@@ -54,3 +54,4 @@ Multiple FRAME messages may be packed back-to-back in one datagram up to the pat
 - Admin message types for can-hub-cli (status, kick, ACL management).
 - Flow control / backpressure signalling on the data plane.
 - P2P phase 2: endpoint exchange messages (OFFER/ANSWER pattern).
+- Reliable data plane: flows that need guaranteed in-order delivery (ISOTP transfers, UDS/firmware upgrades) mapped to dedicated QUIC streams instead of datagrams — reliable per flow without head-of-line blocking the cyclic traffic. Candidate signalling: a flag on OPEN/SUBSCRIBE selecting reliable transport for matching CAN ids.

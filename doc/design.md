@@ -24,6 +24,7 @@ C (C11), cmake + gcc, static or dynamic linking. Make wraps cmake: `make release
 ### Transports
 
 - QUIC (ngtcp2): primary. TLS 1.3 built in, reliable streams for control, unreliable datagrams (RFC 9221) for CAN frames — latest-wins, no head-of-line blocking.
+- Reliable data plane (later): flows that need guaranteed delivery (ISOTP, UDS/firmware upgrades) can ride dedicated QUIC streams, reliable and ordered per flow, without blocking cyclic traffic. See protocol.md open questions.
 - TCP, with optional TLS: fallback for networks that block UDP.
 - Plain UDP (LAN, unencrypted, cannelloni-style): possible later, low priority.
 - SCTP: rejected. Middleboxes kill it, QUIC already provides multistreaming.
