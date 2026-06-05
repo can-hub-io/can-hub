@@ -1,0 +1,18 @@
+# Host toolchain: GCC for x86_64 Linux. Also used for the unit test build.
+
+set(CMAKE_SYSTEM_NAME ${CMAKE_HOST_SYSTEM_NAME})
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+
+find_program(HOST_GCC NAMES gcc cc)
+find_program(HOST_GXX NAMES g++ c++)
+if(HOST_GCC)
+    set(CMAKE_C_COMPILER "${HOST_GCC}")
+endif()
+if(HOST_GXX)
+    set(CMAKE_CXX_COMPILER "${HOST_GXX}")
+endif()
+
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE NEVER)
