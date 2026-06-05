@@ -64,3 +64,15 @@ add_unit_test(test_register_message
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
+
+add_unit_test(test_reconnect_backoff
+    SOURCES
+        domain/test_reconnect_backoff.cpp
+        ${ROOT_SRC_DIR}/domain/reconnect_backoff.c
+)
+
+add_unit_test(test_channel_map
+    SOURCES
+        domain/test_channel_map.cpp
+        ${ROOT_SRC_DIR}/domain/channel_map.c
+)

@@ -55,6 +55,10 @@ The path (relay vs direct) is abstracted from day one and transparent to the dom
 
 Single-threaded epoll event loop; ngtcp2 is callback-driven and fits. Threads only if benchmarks demand them.
 
+### Agent portability (microcontroller target)
+
+The agent core (domain + application) is freestanding: no POSIX, no file descriptors, no heap, no syscalls. Ports are structs of function pointers with a context pointer; events are pushed in (`Agent_OnCanFrame`, `Agent_OnControlMessage`, ...) and time is injected (`Agent_Tick(now_us)`). On Linux the epoll loop in `apps/agent` drives it; on a microcontroller an ISR/systick does, and the transport adapter can be QUIC, TCP or UDP (lwIP or bare) without touching the core.
+
 ### Administration
 
 `can-hub-cli` talks to the hub over a local unix domain socket (filesystem permissions as access control) using the same binary protocol with admin message types.
