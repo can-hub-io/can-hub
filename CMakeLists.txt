@@ -21,8 +21,32 @@ set(COMMON_SOURCES
     src/protocol/register_message.c
 )
 
+include(FetchContent)
+set(ENABLE_GNUTLS ON CACHE BOOL "" FORCE)
+set(ENABLE_OPENSSL OFF CACHE BOOL "" FORCE)
+set(ENABLE_SHARED_LIB OFF CACHE BOOL "" FORCE)
+set(ENABLE_STATIC_LIB ON CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(ngtcp2
+    GIT_REPOSITORY https://github.com/ngtcp2/ngtcp2.git
+    GIT_TAG v1.23.0
+)
+FetchContent_MakeAvailable(ngtcp2)
+
+set(AGENT_SOURCES
+    src/application/agent.c
+    src/domain/channel_map.c
+    src/domain/reconnect_backoff.c
+    src/adapters/quic/quic_client_security.c
+    src/adapters/quic/quic_client_transport.c
+    src/adapters/quic/quic_connection.c
+    src/adapters/quic/quic_control_channel.c
+    src/adapters/quic/quic_udp_endpoint.c
+)
+
 add_executable(can-hub src/apps/hub/main.c ${COMMON_SOURCES})
-add_executable(can-hub-agent src/apps/agent/main.c ${COMMON_SOURCES})
+add_executable(can-hub-agent src/apps/agent/main.c ${COMMON_SOURCES} ${AGENT_SOURCES})
+target_link_libraries(can-hub-agent PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls)
 add_executable(can-hub-cli src/apps/cli/main.c ${COMMON_SOURCES})
 
 install(TARGETS can-hub can-hub-agent can-hub-cli RUNTIME DESTINATION bin)
