@@ -90,7 +90,20 @@ In every `.c`:
 ## 9. Line length and arguments
 
 - **120 columns max recommended** — not strict. Readability beats the limit.
-- Call/signature with many arguments → one argument per line, closing parenthesis aligned.
+- Call/signature with many arguments → one argument per line, closing parenthesis on its own line at statement indent. Never continuation-wrap with alignment padding. Same format for definitions, with the Allman brace below:
+
+```c
+static int receiveDatagramCallback(
+    ngtcp2_conn *connection,
+    uint32_t flags,
+    const uint8_t *data,
+    size_t data_length,
+    void *user_data
+)
+{
+    ...
+}
+```
 
 ## 10. Indentation and flow — flat happy path
 
