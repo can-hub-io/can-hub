@@ -9,6 +9,11 @@
 
 typedef void (*TControlHandler)(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
 
+static void eventConnected(void *context);
+static void eventDisconnected(void *context, uint64_t now_us);
+static void eventControl(void *context, const uint8_t *data, size_t size, uint64_t now_us);
+static void eventTransportFrame(void *context, const uint8_t *data, size_t size);
+static void eventCanFrame(void *context, uint8_t interface_index, const FrameMessage *frame);
 static void tryConnect(Agent *self, uint64_t now_us);
 static void scheduleReconnect(Agent *self, uint64_t now_us);
 static void sendHelloAndRegister(Agent *self);
@@ -31,6 +36,29 @@ void Agent_Init(Agent *self, TransportPort *transport, CanPort *can, const Regis
     ReconnectBackoff_Init(&self->backoff, RECONNECT_DEFAULT_INITIAL_DELAY_MS, RECONNECT_DEFAULT_MAX_DELAY_MS);
     self->state = kAGENT_STATE_DISCONNECTED;
     self->next_connect_at_us = 0;
+}
+
+TransportEvents Agent_TransportEvents(Agent *self)
+{
+    TransportEvents events = {
+        .context = self,
+        .on_connected = eventConnected,
+        .on_disconnected = eventDisconnected,
+        .on_control = eventControl,
+        .on_frame = eventTransportFrame,
+    };
+
+    return events;
+}
+
+CanEvents Agent_CanEvents(Agent *self)
+{
+    CanEvents events = {
+        .context = self,
+        .on_frame = eventCanFrame,
+    };
+
+    return events;
 }
 
 void Agent_Tick(Agent *self, uint64_t now_us)
@@ -135,6 +163,31 @@ uint8_t Agent_State(const Agent *self)
 }
 
 /* ---------- private ---------- */
+
+static void eventConnected(void *context)
+{
+    Agent_OnConnected(context);
+}
+
+static void eventDisconnected(void *context, uint64_t now_us)
+{
+    Agent_OnDisconnected(context, now_us);
+}
+
+static void eventControl(void *context, const uint8_t *data, size_t size, uint64_t now_us)
+{
+    Agent_OnControlMessage(context, data, size, now_us);
+}
+
+static void eventTransportFrame(void *context, const uint8_t *data, size_t size)
+{
+    Agent_OnTransportFrame(context, data, size);
+}
+
+static void eventCanFrame(void *context, uint8_t interface_index, const FrameMessage *frame)
+{
+    Agent_OnCanFrame(context, interface_index, frame);
+}
 
 static void tryConnect(Agent *self, uint64_t now_us)
 {

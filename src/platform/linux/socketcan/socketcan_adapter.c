@@ -1,6 +1,6 @@
-#include "adapters/socketcan/socketcan_adapter.h"
+#include "platform/linux/socketcan/socketcan_adapter.h"
 
-#include "adapters/clock/clock.h"
+#include "platform/linux/clock/clock.h"
 
 #include <stdio.h>
 #include <string.h>

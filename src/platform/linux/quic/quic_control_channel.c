@@ -1,4 +1,4 @@
-#include "adapters/quic/quic_control_channel.h"
+#include "platform/linux/quic/quic_control_channel.h"
 
 #include <string.h>
 

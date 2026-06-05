@@ -79,8 +79,8 @@ add_unit_test(test_channel_map
 
 add_unit_test(test_quic_control_channel
     SOURCES
-        adapters/test_quic_control_channel.cpp
-        ${ROOT_SRC_DIR}/adapters/quic/quic_control_channel.c
+        platform/test_quic_control_channel.cpp
+        ${ROOT_SRC_DIR}/platform/linux/quic/quic_control_channel.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/wire.c
 )

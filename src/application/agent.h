@@ -6,7 +6,9 @@
 
 #include "domain/channel_map.h"
 #include "domain/reconnect_backoff.h"
+#include "ports/can_events.h"
 #include "ports/can_port.h"
+#include "ports/transport_events.h"
 #include "ports/transport_port.h"
 #include "protocol/frame_message.h"
 #include "protocol/register_message.h"
@@ -36,6 +38,8 @@ typedef struct {
 } Agent;
 
 void Agent_Init(Agent *self, TransportPort *transport, CanPort *can, const RegisterMessage *registration);
+TransportEvents Agent_TransportEvents(Agent *self);
+CanEvents Agent_CanEvents(Agent *self);
 void Agent_Tick(Agent *self, uint64_t now_us);
 void Agent_OnConnected(Agent *self);
 void Agent_OnDisconnected(Agent *self, uint64_t now_us);

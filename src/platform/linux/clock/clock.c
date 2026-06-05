@@ -1,4 +1,4 @@
-#include "adapters/clock/clock.h"
+#include "platform/linux/clock/clock.h"
 
 #include <time.h>
 

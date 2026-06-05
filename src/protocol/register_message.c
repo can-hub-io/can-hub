@@ -40,13 +40,13 @@ size_t RegisterMessage_Encode(const RegisterMessage *self, uint8_t *buffer, size
 
     body = buffer + MESSAGE_HEADER_SIZE;
     memset(body, 0, REGISTER_BODY_SIZE);
-    strncpy((char *)body + AGENT_NAME_OFFSET, self->agent_name, REGISTER_AGENT_NAME_SIZE - 1);
+    memcpy(body + AGENT_NAME_OFFSET, self->agent_name, strlen(self->agent_name));
     body[INTERFACE_COUNT_OFFSET] = self->interface_count;
     for(i=0; i<self->interface_count; i++) {
-        strncpy(
-            (char *)body + INTERFACE_NAMES_OFFSET + i * REGISTER_INTERFACE_NAME_SIZE,
+        memcpy(
+            body + INTERFACE_NAMES_OFFSET + i * REGISTER_INTERFACE_NAME_SIZE,
             self->interface_names[i],
-            REGISTER_INTERFACE_NAME_SIZE - 1
+            strlen(self->interface_names[i])
         );
     }
 

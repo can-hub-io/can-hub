@@ -16,6 +16,9 @@ size_t ErrorMessage_Encode(const ErrorMessage *self, uint8_t *buffer, size_t buf
     size_t total_size = MESSAGE_HEADER_SIZE + ERROR_BODY_SIZE;
     uint8_t *body;
 
+    if (self->detail[ERROR_DETAIL_SIZE - 1] != '\0') {
+        return 0;
+    }
     if (buffer_size < total_size) {
         return 0;
     }
@@ -28,7 +31,7 @@ size_t ErrorMessage_Encode(const ErrorMessage *self, uint8_t *buffer, size_t buf
     body = buffer + MESSAGE_HEADER_SIZE;
     memset(body, 0, ERROR_BODY_SIZE);
     Wire_WriteU16(body + CODE_OFFSET, self->code);
-    strncpy((char *)body + DETAIL_OFFSET, self->detail, ERROR_DETAIL_SIZE - 1);
+    memcpy(body + DETAIL_OFFSET, self->detail, strlen(self->detail));
 
     return total_size;
 }

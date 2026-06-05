@@ -4,10 +4,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "adapters/quic/quic_client_security.h"
-#include "adapters/quic/quic_connection.h"
-#include "adapters/quic/quic_control_channel.h"
-#include "adapters/quic/quic_udp_endpoint.h"
+#include "platform/linux/quic/quic_client_security.h"
+#include "platform/linux/quic/quic_connection.h"
+#include "platform/linux/quic/quic_control_channel.h"
+#include "platform/linux/quic/quic_udp_endpoint.h"
+#include "ports/transport_events.h"
 #include "ports/transport_port.h"
 
 #define QUIC_HOST_MAX 256
@@ -21,21 +22,13 @@
  */
 
 typedef struct {
-    void *context;
-    void (*on_connected)(void *context);
-    void (*on_disconnected)(void *context);
-    void (*on_control)(void *context, const uint8_t *data, size_t size);
-    void (*on_frame)(void *context, const uint8_t *data, size_t size);
-} QuicTransportEvents;
-
-typedef struct {
     char host[QUIC_HOST_MAX];
     char port_text[QUIC_PORT_TEXT_MAX];
 } QuicServerEndpoint;
 
 typedef struct {
     TransportPort port;
-    QuicTransportEvents events;
+    TransportEvents events;
     QuicServerEndpoint server;
     QuicUdpEndpoint udp;
     QuicClientSecurity security;
@@ -48,7 +41,7 @@ bool QuicClientTransport_Init(
     QuicClientTransport *self,
     const char *host,
     const char *port,
-    const QuicTransportEvents *events
+    const TransportEvents *events
 );
 TransportPort *QuicClientTransport_Port(QuicClientTransport *self);
 int32_t QuicClientTransport_UdpFd(const QuicClientTransport *self);

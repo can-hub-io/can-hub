@@ -1,4 +1,4 @@
-#include "adapters/quic/quic_udp_endpoint.h"
+#include "platform/linux/quic/quic_udp_endpoint.h"
 
 #include <string.h>
 #include <unistd.h>

@@ -35,20 +35,21 @@ FetchContent_MakeAvailable(ngtcp2)
 
 set(AGENT_SOURCES
     src/application/agent.c
+    src/apps/agent/agent_app.c
     src/domain/channel_map.c
     src/domain/reconnect_backoff.c
-    src/adapters/clock/clock.c
-    src/adapters/socketcan/socketcan_adapter.c
-    src/adapters/quic/quic_client_security.c
-    src/adapters/quic/quic_client_transport.c
-    src/adapters/quic/quic_connection.c
-    src/adapters/quic/quic_control_channel.c
-    src/adapters/quic/quic_udp_endpoint.c
+    src/platform/linux/clock/clock.c
+    src/platform/linux/socketcan/socketcan_adapter.c
+    src/platform/linux/quic/quic_client_security.c
+    src/platform/linux/quic/quic_client_transport.c
+    src/platform/linux/quic/quic_connection.c
+    src/platform/linux/quic/quic_control_channel.c
+    src/platform/linux/quic/quic_udp_endpoint.c
 )
 
-add_executable(can-hub src/apps/hub/main.c ${COMMON_SOURCES})
-add_executable(can-hub-agent src/apps/agent/main.c ${COMMON_SOURCES} ${AGENT_SOURCES})
+add_executable(can-hub src/platform/linux/hub_main.c ${COMMON_SOURCES})
+add_executable(can-hub-agent src/platform/linux/agent_main.c ${COMMON_SOURCES} ${AGENT_SOURCES})
 target_link_libraries(can-hub-agent PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls)
-add_executable(can-hub-cli src/apps/cli/main.c ${COMMON_SOURCES})
+add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES})
 
 install(TARGETS can-hub can-hub-agent can-hub-cli RUNTIME DESTINATION bin)

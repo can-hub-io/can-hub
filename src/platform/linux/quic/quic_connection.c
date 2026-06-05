@@ -1,6 +1,6 @@
-#include "adapters/quic/quic_connection.h"
+#include "platform/linux/quic/quic_connection.h"
 
-#include "adapters/clock/clock.h"
+#include "platform/linux/clock/clock.h"
 
 #include <string.h>
 
@@ -10,6 +10,7 @@
 #define NO_STREAM (-1)
 #define MAX_DATAGRAM_FRAME_SIZE 1350
 #define IDLE_TIMEOUT (30 * NGTCP2_SECONDS)
+#define HANDSHAKE_TIMEOUT (10 * NGTCP2_SECONDS)
 #define INITIAL_MAX_DATA (1024 * 1024)
 #define INITIAL_MAX_STREAM_DATA (64 * 1024)
 
@@ -98,6 +99,7 @@ bool QuicConnection_Open(QuicConnection *self, gnutls_session_t session, const n
 
     ngtcp2_settings_default(&settings);
     settings.initial_ts = Clock_MonotonicNs();
+    settings.handshake_timeout = HANDSHAKE_TIMEOUT;
 
     ngtcp2_transport_params_default(&params);
     params.initial_max_data = INITIAL_MAX_DATA;

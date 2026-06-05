@@ -1,7 +1,9 @@
-#include "adapters/quic/quic_client_transport.h"
+#include "platform/linux/quic/quic_client_transport.h"
 
 #include <stdio.h>
 #include <string.h>
+
+#include "platform/linux/clock/clock.h"
 
 #define UDP_PACKET_BUFFER_SIZE 1452
 
@@ -26,7 +28,7 @@ bool QuicClientTransport_Init(
     QuicClientTransport *self,
     const char *host,
     const char *port,
-    const QuicTransportEvents *events
+    const TransportEvents *events
 )
 {
     QuicConnectionEvents connection_events = {
@@ -181,7 +183,7 @@ static void teardown(QuicClientTransport *self, bool notify)
     self->connected = false;
 
     if (notify) {
-        self->events.on_disconnected(self->events.context);
+        self->events.on_disconnected(self->events.context, Clock_RealtimeUs());
     }
 }
 
@@ -305,7 +307,7 @@ static void dispatchControlMessages(QuicClientTransport *self)
             return;
         }
 
-        self->events.on_control(self->events.context, message, message_size);
+        self->events.on_control(self->events.context, message, message_size, Clock_RealtimeUs());
         QuicControlChannel_ConsumeMessage(&self->control, message_size);
     }
 }

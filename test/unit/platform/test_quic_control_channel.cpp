@@ -1,7 +1,7 @@
 #include <cest>
 
 extern "C" {
-#include "adapters/quic/quic_control_channel.h"
+#include "platform/linux/quic/quic_control_channel.h"
 #include "protocol/message_header.h"
 }
 
