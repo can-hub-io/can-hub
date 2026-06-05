@@ -19,7 +19,11 @@ can-hub inverts the model: a device agent dials out to a central hub over QUIC w
 
 ### Language and build
 
-C (C11), cmake + gcc, static or dynamic linking. Make wraps cmake: `make release|debug|install|test`, `ARCH=x86_64|armhf|arm64` selects a toolchain file. Unit tests with CEST on the host. SOLID and light DDD: domain entities, use cases, ports, adapters — no ceremonial hexagonal layering.
+C (C11), cmake + gcc, static or dynamic linking. Make wraps cmake: `make release|debug|install|test`, `ARCH=x86_64|armhf|arm64` selects a toolchain file. Unit tests with CEST on the host. SOLID and light DDD, layered as:
+
+- `protocol/`, `domain/`, `application/`, `apps/` — freestanding (no POSIX, no heap), portable to microcontrollers as-is.
+- `ports/` — contracts in both directions, owned by the core: outbound Port structs the core calls (`TransportPort`, `CanPort`) and inbound Events structs the core implements (`TransportEvents`, `CanEvents`, obtained from `Agent_*Events`).
+- `platform/<name>/` — adapters plus the concrete entry point per platform (`platform/linux/agent_main.c`: epoll, QUIC over ngtcp2, SocketCAN). Platform mains are deliberately concrete; nothing outside `platform/` includes anything from it.
 
 ### Transports
 
