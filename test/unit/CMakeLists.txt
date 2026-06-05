@@ -25,3 +25,42 @@ add_unit_test(test_version
         version/test_version.cpp
         ${ROOT_SRC_DIR}/version.c
 )
+
+add_unit_test(test_message_header
+    SOURCES
+        protocol/test_message_header.cpp
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+
+add_unit_test(test_frame_message
+    SOURCES
+        protocol/test_frame_message.cpp
+        ${ROOT_SRC_DIR}/protocol/frame_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+
+add_unit_test(test_hello_message
+    SOURCES
+        protocol/test_hello_message.cpp
+        ${ROOT_SRC_DIR}/protocol/hello_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+
+add_unit_test(test_error_message
+    SOURCES
+        protocol/test_error_message.cpp
+        ${ROOT_SRC_DIR}/protocol/error_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+
+add_unit_test(test_register_message
+    SOURCES
+        protocol/test_register_message.cpp
+        ${ROOT_SRC_DIR}/protocol/register_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)

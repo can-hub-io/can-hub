@@ -13,6 +13,12 @@ include_directories(src)
 
 set(COMMON_SOURCES
     src/version.c
+    src/protocol/wire.c
+    src/protocol/message_header.c
+    src/protocol/frame_message.c
+    src/protocol/hello_message.c
+    src/protocol/error_message.c
+    src/protocol/register_message.c
 )
 
 add_executable(can-hub src/apps/hub/main.c ${COMMON_SOURCES})
