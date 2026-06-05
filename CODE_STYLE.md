@@ -31,7 +31,7 @@ Mandatory conventions for all C code. They apply to `src/` and `test/`.
 - Use **fixed widths** from `<stdint.h>`: `uint8_t`, `int8_t`, `uint16_t`, `uint32_t`, `int32_t`…
 - Booleans: `bool` from `<stdbool.h>`.
 - `char` only for text/ASCII, never as a numeric integer.
-- **OS boundary exception**: `int` (file descriptors, errno, POSIX return values), `size_t`/`ssize_t` (sizes from the standard library and syscalls) are allowed where the system API imposes them. Convert to fixed-width types as soon as the value enters our domain.
+- **OS boundary exception**: `size_t`/`ssize_t` (sizes from the standard library and syscalls) are allowed where the system API imposes them. File descriptors and other OS `int` values are stored and passed as `int32_t` in our code; bare `int` never appears in our declarations (`int main` excepted). Convert to fixed-width types as soon as the value enters our domain.
 
 ## 4. No magic numbers
 

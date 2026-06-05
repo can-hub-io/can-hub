@@ -1,7 +1,8 @@
 #include "adapters/quic/quic_connection.h"
 
+#include "adapters/clock/clock.h"
+
 #include <string.h>
-#include <time.h>
 
 #include <gnutls/crypto.h>
 
@@ -12,7 +13,6 @@
 #define INITIAL_MAX_DATA (1024 * 1024)
 #define INITIAL_MAX_STREAM_DATA (64 * 1024)
 
-static uint64_t timestampNs(void);
 static ngtcp2_conn *getConnection(ngtcp2_crypto_conn_ref *connection_ref);
 static void randCallback(uint8_t *destination, size_t destination_length, const ngtcp2_rand_ctx *rand_context);
 static int getNewConnectionIdCallback(
@@ -97,7 +97,7 @@ bool QuicConnection_Open(QuicConnection *self, gnutls_session_t session, const n
     source_cid.datalen = CONNECTION_ID_LENGTH;
 
     ngtcp2_settings_default(&settings);
-    settings.initial_ts = timestampNs();
+    settings.initial_ts = Clock_MonotonicNs();
 
     ngtcp2_transport_params_default(&params);
     params.initial_max_data = INITIAL_MAX_DATA;
@@ -146,12 +146,12 @@ bool QuicConnection_ReadPacket(QuicConnection *self, const ngtcp2_path *path, co
 {
     ngtcp2_pkt_info packet_info = { 0 };
 
-    return ngtcp2_conn_read_pkt(self->connection, path, &packet_info, data, size, timestampNs()) == 0;
+    return ngtcp2_conn_read_pkt(self->connection, path, &packet_info, data, size, Clock_MonotonicNs()) == 0;
 }
 
 bool QuicConnection_HandleExpiry(QuicConnection *self)
 {
-    return ngtcp2_conn_handle_expiry(self->connection, timestampNs()) == 0;
+    return ngtcp2_conn_handle_expiry(self->connection, Clock_MonotonicNs()) == 0;
 }
 
 uint64_t QuicConnection_NextExpiryNs(const QuicConnection *self)
@@ -161,8 +161,8 @@ uint64_t QuicConnection_NextExpiryNs(const QuicConnection *self)
     if (expiry == UINT64_MAX) {
         return UINT64_MAX;
     }
-    if (expiry <= timestampNs()) {
-        return timestampNs() + 1;
+    if (expiry <= Clock_MonotonicNs()) {
+        return Clock_MonotonicNs() + 1;
     }
 
     return expiry;
@@ -206,7 +206,7 @@ ngtcp2_ssize QuicConnection_WriteDatagram(
         ++self->next_datagram_id,
         &data_vector,
         1,
-        timestampNs()
+        Clock_MonotonicNs()
     );
 
     *accepted = accepted_flag != 0;
@@ -242,7 +242,7 @@ ngtcp2_ssize QuicConnection_WriteStream(
         stream_id,
         &data_vector,
         data == NULL ? 0 : 1,
-        timestampNs()
+        Clock_MonotonicNs()
     );
 
     *consumed = stream_bytes_consumed > 0 ? (size_t)stream_bytes_consumed : 0;
@@ -258,15 +258,6 @@ ngtcp2_ssize QuicConnection_WritePacket(QuicConnection *self, uint8_t *packet_bu
 }
 
 /* ---------- private ---------- */
-
-static uint64_t timestampNs(void)
-{
-    struct timespec time_point;
-
-    clock_gettime(CLOCK_MONOTONIC, &time_point);
-
-    return (uint64_t)time_point.tv_sec * NGTCP2_SECONDS + (uint64_t)time_point.tv_nsec;
-}
 
 static ngtcp2_conn *getConnection(ngtcp2_crypto_conn_ref *connection_ref)
 {

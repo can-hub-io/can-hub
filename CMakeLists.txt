@@ -37,6 +37,8 @@ set(AGENT_SOURCES
     src/application/agent.c
     src/domain/channel_map.c
     src/domain/reconnect_backoff.c
+    src/adapters/clock/clock.c
+    src/adapters/socketcan/socketcan_adapter.c
     src/adapters/quic/quic_client_security.c
     src/adapters/quic/quic_client_transport.c
     src/adapters/quic/quic_connection.c

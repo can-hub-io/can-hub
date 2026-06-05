@@ -57,12 +57,12 @@ TransportPort *QuicClientTransport_Port(QuicClientTransport *self)
     return &self->port;
 }
 
-int QuicClientTransport_UdpFd(const QuicClientTransport *self)
+int32_t QuicClientTransport_UdpFd(const QuicClientTransport *self)
 {
     return self->udp.udp_fd;
 }
 
-int QuicClientTransport_TimerFd(const QuicClientTransport *self)
+int32_t QuicClientTransport_TimerFd(const QuicClientTransport *self)
 {
     return self->udp.timer_fd;
 }

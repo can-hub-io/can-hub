@@ -15,8 +15,8 @@
  * reconnects reuse them.
  */
 typedef struct {
-    int udp_fd;
-    int timer_fd;
+    int32_t udp_fd;
+    int32_t timer_fd;
     struct sockaddr_storage local_address;
     socklen_t local_address_length;
     struct sockaddr_storage remote_address;

@@ -51,7 +51,7 @@ bool QuicClientTransport_Init(
     const QuicTransportEvents *events
 );
 TransportPort *QuicClientTransport_Port(QuicClientTransport *self);
-int QuicClientTransport_UdpFd(const QuicClientTransport *self);
-int QuicClientTransport_TimerFd(const QuicClientTransport *self);
+int32_t QuicClientTransport_UdpFd(const QuicClientTransport *self);
+int32_t QuicClientTransport_TimerFd(const QuicClientTransport *self);
 void QuicClientTransport_OnUdpReadable(QuicClientTransport *self);
 void QuicClientTransport_OnTimer(QuicClientTransport *self);
