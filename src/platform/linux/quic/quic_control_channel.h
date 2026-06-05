@@ -4,8 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "platform/linux/shared/message_framer.h"
+
 #define QUIC_CONTROL_TX_BUFFER_SIZE 4096
-#define QUIC_CONTROL_RX_BUFFER_SIZE 4096
 #define QUIC_CONTROL_NO_STREAM (-1)
 
 /*
@@ -19,8 +20,7 @@ typedef struct {
     uint8_t tx_buffer[QUIC_CONTROL_TX_BUFFER_SIZE];
     size_t tx_used;
     size_t tx_sent;
-    uint8_t rx_buffer[QUIC_CONTROL_RX_BUFFER_SIZE];
-    size_t rx_used;
+    MessageFramer framer;
 } QuicControlChannel;
 
 void QuicControlChannel_Reset(QuicControlChannel *self);

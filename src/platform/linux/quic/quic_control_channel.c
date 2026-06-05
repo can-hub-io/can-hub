@@ -10,6 +10,7 @@ void QuicControlChannel_Reset(QuicControlChannel *self)
 {
     memset(self, 0, sizeof(*self));
     self->stream_id = QUIC_CONTROL_NO_STREAM;
+    MessageFramer_Reset(&self->framer);
 }
 
 bool QuicControlChannel_QueueTx(QuicControlChannel *self, const uint8_t *data, size_t size)
@@ -60,41 +61,15 @@ void QuicControlChannel_MarkAcked(QuicControlChannel *self, uint64_t acked_end_o
 
 bool QuicControlChannel_QueueRx(QuicControlChannel *self, const uint8_t *data, size_t size)
 {
-    if (self->rx_used + size > QUIC_CONTROL_RX_BUFFER_SIZE) {
-        return false;
-    }
-
-    memcpy(self->rx_buffer + self->rx_used, data, size);
-    self->rx_used += size;
-
-    return true;
+    return MessageFramer_Push(&self->framer, data, size);
 }
 
 size_t QuicControlChannel_NextMessage(const QuicControlChannel *self, const uint8_t **message)
 {
-    MessageHeader header;
-    size_t message_size;
-
-    if (!MessageHeader_Decode(&header, self->rx_buffer, self->rx_used)) {
-        return 0;
-    }
-
-    message_size = (size_t)MESSAGE_HEADER_SIZE + header.length;
-    if (self->rx_used < message_size) {
-        return 0;
-    }
-
-    *message = self->rx_buffer;
-
-    return message_size;
+    return MessageFramer_NextMessage(&self->framer, message);
 }
 
 void QuicControlChannel_ConsumeMessage(QuicControlChannel *self, size_t size)
 {
-    if (size > self->rx_used) {
-        size = self->rx_used;
-    }
-
-    memmove(self->rx_buffer, self->rx_buffer + size, self->rx_used - size);
-    self->rx_used -= size;
+    MessageFramer_Consume(&self->framer, size);
 }

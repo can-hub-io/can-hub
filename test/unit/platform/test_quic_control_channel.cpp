@@ -99,6 +99,6 @@ describe("quic_control_channel", []() {
         remaining_size = QuicControlChannel_NextMessage(&channel, &next_message);
 
         expect(remaining_size).toBe(sizeof(message));
-        expect(channel.rx_used).toBe(sizeof(message));
+        expect(channel.framer.used).toBe(sizeof(message));
     });
 });

@@ -39,7 +39,9 @@ set(AGENT_SOURCES
     src/domain/channel_map.c
     src/domain/reconnect_backoff.c
     src/platform/linux/clock/clock.c
+    src/platform/linux/shared/message_framer.c
     src/platform/linux/socketcan/socketcan_adapter.c
+    src/platform/linux/tcp/tcp_client_transport.c
     src/platform/linux/quic/quic_client_security.c
     src/platform/linux/quic/quic_client_transport.c
     src/platform/linux/quic/quic_connection.c

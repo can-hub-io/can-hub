@@ -81,6 +81,7 @@ add_unit_test(test_quic_control_channel
     SOURCES
         platform/test_quic_control_channel.cpp
         ${ROOT_SRC_DIR}/platform/linux/quic/quic_control_channel.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/message_framer.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
