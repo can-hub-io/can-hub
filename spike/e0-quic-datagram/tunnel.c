@@ -143,7 +143,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    tunnel.timer_fd = timerfd_create(CLOCK_MONOTONIC, 0);
+    /* TFD_NONBLOCK: updateTimer may rearm (and clear readability) between
+     * epoll_wait and the timer read in the same event batch */
+    tunnel.timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
     tunnel.epoll_fd = epoll_create1(0);
     if (tunnel.timer_fd < 0 || tunnel.epoll_fd < 0) {
         fprintf(stderr, "timerfd/epoll: %s\n", strerror(errno));

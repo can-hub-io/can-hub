@@ -16,12 +16,25 @@ Date: 2026-06-05. Environment: Ubuntu 24.04, gcc 13, loopback (vcan0 -> client -
 
 Under induced loss the connection recovers: cwnd shrinks, a few frames are dropped while congestion-blocked (latest-wins semantics, exactly what we want for CAN), then traffic resumes. p99 spikes to tens of ms during recovery windows.
 
+## Comparison vs plain TCP and UDP
+
+`plain_tunnel.c` bridges the same frames over plain TCP (TCP_NODELAY) and plain UDP, no encryption. `run-compare.sh`, 3 runs, values are typical (loopback):
+
+| Transport | p50 @5000fps | p99 @5000fps | CPU client/server @5000fps | Delivery |
+|---|---|---|---|---|
+| QUIC datagrams (TLS 1.3) | 13-14 us | 104-148 us | ~5.5% / ~4.5% | 100% |
+| TCP (NODELAY, plaintext) | 16 us | 130-357 us | ~3.4% / ~3.0% | 100% |
+| UDP (plaintext) | 12 us | 88-109 us | ~3.0% / ~1.8% | 100% |
+
+Reading: QUIC costs ~1-2 us p50 over raw UDP and roughly 2x the CPU of plaintext transports — while also doing TLS 1.3 encryption that the others lack. All three are far from saturation at 5000 fps. Loopback hides QUIC's real advantage: on lossy/jittery WAN paths TCP suffers head-of-line blocking and retransmits stale frames, while QUIC datagrams drop stale data (latest-wins). The comparison validates that QUIC's overhead is negligible for the encrypted, NAT-traversing transport can-hub needs.
+
 ## Findings
 
 - **Distro ngtcp2 0.12 is unusable for datagrams.** DATAGRAM-only packets do not arm the PTO/loss-detection timer (ngtcp2 issue #697, fixed in 0.14.0). One lost ACK and the connection wedges permanently: bytes_in_flight stays at cwnd forever, every subsequent datagram is rejected, only the 30 s idle timeout remains. Reproduced reliably; gone with 1.23.
 - API breaks between 0.12 and 1.x are minor for our usage: `ngtcp2_conn_info` rename and the mandatory `original_dcid_present` flag on the server.
 - ngtcp2 ergonomics: BYO everything (UDP sockets, event loop, timers via `ngtcp2_conn_get_expiry`/`handle_expiry`, TLS session glue). ~700 lines for a minimal correct tunnel. Verbose but predictable; the crypto helper callbacks remove most TLS pain.
 - GnuTLS backend works; quictls/wolfSSL remain options for static-link footprint later.
+- Event-loop pitfall: a blocking timerfd deadlocks if `timerfd_settime` rearms (clearing readability) between `epoll_wait` and the timer read in the same event batch — the read blocks forever and the tunnel freezes silently. Fix: `TFD_NONBLOCK`. Generalize in can-hub: every fd in the loop must be non-blocking.
 
 ## Decisions for can-hub
 

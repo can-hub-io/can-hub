@@ -7,10 +7,15 @@
 CFLAGS ?= -O2 -Wall -Wextra -g
 PKG_DEPS := libngtcp2 libngtcp2_crypto_gnutls gnutls
 
+all: tunnel plain_tunnel
+
 tunnel: tunnel.c
 	$(CC) $(CFLAGS) $(shell pkg-config --cflags $(PKG_DEPS)) -o $@ $< $(shell pkg-config --libs $(PKG_DEPS))
 
+plain_tunnel: plain_tunnel.c
+	$(CC) $(CFLAGS) -o $@ $<
+
 clean:
-	rm -f tunnel
+	rm -f tunnel plain_tunnel
 
 .PHONY: clean
