@@ -76,3 +76,17 @@ add_unit_test(test_channel_map
         domain/test_channel_map.cpp
         ${ROOT_SRC_DIR}/domain/channel_map.c
 )
+
+add_unit_test(test_agent
+    SOURCES
+        application/test_agent.cpp
+        ${ROOT_SRC_DIR}/application/agent.c
+        ${ROOT_SRC_DIR}/domain/channel_map.c
+        ${ROOT_SRC_DIR}/domain/reconnect_backoff.c
+        ${ROOT_SRC_DIR}/protocol/frame_message.c
+        ${ROOT_SRC_DIR}/protocol/hello_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/register_message.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+target_link_libraries(test_agent PRIVATE port_mocks)

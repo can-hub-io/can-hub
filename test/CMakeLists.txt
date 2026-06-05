@@ -11,4 +11,5 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_compile_options(-Wall -Wextra -Wno-unused-parameter)
 
+add_subdirectory(mocks)
 add_subdirectory(unit)
