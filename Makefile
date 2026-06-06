@@ -40,7 +40,11 @@ test:
 	         -DCMAKE_TOOLCHAIN_FILE=$(abspath cmake/toolchain-x86_64.cmake)
 	$(CMAKE) --build $(_BUILD_TEST)
 	@chmod +x $(_CEST_RUNNER)
-	$(_CEST_RUNNER) $(_BUILD_TEST)
+	# setarch -R: the runner is an ASan build (mandatory: memory/leak checks)
+	# and ASan shadow memory collides randomly with the high-entropy mmap
+	# ASLR of kernels >= 6.5 (intermittent SIGSEGV inside ASan's handler).
+	# Disabling ASLR for the runner process keeps ASan fully functional.
+	setarch -R $(_CEST_RUNNER) $(_BUILD_TEST)
 
 clean:
 	rm -rf build/
