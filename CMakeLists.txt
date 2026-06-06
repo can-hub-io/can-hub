@@ -51,6 +51,7 @@ set(AGENT_SOURCES
     src/platform/linux/quic/quic_client_transport.c
     src/platform/linux/quic/quic_connection.c
     src/platform/linux/quic/quic_control_channel.c
+    src/platform/linux/quic/quic_egress.c
     src/platform/linux/quic/quic_udp_endpoint.c
 )
 
@@ -69,6 +70,7 @@ set(HUB_SOURCES
     src/platform/linux/tcp/tcp_server_transport.c
     src/platform/linux/quic/quic_connection.c
     src/platform/linux/quic/quic_control_channel.c
+    src/platform/linux/quic/quic_egress.c
     src/platform/linux/quic/quic_server_security.c
     src/platform/linux/quic/quic_server_transport.c
 )

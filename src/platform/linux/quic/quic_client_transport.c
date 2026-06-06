@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "platform/linux/clock/clock.h"
+#include "platform/linux/quic/quic_egress.h"
 
 #define UDP_PACKET_BUFFER_SIZE 1452
 
@@ -13,8 +14,7 @@ static bool portSendControl(void *context, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, const uint8_t *data, size_t size);
 static void teardown(QuicClientTransport *self, bool notify);
 static bool flushEgress(QuicClientTransport *self, const uint8_t *datagram, size_t datagram_size);
-static bool flushDatagram(QuicClientTransport *self, const uint8_t *datagram, size_t datagram_size, bool *accepted);
-static bool drainConnection(QuicClientTransport *self);
+static void sendPacket(void *context, const uint8_t *packet, size_t size);
 static void rearmTimer(QuicClientTransport *self);
 static void dispatchControlMessages(QuicClientTransport *self);
 static void onHandshakeCompleted(void *context);
@@ -191,6 +191,7 @@ static void teardown(QuicClientTransport *self, bool notify)
 
 static bool flushEgress(QuicClientTransport *self, const uint8_t *datagram, size_t datagram_size)
 {
+    QuicEgressSink sink = { self, sendPacket };
     bool datagram_accepted = true;
 
     if (!QuicConnection_IsOpen(&self->connection)) {
@@ -198,11 +199,13 @@ static bool flushEgress(QuicClientTransport *self, const uint8_t *datagram, size
     }
 
     if (datagram != NULL) {
-        if (!flushDatagram(self, datagram, datagram_size, &datagram_accepted)) {
+        if (!QuicEgress_FlushDatagram(&self->connection, &sink, datagram, datagram_size, &datagram_accepted)) {
+            teardown(self, true);
             return false;
         }
     }
-    if (!drainConnection(self)) {
+    if (!QuicEgress_Drain(&self->connection, &self->control, &sink)) {
+        teardown(self, true);
         return false;
     }
 
@@ -211,75 +214,11 @@ static bool flushEgress(QuicClientTransport *self, const uint8_t *datagram, size
     return datagram_accepted;
 }
 
-static bool flushDatagram(QuicClientTransport *self, const uint8_t *datagram, size_t datagram_size, bool *accepted)
+static void sendPacket(void *context, const uint8_t *packet, size_t size)
 {
-    uint8_t packet[UDP_PACKET_BUFFER_SIZE];
-    ngtcp2_ssize bytes_written;
+    QuicClientTransport *self = context;
 
-    bytes_written = QuicConnection_WriteDatagram(
-        &self->connection,
-        packet,
-        sizeof(packet),
-        datagram,
-        datagram_size,
-        accepted
-    );
-    if (bytes_written < 0) {
-        teardown(self, true);
-        return false;
-    }
-    if (bytes_written > 0) {
-        QuicUdpEndpoint_Send(&self->udp, packet, (size_t)bytes_written);
-    }
-
-    return true;
-}
-
-static bool drainConnection(QuicClientTransport *self)
-{
-    uint8_t packet[UDP_PACKET_BUFFER_SIZE];
-    QuicControlChannel *control = &self->control;
-    const uint8_t *pending_data = NULL;
-    size_t pending_size = 0;
-    size_t consumed;
-    bool control_writable = control->stream_id != QUIC_CONTROL_NO_STREAM;
-    ngtcp2_ssize bytes_written;
-
-    for (;;) {
-        if (control_writable) {
-            pending_size = QuicControlChannel_PendingTx(control, &pending_data);
-        }
-
-        if (control_writable && pending_size > 0) {
-            bytes_written = QuicConnection_WriteStream(
-                &self->connection,
-                packet,
-                sizeof(packet),
-                control->stream_id,
-                pending_data,
-                pending_size,
-                &consumed
-            );
-        } else {
-            bytes_written = QuicConnection_WritePacket(&self->connection, packet, sizeof(packet));
-            consumed = 0;
-        }
-
-        if (bytes_written == NGTCP2_ERR_STREAM_DATA_BLOCKED) {
-            control_writable = false;
-            continue;
-        }
-        if (bytes_written < 0) {
-            teardown(self, true);
-            return false;
-        }
-        if (bytes_written == 0) {
-            return true;
-        }
-
-        QuicUdpEndpoint_Send(&self->udp, packet, (size_t)bytes_written);
-        QuicControlChannel_MarkSent(control, consumed);
-    }
+    QuicUdpEndpoint_Send(&self->udp, packet, size);
 }
 
 static void rearmTimer(QuicClientTransport *self)

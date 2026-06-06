@@ -8,6 +8,7 @@
 #include <sys/timerfd.h>
 
 #include "platform/linux/clock/clock.h"
+#include "platform/linux/quic/quic_egress.h"
 #include "protocol/message_header.h"
 
 #define UDP_PACKET_BUFFER_SIZE 1452
@@ -30,7 +31,7 @@ static QuicServerPeer *acceptPeer(
 );
 static void makePeerPath(QuicServerTransport *self, QuicServerPeer *peer, ngtcp2_path *path);
 static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *datagram, size_t datagram_size);
-static bool drainPeer(QuicServerTransport *self, QuicServerPeer *peer);
+static void sendPacketToPeer(void *context, const uint8_t *packet, size_t size);
 static void sendToPeer(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *packet, size_t size);
 static void rearmTimer(QuicServerTransport *self);
 static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool notify);
@@ -320,29 +321,18 @@ static void makePeerPath(QuicServerTransport *self, QuicServerPeer *peer, ngtcp2
 
 static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *datagram, size_t datagram_size)
 {
-    uint8_t packet[UDP_PACKET_BUFFER_SIZE];
-    ngtcp2_ssize bytes_written;
+    QuicEgressSink sink = { peer, sendPacketToPeer };
     bool accepted = true;
 
     if (datagram != NULL) {
-        bytes_written = QuicConnection_WriteDatagram(
-            &peer->connection,
-            packet,
-            sizeof(packet),
-            datagram,
-            datagram_size,
-            &accepted
-        );
-        if (bytes_written < 0) {
+        if (!QuicEgress_FlushDatagram(&peer->connection, &sink, datagram, datagram_size, &accepted)) {
             teardownPeer(self, peer, true);
             return false;
         }
-        if (bytes_written > 0) {
-            sendToPeer(self, peer, packet, (size_t)bytes_written);
-        }
     }
 
-    if (!drainPeer(self, peer)) {
+    if (!QuicEgress_Drain(&peer->connection, &peer->control, &sink)) {
+        teardownPeer(self, peer, true);
         return false;
     }
 
@@ -351,51 +341,11 @@ static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer, const uin
     return accepted;
 }
 
-static bool drainPeer(QuicServerTransport *self, QuicServerPeer *peer)
+static void sendPacketToPeer(void *context, const uint8_t *packet, size_t size)
 {
-    uint8_t packet[UDP_PACKET_BUFFER_SIZE];
-    QuicControlChannel *control = &peer->control;
-    const uint8_t *pending_data = NULL;
-    size_t pending_size = 0;
-    size_t consumed;
-    bool control_writable = control->stream_id != QUIC_CONTROL_NO_STREAM;
-    ngtcp2_ssize bytes_written;
+    QuicServerPeer *peer = context;
 
-    for (;;) {
-        if (control_writable) {
-            pending_size = QuicControlChannel_PendingTx(control, &pending_data);
-        }
-
-        if (control_writable && pending_size > 0) {
-            bytes_written = QuicConnection_WriteStream(
-                &peer->connection,
-                packet,
-                sizeof(packet),
-                control->stream_id,
-                pending_data,
-                pending_size,
-                &consumed
-            );
-        } else {
-            bytes_written = QuicConnection_WritePacket(&peer->connection, packet, sizeof(packet));
-            consumed = 0;
-        }
-
-        if (bytes_written == NGTCP2_ERR_STREAM_DATA_BLOCKED) {
-            control_writable = false;
-            continue;
-        }
-        if (bytes_written < 0) {
-            teardownPeer(self, peer, true);
-            return false;
-        }
-        if (bytes_written == 0) {
-            return true;
-        }
-
-        sendToPeer(self, peer, packet, (size_t)bytes_written);
-        QuicControlChannel_MarkSent(control, consumed);
-    }
+    sendToPeer(peer->transport, peer, packet, size);
 }
 
 static void sendToPeer(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *packet, size_t size)
