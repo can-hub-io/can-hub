@@ -9,9 +9,9 @@
 #include <ngtcp2/ngtcp2_crypto.h>
 
 /*
- * Thin wrapper around one ngtcp2 client connection: owns the ngtcp2_conn,
- * registers the callback table and forwards the interesting events. No I/O,
- * no buffering — packets in, packets out.
+ * Thin wrapper around one ngtcp2 connection (client or server side): owns
+ * the ngtcp2_conn, registers the callback table and forwards the
+ * interesting events. No I/O, no buffering — packets in, packets out.
  */
 
 typedef struct {
@@ -32,6 +32,12 @@ typedef struct {
 void QuicConnection_Bind(QuicConnection *self, const QuicConnectionEvents *events);
 ngtcp2_crypto_conn_ref *QuicConnection_Ref(QuicConnection *self);
 bool QuicConnection_Open(QuicConnection *self, gnutls_session_t session, const ngtcp2_path *path);
+bool QuicConnection_OpenServer(
+    QuicConnection *self,
+    gnutls_session_t session,
+    const ngtcp2_path *path,
+    const ngtcp2_pkt_hd *initial_header
+);
 void QuicConnection_Close(QuicConnection *self);
 bool QuicConnection_IsOpen(const QuicConnection *self);
 bool QuicConnection_ReadPacket(QuicConnection *self, const ngtcp2_path *path, const uint8_t *data, size_t size);

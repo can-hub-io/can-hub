@@ -29,7 +29,12 @@ typedef struct {
     TcpServerPeer peers[TCP_SERVER_PEERS_MAX];
 } TcpServerTransport;
 
-bool TcpServerTransport_Init(TcpServerTransport *self, const char *port, const HubTransportEvents *events);
+bool TcpServerTransport_Init(
+    TcpServerTransport *self,
+    const char *port,
+    uint32_t peer_id_base,
+    const HubTransportEvents *events
+);
 HubTransportPort *TcpServerTransport_Port(TcpServerTransport *self);
 int32_t TcpServerTransport_ListenFd(const TcpServerTransport *self);
 int32_t TcpServerTransport_SlotFd(const TcpServerTransport *self, uint8_t slot);

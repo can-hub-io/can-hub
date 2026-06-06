@@ -1,6 +1,6 @@
-#include "platform/linux/tcp/tcp_server_transport.h"
-
 #define _GNU_SOURCE
+
+#include "platform/linux/tcp/tcp_server_transport.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,7 +26,12 @@ static void closePeer(TcpServerTransport *self, TcpServerPeer *peer, bool notify
 
 /* ---------- public ---------- */
 
-bool TcpServerTransport_Init(TcpServerTransport *self, const char *port, const HubTransportEvents *events)
+bool TcpServerTransport_Init(
+    TcpServerTransport *self,
+    const char *port,
+    uint32_t peer_id_base,
+    const HubTransportEvents *events
+)
 {
     struct sockaddr_in address;
     int32_t reuse = 1;
@@ -38,7 +43,7 @@ bool TcpServerTransport_Init(TcpServerTransport *self, const char *port, const H
     self->port.send_frame = portSendFrame;
     self->port.close_peer = portClosePeer;
     self->events = *events;
-    self->next_peer_id = 1;
+    self->next_peer_id = peer_id_base;
     for(slot=0; slot<TCP_SERVER_PEERS_MAX; slot++) {
         TcpChannel_Unbind(&self->peers[slot].channel);
     }

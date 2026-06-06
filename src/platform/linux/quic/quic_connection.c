@@ -15,6 +15,10 @@
 #define INITIAL_MAX_STREAM_DATA (64 * 1024)
 
 static ngtcp2_conn *getConnection(ngtcp2_crypto_conn_ref *connection_ref);
+static void buildCallbacks(ngtcp2_callbacks *callbacks, bool is_server);
+static void buildSettings(ngtcp2_settings *settings);
+static void buildParams(ngtcp2_transport_params *params);
+static void randomCid(ngtcp2_cid *cid);
 static void randCallback(uint8_t *destination, size_t destination_length, const ngtcp2_rand_ctx *rand_context);
 static int getNewConnectionIdCallback(
     ngtcp2_conn *connection,
@@ -67,46 +71,18 @@ ngtcp2_crypto_conn_ref *QuicConnection_Ref(QuicConnection *self)
 
 bool QuicConnection_Open(QuicConnection *self, gnutls_session_t session, const ngtcp2_path *path)
 {
-    ngtcp2_callbacks callbacks = {
-        .client_initial = ngtcp2_crypto_client_initial_cb,
-        .recv_crypto_data = ngtcp2_crypto_recv_crypto_data_cb,
-        .encrypt = ngtcp2_crypto_encrypt_cb,
-        .decrypt = ngtcp2_crypto_decrypt_cb,
-        .hp_mask = ngtcp2_crypto_hp_mask_cb,
-        .recv_retry = ngtcp2_crypto_recv_retry_cb,
-        .rand = randCallback,
-        .get_new_connection_id = getNewConnectionIdCallback,
-        .update_key = ngtcp2_crypto_update_key_cb,
-        .delete_crypto_aead_ctx = ngtcp2_crypto_delete_crypto_aead_ctx_cb,
-        .delete_crypto_cipher_ctx = ngtcp2_crypto_delete_crypto_cipher_ctx_cb,
-        .get_path_challenge_data = ngtcp2_crypto_get_path_challenge_data_cb,
-        .version_negotiation = ngtcp2_crypto_version_negotiation_cb,
-        .handshake_completed = handshakeCompletedCallback,
-        .recv_datagram = receiveDatagramCallback,
-        .recv_stream_data = receiveStreamDataCallback,
-        .acked_stream_data_offset = ackedStreamDataOffsetCallback,
-    };
+    ngtcp2_callbacks callbacks;
     ngtcp2_settings settings;
     ngtcp2_transport_params params;
     ngtcp2_cid destination_cid;
     ngtcp2_cid source_cid;
     int result;
 
-    gnutls_rnd(GNUTLS_RND_RANDOM, destination_cid.data, CONNECTION_ID_LENGTH);
-    destination_cid.datalen = CONNECTION_ID_LENGTH;
-    gnutls_rnd(GNUTLS_RND_RANDOM, source_cid.data, CONNECTION_ID_LENGTH);
-    source_cid.datalen = CONNECTION_ID_LENGTH;
-
-    ngtcp2_settings_default(&settings);
-    settings.initial_ts = Clock_MonotonicNs();
-    settings.handshake_timeout = HANDSHAKE_TIMEOUT;
-
-    ngtcp2_transport_params_default(&params);
-    params.initial_max_data = INITIAL_MAX_DATA;
-    params.initial_max_stream_data_bidi_local = INITIAL_MAX_STREAM_DATA;
-    params.initial_max_stream_data_bidi_remote = INITIAL_MAX_STREAM_DATA;
-    params.max_idle_timeout = IDLE_TIMEOUT;
-    params.max_datagram_frame_size = MAX_DATAGRAM_FRAME_SIZE;
+    buildCallbacks(&callbacks, false);
+    buildSettings(&settings);
+    buildParams(&params);
+    randomCid(&destination_cid);
+    randomCid(&source_cid);
 
     result = ngtcp2_conn_client_new(
         &self->connection,
@@ -114,6 +90,47 @@ bool QuicConnection_Open(QuicConnection *self, gnutls_session_t session, const n
         &source_cid,
         path,
         NGTCP2_PROTO_VER_V1,
+        &callbacks,
+        &settings,
+        &params,
+        NULL,
+        self
+    );
+    if (result != 0) {
+        return false;
+    }
+
+    ngtcp2_conn_set_tls_native_handle(self->connection, session);
+
+    return true;
+}
+
+bool QuicConnection_OpenServer(
+    QuicConnection *self,
+    gnutls_session_t session,
+    const ngtcp2_path *path,
+    const ngtcp2_pkt_hd *initial_header
+)
+{
+    ngtcp2_callbacks callbacks;
+    ngtcp2_settings settings;
+    ngtcp2_transport_params params;
+    ngtcp2_cid source_cid;
+    int result;
+
+    buildCallbacks(&callbacks, true);
+    buildSettings(&settings);
+    buildParams(&params);
+    params.original_dcid = initial_header->dcid;
+    params.original_dcid_present = 1;
+    randomCid(&source_cid);
+
+    result = ngtcp2_conn_server_new(
+        &self->connection,
+        &initial_header->scid,
+        &source_cid,
+        path,
+        initial_header->version,
         &callbacks,
         &settings,
         &params,
@@ -266,6 +283,57 @@ static ngtcp2_conn *getConnection(ngtcp2_crypto_conn_ref *connection_ref)
     QuicConnection *self = connection_ref->user_data;
 
     return self->connection;
+}
+
+static void buildCallbacks(ngtcp2_callbacks *callbacks, bool is_server)
+{
+    memset(callbacks, 0, sizeof(*callbacks));
+    callbacks->recv_crypto_data = ngtcp2_crypto_recv_crypto_data_cb;
+    callbacks->encrypt = ngtcp2_crypto_encrypt_cb;
+    callbacks->decrypt = ngtcp2_crypto_decrypt_cb;
+    callbacks->hp_mask = ngtcp2_crypto_hp_mask_cb;
+    callbacks->rand = randCallback;
+    callbacks->get_new_connection_id = getNewConnectionIdCallback;
+    callbacks->update_key = ngtcp2_crypto_update_key_cb;
+    callbacks->delete_crypto_aead_ctx = ngtcp2_crypto_delete_crypto_aead_ctx_cb;
+    callbacks->delete_crypto_cipher_ctx = ngtcp2_crypto_delete_crypto_cipher_ctx_cb;
+    callbacks->get_path_challenge_data = ngtcp2_crypto_get_path_challenge_data_cb;
+    callbacks->version_negotiation = ngtcp2_crypto_version_negotiation_cb;
+    callbacks->handshake_completed = handshakeCompletedCallback;
+    callbacks->recv_datagram = receiveDatagramCallback;
+    callbacks->recv_stream_data = receiveStreamDataCallback;
+    callbacks->acked_stream_data_offset = ackedStreamDataOffsetCallback;
+
+    if (is_server) {
+        callbacks->recv_client_initial = ngtcp2_crypto_recv_client_initial_cb;
+    } else {
+        callbacks->client_initial = ngtcp2_crypto_client_initial_cb;
+        callbacks->recv_retry = ngtcp2_crypto_recv_retry_cb;
+    }
+}
+
+static void buildSettings(ngtcp2_settings *settings)
+{
+    ngtcp2_settings_default(settings);
+    settings->initial_ts = Clock_MonotonicNs();
+    settings->handshake_timeout = HANDSHAKE_TIMEOUT;
+}
+
+static void buildParams(ngtcp2_transport_params *params)
+{
+    ngtcp2_transport_params_default(params);
+    params->initial_max_data = INITIAL_MAX_DATA;
+    params->initial_max_stream_data_bidi_local = INITIAL_MAX_STREAM_DATA;
+    params->initial_max_stream_data_bidi_remote = INITIAL_MAX_STREAM_DATA;
+    params->initial_max_streams_bidi = 1;
+    params->max_idle_timeout = IDLE_TIMEOUT;
+    params->max_datagram_frame_size = MAX_DATAGRAM_FRAME_SIZE;
+}
+
+static void randomCid(ngtcp2_cid *cid)
+{
+    gnutls_rnd(GNUTLS_RND_RANDOM, cid->data, CONNECTION_ID_LENGTH);
+    cid->datalen = CONNECTION_ID_LENGTH;
 }
 
 static void randCallback(uint8_t *destination, size_t destination_length, const ngtcp2_rand_ctx *rand_context)
