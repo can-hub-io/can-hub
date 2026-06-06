@@ -4,21 +4,27 @@
 #include <string.h>
 
 #include <sys/epoll.h>
+#include <sys/stat.h>
 
 #include "hub/hub_app.h"
 #include "platform/linux/quic/quic_server_transport.h"
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
+#include "platform/linux/shared/hub_defaults.h"
 #include "platform/linux/tcp/tcp_server_transport.h"
 #include "version.h"
 
 #define MAX_EPOLL_EVENTS 32
 #define POLL_PERIOD_MS 100
+#define DEFAULT_UNIX_SOCKET_DIRECTORY_MODE 0755
 #define TCP_PEER_ID_BASE 0x00000001
+#define UNIX_PEER_ID_BASE 0x40000001
 #define QUIC_PEER_ID_BASE 0x80000001
+#define UNIX_SLOT_OFFSET TCP_SERVER_PEERS_MAX
 
 typedef enum thub_event_tag_e {
     kHUB_EVENT_TAG_TCP_LISTENER = 0x100,
+    kHUB_EVENT_TAG_UNIX_LISTENER,
     kHUB_EVENT_TAG_QUIC_UDP,
     kHUB_EVENT_TAG_QUIC_TIMER,
     kHUB_EVENT_TAG_MAX,
@@ -26,21 +32,31 @@ typedef enum thub_event_tag_e {
 
 static HubApp app;
 static TcpServerTransport tcp_transport;
+static TcpServerTransport unix_transport;
 static QuicServerTransport quic_transport;
 static HubTransportPort mux_port;
 static bool tcp_enabled;
+static bool unix_enabled;
 static bool quic_enabled;
 static EpollRegistry poll_registry;
 
 static bool parseArguments(int argc, char **argv);
-static bool startListeners(const char *tcp_port, const char *quic_port, const char *certificate, const char *key);
+static bool startListeners(
+    const char *tcp_port,
+    const char *quic_port,
+    const char *unix_path,
+    const char *certificate,
+    const char *key,
+    bool explicit_listen
+);
 static bool muxSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool muxSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static void muxClosePeer(void *context, uint32_t peer_id);
 static HubTransportPort *portForPeer(uint32_t peer_id);
 static bool registerStaticPollFds(void);
-static void syncTcpSlotRegistrations(void);
+static void syncStreamSlotRegistrations(TcpServerTransport *transport, uint8_t slot_offset);
 static void dispatchEvent(const struct epoll_event *event);
+static void dispatchStreamSlotEvent(const struct epoll_event *event);
 
 int main(int argc, char **argv)
 {
@@ -51,7 +67,10 @@ int main(int argc, char **argv)
     if (!parseArguments(argc, argv)) {
         fprintf(
             stderr,
-            "usage: %s [--listen tcp://<port>] [--listen quic://<port> --cert <pem> --key <pem>]\n",
+            "usage: %s [--listen tcp://<port>] [--listen quic://<port> --cert <pem> --key <pem>]\n"
+            "       [--listen unix://<path>]\n"
+            "       defaults: tcp://" HUB_DEFAULT_PORT_TEXT ", quic://" HUB_DEFAULT_PORT_TEXT
+            " (with --cert/--key), unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n",
             argv[0]
         );
         return 1;
@@ -63,15 +82,19 @@ int main(int argc, char **argv)
 
     fprintf(
         stderr,
-        "can-hub %s ready (tcp:%s quic:%s)\n",
+        "can-hub %s ready (tcp:%s quic:%s unix:%s)\n",
         Version_String(),
         tcp_enabled ? "on" : "off",
-        quic_enabled ? "on" : "off"
+        quic_enabled ? "on" : "off",
+        unix_enabled ? "on" : "off"
     );
 
     for (;;) {
         if (tcp_enabled) {
-            syncTcpSlotRegistrations();
+            syncStreamSlotRegistrations(&tcp_transport, 0);
+        }
+        if (unix_enabled) {
+            syncStreamSlotRegistrations(&unix_transport, UNIX_SLOT_OFFSET);
         }
         event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
 
@@ -87,21 +110,27 @@ static bool parseArguments(int argc, char **argv)
 {
     const char *tcp_port = NULL;
     const char *quic_port = NULL;
+    const char *unix_path = NULL;
     const char *certificate = NULL;
     const char *key = NULL;
-    const char *port;
+    const char *remainder;
+    bool explicit_listen = false;
     uint8_t scheme;
     int32_t i;
 
     for(i=1; i<argc; i++) {
         if (strcmp(argv[i], "--listen") == 0 && i + 1 < argc) {
-            if (!ConnectUrl_ParseScheme(argv[++i], &scheme, &port)) {
+            if (!ConnectUrl_ParseScheme(argv[++i], &scheme, &remainder)) {
                 return false;
             }
             if (scheme == kCONNECT_SCHEME_TCP) {
-                tcp_port = port;
+                tcp_port = remainder;
+                explicit_listen = true;
+            } else if (scheme == kCONNECT_SCHEME_QUIC) {
+                quic_port = remainder;
+                explicit_listen = true;
             } else {
-                quic_port = port;
+                unix_path = remainder;
             }
         } else if (strcmp(argv[i], "--cert") == 0 && i + 1 < argc) {
             certificate = argv[++i];
@@ -110,19 +139,33 @@ static bool parseArguments(int argc, char **argv)
         }
     }
 
-    if (tcp_port == NULL && quic_port == NULL) {
-        return false;
-    }
     if (quic_port != NULL && (certificate == NULL || key == NULL)) {
         return false;
     }
 
-    return startListeners(tcp_port, quic_port, certificate, key);
+    if (!explicit_listen) {
+        tcp_port = HUB_DEFAULT_PORT_TEXT;
+        if (certificate != NULL && key != NULL) {
+            quic_port = HUB_DEFAULT_PORT_TEXT;
+        } else {
+            fprintf(stderr, "QUIC listener disabled: no --cert/--key\n");
+        }
+    }
+
+    return startListeners(tcp_port, quic_port, unix_path, certificate, key, explicit_listen);
 }
 
-static bool startListeners(const char *tcp_port, const char *quic_port, const char *certificate, const char *key)
+static bool startListeners(
+    const char *tcp_port,
+    const char *quic_port,
+    const char *unix_path,
+    const char *certificate,
+    const char *key,
+    bool explicit_listen
+)
 {
     HubTransportEvents transport_events = HubApp_Events(&app);
+    bool explicit_unix = unix_path != NULL;
 
     mux_port.context = NULL;
     mux_port.send_control = muxSendControl;
@@ -130,11 +173,14 @@ static bool startListeners(const char *tcp_port, const char *quic_port, const ch
     mux_port.close_peer = muxClosePeer;
 
     if (tcp_port != NULL) {
-        if (!TcpServerTransport_Init(&tcp_transport, tcp_port, TCP_PEER_ID_BASE, &transport_events)) {
+        if (TcpServerTransport_Init(&tcp_transport, tcp_port, TCP_PEER_ID_BASE, &transport_events)) {
+            tcp_enabled = true;
+        } else {
             fprintf(stderr, "could not open TCP listener on port %s\n", tcp_port);
-            return false;
+            if (explicit_listen) {
+                return false;
+            }
         }
-        tcp_enabled = true;
     }
     if (quic_port != NULL) {
         bool quic_started = QuicServerTransport_Init(
@@ -145,11 +191,31 @@ static bool startListeners(const char *tcp_port, const char *quic_port, const ch
             QUIC_PEER_ID_BASE,
             &transport_events
         );
-        if (!quic_started) {
+        if (quic_started) {
+            quic_enabled = true;
+        } else {
             fprintf(stderr, "could not open QUIC listener on port %s\n", quic_port);
+            if (explicit_listen) {
+                return false;
+            }
+        }
+    }
+
+    if (unix_path == NULL) {
+        unix_path = HUB_DEFAULT_UNIX_SOCKET_PATH;
+        mkdir(HUB_DEFAULT_UNIX_SOCKET_DIRECTORY, DEFAULT_UNIX_SOCKET_DIRECTORY_MODE);
+    }
+    if (TcpServerTransport_InitUnix(&unix_transport, unix_path, UNIX_PEER_ID_BASE, &transport_events)) {
+        unix_enabled = true;
+    } else {
+        fprintf(stderr, "could not open unix socket listener on %s\n", unix_path);
+        if (explicit_unix) {
             return false;
         }
-        quic_enabled = true;
+    }
+
+    if (!tcp_enabled && !quic_enabled && !unix_enabled) {
+        return false;
     }
 
     HubApp_Init(&app, &mux_port);
@@ -189,6 +255,9 @@ static HubTransportPort *portForPeer(uint32_t peer_id)
     if (peer_id >= QUIC_PEER_ID_BASE) {
         return QuicServerTransport_Port(&quic_transport);
     }
+    if (peer_id >= UNIX_PEER_ID_BASE) {
+        return TcpServerTransport_Port(&unix_transport);
+    }
 
     return TcpServerTransport_Port(&tcp_transport);
 }
@@ -198,6 +267,12 @@ static bool registerStaticPollFds(void)
     if (tcp_enabled) {
         int32_t listen_fd = TcpServerTransport_ListenFd(&tcp_transport);
         if (!EpollRegistry_AddStatic(&poll_registry, listen_fd, kHUB_EVENT_TAG_TCP_LISTENER)) {
+            return false;
+        }
+    }
+    if (unix_enabled) {
+        int32_t listen_fd = TcpServerTransport_ListenFd(&unix_transport);
+        if (!EpollRegistry_AddStatic(&poll_registry, listen_fd, kHUB_EVENT_TAG_UNIX_LISTENER)) {
             return false;
         }
     }
@@ -215,29 +290,31 @@ static bool registerStaticPollFds(void)
     return true;
 }
 
-static void syncTcpSlotRegistrations(void)
+static void syncStreamSlotRegistrations(TcpServerTransport *transport, uint8_t slot_offset)
 {
     int32_t current_fd;
     uint32_t wanted_mask;
     uint8_t slot;
 
     for(slot=0; slot<TCP_SERVER_PEERS_MAX; slot++) {
-        current_fd = TcpServerTransport_SlotFd(&tcp_transport, slot);
+        current_fd = TcpServerTransport_SlotFd(transport, slot);
         wanted_mask = EPOLLIN;
-        if (TcpServerTransport_SlotWantsWritable(&tcp_transport, slot)) {
+        if (TcpServerTransport_SlotWantsWritable(transport, slot)) {
             wanted_mask |= EPOLLOUT;
         }
 
-        EpollRegistry_SyncSlot(&poll_registry, slot, current_fd, wanted_mask, slot);
+        EpollRegistry_SyncSlot(&poll_registry, slot_offset + slot, current_fd, wanted_mask, slot_offset + slot);
     }
 }
 
 static void dispatchEvent(const struct epoll_event *event)
 {
-    uint8_t slot;
-
     if (event->data.u32 == kHUB_EVENT_TAG_TCP_LISTENER) {
         TcpServerTransport_OnAcceptReady(&tcp_transport);
+        return;
+    }
+    if (event->data.u32 == kHUB_EVENT_TAG_UNIX_LISTENER) {
+        TcpServerTransport_OnAcceptReady(&unix_transport);
         return;
     }
     if (event->data.u32 == kHUB_EVENT_TAG_QUIC_UDP) {
@@ -249,11 +326,23 @@ static void dispatchEvent(const struct epoll_event *event)
         return;
     }
 
-    slot = (uint8_t)event->data.u32;
+    dispatchStreamSlotEvent(event);
+}
+
+static void dispatchStreamSlotEvent(const struct epoll_event *event)
+{
+    TcpServerTransport *transport = &tcp_transport;
+    uint8_t slot = (uint8_t)event->data.u32;
+
+    if (slot >= UNIX_SLOT_OFFSET) {
+        transport = &unix_transport;
+        slot -= UNIX_SLOT_OFFSET;
+    }
+
     if (event->events & EPOLLOUT) {
-        TcpServerTransport_OnSlotWritable(&tcp_transport, slot);
+        TcpServerTransport_OnSlotWritable(transport, slot);
     }
     if (event->events & EPOLLIN) {
-        TcpServerTransport_OnSlotReadable(&tcp_transport, slot);
+        TcpServerTransport_OnSlotReadable(transport, slot);
     }
 }

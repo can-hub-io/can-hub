@@ -10,6 +10,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 
 #include "platform/linux/clock/clock.h"
 #include "protocol/message_header.h"
@@ -19,6 +20,7 @@
 static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static void portClosePeer(void *context, uint32_t peer_id);
+static void initTransportBase(TcpServerTransport *self, uint32_t peer_id_base, const HubTransportEvents *events);
 static TcpServerPeer *findPeer(TcpServerTransport *self, uint32_t peer_id);
 static TcpServerPeer *findFreeSlot(TcpServerTransport *self);
 static void dispatchMessages(TcpServerTransport *self, TcpServerPeer *peer);
@@ -35,18 +37,8 @@ bool TcpServerTransport_Init(
 {
     struct sockaddr_in address;
     int32_t reuse = 1;
-    uint8_t slot;
 
-    memset(self, 0, sizeof(*self));
-    self->port.context = self;
-    self->port.send_control = portSendControl;
-    self->port.send_frame = portSendFrame;
-    self->port.close_peer = portClosePeer;
-    self->events = *events;
-    self->next_peer_id = peer_id_base;
-    for(slot=0; slot<TCP_SERVER_PEERS_MAX; slot++) {
-        TcpChannel_Unbind(&self->peers[slot].channel);
-    }
+    initTransportBase(self, peer_id_base, events);
 
     self->listen_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
     if (self->listen_fd < 0) {
@@ -58,6 +50,37 @@ bool TcpServerTransport_Init(
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_ANY);
     address.sin_port = htons((uint16_t)atoi(port));
+    if (bind(self->listen_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        return false;
+    }
+
+    return listen(self->listen_fd, LISTEN_BACKLOG) == 0;
+}
+
+bool TcpServerTransport_InitUnix(
+    TcpServerTransport *self,
+    const char *socket_path,
+    uint32_t peer_id_base,
+    const HubTransportEvents *events
+)
+{
+    struct sockaddr_un address;
+
+    initTransportBase(self, peer_id_base, events);
+
+    if (strlen(socket_path) >= sizeof(address.sun_path)) {
+        return false;
+    }
+
+    self->listen_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
+    if (self->listen_fd < 0) {
+        return false;
+    }
+
+    memset(&address, 0, sizeof(address));
+    address.sun_family = AF_UNIX;
+    snprintf(address.sun_path, sizeof(address.sun_path), "%s", socket_path);
+    unlink(socket_path);
     if (bind(self->listen_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         return false;
     }
@@ -186,6 +209,22 @@ static void portClosePeer(void *context, uint32_t peer_id)
 }
 
 /* ---------- private ---------- */
+
+static void initTransportBase(TcpServerTransport *self, uint32_t peer_id_base, const HubTransportEvents *events)
+{
+    uint8_t slot;
+
+    memset(self, 0, sizeof(*self));
+    self->port.context = self;
+    self->port.send_control = portSendControl;
+    self->port.send_frame = portSendFrame;
+    self->port.close_peer = portClosePeer;
+    self->events = *events;
+    self->next_peer_id = peer_id_base;
+    for(slot=0; slot<TCP_SERVER_PEERS_MAX; slot++) {
+        TcpChannel_Unbind(&self->peers[slot].channel);
+    }
+}
 
 static TcpServerPeer *findPeer(TcpServerTransport *self, uint32_t peer_id)
 {

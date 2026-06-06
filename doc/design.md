@@ -64,9 +64,15 @@ Single-threaded epoll event loop; ngtcp2 is callback-driven and fits. Threads on
 
 The agent core (domain + application) is freestanding: no POSIX, no file descriptors, no heap, no syscalls. Ports are structs of function pointers with a context pointer; events are pushed in (`Agent_OnCanFrame`, `Agent_OnControlMessage`, ...) and time is injected (`Agent_Tick(now_us)`). On Linux the epoll loop in `apps/agent` drives it; on a microcontroller an ISR/systick does, and the transport adapter can be QUIC, TCP or UDP (lwIP or bare) without touching the core.
 
+### Listeners and defaults
+
+The hub always listens on a single unix domain socket (`/run/can-hub/hub.sock` by default, `--listen unix://<path>` overrides). It speaks the wire protocol and carries every local consumer: can-hub-client today, can-hub-cli admin traffic when the admin message family lands — demuxed by the HELLO role field, not by socket. Filesystem permissions as access control; it splits into a separate admin socket only if admin ever needs stricter permissions (decision 2026-06-06).
+
+Without `--listen` flags the hub also serves tcp://7227 and, when `--cert`/`--key` are present, quic://7227 (same number, different protocols). Explicit `--listen tcp://`/`quic://` replaces the network defaults; default listeners that cannot start warn and are skipped, explicitly requested ones are fatal.
+
 ### Administration
 
-`can-hub-cli` talks to the hub over a local unix domain socket (filesystem permissions as access control) using the same binary protocol with admin message types.
+`can-hub-cli` talks to the hub over the unix domain socket above using the same binary protocol with admin message types.
 
 ### Compatibility adapters (future)
 

@@ -26,6 +26,7 @@ typedef struct {
     char host[TCP_HOST_MAX];
     char port_text[TCP_PORT_TEXT_MAX];
     TcpChannel channel;
+    bool unix_socket;
     bool connecting;
     bool connected;
 } TcpClientTransport;
@@ -36,6 +37,7 @@ bool TcpClientTransport_Init(
     const char *port,
     const TransportEvents *events
 );
+bool TcpClientTransport_InitUnix(TcpClientTransport *self, const char *socket_path, const TransportEvents *events);
 TransportPort *TcpClientTransport_Port(TcpClientTransport *self);
 int32_t TcpClientTransport_Fd(const TcpClientTransport *self);
 bool TcpClientTransport_WantsWritable(const TcpClientTransport *self);

@@ -35,6 +35,12 @@ bool TcpServerTransport_Init(
     uint32_t peer_id_base,
     const HubTransportEvents *events
 );
+bool TcpServerTransport_InitUnix(
+    TcpServerTransport *self,
+    const char *socket_path,
+    uint32_t peer_id_base,
+    const HubTransportEvents *events
+);
 HubTransportPort *TcpServerTransport_Port(TcpServerTransport *self);
 int32_t TcpServerTransport_ListenFd(const TcpServerTransport *self);
 int32_t TcpServerTransport_SlotFd(const TcpServerTransport *self, uint8_t slot);

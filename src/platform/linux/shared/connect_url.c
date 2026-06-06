@@ -5,6 +5,7 @@
 
 #define TCP_URL_PREFIX "tcp://"
 #define QUIC_URL_PREFIX "quic://"
+#define UNIX_URL_PREFIX "unix://"
 
 bool ConnectUrl_ParseScheme(const char *url, uint8_t *scheme, const char **remainder)
 {
@@ -16,6 +17,11 @@ bool ConnectUrl_ParseScheme(const char *url, uint8_t *scheme, const char **remai
     if (strncmp(url, QUIC_URL_PREFIX, strlen(QUIC_URL_PREFIX)) == 0) {
         *scheme = kCONNECT_SCHEME_QUIC;
         *remainder = url + strlen(QUIC_URL_PREFIX);
+        return true;
+    }
+    if (strncmp(url, UNIX_URL_PREFIX, strlen(UNIX_URL_PREFIX)) == 0) {
+        *scheme = kCONNECT_SCHEME_UNIX;
+        *remainder = url + strlen(UNIX_URL_PREFIX);
         return true;
     }
 
@@ -30,6 +36,15 @@ bool ConnectUrl_Parse(const char *url, uint8_t *scheme, char *host, char *port_t
 
     if (!ConnectUrl_ParseScheme(url, scheme, &address)) {
         return false;
+    }
+
+    if (*scheme == kCONNECT_SCHEME_UNIX) {
+        if (address[0] == '\0' || strlen(address) >= CONNECT_URL_HOST_MAX) {
+            return false;
+        }
+        snprintf(host, CONNECT_URL_HOST_MAX, "%s", address);
+        port_text[0] = '\0';
+        return true;
     }
 
     separator = strrchr(address, ':');

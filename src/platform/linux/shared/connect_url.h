@@ -10,6 +10,7 @@
 typedef enum tconnect_scheme_e {
     kCONNECT_SCHEME_TCP = 0,
     kCONNECT_SCHEME_QUIC,
+    kCONNECT_SCHEME_UNIX,
     kCONNECT_SCHEME_MAX,
 } TCONNECT_SCHEME;
 

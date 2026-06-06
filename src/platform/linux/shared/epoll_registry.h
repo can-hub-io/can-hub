@@ -6,7 +6,7 @@
 
 #include <sys/epoll.h>
 
-#define EPOLL_REGISTRY_SLOTS_MAX 64
+#define EPOLL_REGISTRY_SLOTS_MAX 128
 #define EPOLL_REGISTRY_NO_SOCKET (-1)
 
 /*

@@ -43,7 +43,7 @@ Layout is context-first: one directory per bounded context (`src/agent/`, `src/h
 
 Two planes on the wire: control (reliable QUIC stream / the TCP connection) and data (QUIC datagrams, latest-wins; over TCP shares the stream). Identity is the TLS fingerprint — never sent per message. Data plane demultiplexes by connection-scoped u8 **channel** (assigned by REGISTER_ACK / OPEN), not by global interface id. Adding a transport must not touch the domain.
 
-Hub listens on TCP and QUIC simultaneously; the QUIC server transport demuxes peers by remote address (known debt: breaks on connection migration). Hub peer_id ranges per transport are hardcoded in `hub_main.c`.
+Hub defaults: always-on unix socket (`/run/can-hub/hub.sock`, one socket for wire protocol and future admin, demuxed by HELLO role) plus tcp://7227 and quic://7227 (QUIC only with `--cert`/`--key`); explicit `--listen` overrides the network defaults. can-hub-client connects to the unix socket when `--connect` is omitted. The QUIC server transport demuxes peers by DCID (original DCID + live SCIDs), so client migration/NAT rebinding survive; the remote address follows the latest packet. Hub peer_id ranges per transport are hardcoded in `hub_main.c` (tcp 0x1, unix 0x40000001, quic 0x80000001).
 
 ## Code style
 

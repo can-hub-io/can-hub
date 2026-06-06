@@ -8,6 +8,7 @@
 
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
+#include "platform/linux/shared/hub_defaults.h"
 #include "platform/linux/tcp/tcp_client_transport.h"
 #include "protocol/frame_message.h"
 #include "protocol/hello_message.h"
@@ -27,10 +28,12 @@ typedef enum tclient_command_e {
 
 static TcpClientTransport transport;
 static uint8_t command;
+static uint8_t connect_scheme;
 static uint32_t dump_interface_id;
 static int32_t exit_code = -1;
 
 static bool parseArguments(int argc, char **argv, char *host, char *port_text);
+static bool initTransport(const char *host, const char *port_text, const TransportEvents *events);
 static void onConnected(void *context);
 static void onDisconnected(void *context, uint64_t now_us);
 static void onControl(void *context, const uint8_t *data, size_t size, uint64_t now_us);
@@ -52,17 +55,18 @@ int main(int argc, char **argv)
     };
 
     if (!parseArguments(argc, argv, host, port_text)) {
-        fprintf(stderr, "usage: %s --connect tcp://<host>:<port> list\n", argv[0]);
-        fprintf(stderr, "       %s --connect tcp://<host>:<port> dump <interface-id>\n", argv[0]);
+        fprintf(stderr, "usage: %s [--connect tcp://<host>:<port>|unix://<path>] list\n", argv[0]);
+        fprintf(stderr, "       %s [--connect tcp://<host>:<port>|unix://<path>] dump <interface-id>\n", argv[0]);
+        fprintf(stderr, "       default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
         return 1;
     }
 
-    if (!TcpClientTransport_Init(&transport, host, port_text, &events)) {
+    if (!initTransport(host, port_text, &events)) {
         fprintf(stderr, "could not initialize transport\n");
         return 1;
     }
     if (!transport.port.connect(transport.port.context)) {
-        fprintf(stderr, "could not connect to %s:%s\n", host, port_text);
+        fprintf(stderr, "could not connect to %s\n", host);
         return 1;
     }
 
@@ -75,7 +79,6 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
 {
     const char *connect_url = NULL;
     const char *command_name = NULL;
-    uint8_t scheme;
     int32_t i;
 
     for(i=1; i<argc; i++) {
@@ -94,15 +97,31 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
         }
     }
 
-    if (connect_url == NULL || command_name == NULL) {
+    if (command_name == NULL) {
         return false;
     }
 
-    if (!ConnectUrl_Parse(connect_url, &scheme, host, port_text)) {
+    if (connect_url == NULL) {
+        connect_scheme = kCONNECT_SCHEME_UNIX;
+        snprintf(host, CONNECT_URL_HOST_MAX, "%s", HUB_DEFAULT_UNIX_SOCKET_PATH);
+        port_text[0] = '\0';
+        return true;
+    }
+
+    if (!ConnectUrl_Parse(connect_url, &connect_scheme, host, port_text)) {
         return false;
     }
 
-    return scheme == kCONNECT_SCHEME_TCP;
+    return connect_scheme != kCONNECT_SCHEME_QUIC;
+}
+
+static bool initTransport(const char *host, const char *port_text, const TransportEvents *events)
+{
+    if (connect_scheme == kCONNECT_SCHEME_UNIX) {
+        return TcpClientTransport_InitUnix(&transport, host, events);
+    }
+
+    return TcpClientTransport_Init(&transport, host, port_text, events);
 }
 
 static void onConnected(void *context)
