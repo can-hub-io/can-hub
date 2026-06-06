@@ -68,6 +68,14 @@ set(HUB_SOURCES
 add_executable(can-hub src/platform/linux/hub_main.c ${COMMON_SOURCES} ${HUB_SOURCES})
 add_executable(can-hub-agent src/platform/linux/agent_main.c ${COMMON_SOURCES} ${AGENT_SOURCES})
 target_link_libraries(can-hub-agent PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls)
+set(CLIENT_SOURCES
+    src/platform/linux/clock/clock.c
+    src/platform/linux/shared/message_framer.c
+    src/platform/linux/tcp/tcp_channel.c
+    src/platform/linux/tcp/tcp_client_transport.c
+)
+
+add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES})
 add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES})
 
 install(TARGETS can-hub can-hub-agent can-hub-cli RUNTIME DESTINATION bin)
