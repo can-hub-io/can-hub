@@ -102,6 +102,13 @@ add_unit_test(test_quic_control_channel
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
 
+add_unit_test(test_identity_database
+    SOURCES
+        platform/test_identity_database.cpp
+        ${ROOT_SRC_DIR}/platform/linux/sqlite/identity_database.c
+)
+target_link_libraries(test_identity_database PRIVATE sqlite3)
+
 add_unit_test(test_agent
     SOURCES
         agent/test_agent.cpp

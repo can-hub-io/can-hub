@@ -54,7 +54,7 @@ The path (relay vs direct) is abstracted from day one and transparent to the dom
 ### State and persistence
 
 - Live registry (sessions, interfaces, subscriptions): in memory; it dies with the connection.
-- Persistent data (agent identities, TOFU fingerprints, names, ACLs, config): SQLite, embedded, no external services. Redis rejected: deployment dependency, overkill.
+- Persistent data (agent identities, TOFU fingerprints, names, ACLs, config): SQLite, embedded, no external services. Redis rejected: deployment dependency, overkill. Implemented: `hub.db` in the state dir holds agent_identities (name → fingerprint, behind IdentityStorePort); a legacy known_agents pin file is imported once on start and renamed.
 
 ### Concurrency
 

@@ -27,7 +27,7 @@ Run a single test: build with `make test` (or `cmake --build build/test`), then 
 
 New tests are registered in `test/unit/CMakeLists.txt` with `add_unit_test(<name> SOURCES <test.cpp> <real_src.c ...>)` — each test links the real sources it exercises (no production library target). Mocks for ports live in `test/mocks/`.
 
-ngtcp2 v1.23.0 is pulled via FetchContent (GnuTLS backend, static); first configure needs network.
+ngtcp2 v1.23.0 (GnuTLS backend, static) and the SQLite amalgamation (sha256-pinned zip from sqlite.org) are pulled via FetchContent; first configure needs network. The test project (test/CMakeLists.txt) fetches SQLite separately.
 
 ## Architecture
 

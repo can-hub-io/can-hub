@@ -35,6 +35,16 @@ FetchContent_Declare(ngtcp2
 )
 FetchContent_MakeAvailable(ngtcp2)
 
+FetchContent_Declare(sqlite3
+    URL https://sqlite.org/2026/sqlite-amalgamation-3530200.zip
+    URL_HASH SHA256=8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable(sqlite3)
+add_library(sqlite3 STATIC ${sqlite3_SOURCE_DIR}/sqlite3.c)
+target_include_directories(sqlite3 PUBLIC ${sqlite3_SOURCE_DIR})
+target_compile_definitions(sqlite3 PRIVATE SQLITE_OMIT_LOAD_EXTENSION SQLITE_THREADSAFE=0)
+
 set(AGENT_SOURCES
     src/agent/agent.c
     src/agent/agent_app.c
@@ -77,10 +87,11 @@ set(HUB_SOURCES
     src/platform/linux/quic/quic_egress.c
     src/platform/linux/quic/quic_server_security.c
     src/platform/linux/quic/quic_server_transport.c
+    src/platform/linux/sqlite/identity_database.c
 )
 
 add_executable(can-hub src/platform/linux/hub_main.c ${COMMON_SOURCES} ${HUB_SOURCES})
-target_link_libraries(can-hub PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls)
+target_link_libraries(can-hub PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls sqlite3)
 add_executable(can-hub-agent src/platform/linux/agent_main.c ${COMMON_SOURCES} ${AGENT_SOURCES})
 target_link_libraries(can-hub-agent PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls)
 set(CLIENT_SOURCES

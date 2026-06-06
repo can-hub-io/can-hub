@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <sys/epoll.h>
 #include <sys/stat.h>
@@ -11,8 +12,8 @@
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/hub_defaults.h"
-#include "platform/linux/shared/pin_store.h"
 #include "platform/linux/shared/tls_identity.h"
+#include "platform/linux/sqlite/identity_database.h"
 #include "platform/linux/tcp/tcp_server_transport.h"
 #include "version.h"
 
@@ -20,8 +21,9 @@
 #define POLL_PERIOD_MS 100
 #define DEFAULT_UNIX_SOCKET_DIRECTORY_MODE 0755
 #define IDENTITY_NAME "hub"
+#define DATABASE_FILE "hub.db"
 #define KNOWN_AGENTS_FILE "known_agents"
-#define KNOWN_AGENTS_PATH_MAX (TLS_IDENTITY_PATH_MAX + sizeof(KNOWN_AGENTS_FILE))
+#define STATE_FILE_PATH_MAX (TLS_IDENTITY_PATH_MAX + 32)
 #define TCP_PEER_ID_BASE 0x00000001
 #define UNIX_PEER_ID_BASE 0x40000001
 #define QUIC_PEER_ID_BASE 0x80000001
@@ -47,14 +49,12 @@ static EpollRegistry poll_registry;
 static char state_directory[TLS_IDENTITY_PATH_MAX];
 static char identity_certificate_path[TLS_IDENTITY_PATH_MAX];
 static char identity_key_path[TLS_IDENTITY_PATH_MAX];
-static char known_agents_path[KNOWN_AGENTS_PATH_MAX];
-static IdentityStorePort identity_store;
+static IdentityDatabase identity_database;
 
 static bool parseArguments(int argc, char **argv);
 static bool loadIdentity(const char *state_directory_override);
 static IdentityStorePort *identityStore(void);
-static bool storeLookup(void *context, const char *agent_name, char *fingerprint_hex);
-static bool storePin(void *context, const char *agent_name, const char *fingerprint_hex);
+static void importLegacyPinFile(void);
 static bool startListeners(
     const char *tcp_port,
     const char *quic_port,
@@ -258,32 +258,41 @@ static bool startListeners(
 
 static IdentityStorePort *identityStore(void)
 {
+    char database_path[STATE_FILE_PATH_MAX];
+
     if (state_directory[0] == '\0') {
         return NULL;
     }
 
-    snprintf(known_agents_path, sizeof(known_agents_path), "%s/%s", state_directory, KNOWN_AGENTS_FILE);
-    identity_store.context = NULL;
-    identity_store.lookup = storeLookup;
-    identity_store.pin = storePin;
+    snprintf(database_path, sizeof(database_path), "%s/%s", state_directory, DATABASE_FILE);
+    if (!IdentityDatabase_Open(&identity_database, database_path)) {
+        fprintf(stderr, "agent identity pinning disabled: could not open %s\n", database_path);
+        return NULL;
+    }
 
-    return &identity_store;
+    importLegacyPinFile();
+
+    return IdentityDatabase_Port(&identity_database);
 }
 
-static bool storeLookup(void *context, const char *agent_name, char *fingerprint_hex)
+static void importLegacyPinFile(void)
 {
-    (void)context;
+    char pin_file_path[STATE_FILE_PATH_MAX];
+    char imported_path[STATE_FILE_PATH_MAX];
 
-    return PinStore_Lookup(known_agents_path, agent_name, fingerprint_hex);
-}
+    snprintf(pin_file_path, sizeof(pin_file_path), "%s/%s", state_directory, KNOWN_AGENTS_FILE);
+    if (access(pin_file_path, R_OK) != 0) {
+        return;
+    }
 
-static bool storePin(void *context, const char *agent_name, const char *fingerprint_hex)
-{
-    (void)context;
+    if (!IdentityDatabase_ImportPinFile(&identity_database, pin_file_path)) {
+        fprintf(stderr, "could not import %s into the identity database\n", pin_file_path);
+        return;
+    }
 
-    fprintf(stderr, "pinning agent %s fingerprint %s\n", agent_name, fingerprint_hex);
-
-    return PinStore_Append(known_agents_path, agent_name, fingerprint_hex);
+    snprintf(imported_path, sizeof(imported_path), "%s/%s.imported", state_directory, KNOWN_AGENTS_FILE);
+    rename(pin_file_path, imported_path);
+    fprintf(stderr, "imported %s into the identity database\n", pin_file_path);
 }
 
 static bool muxSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size)
