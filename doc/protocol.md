@@ -64,7 +64,7 @@ REGISTER (total 392)
 @136 interface_names char[16][16]
 
 REGISTER_ACK (total 24)
-@4   status u8 (0 ok)
+@4   status u8 (0 ok, 1 rejected, 2 identity mismatch: name pinned to another fingerprint)
 @5   interface_count u8
 @6   reserved u16
 @8   channels u8[16]   (same order as the REGISTER names)

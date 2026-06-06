@@ -47,7 +47,7 @@ The path (relay vs direct) is abstracted from day one and transparent to the dom
 
 ### Identity and naming
 
-- Agent identity: TLS certificate fingerprint. Zero-config default: self-signed keypair generated on first start, trust-on-first-use pinning on both sides; provisioned CA certificates also supported.
+- Agent identity: TLS certificate fingerprint (SHA-256 of the DER certificate). Zero-config default: self-signed ED25519 keypair generated on first start (state dir `/var/lib/can-hub`, per-user fallback `~/.local/state/can-hub`, `--state-dir` overrides), trust-on-first-use pinning on both sides — the agent pins the hub per host:port (known_hubs), the hub requires a client certificate on QUIC (mTLS) and pins agent_name to fingerprint at REGISTER (known_agents, IdentityStorePort; SQLite later). Changed fingerprints are rejected. Provisioned `--cert`/`--key` also supported. Plaintext transports (tcp, unix socket) carry no fingerprint and bypass pinning.
 - Each agent has a unique friendly name (explicit, or derived from origin as fallback).
 - Interfaces are namespaced `agent_name/interface`, e.g. `truck42/can0`. Each interface knows its owning agent. The hub answers queries by interface, by agent name and by fingerprint.
 
@@ -68,7 +68,7 @@ The agent core (domain + application) is freestanding: no POSIX, no file descrip
 
 The hub always listens on a single unix domain socket (`/run/can-hub/hub.sock` by default, `--listen unix://<path>` overrides). It speaks the wire protocol and carries every local consumer: can-hub-client today, can-hub-cli admin traffic when the admin message family lands — demuxed by the HELLO role field, not by socket. Filesystem permissions as access control; it splits into a separate admin socket only if admin ever needs stricter permissions (decision 2026-06-06).
 
-Without `--listen` flags the hub also serves tcp://7227 and, when `--cert`/`--key` are present, quic://7227 (same number, different protocols). Explicit `--listen tcp://`/`quic://` replaces the network defaults; default listeners that cannot start warn and are skipped, explicitly requested ones are fatal.
+Without `--listen` flags the hub also serves tcp://7227 and quic://7227 (same number, different protocols); the QUIC identity is auto-generated when `--cert`/`--key` are absent. Explicit `--listen tcp://`/`quic://` replaces the network defaults; default listeners that cannot start warn and are skipped, explicitly requested ones are fatal.
 
 ### Administration
 
