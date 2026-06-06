@@ -15,6 +15,7 @@ static void eventControl(void *context, const uint8_t *data, size_t size, uint64
 static void eventTransportFrame(void *context, const uint8_t *data, size_t size);
 static void eventCanFrame(void *context, uint8_t interface_index, const FrameMessage *frame);
 static void tryConnect(Agent *self, uint64_t now_us);
+static void tickRegistering(Agent *self, uint64_t now_us);
 static void scheduleReconnect(Agent *self, uint64_t now_us);
 static void sendHelloAndRegister(Agent *self);
 static void handleRegisterAck(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
@@ -36,6 +37,7 @@ void Agent_Init(Agent *self, TransportPort *transport, CanPort *can, const Regis
     ReconnectBackoff_Init(&self->backoff, RECONNECT_DEFAULT_INITIAL_DELAY_MS, RECONNECT_DEFAULT_MAX_DELAY_MS);
     self->state = kAGENT_STATE_DISCONNECTED;
     self->next_connect_at_us = 0;
+    self->register_deadline_us = 0;
 }
 
 TransportEvents Agent_TransportEvents(Agent *self)
@@ -63,6 +65,10 @@ CanEvents Agent_CanEvents(Agent *self)
 
 void Agent_Tick(Agent *self, uint64_t now_us)
 {
+    if (self->state == kAGENT_STATE_REGISTERING) {
+        tickRegistering(self, now_us);
+        return;
+    }
     if (self->state != kAGENT_STATE_DISCONNECTED) {
         return;
     }
@@ -91,6 +97,7 @@ void Agent_OnDisconnected(Agent *self, uint64_t now_us)
 
     ChannelMap_Reset(&self->channel_map);
     self->state = kAGENT_STATE_DISCONNECTED;
+    self->register_deadline_us = 0;
     scheduleReconnect(self, now_us);
 }
 
@@ -199,6 +206,20 @@ static void tryConnect(Agent *self, uint64_t now_us)
     scheduleReconnect(self, now_us);
 }
 
+static void tickRegistering(Agent *self, uint64_t now_us)
+{
+    if (self->register_deadline_us == 0) {
+        self->register_deadline_us = now_us + AGENT_REGISTER_TIMEOUT_MS * MICROSECONDS_PER_MILLISECOND;
+        return;
+    }
+    if (now_us < self->register_deadline_us) {
+        return;
+    }
+
+    self->transport->disconnect(self->transport->context);
+    Agent_OnDisconnected(self, now_us);
+}
+
 static void scheduleReconnect(Agent *self, uint64_t now_us)
 {
     uint64_t delay_ms = ReconnectBackoff_NextDelayMs(&self->backoff);
@@ -238,6 +259,7 @@ static void handleRegisterAck(Agent *self, const MessageHeader *header, const ui
 
     ReconnectBackoff_Reset(&self->backoff);
     self->state = kAGENT_STATE_RUNNING;
+    self->register_deadline_us = 0;
 }
 
 static void handlePing(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us)

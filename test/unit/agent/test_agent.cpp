@@ -105,6 +105,50 @@ describe("agent", []() {
             expect(transport.frame_count).toBe(0);
         });
 
+        it("stays registering while the ack timeout has not expired", []() {
+            Agent_Tick(&agent, 1000000);
+            Agent_Tick(&agent, 1000000 + AGENT_REGISTER_TIMEOUT_MS * 1000 - 1);
+
+            expect(transport.disconnect_calls).toBe(0);
+            expect(Agent_State(&agent)).toBe(kAGENT_STATE_REGISTERING);
+        });
+
+        it("disconnects when the register ack never arrives", []() {
+            Agent_Tick(&agent, 1000000);
+            Agent_Tick(&agent, 1000000 + AGENT_REGISTER_TIMEOUT_MS * 1000);
+
+            expect(transport.disconnect_calls).toBe(1);
+            expect(Agent_State(&agent)).toBe(kAGENT_STATE_DISCONNECTED);
+        });
+
+        it("does not time out after a successful ack", []() {
+            uint8_t encoded[64];
+            size_t encoded_size = RegisterAckMessage_Encode(&ack_ok, encoded, sizeof(encoded));
+
+            Agent_Tick(&agent, 1000000);
+            Agent_OnControlMessage(&agent, encoded, encoded_size, 2000000);
+            Agent_Tick(&agent, 1000000 + AGENT_REGISTER_TIMEOUT_MS * 1000);
+
+            expect(transport.disconnect_calls).toBe(0);
+            expect(Agent_State(&agent)).toBe(kAGENT_STATE_RUNNING);
+        });
+
+        it("arms a fresh timeout on the next registration attempt", []() {
+            uint8_t encoded[64];
+            size_t encoded_size = RegisterAckMessage_Encode(&ack_ok, encoded, sizeof(encoded));
+            uint64_t second_attempt_us = 1000000 + AGENT_REGISTER_TIMEOUT_MS * 1000 + 2000000;
+
+            Agent_Tick(&agent, 1000000);
+            Agent_Tick(&agent, 1000000 + AGENT_REGISTER_TIMEOUT_MS * 1000);
+            Agent_Tick(&agent, second_attempt_us);
+            Agent_OnConnected(&agent);
+            Agent_Tick(&agent, second_attempt_us);
+            Agent_OnControlMessage(&agent, encoded, encoded_size, second_attempt_us + 1000);
+
+            expect(Agent_State(&agent)).toBe(kAGENT_STATE_RUNNING);
+            expect(transport.disconnect_calls).toBe(1);
+        });
+
         it("replies pong to a ping request", []() {
             MessageHeader ping = { kMESSAGE_TYPE_PING, 0, 0 };
             MessageHeader reply;

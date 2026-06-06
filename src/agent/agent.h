@@ -19,6 +19,8 @@
  * carry everything that leaves the core.
  */
 
+#define AGENT_REGISTER_TIMEOUT_MS 5000
+
 typedef enum tagent_state_e {
     kAGENT_STATE_DISCONNECTED = 0,
     kAGENT_STATE_CONNECTING,
@@ -35,6 +37,7 @@ typedef struct {
     ReconnectBackoff backoff;
     uint8_t state;
     uint64_t next_connect_at_us;
+    uint64_t register_deadline_us;
 } Agent;
 
 void Agent_Init(Agent *self, TransportPort *transport, CanPort *can, const RegisterMessage *registration);
