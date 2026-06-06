@@ -32,6 +32,7 @@ C (C11), cmake + gcc, static or dynamic linking. Make wraps cmake: `make release
 - TCP (plaintext today, optional TLS later): fallback for networks that block UDP. Both planes share the single stream; frames lose latest-wins semantics (head-of-line blocking under WAN loss) — documented trade-off of the fallback.
 - Plain UDP: discarded (2026-06-06). If the network passes UDP it passes QUIC, so plain UDP only removes encryption; a reliable-control-over-UDP lite (stop-and-wait in the adapter) and a TCP-control + UDP-data hybrid (needs a session token so the hub can correlate the flows) were evaluated and parked — revisit only if a microcontroller target cannot carry ngtcp2.
 - SCTP: rejected. Middleboxes kill it, QUIC already provides multistreaming.
+- UDP beacon discovery: discarded (2026-06-06). Clients are configured with the hub address and query the catalogue with LIST.
 
 The transport is a port; adapters implement it. Adding a transport must not touch the domain.
 

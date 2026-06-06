@@ -35,12 +35,11 @@ offset  size  field
 0x05  LIST_REPLY
 0x06  OPEN         client opens an interface by global id, returns a channel
 0x07  CLOSE
-0x08  SUBSCRIBE    CAN id filters for an open channel
+0x08  SUBSCRIBE    CAN id filters for an open channel (layout deferred)
 0x09  ERROR        code + human-readable detail
+0x0A  OPEN_ACK     status + assigned channel
 0x7F  PING/PONG    liveness (flags bit 0: reply)
 ```
-
-LIST, LIST_REPLY, OPEN, CLOSE and SUBSCRIBE layouts are defined when the hub lands (E3).
 
 ### Control payload layouts (version 0)
 
@@ -72,6 +71,32 @@ REGISTER_ACK (total 24)
 
 PING (total 4)
 empty payload; header flags bit 0 set on the reply (pong)
+
+LIST (total 8)
+@4   offset u16        (pagination start index)
+@6   reserved u16
+
+LIST_REPLY (total 8 + count * 148)
+@4   count u8          (0-16 entries in this reply)
+@5   flags u8          (bit 0: more entries beyond offset + count)
+@6   reserved u16
+@8   entries, each 148 bytes:
+     +0   interface_id u32
+     +4   agent_name char[128]
+     +132 interface_name char[16]
+
+OPEN (total 8)
+@4   interface_id u32
+
+OPEN_ACK (total 12)
+@4   status u8 (0 ok)
+@5   channel u8
+@6   reserved u16
+@8   interface_id u32
+
+CLOSE (total 8)
+@4   channel u8
+@5   reserved u8[3]
 ```
 
 Limits: agent name <= 127 chars, interface name 1-15 chars (Linux IFNAMSIZ), <= 16 interfaces per agent, error detail <= 63 chars.
@@ -99,3 +124,5 @@ Multiple FRAME messages may be packed back-to-back in one datagram up to the pat
 - P2P phase 2: endpoint exchange messages (OFFER/ANSWER pattern).
 - Reliable data plane: flows that need guaranteed in-order delivery (ISOTP transfers, UDS/firmware upgrades) mapped to dedicated QUIC streams instead of datagrams — reliable per flow without head-of-line blocking the cyclic traffic. Candidate signalling: a flag on OPEN/SUBSCRIBE selecting reliable transport for matching CAN ids.
 - Timestamp cost: u64 is the largest FRAME field. A u32 microsecond timestamp relative to a negotiated session base (wraps every ~71 min) would save 4 bytes per frame.
+- Interface configuration messaging (bitrate, bit timings, FD parameters, up/down): deferred. Needs its own message family and an authorization story.
+- SUBSCRIBE filter semantics: deferred. In version 0, OPEN delivers every frame of the interface.

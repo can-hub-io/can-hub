@@ -18,6 +18,8 @@ set(COMMON_SOURCES
     src/protocol/frame_message.c
     src/protocol/hello_message.c
     src/protocol/error_message.c
+    src/protocol/list_message.c
+    src/protocol/open_message.c
     src/protocol/register_message.c
 )
 

@@ -33,6 +33,22 @@ add_unit_test(test_message_header
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
 
+add_unit_test(test_list_message
+    SOURCES
+        protocol/test_list_message.cpp
+        ${ROOT_SRC_DIR}/protocol/list_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+
+add_unit_test(test_open_message
+    SOURCES
+        protocol/test_open_message.cpp
+        ${ROOT_SRC_DIR}/protocol/open_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+
 add_unit_test(test_frame_message
     SOURCES
         protocol/test_frame_message.cpp
