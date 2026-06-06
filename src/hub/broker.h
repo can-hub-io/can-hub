@@ -3,6 +3,7 @@
 #include "hub/domain/interface_registry.h"
 #include "hub/domain/peer_directory.h"
 #include "hub/ports/hub_transport_events.h"
+#include "hub/ports/identity_store_port.h"
 #include "hub/ports/hub_transport_port.h"
 
 /*
@@ -13,9 +14,10 @@
  */
 typedef struct {
     HubTransportPort *transport;
+    IdentityStorePort *identity_store;
     InterfaceRegistry registry;
     PeerDirectory directory;
 } Broker;
 
-void Broker_Init(Broker *self, HubTransportPort *transport);
+void Broker_Init(Broker *self, HubTransportPort *transport, IdentityStorePort *identity_store);
 HubTransportEvents Broker_Events(Broker *self);

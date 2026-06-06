@@ -13,5 +13,5 @@ typedef struct {
     Broker broker;
 } HubApp;
 
-void HubApp_Init(HubApp *self, HubTransportPort *transport);
+void HubApp_Init(HubApp *self, HubTransportPort *transport, IdentityStorePort *identity_store);
 HubTransportEvents HubApp_Events(HubApp *self);

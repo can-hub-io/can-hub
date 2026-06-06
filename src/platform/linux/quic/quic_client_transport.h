@@ -36,6 +36,8 @@ typedef struct {
     QuicControlChannel control;
     QuicConnection connection;
     bool connected;
+    bool dispatching;
+    bool disconnect_pending;
 } QuicClientTransport;
 
 bool QuicClientTransport_Init(

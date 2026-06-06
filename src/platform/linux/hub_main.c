@@ -11,6 +11,7 @@
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/hub_defaults.h"
+#include "platform/linux/shared/pin_store.h"
 #include "platform/linux/shared/tls_identity.h"
 #include "platform/linux/tcp/tcp_server_transport.h"
 #include "version.h"
@@ -19,6 +20,8 @@
 #define POLL_PERIOD_MS 100
 #define DEFAULT_UNIX_SOCKET_DIRECTORY_MODE 0755
 #define IDENTITY_NAME "hub"
+#define KNOWN_AGENTS_FILE "known_agents"
+#define KNOWN_AGENTS_PATH_MAX (TLS_IDENTITY_PATH_MAX + sizeof(KNOWN_AGENTS_FILE))
 #define TCP_PEER_ID_BASE 0x00000001
 #define UNIX_PEER_ID_BASE 0x40000001
 #define QUIC_PEER_ID_BASE 0x80000001
@@ -44,9 +47,14 @@ static EpollRegistry poll_registry;
 static char state_directory[TLS_IDENTITY_PATH_MAX];
 static char identity_certificate_path[TLS_IDENTITY_PATH_MAX];
 static char identity_key_path[TLS_IDENTITY_PATH_MAX];
+static char known_agents_path[KNOWN_AGENTS_PATH_MAX];
+static IdentityStorePort identity_store;
 
 static bool parseArguments(int argc, char **argv);
 static bool loadIdentity(const char *state_directory_override);
+static IdentityStorePort *identityStore(void);
+static bool storeLookup(void *context, const char *agent_name, char *fingerprint_hex);
+static bool storePin(void *context, const char *agent_name, const char *fingerprint_hex);
 static bool startListeners(
     const char *tcp_port,
     const char *quic_port,
@@ -243,9 +251,39 @@ static bool startListeners(
         return false;
     }
 
-    HubApp_Init(&app, &mux_port);
+    HubApp_Init(&app, &mux_port, identityStore());
 
     return true;
+}
+
+static IdentityStorePort *identityStore(void)
+{
+    if (state_directory[0] == '\0') {
+        return NULL;
+    }
+
+    snprintf(known_agents_path, sizeof(known_agents_path), "%s/%s", state_directory, KNOWN_AGENTS_FILE);
+    identity_store.context = NULL;
+    identity_store.lookup = storeLookup;
+    identity_store.pin = storePin;
+
+    return &identity_store;
+}
+
+static bool storeLookup(void *context, const char *agent_name, char *fingerprint_hex)
+{
+    (void)context;
+
+    return PinStore_Lookup(known_agents_path, agent_name, fingerprint_hex);
+}
+
+static bool storePin(void *context, const char *agent_name, const char *fingerprint_hex)
+{
+    (void)context;
+
+    fprintf(stderr, "pinning agent %s fingerprint %s\n", agent_name, fingerprint_hex);
+
+    return PinStore_Append(known_agents_path, agent_name, fingerprint_hex);
 }
 
 static bool muxSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size)

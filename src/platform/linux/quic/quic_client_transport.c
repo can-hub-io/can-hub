@@ -90,8 +90,17 @@ void QuicClientTransport_OnUdpReadable(QuicClientTransport *self)
         }
 
         QuicUdpEndpoint_MakePath(&self->udp, &path);
+        self->dispatching = true;
         if (!QuicConnection_ReadPacket(&self->connection, &path, buffer, (size_t)bytes_received)) {
+            self->dispatching = false;
             teardown(self, true);
+            return;
+        }
+        self->dispatching = false;
+
+        if (self->disconnect_pending) {
+            flushEgress(self, NULL, 0);
+            teardown(self, false);
             return;
         }
     }
@@ -106,8 +115,17 @@ void QuicClientTransport_OnTimer(QuicClientTransport *self)
         return;
     }
 
+    self->dispatching = true;
     if (!QuicConnection_HandleExpiry(&self->connection)) {
+        self->dispatching = false;
         teardown(self, true);
+        return;
+    }
+    self->dispatching = false;
+
+    if (self->disconnect_pending) {
+        flushEgress(self, NULL, 0);
+        teardown(self, false);
         return;
     }
 
@@ -144,6 +162,11 @@ static void portDisconnect(void *context)
 {
     QuicClientTransport *self = context;
 
+    if (self->dispatching) {
+        self->disconnect_pending = true;
+        return;
+    }
+
     teardown(self, false);
 }
 
@@ -151,11 +174,14 @@ static bool portSendControl(void *context, const uint8_t *data, size_t size)
 {
     QuicClientTransport *self = context;
 
-    if (!self->connected) {
+    if (!self->connected || self->disconnect_pending) {
         return false;
     }
     if (!QuicControlChannel_QueueTx(&self->control, data, size)) {
         return false;
+    }
+    if (self->dispatching) {
+        return true;
     }
 
     return flushEgress(self, NULL, 0);
@@ -185,6 +211,7 @@ static void teardown(QuicClientTransport *self, bool notify)
     QuicControlChannel_Reset(&self->control);
     QuicUdpEndpoint_DisarmTimer(&self->udp);
     self->connected = false;
+    self->disconnect_pending = false;
 
     if (notify) {
         self->events.on_disconnected(self->events.context, Clock_RealtimeUs());

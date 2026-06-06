@@ -37,6 +37,7 @@ static void sendToPeer(QuicServerTransport *self, QuicServerPeer *peer, const ui
 static void rearmTimer(QuicServerTransport *self);
 static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool notify);
 static void dispatchControlMessages(QuicServerTransport *self, QuicServerPeer *peer);
+static void capturePeerFingerprint(QuicServerPeer *peer);
 static void onHandshakeCompleted(void *context);
 static void onDatagram(void *context, const uint8_t *data, size_t size);
 static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, size_t size);
@@ -136,8 +137,17 @@ void QuicServerTransport_OnUdpReadable(QuicServerTransport *self)
         }
 
         makePeerPath(self, peer, &path);
+        self->dispatching = true;
         if (!QuicConnection_ReadPacket(&peer->connection, &path, packet, (size_t)bytes_received)) {
+            self->dispatching = false;
             teardownPeer(self, peer, true);
+            continue;
+        }
+        self->dispatching = false;
+
+        if (peer->close_pending) {
+            flushPeer(self, peer, NULL, 0);
+            teardownPeer(self, peer, false);
             continue;
         }
         flushPeer(self, peer, NULL, 0);
@@ -166,8 +176,17 @@ void QuicServerTransport_OnTimer(QuicServerTransport *self)
         if (QuicConnection_NextExpiryNs(&peer->connection) > now_ns) {
             continue;
         }
+        self->dispatching = true;
         if (!QuicConnection_HandleExpiry(&peer->connection)) {
+            self->dispatching = false;
             teardownPeer(self, peer, true);
+            continue;
+        }
+        self->dispatching = false;
+
+        if (peer->close_pending) {
+            flushPeer(self, peer, NULL, 0);
+            teardownPeer(self, peer, false);
             continue;
         }
         flushPeer(self, peer, NULL, 0);
@@ -183,11 +202,14 @@ static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data
     QuicServerTransport *self = context;
     QuicServerPeer *peer = findPeerById(self, peer_id);
 
-    if (peer == NULL || !peer->connected) {
+    if (peer == NULL || !peer->connected || peer->close_pending) {
         return false;
     }
     if (!QuicControlChannel_QueueTx(&peer->control, data, size)) {
         return false;
+    }
+    if (self->dispatching) {
+        return true;
     }
 
     return flushPeer(self, peer, NULL, 0);
@@ -198,7 +220,7 @@ static bool portSendFrame(void *context, uint32_t peer_id, const uint8_t *data, 
     QuicServerTransport *self = context;
     QuicServerPeer *peer = findPeerById(self, peer_id);
 
-    if (peer == NULL || !peer->connected) {
+    if (peer == NULL || !peer->connected || peer->close_pending) {
         return false;
     }
 
@@ -210,9 +232,15 @@ static void portClosePeer(void *context, uint32_t peer_id)
     QuicServerTransport *self = context;
     QuicServerPeer *peer = findPeerById(self, peer_id);
 
-    if (peer != NULL) {
-        teardownPeer(self, peer, false);
+    if (peer == NULL) {
+        return;
     }
+    if (self->dispatching) {
+        peer->close_pending = true;
+        return;
+    }
+
+    teardownPeer(self, peer, false);
 }
 
 /* ---------- private: peers ---------- */
@@ -418,6 +446,7 @@ static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool n
     peer->session = NULL;
     QuicControlChannel_Reset(&peer->control);
     peer->connected = false;
+    peer->close_pending = false;
 
     if (notify && was_connected) {
         self->events.on_peer_disconnected(self->events.context, peer_id, Clock_RealtimeUs());
@@ -425,6 +454,19 @@ static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool n
 }
 
 /* ---------- private: connection events ---------- */
+
+static void capturePeerFingerprint(QuicServerPeer *peer)
+{
+    const gnutls_datum_t *certificates;
+    unsigned int certificate_count;
+
+    certificates = gnutls_certificate_get_peers(peer->session, &certificate_count);
+    if (certificates == NULL || certificate_count == 0) {
+        return;
+    }
+
+    TlsIdentity_FingerprintOfDer(&certificates[0], peer->fingerprint_hex);
+}
 
 static void dispatchControlMessages(QuicServerTransport *self, QuicServerPeer *peer)
 {
@@ -452,8 +494,13 @@ static void onHandshakeCompleted(void *context)
 {
     QuicServerPeer *peer = context;
 
+    capturePeerFingerprint(peer);
     peer->connected = true;
-    peer->transport->events.on_peer_connected(peer->transport->events.context, peer->peer_id);
+    peer->transport->events.on_peer_connected(
+        peer->transport->events.context,
+        peer->peer_id,
+        peer->fingerprint_hex[0] != '\0' ? peer->fingerprint_hex : NULL
+    );
 }
 
 static void onDatagram(void *context, const uint8_t *data, size_t size)

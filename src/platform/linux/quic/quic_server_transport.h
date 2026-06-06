@@ -11,6 +11,7 @@
 #include "platform/linux/quic/quic_connection.h"
 #include "platform/linux/quic/quic_control_channel.h"
 #include "platform/linux/quic/quic_server_security.h"
+#include "platform/linux/shared/tls_identity.h"
 #include "hub/ports/hub_transport_events.h"
 #include "hub/ports/hub_transport_port.h"
 
@@ -31,10 +32,12 @@ typedef struct {
     gnutls_session_t session;
     QuicControlChannel control;
     ngtcp2_cid original_dcid;
+    char fingerprint_hex[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
     struct sockaddr_storage remote_address;
     socklen_t remote_address_length;
     uint32_t peer_id;
     bool connected;
+    bool close_pending;
 } QuicServerPeer;
 
 struct QuicServerTransport {
@@ -44,6 +47,7 @@ struct QuicServerTransport {
     int32_t udp_fd;
     int32_t timer_fd;
     uint32_t next_peer_id;
+    bool dispatching;
     struct sockaddr_storage local_address;
     socklen_t local_address_length;
     QuicServerPeer peers[QUIC_SERVER_PEERS_MAX];

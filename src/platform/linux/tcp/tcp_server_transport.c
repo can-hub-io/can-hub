@@ -129,7 +129,7 @@ void TcpServerTransport_OnAcceptReady(TcpServerTransport *self)
         setsockopt(peer_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
         TcpChannel_Bind(&peer->channel, peer_fd);
         peer->peer_id = self->next_peer_id++;
-        self->events.on_peer_connected(self->events.context, peer->peer_id);
+        self->events.on_peer_connected(self->events.context, peer->peer_id, NULL);
     }
 }
 

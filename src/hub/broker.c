@@ -20,7 +20,7 @@ typedef void (*TControlHandler)(
     const uint8_t *payload
 );
 
-static void onPeerConnected(void *context, uint32_t peer_id);
+static void onPeerConnected(void *context, uint32_t peer_id, const char *fingerprint_hex);
 static void onPeerDisconnected(void *context, uint32_t peer_id, uint64_t now_us);
 static void onPeerControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size, uint64_t now_us);
 static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
@@ -30,6 +30,7 @@ static void handleList(Broker *self, HubPeer *peer, const MessageHeader *header,
 static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleClose(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handlePing(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static bool agentIdentityAccepted(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
 static void sendControl(Broker *self, uint32_t peer_id, const uint8_t *encoded, size_t encoded_size);
 static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *data, size_t size);
@@ -45,10 +46,11 @@ static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
 
 /* ---------- public ---------- */
 
-void Broker_Init(Broker *self, HubTransportPort *transport)
+void Broker_Init(Broker *self, HubTransportPort *transport, IdentityStorePort *identity_store)
 {
     memset(self, 0, sizeof(*self));
     self->transport = transport;
+    self->identity_store = identity_store;
     InterfaceRegistry_Reset(&self->registry);
     PeerDirectory_Reset(&self->directory);
 }
@@ -68,12 +70,18 @@ HubTransportEvents Broker_Events(Broker *self)
 
 /* ---------- private: events ---------- */
 
-static void onPeerConnected(void *context, uint32_t peer_id)
+static void onPeerConnected(void *context, uint32_t peer_id, const char *fingerprint_hex)
 {
     Broker *self = context;
+    HubPeer *peer = PeerDirectory_Allocate(&self->directory, peer_id);
 
-    if (PeerDirectory_Allocate(&self->directory, peer_id) == NULL) {
+    if (peer == NULL) {
         self->transport->close_peer(self->transport->context, peer_id);
+        return;
+    }
+
+    if (fingerprint_hex != NULL) {
+        strncpy(peer->fingerprint_hex, fingerprint_hex, IDENTITY_FINGERPRINT_HEX_SIZE - 1);
     }
 }
 
@@ -192,6 +200,14 @@ static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *hea
         return;
     }
 
+    if (!agentIdentityAccepted(self, peer, &registration)) {
+        memset(&ack, 0, sizeof(ack));
+        ack.status = REGISTER_STATUS_IDENTITY_MISMATCH;
+        sendControl(self, peer->peer_id, encoded, RegisterAckMessage_Encode(&ack, encoded, sizeof(encoded)));
+        self->transport->close_peer(self->transport->context, peer->peer_id);
+        return;
+    }
+
     registered = InterfaceRegistry_RegisterAgent(&self->registry, peer->peer_id, &registration, &ack);
     sendControl(self, peer->peer_id, encoded, RegisterAckMessage_Encode(&ack, encoded, sizeof(encoded)));
 
@@ -275,6 +291,25 @@ static void handlePing(Broker *self, HubPeer *peer, const MessageHeader *header,
 }
 
 /* ---------- private: helpers ---------- */
+
+static bool agentIdentityAccepted(Broker *self, const HubPeer *peer, const RegisterMessage *registration)
+{
+    char pinned[IDENTITY_FINGERPRINT_HEX_SIZE];
+
+    if (self->identity_store == NULL || peer->fingerprint_hex[0] == '\0') {
+        return true;
+    }
+
+    if (!self->identity_store->lookup(self->identity_store->context, registration->agent_name, pinned)) {
+        return self->identity_store->pin(
+            self->identity_store->context,
+            registration->agent_name,
+            peer->fingerprint_hex
+        );
+    }
+
+    return strcmp(pinned, peer->fingerprint_hex) == 0;
+}
 
 static void detachAgent(Broker *self, uint32_t agent_peer_id)
 {

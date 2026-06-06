@@ -11,6 +11,7 @@
 #define REGISTER_INTERFACE_NAME_SIZE 16
 
 #define REGISTER_STATUS_OK 0
+#define REGISTER_STATUS_IDENTITY_MISMATCH 2
 
 typedef struct {
     char agent_name[REGISTER_AGENT_NAME_SIZE];

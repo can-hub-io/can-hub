@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "hub/domain/client_session.h"
+#include "hub/ports/identity_store_port.h"
 
 #define PEER_DIRECTORY_MAX 64
 
@@ -22,6 +23,7 @@ typedef struct {
     bool in_use;
     uint32_t peer_id;
     uint8_t role;
+    char fingerprint_hex[IDENTITY_FINGERPRINT_HEX_SIZE];
     ClientSession session;
 } HubPeer;
 

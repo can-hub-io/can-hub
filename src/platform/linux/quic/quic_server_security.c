@@ -48,6 +48,7 @@ bool QuicServerSecurity_NewSession(
     gnutls_priority_set_direct(*session, TLS_PRIORITY, NULL);
     gnutls_credentials_set(*session, GNUTLS_CRD_CERTIFICATE, self->credentials);
     gnutls_alpn_set_protocols(*session, &alpn, 1, GNUTLS_ALPN_MANDATORY);
+    gnutls_certificate_server_set_request(*session, GNUTLS_CERT_REQUIRE);
 
     if (ngtcp2_crypto_gnutls_configure_server_session(*session) != 0) {
         gnutls_deinit(*session);

@@ -22,7 +22,7 @@ void BrokerDriver_ConnectAgent(
     uint8_t encoded[DRIVER_BUFFER_SIZE];
     size_t encoded_size;
 
-    events->on_peer_connected(events->context, peer_id);
+    events->on_peer_connected(events->context, peer_id, NULL);
     sendHello(events, peer_id, kPEER_ROLE_AGENT);
     encoded_size = RegisterMessage_Encode(registration, encoded, sizeof(encoded));
     events->on_peer_control(events->context, peer_id, encoded, encoded_size, 0);
@@ -32,7 +32,7 @@ void BrokerDriver_ConnectAgent(
 
 void BrokerDriver_ConnectClient(const HubTransportEvents *events, uint32_t peer_id)
 {
-    events->on_peer_connected(events->context, peer_id);
+    events->on_peer_connected(events->context, peer_id, NULL);
     sendHello(events, peer_id, kPEER_ROLE_CLIENT);
 }
 
