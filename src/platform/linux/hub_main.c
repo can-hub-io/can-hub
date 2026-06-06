@@ -11,12 +11,14 @@
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/hub_defaults.h"
+#include "platform/linux/shared/tls_identity.h"
 #include "platform/linux/tcp/tcp_server_transport.h"
 #include "version.h"
 
 #define MAX_EPOLL_EVENTS 32
 #define POLL_PERIOD_MS 100
 #define DEFAULT_UNIX_SOCKET_DIRECTORY_MODE 0755
+#define IDENTITY_NAME "hub"
 #define TCP_PEER_ID_BASE 0x00000001
 #define UNIX_PEER_ID_BASE 0x40000001
 #define QUIC_PEER_ID_BASE 0x80000001
@@ -39,8 +41,12 @@ static bool tcp_enabled;
 static bool unix_enabled;
 static bool quic_enabled;
 static EpollRegistry poll_registry;
+static char state_directory[TLS_IDENTITY_PATH_MAX];
+static char identity_certificate_path[TLS_IDENTITY_PATH_MAX];
+static char identity_key_path[TLS_IDENTITY_PATH_MAX];
 
 static bool parseArguments(int argc, char **argv);
+static bool loadIdentity(const char *state_directory_override);
 static bool startListeners(
     const char *tcp_port,
     const char *quic_port,
@@ -67,10 +73,10 @@ int main(int argc, char **argv)
     if (!parseArguments(argc, argv)) {
         fprintf(
             stderr,
-            "usage: %s [--listen tcp://<port>] [--listen quic://<port> --cert <pem> --key <pem>]\n"
-            "       [--listen unix://<path>]\n"
+            "usage: %s [--listen tcp://<port>] [--listen quic://<port>] [--listen unix://<path>]\n"
+            "       [--cert <pem> --key <pem>] [--state-dir <path>]\n"
             "       defaults: tcp://" HUB_DEFAULT_PORT_TEXT ", quic://" HUB_DEFAULT_PORT_TEXT
-            " (with --cert/--key), unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n",
+            ", unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "; TLS identity auto-generated\n",
             argv[0]
         );
         return 1;
@@ -113,8 +119,10 @@ static bool parseArguments(int argc, char **argv)
     const char *unix_path = NULL;
     const char *certificate = NULL;
     const char *key = NULL;
+    const char *state_directory_override = NULL;
     const char *remainder;
     bool explicit_listen = false;
+    bool explicit_quic = false;
     uint8_t scheme;
     int32_t i;
 
@@ -129,6 +137,7 @@ static bool parseArguments(int argc, char **argv)
             } else if (scheme == kCONNECT_SCHEME_QUIC) {
                 quic_port = remainder;
                 explicit_listen = true;
+                explicit_quic = true;
             } else {
                 unix_path = remainder;
             }
@@ -136,23 +145,39 @@ static bool parseArguments(int argc, char **argv)
             certificate = argv[++i];
         } else if (strcmp(argv[i], "--key") == 0 && i + 1 < argc) {
             key = argv[++i];
+        } else if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
+            state_directory_override = argv[++i];
         }
-    }
-
-    if (quic_port != NULL && (certificate == NULL || key == NULL)) {
-        return false;
     }
 
     if (!explicit_listen) {
         tcp_port = HUB_DEFAULT_PORT_TEXT;
-        if (certificate != NULL && key != NULL) {
-            quic_port = HUB_DEFAULT_PORT_TEXT;
+        quic_port = HUB_DEFAULT_PORT_TEXT;
+    }
+
+    if (quic_port != NULL && (certificate == NULL || key == NULL)) {
+        if (loadIdentity(state_directory_override)) {
+            certificate = identity_certificate_path;
+            key = identity_key_path;
         } else {
-            fprintf(stderr, "QUIC listener disabled: no --cert/--key\n");
+            fprintf(stderr, "QUIC listener disabled: could not load or create TLS identity\n");
+            if (explicit_quic) {
+                return false;
+            }
+            quic_port = NULL;
         }
     }
 
     return startListeners(tcp_port, quic_port, unix_path, certificate, key, explicit_listen);
+}
+
+static bool loadIdentity(const char *state_directory_override)
+{
+    if (!TlsIdentity_ResolveStateDirectory(state_directory_override, state_directory)) {
+        return false;
+    }
+
+    return TlsIdentity_LoadOrCreate(state_directory, IDENTITY_NAME, identity_certificate_path, identity_key_path);
 }
 
 static bool startListeners(

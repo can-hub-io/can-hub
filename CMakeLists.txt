@@ -43,6 +43,8 @@ set(AGENT_SOURCES
     src/platform/linux/clock/clock.c
     src/platform/linux/shared/connect_url.c
     src/platform/linux/shared/epoll_registry.c
+    src/platform/linux/shared/pin_store.c
+    src/platform/linux/shared/tls_identity.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/socketcan/socketcan_adapter.c
     src/platform/linux/tcp/tcp_channel.c
@@ -65,6 +67,8 @@ set(HUB_SOURCES
     src/platform/linux/clock/clock.c
     src/platform/linux/shared/connect_url.c
     src/platform/linux/shared/epoll_registry.c
+    src/platform/linux/shared/pin_store.c
+    src/platform/linux/shared/tls_identity.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/tcp/tcp_channel.c
     src/platform/linux/tcp/tcp_server_transport.c
