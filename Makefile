@@ -7,6 +7,7 @@
 #   make clean                               Remove build trees.
 
 CMAKE ?= cmake
+GENERATOR ?= Ninja
 ARCH ?= x86_64
 PREFIX ?= /usr/local
 
@@ -20,6 +21,7 @@ _CEST_RUNNER := test/vendor/cest-runner_linux_x86_64
 
 release:
 	$(CMAKE) -B $(_BUILD_RELEASE) \
+	         -G $(GENERATOR) \
 	         -DCMAKE_BUILD_TYPE=Release \
 	         -DCMAKE_TOOLCHAIN_FILE=$(_TOOLCHAIN) \
 	         -DCMAKE_INSTALL_PREFIX=$(PREFIX)
@@ -27,6 +29,7 @@ release:
 
 debug:
 	$(CMAKE) -B $(_BUILD_DEBUG) \
+	         -G $(GENERATOR) \
 	         -DCMAKE_BUILD_TYPE=Debug \
 	         -DCMAKE_TOOLCHAIN_FILE=$(_TOOLCHAIN) \
 	         -DCMAKE_INSTALL_PREFIX=$(PREFIX)
@@ -37,6 +40,7 @@ install: release
 
 test:
 	$(CMAKE) -B $(_BUILD_TEST) test/ \
+	         -G $(GENERATOR) \
 	         -DCMAKE_TOOLCHAIN_FILE=$(abspath cmake/toolchain-x86_64.cmake)
 	$(CMAKE) --build $(_BUILD_TEST)
 	@chmod +x $(_CEST_RUNNER)

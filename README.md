@@ -21,7 +21,7 @@ make test               # unit tests (CEST, host x86_64)
 make install            # install release binaries
 ```
 
-Requirements: cmake >= 3.16, gcc. Cross builds: `aarch64-linux-gnu` / `arm-linux-gnueabihf` toolchains.
+Requirements: cmake >= 3.16, ninja, gcc (`GENERATOR=...` overrides the cmake generator). Cross builds: `aarch64-linux-gnu` / `arm-linux-gnueabihf` toolchains.
 
 ## License
 
