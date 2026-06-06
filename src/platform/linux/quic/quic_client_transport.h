@@ -32,6 +32,7 @@ typedef struct {
     QuicServerEndpoint server;
     QuicUdpEndpoint udp;
     QuicClientSecurity security;
+    QuicClientSecurityConfig security_config;
     QuicControlChannel control;
     QuicConnection connection;
     bool connected;
@@ -41,7 +42,8 @@ bool QuicClientTransport_Init(
     QuicClientTransport *self,
     const char *host,
     const char *port,
-    const TransportEvents *events
+    const TransportEvents *events,
+    const QuicClientSecurityConfig *security_config
 );
 TransportPort *QuicClientTransport_Port(QuicClientTransport *self);
 int32_t QuicClientTransport_UdpFd(const QuicClientTransport *self);

@@ -10,6 +10,7 @@
 #include "platform/linux/quic/quic_client_transport.h"
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
+#include "platform/linux/shared/tls_identity.h"
 #include "platform/linux/socketcan/socketcan_adapter.h"
 #include "platform/linux/tcp/tcp_client_transport.h"
 #include "version.h"
@@ -17,6 +18,10 @@
 #define MAX_EPOLL_EVENTS 16
 #define TICK_PERIOD_MS 100
 #define TCP_SLOT 0
+#define IDENTITY_NAME "agent"
+#define KNOWN_HUBS_FILE "known_hubs"
+#define KNOWN_HUBS_PATH_MAX (TLS_IDENTITY_PATH_MAX + sizeof(KNOWN_HUBS_FILE))
+#define PIN_KEY_MAX (CONNECT_URL_HOST_MAX + CONNECT_URL_PORT_TEXT_MAX)
 
 static AgentApp app;
 static QuicClientTransport quic_transport;
@@ -25,8 +30,15 @@ static SocketCanAdapter can_adapter;
 static RegisterMessage registration;
 static uint8_t transport_scheme;
 static EpollRegistry poll_registry;
+static const char *state_directory_override;
+static char state_directory[TLS_IDENTITY_PATH_MAX];
+static char identity_certificate_path[TLS_IDENTITY_PATH_MAX];
+static char identity_key_path[TLS_IDENTITY_PATH_MAX];
+static char known_hubs_path[KNOWN_HUBS_PATH_MAX];
+static char pin_key[PIN_KEY_MAX];
 
 static bool parseArguments(int argc, char **argv, char *host, char *port_text);
+static bool prepareQuicSecurity(const char *host, const char *port_text, QuicClientSecurityConfig *config);
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *transport_events);
 static TransportPort *transportPort(void);
 static bool registerStaticPollFds(void);
@@ -47,7 +59,8 @@ int main(int argc, char **argv)
     if (!parseArguments(argc, argv, host, port_text)) {
         fprintf(
             stderr,
-            "usage: %s --connect quic://<host>:<port>|tcp://<host>:<port> [--name <agent-name>] <can-if> [...]\n",
+            "usage: %s --connect quic://<host>:<port>|tcp://<host>:<port> [--name <agent-name>]"
+            " [--state-dir <path>] <can-if> [...]\n",
             argv[0]
         );
         return 1;
@@ -100,6 +113,8 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
             connect_url = argv[++i];
         } else if (strcmp(argv[i], "--name") == 0 && i + 1 < argc) {
             agent_name = argv[++i];
+        } else if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
+            state_directory_override = argv[++i];
         } else {
             if (registration.interface_count >= REGISTER_INTERFACES_MAX) {
                 return false;
@@ -123,10 +138,36 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
     return ConnectUrl_Parse(connect_url, &transport_scheme, host, port_text);
 }
 
+static bool prepareQuicSecurity(const char *host, const char *port_text, QuicClientSecurityConfig *config)
+{
+    if (!TlsIdentity_ResolveStateDirectory(state_directory_override, state_directory)) {
+        return false;
+    }
+    if (!TlsIdentity_LoadOrCreate(state_directory, IDENTITY_NAME, identity_certificate_path, identity_key_path)) {
+        return false;
+    }
+
+    snprintf(known_hubs_path, sizeof(known_hubs_path), "%s/%s", state_directory, KNOWN_HUBS_FILE);
+    snprintf(pin_key, sizeof(pin_key), "%s:%s", host, port_text);
+
+    config->certificate_path = identity_certificate_path;
+    config->key_path = identity_key_path;
+    config->pin_store_path = known_hubs_path;
+    config->pin_key = pin_key;
+
+    return true;
+}
+
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *transport_events)
 {
+    QuicClientSecurityConfig security_config;
+
     if (transport_scheme == kCONNECT_SCHEME_QUIC) {
-        return QuicClientTransport_Init(&quic_transport, host, port_text, transport_events);
+        if (!prepareQuicSecurity(host, port_text, &security_config)) {
+            fprintf(stderr, "could not load or create TLS identity\n");
+            return false;
+        }
+        return QuicClientTransport_Init(&quic_transport, host, port_text, transport_events, &security_config);
     }
 
     return TcpClientTransport_Init(&tcp_transport, host, port_text, transport_events);

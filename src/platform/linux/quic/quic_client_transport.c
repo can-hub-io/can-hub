@@ -28,7 +28,8 @@ bool QuicClientTransport_Init(
     QuicClientTransport *self,
     const char *host,
     const char *port,
-    const TransportEvents *events
+    const TransportEvents *events,
+    const QuicClientSecurityConfig *security_config
 )
 {
     QuicConnectionEvents connection_events = {
@@ -46,6 +47,9 @@ bool QuicClientTransport_Init(
     self->port.send_control = portSendControl;
     self->port.send_frame = portSendFrame;
     self->events = *events;
+    if (security_config != NULL) {
+        self->security_config = *security_config;
+    }
     QuicConnection_Bind(&self->connection, &connection_events);
     QuicControlChannel_Reset(&self->control);
     snprintf(self->server.host, QUIC_HOST_MAX, "%s", host);
@@ -123,7 +127,7 @@ static bool portConnect(void *context)
     if (!QuicUdpEndpoint_ConnectTo(&self->udp, self->server.host, self->server.port_text)) {
         return false;
     }
-    if (!QuicClientSecurity_Init(&self->security, self->server.host, QuicConnection_Ref(&self->connection))) {
+    if (!QuicClientSecurity_Init(&self->security, self->server.host, QuicConnection_Ref(&self->connection), &self->security_config)) {
         return false;
     }
 
