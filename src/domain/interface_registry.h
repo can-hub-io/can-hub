@@ -1,0 +1,45 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "protocol/list_message.h"
+#include "protocol/register_message.h"
+
+#define INTERFACE_REGISTRY_MAX 256
+
+/*
+ * Catalogue of every interface exported by the live agents. Global
+ * interface ids are hub-assigned and never reused within a run. The
+ * (agent name, interface name) pair is unique across live registrations;
+ * a colliding registration is rejected whole.
+ */
+typedef struct {
+    bool in_use;
+    uint32_t interface_id;
+    uint32_t agent_peer_id;
+    uint8_t agent_channel;
+    char agent_name[REGISTER_AGENT_NAME_SIZE];
+    char interface_name[REGISTER_INTERFACE_NAME_SIZE];
+} InterfaceEntry;
+
+typedef struct {
+    InterfaceEntry entries[INTERFACE_REGISTRY_MAX];
+    uint32_t next_interface_id;
+} InterfaceRegistry;
+
+void InterfaceRegistry_Reset(InterfaceRegistry *self);
+bool InterfaceRegistry_RegisterAgent(
+    InterfaceRegistry *self,
+    uint32_t agent_peer_id,
+    const RegisterMessage *registration,
+    RegisterAckMessage *ack
+);
+void InterfaceRegistry_RemovePeer(InterfaceRegistry *self, uint32_t agent_peer_id);
+const InterfaceEntry *InterfaceRegistry_FindById(const InterfaceRegistry *self, uint32_t interface_id);
+const InterfaceEntry *InterfaceRegistry_FindByAgentChannel(
+    const InterfaceRegistry *self,
+    uint32_t agent_peer_id,
+    uint8_t agent_channel
+);
+void InterfaceRegistry_List(const InterfaceRegistry *self, uint16_t offset, ListReplyMessage *reply);

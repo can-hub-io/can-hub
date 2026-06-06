@@ -115,3 +115,50 @@ add_unit_test(test_agent
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
 target_link_libraries(test_agent PRIVATE port_mocks)
+
+add_unit_test(test_interface_registry
+    SOURCES
+        domain/test_interface_registry.cpp
+        ${ROOT_SRC_DIR}/domain/interface_registry.c
+        ${ROOT_SRC_DIR}/protocol/list_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/register_message.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+
+add_unit_test(test_client_session
+    SOURCES
+        domain/test_client_session.cpp
+        ${ROOT_SRC_DIR}/domain/client_session.c
+)
+
+add_unit_test(test_frame_routes
+    SOURCES
+        domain/test_frame_routes.cpp
+        ${ROOT_SRC_DIR}/domain/frame_routes.c
+        ${ROOT_SRC_DIR}/domain/interface_registry.c
+        ${ROOT_SRC_DIR}/domain/client_session.c
+        ${ROOT_SRC_DIR}/domain/peer_directory.c
+        ${ROOT_SRC_DIR}/protocol/list_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/register_message.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+
+add_unit_test(test_broker
+    SOURCES
+        application/test_broker.cpp
+        ${ROOT_SRC_DIR}/application/broker.c
+        ${ROOT_SRC_DIR}/domain/frame_routes.c
+        ${ROOT_SRC_DIR}/domain/interface_registry.c
+        ${ROOT_SRC_DIR}/domain/client_session.c
+        ${ROOT_SRC_DIR}/domain/peer_directory.c
+        ${ROOT_SRC_DIR}/protocol/frame_message.c
+        ${ROOT_SRC_DIR}/protocol/hello_message.c
+        ${ROOT_SRC_DIR}/protocol/list_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/open_message.c
+        ${ROOT_SRC_DIR}/protocol/register_message.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+target_link_libraries(test_broker PRIVATE port_mocks)
