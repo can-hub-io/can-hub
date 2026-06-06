@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ports/hub_transport_port.h"
+#include "hub/ports/hub_transport_port.h"
 
 #define HUB_MOCK_CONTROL_LOG_MAX 8
 #define HUB_MOCK_CONTROL_SIZE 4096

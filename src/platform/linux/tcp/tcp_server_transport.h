@@ -5,8 +5,8 @@
 #include <stdint.h>
 
 #include "platform/linux/tcp/tcp_channel.h"
-#include "ports/hub_transport_events.h"
-#include "ports/hub_transport_port.h"
+#include "hub/ports/hub_transport_events.h"
+#include "hub/ports/hub_transport_port.h"
 
 #define TCP_SERVER_PEERS_MAX 64
 

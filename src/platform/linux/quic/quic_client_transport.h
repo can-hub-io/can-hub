@@ -8,8 +8,8 @@
 #include "platform/linux/quic/quic_connection.h"
 #include "platform/linux/quic/quic_control_channel.h"
 #include "platform/linux/quic/quic_udp_endpoint.h"
-#include "ports/transport_events.h"
-#include "ports/transport_port.h"
+#include "agent/ports/transport_events.h"
+#include "agent/ports/transport_port.h"
 
 #define QUIC_HOST_MAX 256
 #define QUIC_PORT_TEXT_MAX 16

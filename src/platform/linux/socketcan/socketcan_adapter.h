@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "ports/can_port.h"
+#include "agent/ports/can_port.h"
 #include "protocol/frame_message.h"
 #include "protocol/register_message.h"
 

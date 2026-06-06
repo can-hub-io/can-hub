@@ -83,14 +83,14 @@ add_unit_test(test_register_message
 
 add_unit_test(test_reconnect_backoff
     SOURCES
-        domain/test_reconnect_backoff.cpp
-        ${ROOT_SRC_DIR}/domain/reconnect_backoff.c
+        agent/domain/test_reconnect_backoff.cpp
+        ${ROOT_SRC_DIR}/agent/domain/reconnect_backoff.c
 )
 
 add_unit_test(test_channel_map
     SOURCES
-        domain/test_channel_map.cpp
-        ${ROOT_SRC_DIR}/domain/channel_map.c
+        agent/domain/test_channel_map.cpp
+        ${ROOT_SRC_DIR}/agent/domain/channel_map.c
 )
 
 add_unit_test(test_quic_control_channel
@@ -104,10 +104,10 @@ add_unit_test(test_quic_control_channel
 
 add_unit_test(test_agent
     SOURCES
-        application/test_agent.cpp
-        ${ROOT_SRC_DIR}/application/agent.c
-        ${ROOT_SRC_DIR}/domain/channel_map.c
-        ${ROOT_SRC_DIR}/domain/reconnect_backoff.c
+        agent/test_agent.cpp
+        ${ROOT_SRC_DIR}/agent/agent.c
+        ${ROOT_SRC_DIR}/agent/domain/channel_map.c
+        ${ROOT_SRC_DIR}/agent/domain/reconnect_backoff.c
         ${ROOT_SRC_DIR}/protocol/frame_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
@@ -118,8 +118,8 @@ target_link_libraries(test_agent PRIVATE port_mocks)
 
 add_unit_test(test_interface_registry
     SOURCES
-        domain/test_interface_registry.cpp
-        ${ROOT_SRC_DIR}/domain/interface_registry.c
+        hub/domain/test_interface_registry.cpp
+        ${ROOT_SRC_DIR}/hub/domain/interface_registry.c
         ${ROOT_SRC_DIR}/protocol/list_message.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/register_message.c
@@ -128,17 +128,17 @@ add_unit_test(test_interface_registry
 
 add_unit_test(test_client_session
     SOURCES
-        domain/test_client_session.cpp
-        ${ROOT_SRC_DIR}/domain/client_session.c
+        hub/domain/test_client_session.cpp
+        ${ROOT_SRC_DIR}/hub/domain/client_session.c
 )
 
 add_unit_test(test_frame_routes
     SOURCES
-        domain/test_frame_routes.cpp
-        ${ROOT_SRC_DIR}/domain/frame_routes.c
-        ${ROOT_SRC_DIR}/domain/interface_registry.c
-        ${ROOT_SRC_DIR}/domain/client_session.c
-        ${ROOT_SRC_DIR}/domain/peer_directory.c
+        hub/domain/test_frame_routes.cpp
+        ${ROOT_SRC_DIR}/hub/domain/frame_routes.c
+        ${ROOT_SRC_DIR}/hub/domain/interface_registry.c
+        ${ROOT_SRC_DIR}/hub/domain/client_session.c
+        ${ROOT_SRC_DIR}/hub/domain/peer_directory.c
         ${ROOT_SRC_DIR}/protocol/list_message.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/register_message.c
@@ -147,12 +147,12 @@ add_unit_test(test_frame_routes
 
 add_unit_test(test_broker
     SOURCES
-        application/test_broker.cpp
-        ${ROOT_SRC_DIR}/application/broker.c
-        ${ROOT_SRC_DIR}/domain/frame_routes.c
-        ${ROOT_SRC_DIR}/domain/interface_registry.c
-        ${ROOT_SRC_DIR}/domain/client_session.c
-        ${ROOT_SRC_DIR}/domain/peer_directory.c
+        hub/test_broker.cpp
+        ${ROOT_SRC_DIR}/hub/broker.c
+        ${ROOT_SRC_DIR}/hub/domain/frame_routes.c
+        ${ROOT_SRC_DIR}/hub/domain/interface_registry.c
+        ${ROOT_SRC_DIR}/hub/domain/client_session.c
+        ${ROOT_SRC_DIR}/hub/domain/peer_directory.c
         ${ROOT_SRC_DIR}/protocol/frame_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c
         ${ROOT_SRC_DIR}/protocol/list_message.c

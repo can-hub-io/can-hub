@@ -36,10 +36,10 @@ FetchContent_Declare(ngtcp2
 FetchContent_MakeAvailable(ngtcp2)
 
 set(AGENT_SOURCES
-    src/application/agent.c
-    src/apps/agent/agent_app.c
-    src/domain/channel_map.c
-    src/domain/reconnect_backoff.c
+    src/agent/agent.c
+    src/agent/agent_app.c
+    src/agent/domain/channel_map.c
+    src/agent/domain/reconnect_backoff.c
     src/platform/linux/clock/clock.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/socketcan/socketcan_adapter.c
@@ -53,12 +53,12 @@ set(AGENT_SOURCES
 )
 
 set(HUB_SOURCES
-    src/application/broker.c
-    src/apps/hub/hub_app.c
-    src/domain/client_session.c
-    src/domain/frame_routes.c
-    src/domain/interface_registry.c
-    src/domain/peer_directory.c
+    src/hub/broker.c
+    src/hub/hub_app.c
+    src/hub/domain/client_session.c
+    src/hub/domain/frame_routes.c
+    src/hub/domain/interface_registry.c
+    src/hub/domain/peer_directory.c
     src/platform/linux/clock/clock.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/tcp/tcp_channel.c

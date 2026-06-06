@@ -5,7 +5,7 @@
 
 #include <sys/epoll.h>
 
-#include "apps/hub/hub_app.h"
+#include "hub/hub_app.h"
 #include "platform/linux/quic/quic_server_transport.h"
 #include "platform/linux/tcp/tcp_server_transport.h"
 #include "version.h"

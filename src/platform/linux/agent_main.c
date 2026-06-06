@@ -5,7 +5,7 @@
 
 #include <sys/epoll.h>
 
-#include "apps/agent/agent_app.h"
+#include "agent/agent_app.h"
 #include "platform/linux/clock/clock.h"
 #include "platform/linux/quic/quic_client_transport.h"
 #include "platform/linux/socketcan/socketcan_adapter.h"

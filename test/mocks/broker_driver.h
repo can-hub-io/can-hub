@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 #include "hub_transport_port_mock.h"
-#include "ports/hub_transport_events.h"
+#include "hub/ports/hub_transport_events.h"
 #include "protocol/register_message.h"
 
 /*

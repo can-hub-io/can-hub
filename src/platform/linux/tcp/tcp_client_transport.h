@@ -5,8 +5,8 @@
 #include <stdint.h>
 
 #include "platform/linux/tcp/tcp_channel.h"
-#include "ports/transport_events.h"
-#include "ports/transport_port.h"
+#include "agent/ports/transport_events.h"
+#include "agent/ports/transport_port.h"
 
 #define TCP_HOST_MAX 256
 #define TCP_PORT_TEXT_MAX 16

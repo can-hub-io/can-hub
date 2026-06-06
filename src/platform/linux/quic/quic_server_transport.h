@@ -11,8 +11,8 @@
 #include "platform/linux/quic/quic_connection.h"
 #include "platform/linux/quic/quic_control_channel.h"
 #include "platform/linux/quic/quic_server_security.h"
-#include "ports/hub_transport_events.h"
-#include "ports/hub_transport_port.h"
+#include "hub/ports/hub_transport_events.h"
+#include "hub/ports/hub_transport_port.h"
 
 #define QUIC_SERVER_PEERS_MAX 64
 
