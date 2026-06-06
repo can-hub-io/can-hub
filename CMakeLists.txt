@@ -43,6 +43,7 @@ set(AGENT_SOURCES
     src/platform/linux/clock/clock.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/socketcan/socketcan_adapter.c
+    src/platform/linux/tcp/tcp_channel.c
     src/platform/linux/tcp/tcp_client_transport.c
     src/platform/linux/quic/quic_client_security.c
     src/platform/linux/quic/quic_client_transport.c
@@ -51,7 +52,20 @@ set(AGENT_SOURCES
     src/platform/linux/quic/quic_udp_endpoint.c
 )
 
-add_executable(can-hub src/platform/linux/hub_main.c ${COMMON_SOURCES})
+set(HUB_SOURCES
+    src/application/broker.c
+    src/apps/hub/hub_app.c
+    src/domain/client_session.c
+    src/domain/frame_routes.c
+    src/domain/interface_registry.c
+    src/domain/peer_directory.c
+    src/platform/linux/clock/clock.c
+    src/platform/linux/shared/message_framer.c
+    src/platform/linux/tcp/tcp_channel.c
+    src/platform/linux/tcp/tcp_server_transport.c
+)
+
+add_executable(can-hub src/platform/linux/hub_main.c ${COMMON_SOURCES} ${HUB_SOURCES})
 add_executable(can-hub-agent src/platform/linux/agent_main.c ${COMMON_SOURCES} ${AGENT_SOURCES})
 target_link_libraries(can-hub-agent PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls)
 add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES})

@@ -4,13 +4,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "platform/linux/shared/message_framer.h"
+#include "platform/linux/tcp/tcp_channel.h"
 #include "ports/transport_events.h"
 #include "ports/transport_port.h"
 
 #define TCP_HOST_MAX 256
 #define TCP_PORT_TEXT_MAX 16
-#define TCP_TX_BACKLOG_SIZE 8192
 
 /*
  * Plaintext TCP transport: both planes share the single stream. Incoming
@@ -26,12 +25,9 @@ typedef struct {
     TransportEvents events;
     char host[TCP_HOST_MAX];
     char port_text[TCP_PORT_TEXT_MAX];
-    int32_t tcp_fd;
+    TcpChannel channel;
     bool connecting;
     bool connected;
-    MessageFramer framer;
-    uint8_t tx_backlog[TCP_TX_BACKLOG_SIZE];
-    size_t tx_used;
 } TcpClientTransport;
 
 bool TcpClientTransport_Init(

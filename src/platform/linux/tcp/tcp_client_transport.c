@@ -13,15 +13,10 @@
 #include "platform/linux/clock/clock.h"
 #include "protocol/message_header.h"
 
-#define READ_CHUNK_SIZE 2048
-#define NO_SOCKET (-1)
-
 static bool portConnect(void *context);
 static void portDisconnect(void *context);
 static bool portSendControl(void *context, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, const uint8_t *data, size_t size);
-static bool queueBytes(TcpClientTransport *self, const uint8_t *data, size_t size);
-static bool flushBacklog(TcpClientTransport *self);
 static void dispatchMessages(TcpClientTransport *self);
 static void closeConnection(TcpClientTransport *self, bool notify);
 
@@ -41,8 +36,7 @@ bool TcpClientTransport_Init(
     self->port.send_control = portSendControl;
     self->port.send_frame = portSendFrame;
     self->events = *events;
-    self->tcp_fd = NO_SOCKET;
-    MessageFramer_Reset(&self->framer);
+    TcpChannel_Unbind(&self->channel);
     snprintf(self->host, TCP_HOST_MAX, "%s", host);
     snprintf(self->port_text, TCP_PORT_TEXT_MAX, "%s", port);
 
@@ -56,39 +50,26 @@ TransportPort *TcpClientTransport_Port(TcpClientTransport *self)
 
 int32_t TcpClientTransport_Fd(const TcpClientTransport *self)
 {
-    return self->tcp_fd;
+    return self->channel.fd;
 }
 
 bool TcpClientTransport_WantsWritable(const TcpClientTransport *self)
 {
-    return self->connecting || self->tx_used > 0;
+    return self->connecting || TcpChannel_HasPendingTx(&self->channel);
 }
 
 void TcpClientTransport_OnReadable(TcpClientTransport *self)
 {
-    uint8_t chunk[READ_CHUNK_SIZE];
-    ssize_t bytes_received;
-
-    if (self->tcp_fd == NO_SOCKET) {
+    if (!TcpChannel_IsBound(&self->channel)) {
         return;
     }
 
-    for (;;) {
-        bytes_received = recv(self->tcp_fd, chunk, sizeof(chunk), 0);
-        if (bytes_received == 0 || (bytes_received < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
-            closeConnection(self, true);
-            return;
-        }
-        if (bytes_received < 0) {
-            return;
-        }
-
-        if (!MessageFramer_Push(&self->framer, chunk, (size_t)bytes_received)) {
-            closeConnection(self, true);
-            return;
-        }
-        dispatchMessages(self);
+    if (!TcpChannel_Receive(&self->channel)) {
+        closeConnection(self, true);
+        return;
     }
+
+    dispatchMessages(self);
 }
 
 void TcpClientTransport_OnWritable(TcpClientTransport *self)
@@ -96,12 +77,12 @@ void TcpClientTransport_OnWritable(TcpClientTransport *self)
     int32_t socket_error = 0;
     socklen_t error_length = sizeof(socket_error);
 
-    if (self->tcp_fd == NO_SOCKET) {
+    if (!TcpChannel_IsBound(&self->channel)) {
         return;
     }
 
     if (self->connecting) {
-        getsockopt(self->tcp_fd, SOL_SOCKET, SO_ERROR, &socket_error, &error_length);
+        getsockopt(self->channel.fd, SOL_SOCKET, SO_ERROR, &socket_error, &error_length);
         if (socket_error != 0) {
             closeConnection(self, true);
             return;
@@ -113,7 +94,9 @@ void TcpClientTransport_OnWritable(TcpClientTransport *self)
         return;
     }
 
-    flushBacklog(self);
+    if (!TcpChannel_Flush(&self->channel)) {
+        closeConnection(self, true);
+    }
 }
 
 /* ---------- private: transport port ---------- */
@@ -123,9 +106,10 @@ static bool portConnect(void *context)
     TcpClientTransport *self = context;
     struct addrinfo hints;
     struct addrinfo *resolved;
+    int32_t tcp_fd;
     int32_t connect_result;
 
-    if (self->tcp_fd != NO_SOCKET) {
+    if (TcpChannel_IsBound(&self->channel)) {
         return true;
     }
 
@@ -136,20 +120,20 @@ static bool portConnect(void *context)
         return false;
     }
 
-    self->tcp_fd = socket(resolved->ai_family, resolved->ai_socktype | SOCK_NONBLOCK, 0);
-    if (self->tcp_fd < 0) {
+    tcp_fd = socket(resolved->ai_family, resolved->ai_socktype | SOCK_NONBLOCK, 0);
+    if (tcp_fd < 0) {
         freeaddrinfo(resolved);
-        self->tcp_fd = NO_SOCKET;
         return false;
     }
 
-    connect_result = connect(self->tcp_fd, resolved->ai_addr, resolved->ai_addrlen);
+    connect_result = connect(tcp_fd, resolved->ai_addr, resolved->ai_addrlen);
     freeaddrinfo(resolved);
     if (connect_result < 0 && errno != EINPROGRESS) {
-        closeConnection(self, false);
+        close(tcp_fd);
         return false;
     }
 
+    TcpChannel_Bind(&self->channel, tcp_fd);
     self->connecting = true;
 
     return true;
@@ -169,8 +153,15 @@ static bool portSendControl(void *context, const uint8_t *data, size_t size)
     if (!self->connected) {
         return false;
     }
+    if (!TcpChannel_Queue(&self->channel, data, size)) {
+        return false;
+    }
+    if (!TcpChannel_Flush(&self->channel)) {
+        closeConnection(self, true);
+        return false;
+    }
 
-    return queueBytes(self, data, size) && flushBacklog(self);
+    return true;
 }
 
 static bool portSendFrame(void *context, const uint8_t *data, size_t size)
@@ -180,47 +171,14 @@ static bool portSendFrame(void *context, const uint8_t *data, size_t size)
     if (!self->connected) {
         return false;
     }
-    if (self->tx_used + size > TCP_TX_BACKLOG_SIZE) {
+    if (TcpChannel_FreeTxSpace(&self->channel) < size) {
         return false;
     }
 
-    return queueBytes(self, data, size) && flushBacklog(self);
+    return portSendControl(context, data, size);
 }
 
 /* ---------- private ---------- */
-
-static bool queueBytes(TcpClientTransport *self, const uint8_t *data, size_t size)
-{
-    if (self->tx_used + size > TCP_TX_BACKLOG_SIZE) {
-        return false;
-    }
-
-    memcpy(self->tx_backlog + self->tx_used, data, size);
-    self->tx_used += size;
-
-    return true;
-}
-
-static bool flushBacklog(TcpClientTransport *self)
-{
-    ssize_t bytes_sent;
-
-    while (self->tx_used > 0) {
-        bytes_sent = send(self->tcp_fd, self->tx_backlog, self->tx_used, MSG_NOSIGNAL);
-        if (bytes_sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            return true;
-        }
-        if (bytes_sent <= 0) {
-            closeConnection(self, true);
-            return false;
-        }
-
-        memmove(self->tx_backlog, self->tx_backlog + bytes_sent, self->tx_used - (size_t)bytes_sent);
-        self->tx_used -= (size_t)bytes_sent;
-    }
-
-    return true;
-}
 
 static void dispatchMessages(TcpClientTransport *self)
 {
@@ -229,7 +187,7 @@ static void dispatchMessages(TcpClientTransport *self)
     size_t message_size;
 
     for (;;) {
-        message_size = MessageFramer_NextMessage(&self->framer, &message);
+        message_size = MessageFramer_NextMessage(&self->channel.framer, &message);
         if (message_size == 0) {
             return;
         }
@@ -240,22 +198,20 @@ static void dispatchMessages(TcpClientTransport *self)
         } else {
             self->events.on_control(self->events.context, message, message_size, Clock_RealtimeUs());
         }
-        MessageFramer_Consume(&self->framer, message_size);
+        MessageFramer_Consume(&self->channel.framer, message_size);
     }
 }
 
 static void closeConnection(TcpClientTransport *self, bool notify)
 {
-    if (self->tcp_fd == NO_SOCKET) {
+    if (!TcpChannel_IsBound(&self->channel)) {
         return;
     }
 
-    close(self->tcp_fd);
-    self->tcp_fd = NO_SOCKET;
+    close(self->channel.fd);
+    TcpChannel_Unbind(&self->channel);
     self->connecting = false;
     self->connected = false;
-    self->tx_used = 0;
-    MessageFramer_Reset(&self->framer);
 
     if (notify) {
         self->events.on_disconnected(self->events.context, Clock_RealtimeUs());
