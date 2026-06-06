@@ -18,9 +18,10 @@
 
 /*
  * QUIC server transport for the hub: one UDP socket multiplexing every
- * connection, peers matched by remote address (no migration support yet),
- * one shared expiry timer armed to the earliest deadline. Control plane on
- * the client-opened bidirectional stream, data plane on datagrams.
+ * connection, peers matched by Destination Connection ID (survives client
+ * migration and NAT rebinding; the remote address follows the latest
+ * packet), one shared expiry timer armed to the earliest deadline. Control
+ * plane on the client-opened bidirectional stream, data plane on datagrams.
  */
 typedef struct QuicServerTransport QuicServerTransport;
 
@@ -29,6 +30,7 @@ typedef struct {
     QuicConnection connection;
     gnutls_session_t session;
     QuicControlChannel control;
+    ngtcp2_cid original_dcid;
     struct sockaddr_storage remote_address;
     socklen_t remote_address_length;
     uint32_t peer_id;

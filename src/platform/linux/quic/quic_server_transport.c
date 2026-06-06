@@ -17,8 +17,9 @@ static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data
 static bool portSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static void portClosePeer(void *context, uint32_t peer_id);
 static QuicServerPeer *findPeerById(QuicServerTransport *self, uint32_t peer_id);
-static QuicServerPeer *findPeerByAddress(
-    QuicServerTransport *self,
+static QuicServerPeer *findPeerByDcid(QuicServerTransport *self, const uint8_t *packet, size_t packet_size);
+static void refreshPeerAddress(
+    QuicServerPeer *peer,
     const struct sockaddr_storage *address,
     socklen_t address_length
 );
@@ -124,12 +125,14 @@ void QuicServerTransport_OnUdpReadable(QuicServerTransport *self)
             break;
         }
 
-        peer = findPeerByAddress(self, &peer_address, peer_address_length);
+        peer = findPeerByDcid(self, packet, (size_t)bytes_received);
         if (peer == NULL) {
             peer = acceptPeer(self, &peer_address, peer_address_length, packet, (size_t)bytes_received);
             if (peer == NULL) {
                 continue;
             }
+        } else {
+            refreshPeerAddress(peer, &peer_address, peer_address_length);
         }
 
         makePeerPath(self, peer, &path);
@@ -227,29 +230,45 @@ static QuicServerPeer *findPeerById(QuicServerTransport *self, uint32_t peer_id)
     return NULL;
 }
 
-static QuicServerPeer *findPeerByAddress(
-    QuicServerTransport *self,
-    const struct sockaddr_storage *address,
-    socklen_t address_length
-)
+static QuicServerPeer *findPeerByDcid(QuicServerTransport *self, const uint8_t *packet, size_t packet_size)
 {
+    ngtcp2_version_cid version_cid;
+    ngtcp2_cid dcid;
     QuicServerPeer *peer;
     uint8_t i;
+
+    if (ngtcp2_pkt_decode_version_cid(&version_cid, packet, packet_size, QUIC_CONNECTION_CID_LENGTH) != 0) {
+        return NULL;
+    }
+    if (version_cid.dcidlen > NGTCP2_MAX_CIDLEN) {
+        return NULL;
+    }
+    ngtcp2_cid_init(&dcid, version_cid.dcid, version_cid.dcidlen);
 
     for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
         peer = &self->peers[i];
         if (!QuicConnection_IsOpen(&peer->connection)) {
             continue;
         }
-        if (peer->remote_address_length != address_length) {
-            continue;
+        if (ngtcp2_cid_eq(&peer->original_dcid, &dcid)) {
+            return peer;
         }
-        if (memcmp(&peer->remote_address, address, address_length) == 0) {
+        if (QuicConnection_HasLocalCid(&peer->connection, &dcid)) {
             return peer;
         }
     }
 
     return NULL;
+}
+
+static void refreshPeerAddress(
+    QuicServerPeer *peer,
+    const struct sockaddr_storage *address,
+    socklen_t address_length
+)
+{
+    memcpy(&peer->remote_address, address, address_length);
+    peer->remote_address_length = address_length;
 }
 
 static QuicServerPeer *acceptPeer(
@@ -290,6 +309,7 @@ static QuicServerPeer *acceptPeer(
     connection_events.context = peer;
     QuicConnection_Bind(&peer->connection, &connection_events);
     QuicControlChannel_Reset(&peer->control);
+    peer->original_dcid = initial_header.dcid;
     memcpy(&peer->remote_address, address, address_length);
     peer->remote_address_length = address_length;
     peer->peer_id = self->next_peer_id++;

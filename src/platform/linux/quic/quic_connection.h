@@ -14,6 +14,8 @@
  * interesting events. No I/O, no buffering — packets in, packets out.
  */
 
+#define QUIC_CONNECTION_CID_LENGTH 16
+
 typedef struct {
     void *context;
     void (*on_handshake_completed)(void *context);
@@ -40,6 +42,7 @@ bool QuicConnection_OpenServer(
 );
 void QuicConnection_Close(QuicConnection *self);
 bool QuicConnection_IsOpen(const QuicConnection *self);
+bool QuicConnection_HasLocalCid(const QuicConnection *self, const ngtcp2_cid *cid);
 bool QuicConnection_ReadPacket(QuicConnection *self, const ngtcp2_path *path, const uint8_t *data, size_t size);
 bool QuicConnection_HandleExpiry(QuicConnection *self);
 uint64_t QuicConnection_NextExpiryNs(const QuicConnection *self);

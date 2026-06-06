@@ -6,8 +6,8 @@
 
 #include <gnutls/crypto.h>
 
-#define CONNECTION_ID_LENGTH 16
 #define NO_STREAM (-1)
+#define LOCAL_CID_LIST_MAX 32
 #define MAX_DATAGRAM_FRAME_SIZE 1350
 #define IDLE_TIMEOUT (30 * NGTCP2_SECONDS)
 #define HANDSHAKE_TIMEOUT (10 * NGTCP2_SECONDS)
@@ -159,6 +159,31 @@ void QuicConnection_Close(QuicConnection *self)
 bool QuicConnection_IsOpen(const QuicConnection *self)
 {
     return self->connection != NULL;
+}
+
+bool QuicConnection_HasLocalCid(const QuicConnection *self, const ngtcp2_cid *cid)
+{
+    ngtcp2_cid local_cids[LOCAL_CID_LIST_MAX];
+    size_t count;
+    size_t i;
+
+    if (self->connection == NULL) {
+        return false;
+    }
+
+    count = ngtcp2_conn_get_scid2(self->connection, NULL);
+    if (count > LOCAL_CID_LIST_MAX) {
+        return false;
+    }
+    ngtcp2_conn_get_scid2(self->connection, local_cids);
+
+    for(i=0; i<count; i++) {
+        if (ngtcp2_cid_eq(&local_cids[i], cid)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool QuicConnection_ReadPacket(QuicConnection *self, const ngtcp2_path *path, const uint8_t *data, size_t size)
@@ -332,8 +357,8 @@ static void buildParams(ngtcp2_transport_params *params)
 
 static void randomCid(ngtcp2_cid *cid)
 {
-    gnutls_rnd(GNUTLS_RND_RANDOM, cid->data, CONNECTION_ID_LENGTH);
-    cid->datalen = CONNECTION_ID_LENGTH;
+    gnutls_rnd(GNUTLS_RND_RANDOM, cid->data, QUIC_CONNECTION_CID_LENGTH);
+    cid->datalen = QUIC_CONNECTION_CID_LENGTH;
 }
 
 static void randCallback(uint8_t *destination, size_t destination_length, const ngtcp2_rand_ctx *rand_context)
