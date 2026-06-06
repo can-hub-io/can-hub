@@ -110,7 +110,9 @@ FRAME (total 20 + payload)
 @16  channel u8
 @17  payload_length u8 (0-8 classic, 0-64 FD)
 @18  frame_flags u8    (bit 0: FD, bit 1: BRS)
-@19  reserved u8
+@19  route_flags u8    (bit 0: bridged — set by the hub when forwarding a
+                        frame across a bus-to-bus bridge rule; bridged frames
+                        are never bridged again. other bits reserved)
 @20  payload 0-64 bytes
 ```
 
