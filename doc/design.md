@@ -72,6 +72,12 @@ The agent core (domain + application) is freestanding: no POSIX, no file descrip
 
 Protocol compatibility needs no license: optional adapters may let socketcand or cannelloni clients talk to the hub, implemented from their public specs. Out of MVP scope.
 
+Shims run as additional listener transports on the hub itself: the hub listens on TCP and QUIC for its own protocol by default, and each enabled shim (e.g. socketcand ASCII) adds another listener that translates to the broker's transport contract — legacy clients connect to the hub directly, no separate proxy process.
+
+### Administration
+
+Two admin surfaces over the same admin plane: `can-hub-cli` (unix socket) and a web panel (peers, interfaces, metrics, kick, ACLs). How the web panel is served (embedded HTTP server vs separate process consuming the admin socket) is decided when it lands.
+
 ## Stories
 
 - E0 — spikes: ngtcp2 datagram proof of concept (vcan over QUIC), latency/CPU baseline against socketcand and cannelloni.
