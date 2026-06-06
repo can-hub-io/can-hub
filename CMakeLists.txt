@@ -41,6 +41,8 @@ set(AGENT_SOURCES
     src/agent/domain/channel_map.c
     src/agent/domain/reconnect_backoff.c
     src/platform/linux/clock/clock.c
+    src/platform/linux/shared/connect_url.c
+    src/platform/linux/shared/epoll_registry.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/socketcan/socketcan_adapter.c
     src/platform/linux/tcp/tcp_channel.c
@@ -60,6 +62,8 @@ set(HUB_SOURCES
     src/hub/domain/interface_registry.c
     src/hub/domain/peer_directory.c
     src/platform/linux/clock/clock.c
+    src/platform/linux/shared/connect_url.c
+    src/platform/linux/shared/epoll_registry.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/tcp/tcp_channel.c
     src/platform/linux/tcp/tcp_server_transport.c
@@ -75,6 +79,8 @@ add_executable(can-hub-agent src/platform/linux/agent_main.c ${COMMON_SOURCES} $
 target_link_libraries(can-hub-agent PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls)
 set(CLIENT_SOURCES
     src/platform/linux/clock/clock.c
+    src/platform/linux/shared/connect_url.c
+    src/platform/linux/shared/epoll_registry.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/tcp/tcp_channel.c
     src/platform/linux/tcp/tcp_client_transport.c

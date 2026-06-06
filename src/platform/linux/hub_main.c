@@ -7,15 +7,13 @@
 
 #include "hub/hub_app.h"
 #include "platform/linux/quic/quic_server_transport.h"
+#include "platform/linux/shared/connect_url.h"
+#include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/tcp/tcp_server_transport.h"
 #include "version.h"
 
 #define MAX_EPOLL_EVENTS 32
 #define POLL_PERIOD_MS 100
-#define TCP_URL_PREFIX "tcp://"
-#define QUIC_URL_PREFIX "quic://"
-#define LISTEN_PORT_MAX 16
-#define NO_SOCKET (-1)
 #define TCP_PEER_ID_BASE 0x00000001
 #define QUIC_PEER_ID_BASE 0x80000001
 
@@ -32,8 +30,7 @@ static QuicServerTransport quic_transport;
 static HubTransportPort mux_port;
 static bool tcp_enabled;
 static bool quic_enabled;
-static int32_t registered_fds[TCP_SERVER_PEERS_MAX];
-static uint32_t registered_masks[TCP_SERVER_PEERS_MAX];
+static EpollRegistry poll_registry;
 
 static bool parseArguments(int argc, char **argv);
 static bool startListeners(const char *tcp_port, const char *quic_port, const char *certificate, const char *key);
@@ -41,17 +38,15 @@ static bool muxSendControl(void *context, uint32_t peer_id, const uint8_t *data,
 static bool muxSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static void muxClosePeer(void *context, uint32_t peer_id);
 static HubTransportPort *portForPeer(uint32_t peer_id);
-static bool registerStaticPollFds(int32_t epoll_fd);
-static void syncTcpSlotRegistrations(int32_t epoll_fd);
+static bool registerStaticPollFds(void);
+static void syncTcpSlotRegistrations(void);
 static void dispatchEvent(const struct epoll_event *event);
 
 int main(int argc, char **argv)
 {
     struct epoll_event events[MAX_EPOLL_EVENTS];
-    int32_t epoll_fd;
     int32_t event_count;
     int32_t i;
-    uint8_t slot;
 
     if (!parseArguments(argc, argv)) {
         fprintf(
@@ -62,12 +57,8 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    epoll_fd = epoll_create1(0);
-    if (epoll_fd < 0 || !registerStaticPollFds(epoll_fd)) {
+    if (!EpollRegistry_Open(&poll_registry) || !registerStaticPollFds()) {
         return 1;
-    }
-    for(slot=0; slot<TCP_SERVER_PEERS_MAX; slot++) {
-        registered_fds[slot] = NO_SOCKET;
     }
 
     fprintf(
@@ -80,9 +71,9 @@ int main(int argc, char **argv)
 
     for (;;) {
         if (tcp_enabled) {
-            syncTcpSlotRegistrations(epoll_fd);
+            syncTcpSlotRegistrations();
         }
-        event_count = epoll_wait(epoll_fd, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
+        event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
 
         for(i=0; i<event_count; i++) {
             dispatchEvent(&events[i]);
@@ -98,18 +89,19 @@ static bool parseArguments(int argc, char **argv)
     const char *quic_port = NULL;
     const char *certificate = NULL;
     const char *key = NULL;
-    const char *url;
+    const char *port;
+    uint8_t scheme;
     int32_t i;
 
     for(i=1; i<argc; i++) {
         if (strcmp(argv[i], "--listen") == 0 && i + 1 < argc) {
-            url = argv[++i];
-            if (strncmp(url, TCP_URL_PREFIX, strlen(TCP_URL_PREFIX)) == 0) {
-                tcp_port = url + strlen(TCP_URL_PREFIX);
-            } else if (strncmp(url, QUIC_URL_PREFIX, strlen(QUIC_URL_PREFIX)) == 0) {
-                quic_port = url + strlen(QUIC_URL_PREFIX);
-            } else {
+            if (!ConnectUrl_ParseScheme(argv[++i], &scheme, &port)) {
                 return false;
+            }
+            if (scheme == kCONNECT_SCHEME_TCP) {
+                tcp_port = port;
+            } else {
+                quic_port = port;
             }
         } else if (strcmp(argv[i], "--cert") == 0 && i + 1 < argc) {
             certificate = argv[++i];
@@ -201,24 +193,21 @@ static HubTransportPort *portForPeer(uint32_t peer_id)
     return TcpServerTransport_Port(&tcp_transport);
 }
 
-static bool registerStaticPollFds(int32_t epoll_fd)
+static bool registerStaticPollFds(void)
 {
-    struct epoll_event event;
-
-    event.events = EPOLLIN;
     if (tcp_enabled) {
-        event.data.u32 = kHUB_EVENT_TAG_TCP_LISTENER;
-        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, TcpServerTransport_ListenFd(&tcp_transport), &event) < 0) {
+        int32_t listen_fd = TcpServerTransport_ListenFd(&tcp_transport);
+        if (!EpollRegistry_AddStatic(&poll_registry, listen_fd, kHUB_EVENT_TAG_TCP_LISTENER)) {
             return false;
         }
     }
     if (quic_enabled) {
-        event.data.u32 = kHUB_EVENT_TAG_QUIC_UDP;
-        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, QuicServerTransport_UdpFd(&quic_transport), &event) < 0) {
+        int32_t udp_fd = QuicServerTransport_UdpFd(&quic_transport);
+        int32_t timer_fd = QuicServerTransport_TimerFd(&quic_transport);
+        if (!EpollRegistry_AddStatic(&poll_registry, udp_fd, kHUB_EVENT_TAG_QUIC_UDP)) {
             return false;
         }
-        event.data.u32 = kHUB_EVENT_TAG_QUIC_TIMER;
-        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, QuicServerTransport_TimerFd(&quic_transport), &event) < 0) {
+        if (!EpollRegistry_AddStatic(&poll_registry, timer_fd, kHUB_EVENT_TAG_QUIC_TIMER)) {
             return false;
         }
     }
@@ -226,13 +215,11 @@ static bool registerStaticPollFds(int32_t epoll_fd)
     return true;
 }
 
-static void syncTcpSlotRegistrations(int32_t epoll_fd)
+static void syncTcpSlotRegistrations(void)
 {
-    struct epoll_event event;
     int32_t current_fd;
     uint32_t wanted_mask;
     uint8_t slot;
-    bool unchanged;
 
     for(slot=0; slot<TCP_SERVER_PEERS_MAX; slot++) {
         current_fd = TcpServerTransport_SlotFd(&tcp_transport, slot);
@@ -241,30 +228,7 @@ static void syncTcpSlotRegistrations(int32_t epoll_fd)
             wanted_mask |= EPOLLOUT;
         }
 
-        unchanged = current_fd == registered_fds[slot]
-                    && (current_fd == NO_SOCKET || wanted_mask == registered_masks[slot]);
-        if (unchanged) {
-            continue;
-        }
-
-        if (registered_fds[slot] != NO_SOCKET && registered_fds[slot] != current_fd) {
-            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, registered_fds[slot], NULL);
-            registered_fds[slot] = NO_SOCKET;
-        }
-        if (current_fd == NO_SOCKET) {
-            registered_fds[slot] = NO_SOCKET;
-            continue;
-        }
-
-        event.events = wanted_mask;
-        event.data.u32 = slot;
-        if (registered_fds[slot] == current_fd) {
-            epoll_ctl(epoll_fd, EPOLL_CTL_MOD, current_fd, &event);
-        } else {
-            epoll_ctl(epoll_fd, EPOLL_CTL_ADD, current_fd, &event);
-        }
-        registered_fds[slot] = current_fd;
-        registered_masks[slot] = wanted_mask;
+        EpollRegistry_SyncSlot(&poll_registry, slot, current_fd, wanted_mask, slot);
     }
 }
 

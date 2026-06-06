@@ -6,6 +6,8 @@
 
 #include <sys/epoll.h>
 
+#include "platform/linux/shared/connect_url.h"
+#include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/tcp/tcp_client_transport.h"
 #include "protocol/frame_message.h"
 #include "protocol/hello_message.h"
@@ -15,8 +17,7 @@
 
 #define MAX_EPOLL_EVENTS 8
 #define POLL_PERIOD_MS 100
-#define TCP_URL_PREFIX "tcp://"
-#define NO_SOCKET (-1)
+#define TCP_SLOT 0
 
 typedef enum tclient_command_e {
     kCLIENT_COMMAND_LIST = 0,
@@ -30,7 +31,6 @@ static uint32_t dump_interface_id;
 static int32_t exit_code = -1;
 
 static bool parseArguments(int argc, char **argv, char *host, char *port_text);
-static bool parseConnectUrl(const char *url, char *host, char *port_text);
 static void onConnected(void *context);
 static void onDisconnected(void *context, uint64_t now_us);
 static void onControl(void *context, const uint8_t *data, size_t size, uint64_t now_us);
@@ -41,8 +41,8 @@ static int32_t runEventLoop(void);
 
 int main(int argc, char **argv)
 {
-    char host[TCP_HOST_MAX];
-    char port_text[TCP_PORT_TEXT_MAX];
+    char host[CONNECT_URL_HOST_MAX];
+    char port_text[CONNECT_URL_PORT_TEXT_MAX];
     TransportEvents events = {
         .context = &transport,
         .on_connected = onConnected,
@@ -75,6 +75,7 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
 {
     const char *connect_url = NULL;
     const char *command_name = NULL;
+    uint8_t scheme;
     int32_t i;
 
     for(i=1; i<argc; i++) {
@@ -97,35 +98,11 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
         return false;
     }
 
-    return parseConnectUrl(connect_url, host, port_text);
-}
-
-static bool parseConnectUrl(const char *url, char *host, char *port_text)
-{
-    const char *address;
-    const char *separator;
-    size_t host_length;
-
-    if (strncmp(url, TCP_URL_PREFIX, strlen(TCP_URL_PREFIX)) != 0) {
+    if (!ConnectUrl_Parse(connect_url, &scheme, host, port_text)) {
         return false;
     }
 
-    address = url + strlen(TCP_URL_PREFIX);
-    separator = strrchr(address, ':');
-    if (separator == NULL || separator == address || separator[1] == '\0') {
-        return false;
-    }
-
-    host_length = (size_t)(separator - address);
-    if (host_length >= TCP_HOST_MAX) {
-        return false;
-    }
-
-    memcpy(host, address, host_length);
-    host[host_length] = '\0';
-    snprintf(port_text, TCP_PORT_TEXT_MAX, "%s", separator + 1);
-
-    return true;
+    return scheme == kCONNECT_SCHEME_TCP;
 }
 
 static void onConnected(void *context)
@@ -244,17 +221,13 @@ static void printFrame(const FrameMessage *frame)
 static int32_t runEventLoop(void)
 {
     struct epoll_event events[MAX_EPOLL_EVENTS];
-    struct epoll_event event;
-    int32_t epoll_fd;
+    EpollRegistry poll_registry;
     int32_t event_count;
-    int32_t registered_fd = NO_SOCKET;
-    uint32_t registered_mask = 0;
     uint32_t wanted_mask;
     int32_t current_fd;
     int32_t i;
 
-    epoll_fd = epoll_create1(0);
-    if (epoll_fd < 0) {
+    if (!EpollRegistry_Open(&poll_registry)) {
         return 1;
     }
 
@@ -264,20 +237,9 @@ static int32_t runEventLoop(void)
         if (TcpClientTransport_WantsWritable(&transport)) {
             wanted_mask |= EPOLLOUT;
         }
-        if (current_fd != registered_fd || wanted_mask != registered_mask) {
-            if (registered_fd != NO_SOCKET) {
-                epoll_ctl(epoll_fd, EPOLL_CTL_DEL, registered_fd, NULL);
-            }
-            if (current_fd != NO_SOCKET) {
-                event.events = wanted_mask;
-                event.data.fd = current_fd;
-                epoll_ctl(epoll_fd, EPOLL_CTL_ADD, current_fd, &event);
-            }
-            registered_fd = current_fd;
-            registered_mask = wanted_mask;
-        }
+        EpollRegistry_SyncSlot(&poll_registry, TCP_SLOT, current_fd, wanted_mask, (uint32_t)current_fd);
 
-        event_count = epoll_wait(epoll_fd, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
+        event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
         for(i=0; i<event_count; i++) {
             if (events[i].events & EPOLLOUT) {
                 TcpClientTransport_OnWritable(&transport);
