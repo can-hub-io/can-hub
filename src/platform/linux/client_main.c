@@ -59,6 +59,7 @@ static bool parseHexPayload(const char *text, FrameMessage *frame);
 static void sendFrameAndQuit(uint8_t channel);
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *events);
 static bool prepareSecurityMaterial(const char *host, const char *port_text);
+static int32_t showIdentity(void);
 static bool initTlsTransport(const char *host, const char *port_text, const TransportEvents *events);
 static bool initQuicTransport(const char *host, const char *port_text, const TransportEvents *events);
 static int32_t runQuicEventLoop(void);
@@ -74,6 +75,7 @@ int main(int argc, char **argv)
 {
     char host[CONNECT_URL_HOST_MAX];
     char port_text[CONNECT_URL_PORT_TEXT_MAX];
+    int32_t i;
     TransportEvents events = {
         .context = &transport,
         .on_connected = onConnected,
@@ -82,10 +84,22 @@ int main(int argc, char **argv)
         .on_frame = onFrame,
     };
 
+    for(i=1; i<argc; i++) {
+        if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
+            state_directory_override = argv[i + 1];
+        }
+    }
+    for(i=1; i<argc; i++) {
+        if (strcmp(argv[i], "--show-identity") == 0) {
+            return showIdentity();
+        }
+    }
+
     if (!parseArguments(argc, argv, host, port_text)) {
         fprintf(stderr, "usage: %s [--connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>|unix://<path>]\n", argv[0]);
         fprintf(stderr, "       [--state-dir <path>] list | dump [--no-echo] <interface-id>\n");
         fprintf(stderr, "       | send <interface-id> <can-id>#<hex-payload>   (cansend syntax, e.g. 123#DEADBEEF)\n");
+        fprintf(stderr, "       %s --show-identity [--state-dir <path>]   print this client's TLS fingerprint\n", argv[0]);
         fprintf(stderr, "       default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
         return 1;
     }
@@ -126,6 +140,7 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
                 target_interface_id = (uint32_t)strtoul(argv[++i], NULL, 10);
             } else if (strcmp(command_name, "send") == 0 && i + 2 < argc) {
                 command = kCLIENT_COMMAND_SEND;
+                open_flags |= OPEN_FLAG_WANT_WRITE;
                 target_interface_id = (uint32_t)strtoul(argv[++i], NULL, 10);
                 if (!parseFrameSpec(argv[++i], &frame_to_send)) {
                     return false;
@@ -258,6 +273,24 @@ static bool prepareSecurityMaterial(const char *host, const char *port_text)
     snprintf(pin_key, sizeof(pin_key), "%s:%s", host, port_text);
 
     return true;
+}
+
+static int32_t showIdentity(void)
+{
+    char fingerprint[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
+
+    if (!prepareSecurityMaterial("identity", "0")) {
+        fprintf(stderr, "could not load or create TLS identity\n");
+        return 1;
+    }
+    if (!TlsIdentity_FingerprintOfFile(identity_certificate_path, fingerprint)) {
+        fprintf(stderr, "could not read the identity fingerprint\n");
+        return 1;
+    }
+
+    printf("%s\n", fingerprint);
+
+    return 0;
 }
 
 static bool initTlsTransport(const char *host, const char *port_text, const TransportEvents *events)

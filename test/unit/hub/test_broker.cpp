@@ -845,6 +845,62 @@ describe("broker", []() {
         });
     });
 
+    describe("admin acl plane", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            AuthorizationMock_Reset(&authorization);
+            Broker_Init(&broker, &transport.port, NULL, &authorization.port, false);
+            events = Broker_Events(&broker);
+            BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
+        });
+
+        it("grants a write acl from the admin plane", []() {
+            AdminAclSetMessage request = { "truck42", "can0", TRUCK_FINGERPRINT, 1 };
+            AdminAclSetReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[256];
+            size_t encoded_size = AdminAclSetMessage_Encode(&request, encoded, sizeof(encoded));
+
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminAclSetReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_ACL_SET_REPLY);
+            expect(reply.status).toBe(ADMIN_STATUS_OK);
+            expect(authorization.port.write_allowed(authorization.port.context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(true);
+        });
+
+        it("revokes a write acl", []() {
+            AdminAclRevokeMessage request = { "truck42", "can0", TRUCK_FINGERPRINT };
+            AdminAclRevokeReplyMessage reply;
+            uint8_t encoded[256];
+            size_t encoded_size = AdminAclRevokeMessage_Encode(&request, encoded, sizeof(encoded));
+
+            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true);
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            lastReply(&reply, AdminAclRevokeReplyMessage_Decode);
+
+            expect(reply.status).toBe(ADMIN_STATUS_OK);
+            expect(authorization.port.write_allowed(authorization.port.context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(false);
+        });
+
+        it("lists acl entries", []() {
+            AdminAclListMessage request = { 0 };
+            AdminAclListReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[64];
+            size_t encoded_size = AdminAclListMessage_Encode(&request, encoded, sizeof(encoded));
+
+            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true);
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminAclListReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_ACL_LIST_REPLY);
+            expect(reply.count).toBe(1);
+            expect((const char *)reply.entries[0].interface_name).toBe("can0");
+            expect(reply.entries[0].can_write).toBe(1);
+        });
+    });
+
     describe("backpressure", []() {
         beforeEach([]() {
             uint32_t interface_id;

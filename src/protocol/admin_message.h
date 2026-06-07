@@ -21,6 +21,14 @@
 #define ADMIN_FORGET_REPLY_BODY_SIZE 4
 #define ADMIN_PIN_ADD_BODY_SIZE 196
 #define ADMIN_PIN_ADD_REPLY_BODY_SIZE 4
+#define ADMIN_ACL_SET_BODY_SIZE 212
+#define ADMIN_ACL_SET_REPLY_BODY_SIZE 4
+#define ADMIN_ACL_REVOKE_BODY_SIZE 212
+#define ADMIN_ACL_REVOKE_REPLY_BODY_SIZE 4
+#define ADMIN_ACL_LIST_BODY_SIZE 4
+#define ADMIN_ACL_LIST_REPLY_FIXED_FIELDS_SIZE 4
+#define ADMIN_ACL_LIST_REPLY_ENTRIES_MAX 16
+#define ADMIN_ACL_LIST_REPLY_ENTRY_SIZE 212
 #define ADMIN_KICK_PEER_BODY_SIZE 4
 #define ADMIN_KICK_PEER_REPLY_BODY_SIZE 4
 #define ADMIN_AGENTS_BODY_SIZE 132
@@ -161,6 +169,44 @@ typedef struct {
 } AdminPinAddReplyMessage;
 
 typedef struct {
+    char agent_name[REGISTER_AGENT_NAME_SIZE];
+    char interface_name[REGISTER_INTERFACE_NAME_SIZE];
+    char fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE];
+    uint8_t can_write;
+} AdminAclSetMessage;
+
+typedef struct {
+    uint8_t status;
+} AdminAclSetReplyMessage;
+
+typedef struct {
+    char agent_name[REGISTER_AGENT_NAME_SIZE];
+    char interface_name[REGISTER_INTERFACE_NAME_SIZE];
+    char fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE];
+} AdminAclRevokeMessage;
+
+typedef struct {
+    uint8_t status;
+} AdminAclRevokeReplyMessage;
+
+typedef struct {
+    uint16_t offset;
+} AdminAclListMessage;
+
+typedef struct {
+    char agent_name[REGISTER_AGENT_NAME_SIZE];
+    char interface_name[REGISTER_INTERFACE_NAME_SIZE];
+    char fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE];
+    uint8_t can_write;
+} AdminAclListReplyEntry;
+
+typedef struct {
+    uint8_t count;
+    uint8_t flags;
+    AdminAclListReplyEntry entries[ADMIN_ACL_LIST_REPLY_ENTRIES_MAX];
+} AdminAclListReplyMessage;
+
+typedef struct {
     uint16_t offset;
 } AdminInterfacesMessage;
 
@@ -230,6 +276,24 @@ bool AdminPinAddMessage_Decode(AdminPinAddMessage *self, const uint8_t *payload,
 
 size_t AdminPinAddReplyMessage_Encode(const AdminPinAddReplyMessage *self, uint8_t *buffer, size_t buffer_size);
 bool AdminPinAddReplyMessage_Decode(AdminPinAddReplyMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminAclSetMessage_Encode(const AdminAclSetMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminAclSetMessage_Decode(AdminAclSetMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminAclSetReplyMessage_Encode(const AdminAclSetReplyMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminAclSetReplyMessage_Decode(AdminAclSetReplyMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminAclRevokeMessage_Encode(const AdminAclRevokeMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminAclRevokeMessage_Decode(AdminAclRevokeMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminAclRevokeReplyMessage_Encode(const AdminAclRevokeReplyMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminAclRevokeReplyMessage_Decode(AdminAclRevokeReplyMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminAclListMessage_Encode(const AdminAclListMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminAclListMessage_Decode(AdminAclListMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminAclListReplyMessage_Encode(const AdminAclListReplyMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminAclListReplyMessage_Decode(AdminAclListReplyMessage *self, const uint8_t *payload, size_t payload_length);
 
 size_t AdminInterfacesMessage_Encode(const AdminInterfacesMessage *self, uint8_t *buffer, size_t buffer_size);
 bool AdminInterfacesMessage_Decode(AdminInterfacesMessage *self, const uint8_t *payload, size_t payload_length);

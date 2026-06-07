@@ -239,7 +239,9 @@ static bool aclWriteAllowed(void *context, const char *fingerprint_hex, const ch
 
     if (sqlite3_prepare_v2(
             self->database,
-            "SELECT can_write FROM client_acls WHERE fingerprint = ?1 AND agent_name = ?2 AND interface_name = ?3",
+            "SELECT can_write FROM client_acls"
+            " WHERE agent_name = ?2 AND interface_name = ?3 AND fingerprint IN (?1, 'default')"
+            " ORDER BY (fingerprint = 'default') LIMIT 1",
             -1,
             &statement,
             NULL

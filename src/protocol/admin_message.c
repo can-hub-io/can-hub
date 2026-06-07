@@ -45,6 +45,11 @@
 #define CLIENT_ENTRY_AGENT_NAME_OFFSET 12
 #define CLIENT_ENTRY_INTERFACE_NAME_OFFSET 140
 
+#define ACL_AGENT_NAME_OFFSET 0
+#define ACL_INTERFACE_NAME_OFFSET 128
+#define ACL_FINGERPRINT_OFFSET 144
+#define ACL_CAN_WRITE_OFFSET 209
+
 #define INTERFACE_ENTRY_ID_OFFSET 0
 #define INTERFACE_ENTRY_SUBSCRIBERS_OFFSET 4
 #define INTERFACE_ENTRY_FRAMES_OFFSET 8
@@ -536,6 +541,193 @@ size_t AdminPinAddReplyMessage_Encode(const AdminPinAddReplyMessage *self, uint8
 bool AdminPinAddReplyMessage_Decode(AdminPinAddReplyMessage *self, const uint8_t *payload, size_t payload_length)
 {
     return decodeStatusReply(&self->status, payload, payload_length, ADMIN_PIN_ADD_REPLY_BODY_SIZE);
+}
+
+size_t AdminAclSetMessage_Encode(const AdminAclSetMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t total_size;
+
+    if (!isNameTerminated(self->agent_name) || self->agent_name[0] == '\0') {
+        return 0;
+    }
+    if (self->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] != '\0' || self->interface_name[0] == '\0') {
+        return 0;
+    }
+    if (self->fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] != '\0' || self->fingerprint_hex[0] == '\0') {
+        return 0;
+    }
+
+    total_size = encodeFixedBody(kMESSAGE_TYPE_ADMIN_ACL_SET, ADMIN_ACL_SET_BODY_SIZE, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    memcpy(body + ACL_AGENT_NAME_OFFSET, self->agent_name, strlen(self->agent_name));
+    memcpy(body + ACL_INTERFACE_NAME_OFFSET, self->interface_name, strlen(self->interface_name));
+    memcpy(body + ACL_FINGERPRINT_OFFSET, self->fingerprint_hex, strlen(self->fingerprint_hex));
+    body[ACL_CAN_WRITE_OFFSET] = self->can_write;
+
+    return total_size;
+}
+
+bool AdminAclSetMessage_Decode(AdminAclSetMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    if (payload_length < ADMIN_ACL_SET_BODY_SIZE) {
+        return false;
+    }
+
+    memcpy(self->agent_name, payload + ACL_AGENT_NAME_OFFSET, REGISTER_AGENT_NAME_SIZE);
+    self->agent_name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';
+    memcpy(self->interface_name, payload + ACL_INTERFACE_NAME_OFFSET, REGISTER_INTERFACE_NAME_SIZE);
+    self->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] = '\0';
+    memcpy(self->fingerprint_hex, payload + ACL_FINGERPRINT_OFFSET, ADMIN_FINGERPRINT_HEX_SIZE);
+    self->fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] = '\0';
+    self->can_write = payload[ACL_CAN_WRITE_OFFSET];
+
+    return self->agent_name[0] != '\0' && self->interface_name[0] != '\0' && self->fingerprint_hex[0] != '\0';
+}
+
+size_t AdminAclSetReplyMessage_Encode(const AdminAclSetReplyMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    return encodeStatusReply(kMESSAGE_TYPE_ADMIN_ACL_SET_REPLY, self->status, buffer, buffer_size);
+}
+
+bool AdminAclSetReplyMessage_Decode(AdminAclSetReplyMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    return decodeStatusReply(&self->status, payload, payload_length, ADMIN_ACL_SET_REPLY_BODY_SIZE);
+}
+
+size_t AdminAclRevokeMessage_Encode(const AdminAclRevokeMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t total_size;
+
+    if (!isNameTerminated(self->agent_name) || self->agent_name[0] == '\0') {
+        return 0;
+    }
+    if (self->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] != '\0' || self->interface_name[0] == '\0') {
+        return 0;
+    }
+    if (self->fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] != '\0' || self->fingerprint_hex[0] == '\0') {
+        return 0;
+    }
+
+    total_size = encodeFixedBody(kMESSAGE_TYPE_ADMIN_ACL_REVOKE, ADMIN_ACL_REVOKE_BODY_SIZE, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    memcpy(body + ACL_AGENT_NAME_OFFSET, self->agent_name, strlen(self->agent_name));
+    memcpy(body + ACL_INTERFACE_NAME_OFFSET, self->interface_name, strlen(self->interface_name));
+    memcpy(body + ACL_FINGERPRINT_OFFSET, self->fingerprint_hex, strlen(self->fingerprint_hex));
+
+    return total_size;
+}
+
+bool AdminAclRevokeMessage_Decode(AdminAclRevokeMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    if (payload_length < ADMIN_ACL_REVOKE_BODY_SIZE) {
+        return false;
+    }
+
+    memcpy(self->agent_name, payload + ACL_AGENT_NAME_OFFSET, REGISTER_AGENT_NAME_SIZE);
+    self->agent_name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';
+    memcpy(self->interface_name, payload + ACL_INTERFACE_NAME_OFFSET, REGISTER_INTERFACE_NAME_SIZE);
+    self->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] = '\0';
+    memcpy(self->fingerprint_hex, payload + ACL_FINGERPRINT_OFFSET, ADMIN_FINGERPRINT_HEX_SIZE);
+    self->fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] = '\0';
+
+    return self->agent_name[0] != '\0' && self->interface_name[0] != '\0' && self->fingerprint_hex[0] != '\0';
+}
+
+size_t AdminAclRevokeReplyMessage_Encode(const AdminAclRevokeReplyMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    return encodeStatusReply(kMESSAGE_TYPE_ADMIN_ACL_REVOKE_REPLY, self->status, buffer, buffer_size);
+}
+
+bool AdminAclRevokeReplyMessage_Decode(AdminAclRevokeReplyMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    return decodeStatusReply(&self->status, payload, payload_length, ADMIN_ACL_REVOKE_REPLY_BODY_SIZE);
+}
+
+size_t AdminAclListMessage_Encode(const AdminAclListMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    return encodeOffsetRequest(kMESSAGE_TYPE_ADMIN_ACL_LIST, self->offset, buffer, buffer_size);
+}
+
+bool AdminAclListMessage_Decode(AdminAclListMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    if (payload_length < ADMIN_ACL_LIST_BODY_SIZE) {
+        return false;
+    }
+
+    self->offset = Wire_ReadU16(payload + OFFSET_OFFSET);
+
+    return true;
+}
+
+size_t AdminAclListReplyMessage_Encode(const AdminAclListReplyMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t body_size;
+    size_t total_size;
+    uint8_t i;
+    uint8_t *entry;
+
+    if (self->count > ADMIN_ACL_LIST_REPLY_ENTRIES_MAX) {
+        return 0;
+    }
+
+    body_size = ADMIN_ACL_LIST_REPLY_FIXED_FIELDS_SIZE + (size_t)self->count * ADMIN_ACL_LIST_REPLY_ENTRY_SIZE;
+    total_size = encodeFixedBody(kMESSAGE_TYPE_ADMIN_ACL_LIST_REPLY, body_size, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    body[COUNT_OFFSET] = self->count;
+    body[FLAGS_OFFSET] = self->flags;
+    for(i=0; i<self->count; i++) {
+        entry = body + ENTRIES_OFFSET + i * ADMIN_ACL_LIST_REPLY_ENTRY_SIZE;
+        memcpy(entry + ACL_AGENT_NAME_OFFSET, self->entries[i].agent_name, strlen(self->entries[i].agent_name));
+        memcpy(entry + ACL_INTERFACE_NAME_OFFSET, self->entries[i].interface_name, strlen(self->entries[i].interface_name));
+        memcpy(entry + ACL_FINGERPRINT_OFFSET, self->entries[i].fingerprint_hex, strlen(self->entries[i].fingerprint_hex));
+        entry[ACL_CAN_WRITE_OFFSET] = self->entries[i].can_write;
+    }
+
+    return total_size;
+}
+
+bool AdminAclListReplyMessage_Decode(AdminAclListReplyMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    const uint8_t *entry;
+    uint8_t i;
+
+    if (payload_length < ADMIN_ACL_LIST_REPLY_FIXED_FIELDS_SIZE) {
+        return false;
+    }
+
+    self->count = payload[COUNT_OFFSET];
+    self->flags = payload[FLAGS_OFFSET];
+    if (self->count > ADMIN_ACL_LIST_REPLY_ENTRIES_MAX) {
+        return false;
+    }
+    if (payload_length < ADMIN_ACL_LIST_REPLY_FIXED_FIELDS_SIZE + (size_t)self->count * ADMIN_ACL_LIST_REPLY_ENTRY_SIZE) {
+        return false;
+    }
+
+    for(i=0; i<self->count; i++) {
+        entry = payload + ENTRIES_OFFSET + i * ADMIN_ACL_LIST_REPLY_ENTRY_SIZE;
+        memcpy(self->entries[i].agent_name, entry + ACL_AGENT_NAME_OFFSET, REGISTER_AGENT_NAME_SIZE);
+        self->entries[i].agent_name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';
+        memcpy(self->entries[i].interface_name, entry + ACL_INTERFACE_NAME_OFFSET, REGISTER_INTERFACE_NAME_SIZE);
+        self->entries[i].interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] = '\0';
+        memcpy(self->entries[i].fingerprint_hex, entry + ACL_FINGERPRINT_OFFSET, ADMIN_FINGERPRINT_HEX_SIZE);
+        self->entries[i].fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] = '\0';
+        self->entries[i].can_write = entry[ACL_CAN_WRITE_OFFSET];
+    }
+
+    return true;
 }
 
 size_t AdminInterfacesMessage_Encode(const AdminInterfacesMessage *self, uint8_t *buffer, size_t buffer_size)

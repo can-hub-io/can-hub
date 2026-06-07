@@ -60,8 +60,22 @@ offset  size  field
 0x1F  ADMIN_CLIENTS_REPLY
 0x20  ADMIN_INTERFACES    admin: interface catalogue with traffic counters (paginated)
 0x21  ADMIN_INTERFACES_REPLY
+0x22  ADMIN_PIN_ADD       admin: authorize an agent fingerprint
+0x23  ADMIN_PIN_ADD_REPLY
+0x24  ADMIN_ACL_SET       admin: grant a client read/write on an interface
+0x25  ADMIN_ACL_SET_REPLY
+0x26  ADMIN_ACL_REVOKE    admin: drop a client grant
+0x27  ADMIN_ACL_REVOKE_REPLY
+0x28  ADMIN_ACL_LIST      admin: list client grants (paginated)
+0x29  ADMIN_ACL_LIST_REPLY
 0x7F  PING/PONG    liveness (flags bit 0: reply)
 ```
+
+Admin ACL grants are keyed by the client TLS fingerprint and the stable
+namespaced interface (agent_name + interface_name); the reserved literal
+fingerprint `default` is the per-interface baseline. The hub resolves a
+client's write permission as specific grant, else interface default, else
+the global default (read open, no write).
 
 Admin messages are accepted only from peers whose HELLO declared the admin
 role, and the hub accepts that role only on local transports (the unix

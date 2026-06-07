@@ -243,6 +243,7 @@ static bool loadIdentity(const char *state_directory_override)
 static bool startListeners(const char *unix_path, const char *certificate, const char *key, bool explicit_listen)
 {
     HubTransportEvents transport_events = HubApp_Events(&app);
+    IdentityStorePort *identity_store;
     bool explicit_unix = unix_path != NULL;
 
     mux_port.context = NULL;
@@ -323,7 +324,8 @@ static bool startListeners(const char *unix_path, const char *certificate, const
         return false;
     }
 
-    HubApp_Init(&app, &mux_port, identityStore(), authorizationStore(), require_known_agents);
+    identity_store = identityStore();
+    HubApp_Init(&app, &mux_port, identity_store, authorizationStore(), require_known_agents);
 
     return true;
 }

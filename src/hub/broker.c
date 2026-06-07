@@ -47,6 +47,9 @@ static void handleAdminAgents(Broker *self, HubPeer *peer, const MessageHeader *
 static void handleAdminClients(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminInterfaces(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminPinAdd(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleAdminAclSet(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleAdminAclRevoke(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleAdminAclList(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void countInterfaceFrame(Broker *self, const HubPeer *peer, uint8_t channel);
 static void disconnectPeer(Broker *self, uint32_t peer_id);
 static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
@@ -76,6 +79,9 @@ static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
     [kMESSAGE_TYPE_ADMIN_CLIENTS] = handleAdminClients,
     [kMESSAGE_TYPE_ADMIN_INTERFACES] = handleAdminInterfaces,
     [kMESSAGE_TYPE_ADMIN_PIN_ADD] = handleAdminPinAdd,
+    [kMESSAGE_TYPE_ADMIN_ACL_SET] = handleAdminAclSet,
+    [kMESSAGE_TYPE_ADMIN_ACL_REVOKE] = handleAdminAclRevoke,
+    [kMESSAGE_TYPE_ADMIN_ACL_LIST] = handleAdminAclList,
 };
 
 /* ---------- public ---------- */
@@ -575,6 +581,98 @@ static void handleAdminPinAdd(Broker *self, HubPeer *peer, const MessageHeader *
     }
     reply.status = added ? ADMIN_STATUS_OK : ADMIN_STATUS_PIN_FAILED;
     sendControl(self, peer, encoded, AdminPinAddReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+}
+
+static void handleAdminAclSet(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    AdminAclSetMessage request;
+    AdminAclSetReplyMessage reply;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    bool granted = false;
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN) {
+        return;
+    }
+    if (!AdminAclSetMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    if (self->authorization != NULL) {
+        granted = self->authorization->grant(
+            self->authorization->context,
+            request.fingerprint_hex,
+            request.agent_name,
+            request.interface_name,
+            request.can_write != 0
+        );
+    }
+    reply.status = granted ? ADMIN_STATUS_OK : ADMIN_STATUS_PIN_FAILED;
+    sendControl(self, peer, encoded, AdminAclSetReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+}
+
+static void handleAdminAclRevoke(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    AdminAclRevokeMessage request;
+    AdminAclRevokeReplyMessage reply;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    bool revoked = false;
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN) {
+        return;
+    }
+    if (!AdminAclRevokeMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    if (self->authorization != NULL) {
+        revoked = self->authorization->revoke(
+            self->authorization->context,
+            request.fingerprint_hex,
+            request.agent_name,
+            request.interface_name
+        );
+    }
+    reply.status = revoked ? ADMIN_STATUS_OK : ADMIN_STATUS_UNKNOWN_AGENT;
+    sendControl(self, peer, encoded, AdminAclRevokeReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+}
+
+static void handleAdminAclList(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    AdminAclListMessage request;
+    AdminAclListReplyMessage reply;
+    AclEntry entries[ADMIN_ACL_LIST_REPLY_ENTRIES_MAX];
+    bool more = false;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    uint8_t i;
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN) {
+        return;
+    }
+    if (!AdminAclListMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    memset(&reply, 0, sizeof(reply));
+    if (self->authorization != NULL) {
+        reply.count = self->authorization->list(
+            self->authorization->context,
+            request.offset,
+            entries,
+            ADMIN_ACL_LIST_REPLY_ENTRIES_MAX,
+            &more
+        );
+        for(i=0; i<reply.count; i++) {
+            memcpy(reply.entries[i].agent_name, entries[i].agent_name, REGISTER_AGENT_NAME_SIZE);
+            memcpy(reply.entries[i].interface_name, entries[i].interface_name, REGISTER_INTERFACE_NAME_SIZE);
+            memcpy(reply.entries[i].fingerprint_hex, entries[i].fingerprint_hex, IDENTITY_FINGERPRINT_HEX_SIZE);
+            reply.entries[i].can_write = entries[i].can_write ? 1 : 0;
+        }
+        if (more) {
+            reply.flags |= ADMIN_REPLY_FLAG_MORE;
+        }
+    }
+
+    sendControl(self, peer, encoded, AdminAclListReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 
 static void handleAdminPins(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)

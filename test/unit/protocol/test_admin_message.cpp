@@ -316,6 +316,73 @@ describe("admin_pin_add_message", []() {
     });
 });
 
+describe("admin_acl_message", []() {
+    it("round-trips an acl set with permission", []() {
+        AdminAclSetMessage request = { "truck42", "can0", FINGERPRINT, 1 };
+        AdminAclSetMessage decoded;
+        uint8_t buffer[256];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminAclSetMessage_Encode(&request, buffer, sizeof(buffer));
+        decoded_ok = AdminAclSetMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + ADMIN_ACL_SET_BODY_SIZE));
+        expect(decoded_ok).toBe(true);
+        expect((const char *)decoded.agent_name).toBe("truck42");
+        expect((const char *)decoded.interface_name).toBe("can0");
+        expect((const char *)decoded.fingerprint_hex).toBe(FINGERPRINT);
+        expect(decoded.can_write).toBe(1);
+    });
+
+    it("carries the default pseudo-fingerprint", []() {
+        AdminAclSetMessage request = { "truck42", "can0", "default", 1 };
+        AdminAclSetMessage decoded;
+        uint8_t buffer[256];
+        size_t encoded_size = AdminAclSetMessage_Encode(&request, buffer, sizeof(buffer));
+
+        expect(AdminAclSetMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE)).toBe(true);
+        expect((const char *)decoded.fingerprint_hex).toBe("default");
+    });
+
+    it("round-trips an acl revoke and its reply", []() {
+        AdminAclRevokeMessage revoke = { "truck42", "can0", FINGERPRINT };
+        AdminAclRevokeMessage decoded_revoke;
+        AdminAclRevokeReplyMessage reply = { ADMIN_STATUS_UNKNOWN_AGENT };
+        AdminAclRevokeReplyMessage decoded_reply;
+        uint8_t buffer[256];
+        size_t encoded_size;
+
+        encoded_size = AdminAclRevokeMessage_Encode(&revoke, buffer, sizeof(buffer));
+        expect(AdminAclRevokeMessage_Decode(&decoded_revoke, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE)).toBe(true);
+        expect((const char *)decoded_revoke.interface_name).toBe("can0");
+
+        encoded_size = AdminAclRevokeReplyMessage_Encode(&reply, buffer, sizeof(buffer));
+        expect(AdminAclRevokeReplyMessage_Decode(&decoded_reply, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE)).toBe(true);
+        expect(decoded_reply.status).toBe(ADMIN_STATUS_UNKNOWN_AGENT);
+    });
+
+    it("round-trips acl list entries", []() {
+        AdminAclListReplyMessage reply = { 1, 0, { { "truck42", "can0", FINGERPRINT, 1 } } };
+        AdminAclListReplyMessage decoded;
+        uint8_t buffer[512];
+        size_t expected_size = MESSAGE_HEADER_SIZE + ADMIN_ACL_LIST_REPLY_FIXED_FIELDS_SIZE + ADMIN_ACL_LIST_REPLY_ENTRY_SIZE;
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminAclListReplyMessage_Encode(&reply, buffer, sizeof(buffer));
+        decoded_ok = AdminAclListReplyMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe(expected_size);
+        expect(decoded_ok).toBe(true);
+        expect(decoded.count).toBe(1);
+        expect((const char *)decoded.entries[0].agent_name).toBe("truck42");
+        expect((const char *)decoded.entries[0].interface_name).toBe("can0");
+        expect((const char *)decoded.entries[0].fingerprint_hex).toBe(FINGERPRINT);
+        expect(decoded.entries[0].can_write).toBe(1);
+    });
+});
+
 describe("admin_interfaces_message", []() {
     it("round-trips the pagination offset", []() {
         AdminInterfacesMessage request = { 9 };
