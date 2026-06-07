@@ -116,6 +116,12 @@ add_unit_test(test_quic_control_channel
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
 
+add_unit_test(test_connect_url
+    SOURCES
+        platform/test_connect_url.cpp
+        ${ROOT_SRC_DIR}/platform/linux/shared/connect_url.c
+)
+
 add_unit_test(test_tls_channel
     SOURCES
         platform/test_tls_channel.cpp

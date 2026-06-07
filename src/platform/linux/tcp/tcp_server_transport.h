@@ -32,6 +32,7 @@ typedef struct {
 
 bool TcpServerTransport_Init(
     TcpServerTransport *self,
+    const char *bind_address,
     const char *port,
     uint32_t peer_id_base,
     const HubTransportEvents *events

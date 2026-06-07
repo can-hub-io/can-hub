@@ -17,5 +17,6 @@ typedef enum tconnect_scheme_e {
 
 bool ConnectUrl_ParseScheme(const char *url, uint8_t *scheme, const char **remainder);
 bool ConnectUrl_Parse(const char *url, uint8_t *scheme, char *host, char *port_text);
+bool ConnectUrl_SplitListenAddress(const char *remainder, char *bind_address, char *port_text);
 
 #endif

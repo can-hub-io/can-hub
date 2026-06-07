@@ -35,6 +35,7 @@ typedef struct {
 
 bool TlsServerTransport_Init(
     TlsServerTransport *self,
+    const char *bind_address,
     const char *port,
     const char *certificate_file,
     const char *key_file,

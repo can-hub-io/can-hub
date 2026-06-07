@@ -55,6 +55,7 @@ struct QuicServerTransport {
 
 bool QuicServerTransport_Init(
     QuicServerTransport *self,
+    const char *bind_address,
     const char *port,
     const char *certificate_file,
     const char *key_file,

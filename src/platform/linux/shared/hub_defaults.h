@@ -4,6 +4,7 @@
 /* Defaults shared between the hub listeners and the local consumers. */
 
 #define HUB_DEFAULT_PORT_TEXT "7227"
+#define HUB_LISTEN_ANY_ADDRESS "0.0.0.0"
 #define HUB_DEFAULT_PLAIN_TCP_PORT_TEXT "7228"
 #define HUB_DEFAULT_UNIX_SOCKET_DIRECTORY "/run/can-hub"
 #define HUB_DEFAULT_UNIX_SOCKET_PATH HUB_DEFAULT_UNIX_SOCKET_DIRECTORY "/hub.sock"

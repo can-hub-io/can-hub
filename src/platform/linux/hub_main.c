@@ -33,6 +33,12 @@
 #define UNIX_SLOT_OFFSET TCP_SERVER_PEERS_MAX
 #define TLS_SLOT_OFFSET (2 * TCP_SERVER_PEERS_MAX)
 
+typedef struct {
+    bool requested;
+    char bind_address[CONNECT_URL_HOST_MAX];
+    char port_text[CONNECT_URL_PORT_TEXT_MAX];
+} ListenAddress;
+
 typedef enum thub_event_tag_e {
     kHUB_EVENT_TAG_TCP_LISTENER = 0x100,
     kHUB_EVENT_TAG_UNIX_LISTENER,
@@ -47,6 +53,9 @@ static TcpServerTransport tcp_transport;
 static TcpServerTransport unix_transport;
 static QuicServerTransport quic_transport;
 static TlsServerTransport tls_transport;
+static ListenAddress tcp_listen;
+static ListenAddress quic_listen;
+static ListenAddress tls_listen;
 static HubTransportPort mux_port;
 static bool tcp_enabled;
 static bool unix_enabled;
@@ -62,15 +71,8 @@ static bool parseArguments(int argc, char **argv);
 static bool loadIdentity(const char *state_directory_override);
 static IdentityStorePort *identityStore(void);
 static void importLegacyPinFile(void);
-static bool startListeners(
-    const char *tcp_port,
-    const char *quic_port,
-    const char *tls_port,
-    const char *unix_path,
-    const char *certificate,
-    const char *key,
-    bool explicit_listen
-);
+static void applyDefaultListen(ListenAddress *listen_address, const char *port_text);
+static bool startListeners(const char *unix_path, const char *certificate, const char *key, bool explicit_listen);
 static bool muxSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool muxSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static void muxClosePeer(void *context, uint32_t peer_id);
@@ -90,11 +92,13 @@ int main(int argc, char **argv)
     if (!parseArguments(argc, argv)) {
         fprintf(
             stderr,
-            "usage: %s [--listen tls://<port>] [--listen quic://<port>] [--listen tcp://<port>]\n"
-            "       [--listen unix://<path>] [--cert <pem> --key <pem>] [--state-dir <path>]\n"
+            "usage: %s [--listen tls://[<bind-ip>:]<port>] [--listen quic://[<bind-ip>:]<port>]\n"
+            "       [--listen tcp://[<bind-ip>:]<port>] [--listen unix://<path>]\n"
+            "       [--cert <pem> --key <pem>] [--state-dir <path>]\n"
             "       defaults: tls://" HUB_DEFAULT_PORT_TEXT ", quic://" HUB_DEFAULT_PORT_TEXT
-            ", tcp://" HUB_DEFAULT_PLAIN_TCP_PORT_TEXT ", unix://" HUB_DEFAULT_UNIX_SOCKET_PATH
-            "; TLS identity auto-generated\n",
+            ", tcp://" HUB_DEFAULT_PLAIN_TCP_PORT_TEXT ", unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n"
+            "       bind-ip defaults to 0.0.0.0; explicit --listen replaces the network defaults;"
+            " TLS identity auto-generated\n",
             argv[0]
         );
         return 1;
@@ -138,14 +142,12 @@ int main(int argc, char **argv)
 
 static bool parseArguments(int argc, char **argv)
 {
-    const char *tcp_port = NULL;
-    const char *quic_port = NULL;
-    const char *tls_port = NULL;
     const char *unix_path = NULL;
     const char *certificate = NULL;
     const char *key = NULL;
     const char *state_directory_override = NULL;
     const char *remainder;
+    ListenAddress *listen_address;
     bool explicit_listen = false;
     bool explicit_quic = false;
     bool explicit_tls = false;
@@ -157,20 +159,24 @@ static bool parseArguments(int argc, char **argv)
             if (!ConnectUrl_ParseScheme(argv[++i], &scheme, &remainder)) {
                 return false;
             }
-            if (scheme == kCONNECT_SCHEME_TCP) {
-                tcp_port = remainder;
-                explicit_listen = true;
-            } else if (scheme == kCONNECT_SCHEME_QUIC) {
-                quic_port = remainder;
-                explicit_listen = true;
+            if (scheme == kCONNECT_SCHEME_UNIX) {
+                unix_path = remainder;
+                continue;
+            }
+
+            listen_address = &tcp_listen;
+            if (scheme == kCONNECT_SCHEME_QUIC) {
+                listen_address = &quic_listen;
                 explicit_quic = true;
             } else if (scheme == kCONNECT_SCHEME_TLS) {
-                tls_port = remainder;
-                explicit_listen = true;
+                listen_address = &tls_listen;
                 explicit_tls = true;
-            } else {
-                unix_path = remainder;
             }
+            if (!ConnectUrl_SplitListenAddress(remainder, listen_address->bind_address, listen_address->port_text)) {
+                return false;
+            }
+            listen_address->requested = true;
+            explicit_listen = true;
         } else if (strcmp(argv[i], "--cert") == 0 && i + 1 < argc) {
             certificate = argv[++i];
         } else if (strcmp(argv[i], "--key") == 0 && i + 1 < argc) {
@@ -181,12 +187,12 @@ static bool parseArguments(int argc, char **argv)
     }
 
     if (!explicit_listen) {
-        tcp_port = HUB_DEFAULT_PLAIN_TCP_PORT_TEXT;
-        quic_port = HUB_DEFAULT_PORT_TEXT;
-        tls_port = HUB_DEFAULT_PORT_TEXT;
+        applyDefaultListen(&tcp_listen, HUB_DEFAULT_PLAIN_TCP_PORT_TEXT);
+        applyDefaultListen(&quic_listen, HUB_DEFAULT_PORT_TEXT);
+        applyDefaultListen(&tls_listen, HUB_DEFAULT_PORT_TEXT);
     }
 
-    if ((quic_port != NULL || tls_port != NULL) && (certificate == NULL || key == NULL)) {
+    if ((quic_listen.requested || tls_listen.requested) && (certificate == NULL || key == NULL)) {
         if (loadIdentity(state_directory_override)) {
             certificate = identity_certificate_path;
             key = identity_key_path;
@@ -195,12 +201,19 @@ static bool parseArguments(int argc, char **argv)
             if (explicit_quic || explicit_tls) {
                 return false;
             }
-            quic_port = NULL;
-            tls_port = NULL;
+            quic_listen.requested = false;
+            tls_listen.requested = false;
         }
     }
 
-    return startListeners(tcp_port, quic_port, tls_port, unix_path, certificate, key, explicit_listen);
+    return startListeners(unix_path, certificate, key, explicit_listen);
+}
+
+static void applyDefaultListen(ListenAddress *listen_address, const char *port_text)
+{
+    listen_address->requested = true;
+    snprintf(listen_address->bind_address, sizeof(listen_address->bind_address), "%s", HUB_LISTEN_ANY_ADDRESS);
+    snprintf(listen_address->port_text, sizeof(listen_address->port_text), "%s", port_text);
 }
 
 static bool loadIdentity(const char *state_directory_override)
@@ -212,15 +225,7 @@ static bool loadIdentity(const char *state_directory_override)
     return TlsIdentity_LoadOrCreate(state_directory, IDENTITY_NAME, identity_certificate_path, identity_key_path);
 }
 
-static bool startListeners(
-    const char *tcp_port,
-    const char *quic_port,
-    const char *tls_port,
-    const char *unix_path,
-    const char *certificate,
-    const char *key,
-    bool explicit_listen
-)
+static bool startListeners(const char *unix_path, const char *certificate, const char *key, bool explicit_listen)
 {
     HubTransportEvents transport_events = HubApp_Events(&app);
     bool explicit_unix = unix_path != NULL;
@@ -230,20 +235,28 @@ static bool startListeners(
     mux_port.send_frame = muxSendFrame;
     mux_port.close_peer = muxClosePeer;
 
-    if (tcp_port != NULL) {
-        if (TcpServerTransport_Init(&tcp_transport, tcp_port, TCP_PEER_ID_BASE, &transport_events)) {
+    if (tcp_listen.requested) {
+        bool tcp_started = TcpServerTransport_Init(
+            &tcp_transport,
+            tcp_listen.bind_address,
+            tcp_listen.port_text,
+            TCP_PEER_ID_BASE,
+            &transport_events
+        );
+        if (tcp_started) {
             tcp_enabled = true;
         } else {
-            fprintf(stderr, "could not open TCP listener on port %s\n", tcp_port);
+            fprintf(stderr, "could not open TCP listener on %s:%s\n", tcp_listen.bind_address, tcp_listen.port_text);
             if (explicit_listen) {
                 return false;
             }
         }
     }
-    if (quic_port != NULL) {
+    if (quic_listen.requested) {
         bool quic_started = QuicServerTransport_Init(
             &quic_transport,
-            quic_port,
+            quic_listen.bind_address,
+            quic_listen.port_text,
             certificate,
             key,
             QUIC_PEER_ID_BASE,
@@ -252,16 +265,17 @@ static bool startListeners(
         if (quic_started) {
             quic_enabled = true;
         } else {
-            fprintf(stderr, "could not open QUIC listener on port %s\n", quic_port);
+            fprintf(stderr, "could not open QUIC listener on %s:%s\n", quic_listen.bind_address, quic_listen.port_text);
             if (explicit_listen) {
                 return false;
             }
         }
     }
-    if (tls_port != NULL) {
+    if (tls_listen.requested) {
         bool tls_started = TlsServerTransport_Init(
             &tls_transport,
-            tls_port,
+            tls_listen.bind_address,
+            tls_listen.port_text,
             certificate,
             key,
             TLS_PEER_ID_BASE,
@@ -270,7 +284,7 @@ static bool startListeners(
         if (tls_started) {
             tls_enabled = true;
         } else {
-            fprintf(stderr, "could not open TLS listener on port %s\n", tls_port);
+            fprintf(stderr, "could not open TLS listener on %s:%s\n", tls_listen.bind_address, tls_listen.port_text);
             if (explicit_listen) {
                 return false;
             }

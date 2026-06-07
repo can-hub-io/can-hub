@@ -112,6 +112,11 @@ link set up vcan0`, run the agent against `vcan0` and talk to it with
 Plaintext transports carry no identity and skip pinning; the admin role is
 accepted only on the unix socket.
 
+Listeners take an optional bind address (`--listen tcp://10.0.0.5:7228`,
+default 0.0.0.0), and explicit `--listen` flags replace the network
+defaults — so disabling a transport is listing the ones you want:
+`can-hub --listen tls://7227 --listen quic://7227` runs without plain TCP.
+
 ## Status
 
 Pre-1.0. The wire protocol is version 0 and may change until v1 is frozen

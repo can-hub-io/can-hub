@@ -7,6 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
@@ -30,6 +31,7 @@ static void closePeer(TcpServerTransport *self, TcpServerPeer *peer, bool notify
 
 bool TcpServerTransport_Init(
     TcpServerTransport *self,
+    const char *bind_address,
     const char *port,
     uint32_t peer_id_base,
     const HubTransportEvents *events
@@ -48,8 +50,10 @@ bool TcpServerTransport_Init(
 
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_ANY);
     address.sin_port = htons((uint16_t)atoi(port));
+    if (inet_pton(AF_INET, bind_address, &address.sin_addr) != 1) {
+        return false;
+    }
     if (bind(self->listen_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         return false;
     }
