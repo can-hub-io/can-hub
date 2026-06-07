@@ -1,4 +1,4 @@
-# Fully static can-hub edge binaries (agent, client, cli) against musl and
+# Fully static can-hub binaries (hub, agent, client, cli) against musl and
 # a source-built GnuTLS stack. Zero runtime dependencies: the binaries run
 # on any Linux of the right architecture regardless of the distro, its libc
 # or its package set (embedded boards, vendor OSes, old installations).
@@ -97,15 +97,17 @@ RUN . /etc/static-build.env \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_TOOLCHAIN_FILE=/src/cmake/toolchain-musl-static.cmake \
         -DCAN_HUB_STATIC=ON \
-    && cmake --build /build --target can-hub-agent can-hub-client can-hub-cli \
-    && $CROSS_TRIPLET-strip /build/can-hub-agent /build/can-hub-client /build/can-hub-cli \
-    && file /build/can-hub-agent /build/can-hub-client /build/can-hub-cli \
-    && ls -la /build/can-hub-agent /build/can-hub-client /build/can-hub-cli \
+    && cmake --build /build --target can-hub can-hub-agent can-hub-client can-hub-cli \
+    && $CROSS_TRIPLET-strip /build/can-hub /build/can-hub-agent /build/can-hub-client /build/can-hub-cli \
+    && file /build/can-hub /build/can-hub-agent /build/can-hub-client /build/can-hub-cli \
+    && ls -la /build/can-hub /build/can-hub-agent /build/can-hub-client /build/can-hub-cli \
+    && file /build/can-hub | grep -q "statically linked" \
     && file /build/can-hub-agent | grep -q "statically linked" \
     && file /build/can-hub-client | grep -q "statically linked" \
     && file /build/can-hub-cli | grep -q "statically linked"
 
 FROM scratch AS artifact
+COPY --from=build /build/can-hub /can-hub
 COPY --from=build /build/can-hub-agent /can-hub-agent
 COPY --from=build /build/can-hub-client /can-hub-client
 COPY --from=build /build/can-hub-cli /can-hub-cli

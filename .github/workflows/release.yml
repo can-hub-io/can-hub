@@ -27,6 +27,7 @@ jobs:
           cache-to: type=gha,scope=static-${{ matrix.arch }},mode=max
       - name: verify static linkage
         run: |
+          file dist/${{ matrix.arch }}/can-hub | grep -q "statically linked"
           file dist/${{ matrix.arch }}/can-hub-agent | grep -q "statically linked"
           file dist/${{ matrix.arch }}/can-hub-client | grep -q "statically linked"
           file dist/${{ matrix.arch }}/can-hub-cli | grep -q "statically linked"
@@ -34,7 +35,7 @@ jobs:
         run: |
           cd dist/${{ matrix.arch }}
           tar czf ../can-hub-${{ github.ref_name }}-linux-${{ matrix.arch }}-static.tar.gz \
-              can-hub-agent can-hub-client can-hub-cli
+              can-hub can-hub-agent can-hub-client can-hub-cli
       - name: publish release assets
         uses: softprops/action-gh-release@v2
         with:

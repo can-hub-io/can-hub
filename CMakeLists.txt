@@ -109,7 +109,7 @@ set(HUB_SOURCES
 )
 
 add_executable(can-hub src/platform/linux/hub_main.c ${COMMON_SOURCES} ${HUB_SOURCES})
-target_link_libraries(can-hub PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls sqlite3)
+target_link_libraries(can-hub PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls sqlite3 ${GNUTLS_STATIC_EXTRA_LIBRARIES})
 add_executable(can-hub-agent src/platform/linux/agent_main.c ${COMMON_SOURCES} ${AGENT_SOURCES})
 target_link_libraries(can-hub-agent PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls ${GNUTLS_STATIC_EXTRA_LIBRARIES})
 set(CLIENT_SOURCES
