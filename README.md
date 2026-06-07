@@ -40,7 +40,7 @@ to socketcand and cannelloni.
 |---|---|
 | `can-hub` | the hub: registry, frame relay, admin plane |
 | `can-hub-agent` | device daemon: exports local SocketCAN interfaces |
-| `can-hub-client` | consumer: `list`, `dump`, `send` |
+| `can-hub-client` | consumer: `list`, `dump`, `send`, `socketcand` |
 | `can-hub-cli` | hub administration over the local unix socket |
 
 ## Build
@@ -84,6 +84,23 @@ $ can-hub-client --connect tls://hub.example.com:7227 dump 1
 
 $ can-hub-client --connect tls://hub.example.com:7227 send 1 123#DEADBEEF
 ```
+
+Use remote buses with the existing SocketCAN ecosystem (python-can, Kayak,
+SavvyCAN) via the built-in socketcand server — it bridges every interface the
+client is allowed to read and announces them on the discovery beacon:
+
+```sh
+$ can-hub-client --connect tls://hub.example.com:7227 socketcand
+socketcand server on 127.0.0.1:29536, hub hub.example.com, beacon on
+
+# from a socketcand client, e.g. python-can:
+#   can.Bus(interface="socketcand", host="127.0.0.1", port=29536,
+#           channel="truck42/can0")
+```
+
+It opens read-only when the client lacks a write ACL on a bus (receive still
+works); `--listen [<bind-ip>:]<port>` moves the server off the loopback default
+and `--no-beacon` silences discovery.
 
 Administration, on the hub host:
 

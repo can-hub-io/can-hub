@@ -6,12 +6,15 @@
 
 #include <sys/epoll.h>
 
+#include <unistd.h>
+
 #include "platform/linux/clock/clock.h"
 #include "platform/linux/quic/quic_client_transport.h"
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/hub_defaults.h"
 #include "platform/linux/shared/tls_identity.h"
+#include "platform/linux/socketcand/socketcand_server.h"
 #include "platform/linux/tcp/tcp_client_transport.h"
 #include "platform/linux/tls/tls_client_transport.h"
 #include "protocol/error_message.h"
@@ -21,6 +24,7 @@
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
 #include "protocol/subscribe_message.h"
+#include "socketcand/socketcand_app.h"
 
 #define MAX_EPOLL_EVENTS 8
 #define POLL_PERIOD_MS 100
@@ -30,10 +34,20 @@
 #define KNOWN_HUBS_PATH_MAX (TLS_IDENTITY_PATH_MAX + sizeof(KNOWN_HUBS_FILE))
 #define PIN_KEY_MAX (CONNECT_URL_HOST_MAX + CONNECT_URL_PORT_TEXT_MAX)
 
+#define SOCKETCAND_DEFAULT_PORT_TEXT "29536"
+#define SOCKETCAND_BEACON_PORT 42000
+#define SOCKETCAND_HUB_STREAM_SLOT 0
+#define SC_TAG_HUB_STREAM 0xE0000000u
+#define SC_TAG_HUB_QUIC_UDP 0xE0000001u
+#define SC_TAG_HUB_QUIC_TIMER 0xE0000002u
+#define SC_TAG_SC_LISTEN 0xE0000003u
+#define SC_TAG_SC_SLOT_BASE 0xE0000010u
+
 typedef enum tclient_command_e {
     kCLIENT_COMMAND_LIST = 0,
     kCLIENT_COMMAND_DUMP,
     kCLIENT_COMMAND_SEND,
+    kCLIENT_COMMAND_SOCKETCAND,
     kCLIENT_COMMAND_MAX,
 } TCLIENT_COMMAND;
 
@@ -55,8 +69,23 @@ static char identity_certificate_path[TLS_IDENTITY_PATH_MAX];
 static char identity_key_path[TLS_IDENTITY_PATH_MAX];
 static char known_hubs_path[KNOWN_HUBS_PATH_MAX];
 static char pin_key[PIN_KEY_MAX];
+static char socketcand_bind_address[CONNECT_URL_HOST_MAX] = HUB_LOCAL_ADDRESS;
+static char socketcand_port_text[CONNECT_URL_PORT_TEXT_MAX] = SOCKETCAND_DEFAULT_PORT_TEXT;
+static bool beacon_enabled = true;
+static SocketcandApp socketcand_app;
+static SocketcandServer socketcand_server;
 
 static bool parseArguments(int argc, char **argv, char *host, char *port_text);
+static bool parseSocketcandListen(const char *value);
+static int32_t runSocketcandServer(const char *host, const char *port_text);
+static int32_t runSocketcandLoop(void);
+static void syncSocketcandHubStream(EpollRegistry *poll_registry);
+static uint32_t socketcandSlotMask(uint8_t slot);
+static void dispatchSocketcandEvent(const struct epoll_event *event);
+static void handleSocketcandSlotEvent(uint8_t slot, const struct epoll_event *event);
+static void handleHubStreamEvent(const struct epoll_event *event);
+static void resolveDeviceName(char *out, size_t out_size);
+static void buildBeaconUrl(char *out, size_t out_size);
 static bool parseFrameSpec(const char *text, FrameMessage *frame);
 static bool parseFilterSpec(const char *text, CanFilter *filter);
 static bool parseHexPayload(const char *text, FrameMessage *frame);
@@ -104,9 +133,15 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: %s [--connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>|unix://<path>]\n", argv[0]);
         fprintf(stderr, "       [--state-dir <path>] list | dump [--no-echo] <interface-id> [<id>[:<mask>] ...]\n");
         fprintf(stderr, "       | send <interface-id> <can-id>#<hex-payload>   (cansend syntax, e.g. 123#DEADBEEF)\n");
+        fprintf(stderr, "       | socketcand [--listen [<bind-ip>:]<port>] [--no-beacon]\n");
+        fprintf(stderr, "                                           local socketcand server (default 127.0.0.1:" SOCKETCAND_DEFAULT_PORT_TEXT ")\n");
         fprintf(stderr, "       %s --show-identity [--state-dir <path>]   print this client's TLS fingerprint\n", argv[0]);
         fprintf(stderr, "       default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
         return 1;
+    }
+
+    if (command == kCLIENT_COMMAND_SOCKETCAND) {
+        return runSocketcandServer(host, port_text);
     }
 
     if (!initTransport(host, port_text, &events)) {
@@ -136,10 +171,18 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
             state_directory_override = argv[++i];
         } else if (strcmp(argv[i], "--no-echo") == 0) {
             open_flags |= OPEN_FLAG_SUPPRESS_OWN_ECHO;
+        } else if (strcmp(argv[i], "--no-beacon") == 0) {
+            beacon_enabled = false;
+        } else if (strcmp(argv[i], "--listen") == 0 && i + 1 < argc) {
+            if (!parseSocketcandListen(argv[++i])) {
+                return false;
+            }
         } else if (command_name == NULL) {
             command_name = argv[i];
             if (strcmp(command_name, "list") == 0) {
                 command = kCLIENT_COMMAND_LIST;
+            } else if (strcmp(command_name, "socketcand") == 0) {
+                command = kCLIENT_COMMAND_SOCKETCAND;
             } else if (strcmp(command_name, "dump") == 0 && i + 1 < argc) {
                 command = kCLIENT_COMMAND_DUMP;
                 target_interface_id = (uint32_t)strtoul(argv[++i], NULL, 10);
@@ -589,4 +632,187 @@ static int32_t runQuicEventLoop(void)
     }
 
     return exit_code;
+}
+
+static bool parseSocketcandListen(const char *value)
+{
+    const char *remainder = strstr(value, "://");
+
+    remainder = (remainder != NULL) ? remainder + 3 : value;
+
+    return ConnectUrl_SplitListenAddress(remainder, socketcand_bind_address, socketcand_port_text);
+}
+
+static void resolveDeviceName(char *out, size_t out_size)
+{
+    if (gethostname(out, out_size) != 0) {
+        snprintf(out, out_size, "can-hub");
+    }
+    out[out_size - 1] = '\0';
+}
+
+static void buildBeaconUrl(char *out, size_t out_size)
+{
+    snprintf(out, out_size, "can://%s:%s", socketcand_bind_address, socketcand_port_text);
+}
+
+static int32_t runSocketcandServer(const char *host, const char *port_text)
+{
+    TransportEvents hub_events = SocketcandApp_TransportEvents(&socketcand_app);
+    SocketcandServerEvents server_events = SocketcandApp_ServerEvents(&socketcand_app);
+    char device_name[SOCKETCAND_DEVICE_NAME_SIZE];
+    char beacon_url[SOCKETCAND_URL_SIZE];
+
+    if (!initTransport(host, port_text, &hub_events)) {
+        fprintf(stderr, "could not initialize transport\n");
+        return 1;
+    }
+    if (!SocketcandServer_Init(&socketcand_server, socketcand_bind_address, socketcand_port_text, SOCKETCAND_BEACON_PORT, &server_events)) {
+        fprintf(stderr, "could not bind socketcand server on %s:%s\n", socketcand_bind_address, socketcand_port_text);
+        return 1;
+    }
+    if (strcmp(socketcand_bind_address, HUB_LOCAL_ADDRESS) != 0) {
+        fprintf(stderr, "warning: socketcand server bound to %s (not loopback) — socketcand clients are unauthenticated\n", socketcand_bind_address);
+    }
+
+    resolveDeviceName(device_name, sizeof(device_name));
+    buildBeaconUrl(beacon_url, sizeof(beacon_url));
+    SocketcandApp_Init(&socketcand_app, active_port, SocketcandServer_Port(&socketcand_server), device_name, beacon_url, beacon_enabled);
+
+    fprintf(stderr, "socketcand server on %s:%s, hub %s, beacon %s\n",
+            socketcand_bind_address, socketcand_port_text, host, beacon_enabled ? "on" : "off");
+
+    return runSocketcandLoop();
+}
+
+static void syncSocketcandHubStream(EpollRegistry *poll_registry)
+{
+    int32_t current_fd;
+    uint32_t wanted_mask = EPOLLIN;
+
+    if (connect_scheme == kCONNECT_SCHEME_QUIC) {
+        return;
+    }
+    if (connect_scheme == kCONNECT_SCHEME_TLS) {
+        current_fd = TlsClientTransport_Fd(&tls_transport);
+        if (TlsClientTransport_WantsWritable(&tls_transport)) {
+            wanted_mask |= EPOLLOUT;
+        }
+    } else {
+        current_fd = TcpClientTransport_Fd(&transport);
+        if (TcpClientTransport_WantsWritable(&transport)) {
+            wanted_mask |= EPOLLOUT;
+        }
+    }
+    EpollRegistry_SyncSlot(poll_registry, SOCKETCAND_HUB_STREAM_SLOT, current_fd, wanted_mask, SC_TAG_HUB_STREAM);
+}
+
+static uint32_t socketcandSlotMask(uint8_t slot)
+{
+    uint32_t mask = EPOLLIN;
+
+    if (SocketcandServer_SlotFd(&socketcand_server, slot) < 0) {
+        return 0;
+    }
+    if (SocketcandServer_SlotWantsWritable(&socketcand_server, slot)) {
+        mask |= EPOLLOUT;
+    }
+
+    return mask;
+}
+
+static void handleSocketcandSlotEvent(uint8_t slot, const struct epoll_event *event)
+{
+    if (event->events & EPOLLOUT) {
+        SocketcandServer_OnSlotWritable(&socketcand_server, slot);
+    }
+    if (event->events & EPOLLIN) {
+        SocketcandServer_OnSlotReadable(&socketcand_server, slot);
+    }
+}
+
+static void handleHubStreamEvent(const struct epoll_event *event)
+{
+    bool writable = (event->events & EPOLLOUT) != 0;
+    bool readable = (event->events & EPOLLIN) != 0;
+
+    if (connect_scheme == kCONNECT_SCHEME_TLS) {
+        if (writable) {
+            TlsClientTransport_OnWritable(&tls_transport);
+        }
+        if (readable) {
+            TlsClientTransport_OnReadable(&tls_transport);
+        }
+        return;
+    }
+    if (writable) {
+        TcpClientTransport_OnWritable(&transport);
+    }
+    if (readable) {
+        TcpClientTransport_OnReadable(&transport);
+    }
+}
+
+static void dispatchSocketcandEvent(const struct epoll_event *event)
+{
+    uint32_t tag = event->data.u32;
+
+    if (tag == SC_TAG_SC_LISTEN) {
+        SocketcandServer_OnAcceptReady(&socketcand_server);
+        return;
+    }
+    if (tag >= SC_TAG_SC_SLOT_BASE && tag < SC_TAG_SC_SLOT_BASE + SOCKETCAND_SERVER_SLOTS_MAX) {
+        handleSocketcandSlotEvent((uint8_t)(tag - SC_TAG_SC_SLOT_BASE), event);
+        return;
+    }
+    if (tag == SC_TAG_HUB_QUIC_UDP) {
+        QuicClientTransport_OnUdpReadable(&quic_transport);
+        return;
+    }
+    if (tag == SC_TAG_HUB_QUIC_TIMER) {
+        QuicClientTransport_OnTimer(&quic_transport);
+        return;
+    }
+    if (tag == SC_TAG_HUB_STREAM) {
+        handleHubStreamEvent(event);
+    }
+}
+
+static int32_t runSocketcandLoop(void)
+{
+    struct epoll_event events[MAX_EPOLL_EVENTS];
+    EpollRegistry poll_registry;
+    int32_t event_count;
+    int32_t i;
+    uint8_t slot;
+
+    if (!EpollRegistry_Open(&poll_registry)) {
+        return 1;
+    }
+    if (!EpollRegistry_AddStatic(&poll_registry, SocketcandServer_ListenFd(&socketcand_server), SC_TAG_SC_LISTEN)) {
+        return 1;
+    }
+    if (connect_scheme == kCONNECT_SCHEME_QUIC) {
+        EpollRegistry_AddStatic(&poll_registry, QuicClientTransport_UdpFd(&quic_transport), SC_TAG_HUB_QUIC_UDP);
+        EpollRegistry_AddStatic(&poll_registry, QuicClientTransport_TimerFd(&quic_transport), SC_TAG_HUB_QUIC_TIMER);
+    }
+
+    for (;;) {
+        syncSocketcandHubStream(&poll_registry);
+        for(slot=0; slot<SOCKETCAND_SERVER_SLOTS_MAX; slot++) {
+            EpollRegistry_SyncSlot(
+                &poll_registry,
+                (uint8_t)(1 + slot),
+                SocketcandServer_SlotFd(&socketcand_server, slot),
+                socketcandSlotMask(slot),
+                SC_TAG_SC_SLOT_BASE + slot
+            );
+        }
+
+        event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
+        for(i=0; i<event_count; i++) {
+            dispatchSocketcandEvent(&events[i]);
+        }
+        SocketcandApp_Tick(&socketcand_app, Clock_RealtimeUs());
+    }
 }

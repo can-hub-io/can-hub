@@ -139,7 +139,19 @@ set(CLIENT_TLS_SOURCES
     src/platform/linux/quic/quic_udp_endpoint.c
 )
 
-add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES} ${CLIENT_TLS_SOURCES})
+set(SOCKETCAND_SOURCES
+    src/socketcand/socketcand_bridge.c
+    src/socketcand/socketcand_app.c
+    src/socketcand/domain/ascii_framer.c
+    src/socketcand/domain/socketcand_codec.c
+    src/socketcand/domain/interface_catalogue.c
+    src/socketcand/domain/connection_table.c
+    src/socketcand/domain/beacon_xml.c
+    src/platform/linux/socketcand/socketcand_server.c
+    src/platform/linux/socketcand/beacon_udp.c
+)
+
+add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES} ${CLIENT_TLS_SOURCES} ${SOCKETCAND_SOURCES})
 target_link_libraries(can-hub-client PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls ${GNUTLS_STATIC_EXTRA_LIBRARIES})
 add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES})
 
