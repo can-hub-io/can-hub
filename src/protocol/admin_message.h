@@ -19,6 +19,8 @@
 #define ADMIN_PINS_REPLY_ENTRY_SIZE 196
 #define ADMIN_FORGET_BODY_SIZE 128
 #define ADMIN_FORGET_REPLY_BODY_SIZE 4
+#define ADMIN_PIN_ADD_BODY_SIZE 196
+#define ADMIN_PIN_ADD_REPLY_BODY_SIZE 4
 #define ADMIN_KICK_PEER_BODY_SIZE 4
 #define ADMIN_KICK_PEER_REPLY_BODY_SIZE 4
 #define ADMIN_AGENTS_BODY_SIZE 132
@@ -41,6 +43,7 @@
 #define ADMIN_STATUS_OK 0
 #define ADMIN_STATUS_UNKNOWN_AGENT 1
 #define ADMIN_STATUS_UNKNOWN_PEER 1
+#define ADMIN_STATUS_PIN_FAILED 1
 
 typedef struct {
     uint16_t peer_count;
@@ -149,6 +152,15 @@ typedef struct {
 } AdminClientsReplyMessage;
 
 typedef struct {
+    char agent_name[REGISTER_AGENT_NAME_SIZE];
+    char fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE];
+} AdminPinAddMessage;
+
+typedef struct {
+    uint8_t status;
+} AdminPinAddReplyMessage;
+
+typedef struct {
     uint16_t offset;
 } AdminInterfacesMessage;
 
@@ -212,6 +224,12 @@ bool AdminClientsMessage_Decode(AdminClientsMessage *self, const uint8_t *payloa
 
 size_t AdminClientsReplyMessage_Encode(const AdminClientsReplyMessage *self, uint8_t *buffer, size_t buffer_size);
 bool AdminClientsReplyMessage_Decode(AdminClientsReplyMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminPinAddMessage_Encode(const AdminPinAddMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminPinAddMessage_Decode(AdminPinAddMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminPinAddReplyMessage_Encode(const AdminPinAddReplyMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminPinAddReplyMessage_Decode(AdminPinAddReplyMessage *self, const uint8_t *payload, size_t payload_length);
 
 size_t AdminInterfacesMessage_Encode(const AdminInterfacesMessage *self, uint8_t *buffer, size_t buffer_size);
 bool AdminInterfacesMessage_Decode(AdminInterfacesMessage *self, const uint8_t *payload, size_t payload_length);

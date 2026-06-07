@@ -277,6 +277,45 @@ describe("admin_agents_message", []() {
     });
 });
 
+describe("admin_pin_add_message", []() {
+    it("round-trips the agent name and fingerprint", []() {
+        AdminPinAddMessage request = { "truck42", FINGERPRINT };
+        AdminPinAddMessage decoded;
+        uint8_t buffer[256];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminPinAddMessage_Encode(&request, buffer, sizeof(buffer));
+        decoded_ok = AdminPinAddMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + ADMIN_PIN_ADD_BODY_SIZE));
+        expect(decoded_ok).toBe(true);
+        expect((const char *)decoded.agent_name).toBe("truck42");
+        expect((const char *)decoded.fingerprint_hex).toBe(FINGERPRINT);
+    });
+
+    it("rejects encoding an empty name or fingerprint", []() {
+        AdminPinAddMessage no_name = { "", FINGERPRINT };
+        AdminPinAddMessage no_fp = { "truck42", "" };
+        uint8_t buffer[256];
+
+        expect(AdminPinAddMessage_Encode(&no_name, buffer, sizeof(buffer))).toBe((size_t)0);
+        expect(AdminPinAddMessage_Encode(&no_fp, buffer, sizeof(buffer))).toBe((size_t)0);
+    });
+
+    it("round-trips the reply status", []() {
+        AdminPinAddReplyMessage reply = { ADMIN_STATUS_PIN_FAILED };
+        AdminPinAddReplyMessage decoded;
+        uint8_t buffer[16];
+        size_t encoded_size;
+
+        encoded_size = AdminPinAddReplyMessage_Encode(&reply, buffer, sizeof(buffer));
+
+        expect(AdminPinAddReplyMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE)).toBe(true);
+        expect(decoded.status).toBe(ADMIN_STATUS_PIN_FAILED);
+    });
+});
+
 describe("admin_interfaces_message", []() {
     it("round-trips the pagination offset", []() {
         AdminInterfacesMessage request = { 9 };

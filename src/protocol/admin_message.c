@@ -491,6 +491,53 @@ bool AdminClientsReplyMessage_Decode(AdminClientsReplyMessage *self, const uint8
     return true;
 }
 
+size_t AdminPinAddMessage_Encode(const AdminPinAddMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t total_size;
+
+    if (!isNameTerminated(self->agent_name) || self->agent_name[0] == '\0') {
+        return 0;
+    }
+    if (self->fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] != '\0' || self->fingerprint_hex[0] == '\0') {
+        return 0;
+    }
+
+    total_size = encodeFixedBody(kMESSAGE_TYPE_ADMIN_PIN_ADD, ADMIN_PIN_ADD_BODY_SIZE, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    memcpy(body + PIN_ENTRY_AGENT_NAME_OFFSET, self->agent_name, strlen(self->agent_name));
+    memcpy(body + PIN_ENTRY_FINGERPRINT_OFFSET, self->fingerprint_hex, strlen(self->fingerprint_hex));
+
+    return total_size;
+}
+
+bool AdminPinAddMessage_Decode(AdminPinAddMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    if (payload_length < ADMIN_PIN_ADD_BODY_SIZE) {
+        return false;
+    }
+
+    memcpy(self->agent_name, payload + PIN_ENTRY_AGENT_NAME_OFFSET, REGISTER_AGENT_NAME_SIZE);
+    self->agent_name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';
+    memcpy(self->fingerprint_hex, payload + PIN_ENTRY_FINGERPRINT_OFFSET, ADMIN_FINGERPRINT_HEX_SIZE);
+    self->fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] = '\0';
+
+    return self->agent_name[0] != '\0' && self->fingerprint_hex[0] != '\0';
+}
+
+size_t AdminPinAddReplyMessage_Encode(const AdminPinAddReplyMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    return encodeStatusReply(kMESSAGE_TYPE_ADMIN_PIN_ADD_REPLY, self->status, buffer, buffer_size);
+}
+
+bool AdminPinAddReplyMessage_Decode(AdminPinAddReplyMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    return decodeStatusReply(&self->status, payload, payload_length, ADMIN_PIN_ADD_REPLY_BODY_SIZE);
+}
+
 size_t AdminInterfacesMessage_Encode(const AdminInterfacesMessage *self, uint8_t *buffer, size_t buffer_size)
 {
     return encodeOffsetRequest(kMESSAGE_TYPE_ADMIN_INTERFACES, self->offset, buffer, buffer_size);

@@ -46,9 +46,10 @@ static void handleAdminKickPeer(Broker *self, HubPeer *peer, const MessageHeader
 static void handleAdminAgents(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminClients(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminInterfaces(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleAdminPinAdd(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void countInterfaceFrame(Broker *self, const HubPeer *peer, uint8_t channel);
 static void disconnectPeer(Broker *self, uint32_t peer_id);
-static bool agentIdentityAccepted(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
+static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
 static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size);
 static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char *detail);
@@ -73,15 +74,17 @@ static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
     [kMESSAGE_TYPE_ADMIN_AGENTS] = handleAdminAgents,
     [kMESSAGE_TYPE_ADMIN_CLIENTS] = handleAdminClients,
     [kMESSAGE_TYPE_ADMIN_INTERFACES] = handleAdminInterfaces,
+    [kMESSAGE_TYPE_ADMIN_PIN_ADD] = handleAdminPinAdd,
 };
 
 /* ---------- public ---------- */
 
-void Broker_Init(Broker *self, HubTransportPort *transport, IdentityStorePort *identity_store)
+void Broker_Init(Broker *self, HubTransportPort *transport, IdentityStorePort *identity_store, bool require_known_agents)
 {
     memset(self, 0, sizeof(*self));
     self->transport = transport;
     self->identity_store = identity_store;
+    self->require_known_agents = require_known_agents;
     InterfaceRegistry_Reset(&self->registry);
     PeerDirectory_Reset(&self->directory);
 }
@@ -249,13 +252,13 @@ static void handleHello(Broker *self, HubPeer *peer, const MessageHeader *header
     }
     if (!HelloMessage_Decode(&hello, payload, header->length)) {
         sendError(self, peer->peer_id, kERROR_CODE_MALFORMED, "malformed hello");
-        self->transport->close_peer(self->transport->context, peer->peer_id);
+        disconnectPeer(self, peer->peer_id);
         return;
     }
 
     if (!HubPeer_AdoptRole(peer, hello.role)) {
         sendError(self, peer->peer_id, kERROR_CODE_ROLE_REJECTED, "admin role requires a local transport");
-        self->transport->close_peer(self->transport->context, peer->peer_id);
+        disconnectPeer(self, peer->peer_id);
     }
 }
 
@@ -264,6 +267,7 @@ static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *hea
     RegisterMessage registration;
     RegisterAckMessage ack;
     uint8_t encoded[CONTROL_BUFFER_SIZE];
+    uint8_t identity_status;
     bool registered;
 
     if (peer->role != kHUB_PEER_ROLE_AGENT) {
@@ -271,15 +275,24 @@ static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *hea
     }
     if (!RegisterMessage_Decode(&registration, payload, header->length)) {
         sendError(self, peer->peer_id, kERROR_CODE_MALFORMED, "malformed register");
-        self->transport->close_peer(self->transport->context, peer->peer_id);
+        disconnectPeer(self, peer->peer_id);
         return;
     }
 
-    if (!agentIdentityAccepted(self, peer, &registration)) {
+    identity_status = agentIdentityStatus(self, peer, &registration);
+    if (identity_status != REGISTER_STATUS_OK) {
         memset(&ack, 0, sizeof(ack));
-        ack.status = REGISTER_STATUS_IDENTITY_MISMATCH;
+        ack.status = identity_status;
         sendControl(self, peer, encoded, RegisterAckMessage_Encode(&ack, encoded, sizeof(encoded)));
-        self->transport->close_peer(self->transport->context, peer->peer_id);
+        sendError(
+            self,
+            peer->peer_id,
+            kERROR_CODE_ROLE_REJECTED,
+            identity_status == REGISTER_STATUS_UNKNOWN_AGENT
+                ? "agent fingerprint not in the hub allowlist"
+                : "agent name pinned to a different fingerprint"
+        );
+        disconnectPeer(self, peer->peer_id);
         return;
     }
 
@@ -287,7 +300,7 @@ static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *hea
     sendControl(self, peer, encoded, RegisterAckMessage_Encode(&ack, encoded, sizeof(encoded)));
 
     if (!registered) {
-        self->transport->close_peer(self->transport->context, peer->peer_id);
+        disconnectPeer(self, peer->peer_id);
         return;
     }
 
@@ -517,6 +530,27 @@ static void handleAdminInterfaces(Broker *self, HubPeer *peer, const MessageHead
     sendControl(self, peer, encoded, AdminInterfacesReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 
+static void handleAdminPinAdd(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    AdminPinAddMessage request;
+    AdminPinAddReplyMessage reply;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    bool added = false;
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN) {
+        return;
+    }
+    if (!AdminPinAddMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    if (self->identity_store != NULL) {
+        added = self->identity_store->pin(self->identity_store->context, request.agent_name, request.fingerprint_hex);
+    }
+    reply.status = added ? ADMIN_STATUS_OK : ADMIN_STATUS_PIN_FAILED;
+    sendControl(self, peer, encoded, AdminPinAddReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+}
+
 static void handleAdminPins(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
 {
     AdminPinsMessage request;
@@ -577,23 +611,29 @@ static void handleAdminForget(Broker *self, HubPeer *peer, const MessageHeader *
 
 /* ---------- private: helpers ---------- */
 
-static bool agentIdentityAccepted(Broker *self, const HubPeer *peer, const RegisterMessage *registration)
+static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const RegisterMessage *registration)
 {
     char pinned[IDENTITY_FINGERPRINT_HEX_SIZE];
 
     if (self->identity_store == NULL || peer->fingerprint_hex[0] == '\0') {
-        return true;
+        return REGISTER_STATUS_OK;
     }
 
     if (!self->identity_store->lookup(self->identity_store->context, registration->agent_name, pinned)) {
-        return self->identity_store->pin(
-            self->identity_store->context,
-            registration->agent_name,
-            peer->fingerprint_hex
-        );
+        if (self->require_known_agents) {
+            return REGISTER_STATUS_UNKNOWN_AGENT;
+        }
+        if (!self->identity_store->pin(
+                self->identity_store->context,
+                registration->agent_name,
+                peer->fingerprint_hex
+            )) {
+            return REGISTER_STATUS_REJECTED;
+        }
+        return REGISTER_STATUS_OK;
     }
 
-    return strcmp(pinned, peer->fingerprint_hex) == 0;
+    return strcmp(pinned, peer->fingerprint_hex) == 0 ? REGISTER_STATUS_OK : REGISTER_STATUS_IDENTITY_MISMATCH;
 }
 
 static void disconnectPeer(Broker *self, uint32_t peer_id)

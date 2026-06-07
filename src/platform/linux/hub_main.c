@@ -56,6 +56,7 @@ static TlsServerTransport tls_transport;
 static ListenAddress tcp_listen;
 static ListenAddress quic_listen;
 static ListenAddress tls_listen;
+static bool require_known_agents;
 static HubTransportPort mux_port;
 static bool tcp_enabled;
 static bool unix_enabled;
@@ -71,7 +72,7 @@ static bool parseArguments(int argc, char **argv);
 static bool loadIdentity(const char *state_directory_override);
 static IdentityStorePort *identityStore(void);
 static void importLegacyPinFile(void);
-static void applyDefaultListen(ListenAddress *listen_address, const char *port_text);
+static void applyDefaultListen(ListenAddress *listen_address, const char *bind_address, const char *port_text);
 static bool startListeners(const char *unix_path, const char *certificate, const char *key, bool explicit_listen);
 static bool muxSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool muxSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
@@ -94,10 +95,11 @@ int main(int argc, char **argv)
             stderr,
             "usage: %s [--listen tls://[<bind-ip>:]<port>] [--listen quic://[<bind-ip>:]<port>]\n"
             "       [--listen tcp://[<bind-ip>:]<port>] [--listen unix://<path>]\n"
-            "       [--cert <pem> --key <pem>] [--state-dir <path>]\n"
-            "       defaults: tls://" HUB_DEFAULT_PORT_TEXT ", quic://" HUB_DEFAULT_PORT_TEXT
-            ", tcp://" HUB_DEFAULT_PLAIN_TCP_PORT_TEXT ", unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n"
-            "       bind-ip defaults to 0.0.0.0; explicit --listen replaces the network defaults;"
+            "       [--cert <pem> --key <pem>] [--state-dir <path>] [--require-known-agents]\n"
+            "       defaults: tls://0.0.0.0:" HUB_DEFAULT_PORT_TEXT ", quic://0.0.0.0:" HUB_DEFAULT_PORT_TEXT
+            ", tcp://127.0.0.1:" HUB_DEFAULT_PLAIN_TCP_PORT_TEXT ", unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n"
+            "       bind-ip defaults to 0.0.0.0 (tcp: 127.0.0.1); explicit --listen replaces the network\n"
+            "       defaults; --require-known-agents rejects agents whose fingerprint is not pinned;"
             " TLS identity auto-generated\n",
             argv[0]
         );
@@ -110,13 +112,22 @@ int main(int argc, char **argv)
 
     fprintf(
         stderr,
-        "can-hub %s ready (tls:%s quic:%s tcp:%s unix:%s)\n",
+        "can-hub %s ready (tls:%s quic:%s tcp:%s unix:%s)%s\n",
         Version_String(),
         tls_enabled ? "on" : "off",
         quic_enabled ? "on" : "off",
         tcp_enabled ? "on" : "off",
-        unix_enabled ? "on" : "off"
+        unix_enabled ? "on" : "off",
+        require_known_agents ? " [locked: known agents only]" : ""
     );
+    if (require_known_agents && tcp_enabled && strcmp(tcp_listen.bind_address, "127.0.0.1") != 0) {
+        fprintf(
+            stderr,
+            "warning: plain tcp on %s carries no identity and bypasses the agent allowlist;"
+            " bind it to a trusted interface or disable it\n",
+            tcp_listen.bind_address
+        );
+    }
 
     for (;;) {
         if (tcp_enabled) {
@@ -183,13 +194,15 @@ static bool parseArguments(int argc, char **argv)
             key = argv[++i];
         } else if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
             state_directory_override = argv[++i];
+        } else if (strcmp(argv[i], "--require-known-agents") == 0) {
+            require_known_agents = true;
         }
     }
 
     if (!explicit_listen) {
-        applyDefaultListen(&tcp_listen, HUB_DEFAULT_PLAIN_TCP_PORT_TEXT);
-        applyDefaultListen(&quic_listen, HUB_DEFAULT_PORT_TEXT);
-        applyDefaultListen(&tls_listen, HUB_DEFAULT_PORT_TEXT);
+        applyDefaultListen(&tcp_listen, HUB_LOCAL_ADDRESS, HUB_DEFAULT_PLAIN_TCP_PORT_TEXT);
+        applyDefaultListen(&quic_listen, HUB_LISTEN_ANY_ADDRESS, HUB_DEFAULT_PORT_TEXT);
+        applyDefaultListen(&tls_listen, HUB_LISTEN_ANY_ADDRESS, HUB_DEFAULT_PORT_TEXT);
     }
 
     if ((quic_listen.requested || tls_listen.requested) && (certificate == NULL || key == NULL)) {
@@ -209,10 +222,10 @@ static bool parseArguments(int argc, char **argv)
     return startListeners(unix_path, certificate, key, explicit_listen);
 }
 
-static void applyDefaultListen(ListenAddress *listen_address, const char *port_text)
+static void applyDefaultListen(ListenAddress *listen_address, const char *bind_address, const char *port_text)
 {
     listen_address->requested = true;
-    snprintf(listen_address->bind_address, sizeof(listen_address->bind_address), "%s", HUB_LISTEN_ANY_ADDRESS);
+    snprintf(listen_address->bind_address, sizeof(listen_address->bind_address), "%s", bind_address);
     snprintf(listen_address->port_text, sizeof(listen_address->port_text), "%s", port_text);
 }
 
@@ -308,7 +321,7 @@ static bool startListeners(const char *unix_path, const char *certificate, const
         return false;
     }
 
-    HubApp_Init(&app, &mux_port, identityStore());
+    HubApp_Init(&app, &mux_port, identityStore(), require_known_agents);
 
     return true;
 }

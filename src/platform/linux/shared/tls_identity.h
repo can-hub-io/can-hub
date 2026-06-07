@@ -24,3 +24,4 @@ bool TlsIdentity_LoadOrCreate(
     char *key_path
 );
 bool TlsIdentity_FingerprintOfDer(const gnutls_datum_t *certificate_der, char *fingerprint_hex);
+bool TlsIdentity_FingerprintOfFile(const char *certificate_path, char *fingerprint_hex);

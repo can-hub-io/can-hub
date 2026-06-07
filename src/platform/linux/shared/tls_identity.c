@@ -93,6 +93,26 @@ bool TlsIdentity_FingerprintOfDer(const gnutls_datum_t *certificate_der, char *f
     return true;
 }
 
+bool TlsIdentity_FingerprintOfFile(const char *certificate_path, char *fingerprint_hex)
+{
+    gnutls_datum_t certificate_pem;
+    gnutls_datum_t certificate_der;
+    bool computed = false;
+
+    if (gnutls_load_file(certificate_path, &certificate_pem) != 0) {
+        return false;
+    }
+
+    if (gnutls_pem_base64_decode2("CERTIFICATE", &certificate_pem, &certificate_der) == 0) {
+        computed = TlsIdentity_FingerprintOfDer(&certificate_der, fingerprint_hex);
+        gnutls_free(certificate_der.data);
+    }
+
+    gnutls_free(certificate_pem.data);
+
+    return computed;
+}
+
 /* ---------- private ---------- */
 
 static bool directoryUsable(const char *directory)

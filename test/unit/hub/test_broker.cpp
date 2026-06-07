@@ -40,14 +40,13 @@ static void registerAgentWithFingerprint(uint32_t peer_id, const char *fingerpri
     events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
 }
 
-static uint8_t lastAckStatus(void)
+static uint8_t registerAckStatus(void)
 {
     RegisterAckMessage ack;
     MessageHeader header;
-    int reply_index = transport.control_count - 1;
 
-    MessageHeader_Decode(&header, transport.control_log[reply_index], transport.control_sizes[reply_index]);
-    RegisterAckMessage_Decode(&ack, transport.control_log[reply_index] + MESSAGE_HEADER_SIZE, header.length);
+    MessageHeader_Decode(&header, transport.control_log[0], transport.control_sizes[0]);
+    RegisterAckMessage_Decode(&ack, transport.control_log[0] + MESSAGE_HEADER_SIZE, header.length);
 
     return ack.status;
 }
@@ -78,7 +77,7 @@ describe("broker", []() {
     describe("agent registration", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL);
+            Broker_Init(&broker, &transport.port, NULL, false);
             events = Broker_Events(&broker);
         });
 
@@ -134,14 +133,14 @@ describe("broker", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
             IdentityStoreMock_Reset(&identity_store);
-            Broker_Init(&broker, &transport.port, &identity_store.port);
+            Broker_Init(&broker, &transport.port, &identity_store.port, false);
             events = Broker_Events(&broker);
         });
 
         it("pins the fingerprint of a first-seen agent name", []() {
             registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
 
-            expect(lastAckStatus()).toBe(REGISTER_STATUS_OK);
+            expect(registerAckStatus()).toBe(REGISTER_STATUS_OK);
             expect(identity_store.pin_calls).toBe(1);
             expect((const char *)identity_store.names[0]).toBe("truck42");
             expect((const char *)identity_store.fingerprints[0]).toBe(TRUCK_FINGERPRINT);
@@ -152,7 +151,7 @@ describe("broker", []() {
 
             registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
 
-            expect(lastAckStatus()).toBe(REGISTER_STATUS_OK);
+            expect(registerAckStatus()).toBe(REGISTER_STATUS_OK);
             expect(identity_store.pin_calls).toBe(0);
         });
 
@@ -161,7 +160,7 @@ describe("broker", []() {
 
             registerAgentWithFingerprint(AGENT_PEER, OTHER_FINGERPRINT);
 
-            expect(lastAckStatus()).toBe(REGISTER_STATUS_IDENTITY_MISMATCH);
+            expect(registerAckStatus()).toBe(REGISTER_STATUS_IDENTITY_MISMATCH);
             expect(transport.close_count).toBe(1);
             expect(transport.last_closed_peer).toBe((uint32_t)AGENT_PEER);
         });
@@ -169,16 +168,101 @@ describe("broker", []() {
         it("skips pinning for peers without a fingerprint", []() {
             registerAgentWithFingerprint(AGENT_PEER, NULL);
 
-            expect(lastAckStatus()).toBe(REGISTER_STATUS_OK);
+            expect(registerAckStatus()).toBe(REGISTER_STATUS_OK);
             expect(identity_store.lookup_calls).toBe(0);
             expect(identity_store.pin_calls).toBe(0);
+        });
+    });
+
+    describe("locked agents", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            IdentityStoreMock_Reset(&identity_store);
+            Broker_Init(&broker, &transport.port, &identity_store.port, true);
+            events = Broker_Events(&broker);
+        });
+
+        it("rejects an unknown fingerprint instead of auto-pinning", []() {
+            ErrorMessage error;
+            uint8_t error_type;
+
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+            error_type = lastReply(&error, ErrorMessage_Decode);
+
+            expect(registerAckStatus()).toBe(REGISTER_STATUS_UNKNOWN_AGENT);
+            expect(identity_store.pin_calls).toBe(0);
+            expect(error_type).toBe(kMESSAGE_TYPE_ERROR);
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)AGENT_PEER);
+        });
+
+        it("accepts a pre-authorized fingerprint", []() {
+            IdentityStoreMock_Preload(&identity_store, "truck42", TRUCK_FINGERPRINT);
+
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+
+            expect(registerAckStatus()).toBe(REGISTER_STATUS_OK);
+        });
+
+        it("releases the peer slot of a rejected agent (no ghost)", []() {
+            AdminPeersMessage request = { 0 };
+            AdminPeersReplyMessage reply;
+            uint8_t encoded[64];
+            size_t encoded_size = AdminPeersMessage_Encode(&request, encoded, sizeof(encoded));
+
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+            registerAgentWithFingerprint(AGENT_PEER + 1, OTHER_FINGERPRINT);
+            HubTransportPortMock_Reset(&transport);
+            BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            lastReply(&reply, AdminPeersReplyMessage_Decode);
+
+            expect(reply.count).toBe(1);
+            expect(reply.entries[0].peer_id).toBe((uint32_t)ADMIN_PEER);
+        });
+
+        it("still accepts plaintext peers that carry no fingerprint", []() {
+            registerAgentWithFingerprint(AGENT_PEER, NULL);
+
+            expect(registerAckStatus()).toBe(REGISTER_STATUS_OK);
+        });
+    });
+
+    describe("admin pin add", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            IdentityStoreMock_Reset(&identity_store);
+            Broker_Init(&broker, &transport.port, &identity_store.port, true);
+            events = Broker_Events(&broker);
+            BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
+        });
+
+        it("pins an agent fingerprint from the admin plane", []() {
+            AdminPinAddMessage request;
+            AdminPinAddReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[256];
+            size_t encoded_size;
+
+            memset(&request, 0, sizeof(request));
+            snprintf(request.agent_name, sizeof(request.agent_name), "truck42");
+            snprintf(request.fingerprint_hex, sizeof(request.fingerprint_hex), "%s", TRUCK_FINGERPRINT);
+            encoded_size = AdminPinAddMessage_Encode(&request, encoded, sizeof(encoded));
+
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminPinAddReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_PIN_ADD_REPLY);
+            expect(reply.status).toBe(ADMIN_STATUS_OK);
+            expect((const char *)identity_store.names[0]).toBe("truck42");
+            expect((const char *)identity_store.fingerprints[0]).toBe(TRUCK_FINGERPRINT);
         });
     });
 
     describe("client control plane", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL);
+            Broker_Init(&broker, &transport.port, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);
@@ -237,7 +321,7 @@ describe("broker", []() {
             uint32_t interface_id;
 
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL);
+            Broker_Init(&broker, &transport.port, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);
@@ -304,7 +388,7 @@ describe("broker", []() {
     describe("liveness", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL);
+            Broker_Init(&broker, &transport.port, NULL, false);
             events = Broker_Events(&broker);
             events.on_peer_connected(events.context, AGENT_PEER, NULL, false);
         });
@@ -329,7 +413,7 @@ describe("broker", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
             IdentityStoreMock_Reset(&identity_store);
-            Broker_Init(&broker, &transport.port, &identity_store.port);
+            Broker_Init(&broker, &transport.port, &identity_store.port, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);
@@ -559,7 +643,7 @@ describe("broker", []() {
     describe("echo fan-out", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL);
+            Broker_Init(&broker, &transport.port, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);
@@ -644,7 +728,7 @@ describe("broker", []() {
             uint32_t interface_id;
 
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL);
+            Broker_Init(&broker, &transport.port, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);

@@ -20,7 +20,7 @@
 #define POLL_PERIOD_MS 100
 #define TCP_SLOT 0
 #define COMMAND_BUFFER_SIZE 256
-#define COMMAND_WORDS_MAX 3
+#define COMMAND_WORDS_MAX 4
 
 typedef enum tcli_command_e {
     kCLI_COMMAND_STATUS = 0,
@@ -33,6 +33,7 @@ typedef enum tcli_command_e {
     kCLI_COMMAND_INTERFACES,
     kCLI_COMMAND_PINS,
     kCLI_COMMAND_PINS_FORGET,
+    kCLI_COMMAND_PINS_ADD,
     kCLI_COMMAND_MAX,
 } TCLI_COMMAND;
 
@@ -48,6 +49,7 @@ static uint8_t command;
 static uint8_t connect_scheme;
 static uint8_t show_stage;
 static char target_agent[REGISTER_AGENT_NAME_SIZE];
+static char target_fingerprint[ADMIN_FINGERPRINT_HEX_SIZE];
 static uint32_t target_peer_id;
 static uint16_t page_offset;
 static bool page_header_printed;
@@ -101,6 +103,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "  clients                open client channels\n");
         fprintf(stderr, "  interfaces             interface catalogue\n");
         fprintf(stderr, "  pins                   pinned TOFU identities\n");
+        fprintf(stderr, "  pins add <name> <fp>   allow an agent (its --show-identity fingerprint)\n");
         fprintf(stderr, "  pins forget <name>     drop a pin so the agent can re-pin\n");
         fprintf(stderr, "default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
         return 1;
@@ -176,7 +179,17 @@ static bool mapCommand(const char *words[], uint8_t word_count)
         return true;
     }
 
-    if (word_count != COMMAND_WORDS_MAX) {
+    if (word_count == 4) {
+        if (strcmp(words[0], "pins") != 0 || strcmp(words[1], "add") != 0) {
+            return false;
+        }
+        command = kCLI_COMMAND_PINS_ADD;
+        snprintf(target_agent, sizeof(target_agent), "%s", words[2]);
+        snprintf(target_fingerprint, sizeof(target_fingerprint), "%s", words[3]);
+        return target_agent[0] != '\0' && target_fingerprint[0] != '\0';
+    }
+
+    if (word_count != 3) {
         return false;
     }
 
@@ -245,6 +258,7 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
     AdminKickReplyMessage kick_reply;
     AdminKickPeerReplyMessage kick_peer_reply;
     AdminForgetReplyMessage forget_reply;
+    AdminPinAddReplyMessage pin_add_reply;
     ErrorMessage error;
     char peer_id_text[16];
 
@@ -301,6 +315,17 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
         printActionReply(kick_peer_reply.status, "kicked", "peer", peer_id_text);
         return;
     }
+    if (header.type == kMESSAGE_TYPE_ADMIN_PIN_ADD_REPLY) {
+        AdminPinAddReplyMessage_Decode(&pin_add_reply, data + MESSAGE_HEADER_SIZE, header.length);
+        if (pin_add_reply.status != ADMIN_STATUS_OK) {
+            fprintf(stderr, "could not pin %s\n", target_agent);
+            exit_code = 1;
+            return;
+        }
+        printf("pinned %s %s\n", target_agent, target_fingerprint);
+        exit_code = 0;
+        return;
+    }
     if (header.type == kMESSAGE_TYPE_ADMIN_FORGET_REPLY) {
         AdminForgetReplyMessage_Decode(&forget_reply, data + MESSAGE_HEADER_SIZE, header.length);
         printActionReply(forget_reply.status, "forgot", "agent", target_agent);
@@ -327,6 +352,7 @@ static void sendRequest(void)
     AdminKickMessage kick;
     AdminKickPeerMessage kick_peer = { target_peer_id };
     AdminForgetMessage forget;
+    AdminPinAddMessage pin_add;
     uint8_t encoded[COMMAND_BUFFER_SIZE];
     size_t encoded_size = 0;
 
@@ -360,6 +386,11 @@ static void sendRequest(void)
         memset(&forget, 0, sizeof(forget));
         snprintf(forget.agent_name, sizeof(forget.agent_name), "%s", target_agent);
         encoded_size = AdminForgetMessage_Encode(&forget, encoded, sizeof(encoded));
+    } else if (command == kCLI_COMMAND_PINS_ADD) {
+        memset(&pin_add, 0, sizeof(pin_add));
+        snprintf(pin_add.agent_name, sizeof(pin_add.agent_name), "%s", target_agent);
+        snprintf(pin_add.fingerprint_hex, sizeof(pin_add.fingerprint_hex), "%s", target_fingerprint);
+        encoded_size = AdminPinAddMessage_Encode(&pin_add, encoded, sizeof(encoded));
     }
 
     if (encoded_size == 0) {

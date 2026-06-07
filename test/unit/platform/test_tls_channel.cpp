@@ -78,6 +78,19 @@ describe("tls_channel", []() {
         expect(strlen(fingerprint)).toBe((size_t)64);
     });
 
+    it("FingerprintOfFile matches the fingerprint seen on the wire", []() {
+        char handshake_fingerprint[TLS_IDENTITY_FINGERPRINT_HEX_SIZE] = "";
+        char file_fingerprint[TLS_IDENTITY_FINGERPRINT_HEX_SIZE] = "";
+        bool client_failed = false;
+
+        expect(startLoopbackPair()).toBe(true);
+        expect(pumpUntilEstablished(&client_failed)).toBe(true);
+
+        expect(TlsChannel_PeerFingerprint(&server_channel, handshake_fingerprint)).toBe(true);
+        expect(TlsIdentity_FingerprintOfFile(client_certificate, file_fingerprint)).toBe(true);
+        expect((const char *)file_fingerprint).toBe((const char *)handshake_fingerprint);
+    });
+
     it("pins the server fingerprint on first contact", []() {
         char pinned[PIN_STORE_FINGERPRINT_HEX_SIZE];
         bool client_failed = false;

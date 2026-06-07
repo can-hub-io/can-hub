@@ -25,8 +25,9 @@ typedef struct {
     InterfaceRegistry registry;
     PeerDirectory directory;
     HubMetrics metrics;
+    bool require_known_agents;
 } Broker;
 
-void Broker_Init(Broker *self, HubTransportPort *transport, IdentityStorePort *identity_store);
+void Broker_Init(Broker *self, HubTransportPort *transport, IdentityStorePort *identity_store, bool require_known_agents);
 HubTransportEvents Broker_Events(Broker *self);
 void Broker_Tick(Broker *self, uint64_t now_us);

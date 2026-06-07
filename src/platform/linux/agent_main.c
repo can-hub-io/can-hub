@@ -47,6 +47,7 @@ static bool registerStaticPollFds(void);
 static void syncStreamRegistration(void);
 static void dispatchEvent(const struct epoll_event *event, const CanEvents *can_events);
 static void drainCanInterface(uint8_t interface_index, const CanEvents *can_events);
+static int32_t showIdentity(void);
 
 int main(int argc, char **argv)
 {
@@ -58,11 +59,25 @@ int main(int argc, char **argv)
     int32_t event_count;
     int32_t i;
 
+    for(i=1; i<argc; i++) {
+        if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
+            state_directory_override = argv[++i];
+        }
+    }
+    for(i=1; i<argc; i++) {
+        if (strcmp(argv[i], "--show-identity") == 0) {
+            return showIdentity();
+        }
+    }
+
     if (!parseArguments(argc, argv, host, port_text)) {
         fprintf(
             stderr,
             "usage: %s --connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>"
-            " [--name <agent-name>] [--state-dir <path>] <can-if> [...]\n",
+            " [--name <agent-name>] [--state-dir <path>] <can-if> [...]\n"
+            "       %s --show-identity [--state-dir <path>]   print this agent's"
+            " TLS fingerprint for the hub allowlist\n",
+            argv[0],
             argv[0]
         );
         return 1;
@@ -292,4 +307,22 @@ static void drainCanInterface(uint8_t interface_index, const CanEvents *can_even
     while (SocketCanAdapter_ReadFrame(&can_adapter, interface_index, &frame)) {
         can_events->on_frame(can_events->context, interface_index, &frame);
     }
+}
+
+static int32_t showIdentity(void)
+{
+    char fingerprint[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
+
+    if (!prepareSecurityMaterial("identity", "0")) {
+        fprintf(stderr, "could not load or create TLS identity\n");
+        return 1;
+    }
+    if (!TlsIdentity_FingerprintOfFile(identity_certificate_path, fingerprint)) {
+        fprintf(stderr, "could not read the identity fingerprint\n");
+        return 1;
+    }
+
+    printf("%s\n", fingerprint);
+
+    return 0;
 }
