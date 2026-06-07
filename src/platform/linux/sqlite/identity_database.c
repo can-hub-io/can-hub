@@ -12,6 +12,13 @@
     "name TEXT PRIMARY KEY," \
     "fingerprint TEXT NOT NULL," \
     "first_seen_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))" \
+    ");" \
+    "CREATE TABLE IF NOT EXISTS client_acls (" \
+    "fingerprint TEXT NOT NULL," \
+    "agent_name TEXT NOT NULL," \
+    "interface_name TEXT NOT NULL," \
+    "can_write INTEGER NOT NULL DEFAULT 0," \
+    "PRIMARY KEY (fingerprint, agent_name, interface_name)" \
     ")"
 
 static bool storeLookup(void *context, const char *agent_name, char *fingerprint_hex);
@@ -19,17 +26,32 @@ static bool storePin(void *context, const char *agent_name, const char *fingerpr
 static bool storeForget(void *context, const char *agent_name);
 static uint8_t storeList(void *context, uint16_t offset, IdentityPin *pins, uint8_t max_pins, bool *more);
 static bool insertPin(IdentityDatabase *self, const char *sql, const char *agent_name, const char *fingerprint_hex);
+static bool aclWriteAllowed(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name);
+static bool aclGrant(
+    void *context,
+    const char *fingerprint_hex,
+    const char *agent_name,
+    const char *interface_name,
+    bool can_write
+);
+static bool aclRevoke(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name);
+static uint8_t aclList(void *context, uint16_t offset, AclEntry *entries, uint8_t max_entries, bool *more);
 
 /* ---------- public ---------- */
 
 bool IdentityDatabase_Open(IdentityDatabase *self, const char *path)
 {
     memset(self, 0, sizeof(*self));
-    self->port.context = self;
-    self->port.lookup = storeLookup;
-    self->port.pin = storePin;
-    self->port.forget = storeForget;
-    self->port.list = storeList;
+    self->identity_port.context = self;
+    self->identity_port.lookup = storeLookup;
+    self->identity_port.pin = storePin;
+    self->identity_port.forget = storeForget;
+    self->identity_port.list = storeList;
+    self->authorization_port.context = self;
+    self->authorization_port.write_allowed = aclWriteAllowed;
+    self->authorization_port.grant = aclGrant;
+    self->authorization_port.revoke = aclRevoke;
+    self->authorization_port.list = aclList;
 
     if (sqlite3_open(path, &self->database) != SQLITE_OK) {
         IdentityDatabase_Close(self);
@@ -53,7 +75,12 @@ void IdentityDatabase_Close(IdentityDatabase *self)
 
 IdentityStorePort *IdentityDatabase_Port(IdentityDatabase *self)
 {
-    return &self->port;
+    return &self->identity_port;
+}
+
+AuthorizationPort *IdentityDatabase_AuthorizationPort(IdentityDatabase *self)
+{
+    return &self->authorization_port;
 }
 
 bool IdentityDatabase_ImportPinFile(IdentityDatabase *self, const char *path)
@@ -202,4 +229,127 @@ static bool insertPin(IdentityDatabase *self, const char *sql, const char *agent
     sqlite3_finalize(statement);
 
     return inserted;
+}
+
+static bool aclWriteAllowed(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name)
+{
+    IdentityDatabase *self = context;
+    sqlite3_stmt *statement = NULL;
+    bool allowed = false;
+
+    if (sqlite3_prepare_v2(
+            self->database,
+            "SELECT can_write FROM client_acls WHERE fingerprint = ?1 AND agent_name = ?2 AND interface_name = ?3",
+            -1,
+            &statement,
+            NULL
+        ) != SQLITE_OK) {
+        return false;
+    }
+
+    sqlite3_bind_text(statement, 1, fingerprint_hex, -1, SQLITE_STATIC);
+    sqlite3_bind_text(statement, 2, agent_name, -1, SQLITE_STATIC);
+    sqlite3_bind_text(statement, 3, interface_name, -1, SQLITE_STATIC);
+    if (sqlite3_step(statement) == SQLITE_ROW) {
+        allowed = sqlite3_column_int(statement, 0) != 0;
+    }
+    sqlite3_finalize(statement);
+
+    return allowed;
+}
+
+static bool aclGrant(
+    void *context,
+    const char *fingerprint_hex,
+    const char *agent_name,
+    const char *interface_name,
+    bool can_write
+)
+{
+    IdentityDatabase *self = context;
+    sqlite3_stmt *statement = NULL;
+    bool granted;
+
+    if (sqlite3_prepare_v2(
+            self->database,
+            "INSERT INTO client_acls (fingerprint, agent_name, interface_name, can_write) VALUES (?1, ?2, ?3, ?4)"
+            " ON CONFLICT (fingerprint, agent_name, interface_name) DO UPDATE SET can_write = ?4",
+            -1,
+            &statement,
+            NULL
+        ) != SQLITE_OK) {
+        return false;
+    }
+
+    sqlite3_bind_text(statement, 1, fingerprint_hex, -1, SQLITE_STATIC);
+    sqlite3_bind_text(statement, 2, agent_name, -1, SQLITE_STATIC);
+    sqlite3_bind_text(statement, 3, interface_name, -1, SQLITE_STATIC);
+    sqlite3_bind_int(statement, 4, can_write ? 1 : 0);
+    granted = sqlite3_step(statement) == SQLITE_DONE;
+    sqlite3_finalize(statement);
+
+    return granted;
+}
+
+static bool aclRevoke(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name)
+{
+    IdentityDatabase *self = context;
+    sqlite3_stmt *statement = NULL;
+    bool revoked = false;
+
+    if (sqlite3_prepare_v2(
+            self->database,
+            "DELETE FROM client_acls WHERE fingerprint = ?1 AND agent_name = ?2 AND interface_name = ?3",
+            -1,
+            &statement,
+            NULL
+        ) != SQLITE_OK) {
+        return false;
+    }
+
+    sqlite3_bind_text(statement, 1, fingerprint_hex, -1, SQLITE_STATIC);
+    sqlite3_bind_text(statement, 2, agent_name, -1, SQLITE_STATIC);
+    sqlite3_bind_text(statement, 3, interface_name, -1, SQLITE_STATIC);
+    if (sqlite3_step(statement) == SQLITE_DONE) {
+        revoked = sqlite3_changes(self->database) > 0;
+    }
+    sqlite3_finalize(statement);
+
+    return revoked;
+}
+
+static uint8_t aclList(void *context, uint16_t offset, AclEntry *entries, uint8_t max_entries, bool *more)
+{
+    IdentityDatabase *self = context;
+    sqlite3_stmt *statement = NULL;
+    uint8_t count = 0;
+
+    *more = false;
+    if (sqlite3_prepare_v2(
+            self->database,
+            "SELECT fingerprint, agent_name, interface_name, can_write FROM client_acls"
+            " ORDER BY agent_name, interface_name, fingerprint LIMIT ?1 OFFSET ?2",
+            -1,
+            &statement,
+            NULL
+        ) != SQLITE_OK) {
+        return 0;
+    }
+
+    sqlite3_bind_int(statement, 1, (int32_t)max_entries + 1);
+    sqlite3_bind_int(statement, 2, offset);
+    while (sqlite3_step(statement) == SQLITE_ROW) {
+        if (count == max_entries) {
+            *more = true;
+            break;
+        }
+        snprintf(entries[count].fingerprint_hex, sizeof(entries[count].fingerprint_hex), "%s", (const char *)sqlite3_column_text(statement, 0));
+        snprintf(entries[count].agent_name, sizeof(entries[count].agent_name), "%s", (const char *)sqlite3_column_text(statement, 1));
+        snprintf(entries[count].interface_name, sizeof(entries[count].interface_name), "%s", (const char *)sqlite3_column_text(statement, 2));
+        entries[count].can_write = sqlite3_column_int(statement, 3) != 0;
+        count++;
+    }
+    sqlite3_finalize(statement);
+
+    return count;
 }

@@ -3,6 +3,7 @@ add_library(port_mocks STATIC
     can_port_mock.c
     hub_transport_port_mock.c
     identity_store_mock.c
+    authorization_mock.c
     broker_driver.c
 )
 

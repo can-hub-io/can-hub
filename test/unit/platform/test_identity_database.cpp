@@ -58,6 +58,44 @@ describe("identity_database", []() {
         expect(port->forget(port->context, "ghost")).toBe(false);
     });
 
+    it("denies writes with no acl and grants them after acl_grant", []() {
+        AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
+
+        expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(false);
+        expect(acl->grant(acl->context, TRUCK_FINGERPRINT, "truck42", "can0", true)).toBe(true);
+        expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(true);
+        expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can1")).toBe(false);
+        expect(acl->write_allowed(acl->context, OTHER_FINGERPRINT, "truck42", "can0")).toBe(false);
+    });
+
+    it("downgrades and revokes a write grant", []() {
+        AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
+
+        acl->grant(acl->context, TRUCK_FINGERPRINT, "truck42", "can0", true);
+        expect(acl->grant(acl->context, TRUCK_FINGERPRINT, "truck42", "can0", false)).toBe(true);
+        expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(false);
+        expect(acl->revoke(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(true);
+        expect(acl->revoke(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(false);
+    });
+
+    it("lists acl entries with pagination", []() {
+        AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
+        AclEntry entries[1];
+        bool more;
+
+        acl->grant(acl->context, TRUCK_FINGERPRINT, "truck42", "can0", true);
+        acl->grant(acl->context, OTHER_FINGERPRINT, "truck42", "can1", false);
+
+        expect(acl->list(acl->context, 0, entries, 1, &more)).toBe(1);
+        expect(more).toBe(true);
+        expect((const char *)entries[0].interface_name).toBe("can0");
+        expect(entries[0].can_write).toBe(true);
+        expect(acl->list(acl->context, 1, entries, 1, &more)).toBe(1);
+        expect(more).toBe(false);
+        expect((const char *)entries[0].interface_name).toBe("can1");
+        expect(entries[0].can_write).toBe(false);
+    });
+
     it("lists pins ordered by name with pagination", []() {
         IdentityPin pins[2];
         bool more;
