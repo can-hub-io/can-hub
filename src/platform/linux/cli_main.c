@@ -401,7 +401,7 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
     }
     if (header.type == kMESSAGE_TYPE_ADMIN_FORGET_REPLY) {
         AdminForgetReplyMessage_Decode(&forget_reply, data + MESSAGE_HEADER_SIZE, header.length);
-        printActionReply(forget_reply.status, "forgot", "agent", target_agent);
+        printActionReply(forget_reply.status, "deleted pin for", "agent", target_agent);
         return;
     }
     if (header.type == kMESSAGE_TYPE_ADMIN_ACL_LIST_REPLY) {
@@ -432,7 +432,7 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
             exit_code = 1;
             return;
         }
-        printf("revoked %s %s/%s\n", target_fingerprint, target_agent, target_interface);
+        printf("deleted %s %s/%s\n", target_fingerprint, target_agent, target_interface);
         exit_code = 0;
         return;
     }
