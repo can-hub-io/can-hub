@@ -1,5 +1,6 @@
 #include <cest>
 
+#include <cstdio>
 #include <cstring>
 
 extern "C" {
@@ -50,7 +51,7 @@ describe("hub_peer", []() {
         peer.frames_forwarded = 1500;
         peer.frames_dropped = 7;
         HubPeer_SetAgentName(&peer, "truck42");
-        strncpy(peer.fingerprint_hex, FINGERPRINT, IDENTITY_FINGERPRINT_HEX_SIZE - 1);
+        snprintf(peer.fingerprint_hex, IDENTITY_FINGERPRINT_HEX_SIZE, "%s", FINGERPRINT);
 
         HubPeer_FillAdminEntry(&peer, &entry);
 

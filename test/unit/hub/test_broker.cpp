@@ -202,7 +202,7 @@ describe("broker", []() {
 
         it("acknowledges an open with a channel", []() {
             uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
-            OpenMessage open = { interface_id };
+            OpenMessage open = { interface_id, 0 };
             OpenAckMessage ack;
             MessageHeader header;
             uint8_t encoded[64];
@@ -218,7 +218,7 @@ describe("broker", []() {
         });
 
         it("rejects opening an unknown interface", []() {
-            OpenMessage open = { 9999 };
+            OpenMessage open = { 9999, 0 };
             OpenAckMessage ack;
             MessageHeader header;
             uint8_t encoded[64];
