@@ -1,0 +1,16 @@
+# Commercial license
+
+can-hub is dual-licensed.
+
+- Open source: GNU Affero General Public License v3.0 (see LICENSE). Free for
+  any use that complies with the AGPL, including personal, research and open
+  source projects.
+- Commercial: for use in proprietary products or services where the AGPL
+  obligations (publishing your source code, including when offering can-hub
+  functionality over a network) are not acceptable, a commercial license is
+  available from the copyright holder.
+
+Contact: Javier Moragon <jamofer@gmail.com>
+
+External contributions are accepted under a Contributor License Agreement so
+that dual licensing remains possible (see CONTRIBUTING.md).

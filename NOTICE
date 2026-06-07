@@ -1,0 +1,23 @@
+can-hub
+Copyright (C) 2026 Javier Moragon
+
+Licensed under the GNU Affero General Public License v3.0 (see LICENSE).
+A commercial license is available (see LICENSE.commercial).
+
+The protocol specification (doc/protocol.md) is additionally licensed under
+CC-BY-4.0 to encourage independent implementations.
+
+Third-party components (fetched at build time, not vendored):
+
+- ngtcp2 (https://github.com/ngtcp2/ngtcp2) — MIT License. Statically linked.
+- SQLite (https://sqlite.org) — Public domain. Statically linked.
+- GnuTLS (https://gnutls.org) — LGPL-2.1-or-later. Linked by the build;
+  AGPL source availability of can-hub satisfies the LGPL relinking
+  requirement for these builds. Proprietary (commercially licensed) binary
+  distributions must link GnuTLS dynamically or otherwise comply with the
+  LGPL (see TODO: OpenSSL backend evaluation).
+
+Test-only components:
+
+- CEST (https://github.com/cegonse/cest) — MIT License. Vendored under
+  test/vendor; not part of the shipped binaries.

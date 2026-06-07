@@ -2,6 +2,10 @@
 
 Status: draft, version 0. Everything here may change until version 1 is frozen.
 
+License: this specification is licensed under CC-BY-4.0 — independent
+implementations are welcome. The can-hub source code is AGPL-3.0 (see
+LICENSE) with a commercial option (see LICENSE.commercial).
+
 Binary protocol, little-endian. Two planes:
 
 - Control plane: reliable, ordered (QUIC bidirectional stream, or the TCP connection itself).
