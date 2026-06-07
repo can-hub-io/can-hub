@@ -10,7 +10,7 @@
 #define ADMIN_PEERS_BODY_SIZE 4
 #define ADMIN_PEERS_REPLY_FIXED_FIELDS_SIZE 4
 #define ADMIN_PEERS_REPLY_ENTRIES_MAX 16
-#define ADMIN_PEERS_REPLY_ENTRY_SIZE 204
+#define ADMIN_PEERS_REPLY_ENTRY_SIZE 212
 #define ADMIN_KICK_BODY_SIZE 128
 #define ADMIN_KICK_REPLY_BODY_SIZE 4
 #define ADMIN_PINS_BODY_SIZE 4
@@ -51,6 +51,8 @@ typedef struct {
 
 typedef struct {
     uint32_t peer_id;
+    uint32_t frames_forwarded;
+    uint32_t frames_dropped;
     uint8_t role;
     char agent_name[REGISTER_AGENT_NAME_SIZE];
     char fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE];

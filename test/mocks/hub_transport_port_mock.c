@@ -15,6 +15,8 @@ void HubTransportPortMock_Reset(HubTransportPortMock *self)
     self->port.send_control = mockSendControl;
     self->port.send_frame = mockSendFrame;
     self->port.close_peer = mockClosePeer;
+    self->control_result = true;
+    self->frame_result = true;
 }
 
 /* ---------- private ---------- */
@@ -23,6 +25,9 @@ static bool mockSendControl(void *context, uint32_t peer_id, const uint8_t *data
 {
     HubTransportPortMock *self = context;
 
+    if (!self->control_result) {
+        return false;
+    }
     if (self->control_count >= HUB_MOCK_CONTROL_LOG_MAX || size > HUB_MOCK_CONTROL_SIZE) {
         return false;
     }
@@ -39,6 +44,9 @@ static bool mockSendFrame(void *context, uint32_t peer_id, const uint8_t *data, 
 {
     HubTransportPortMock *self = context;
 
+    if (!self->frame_result) {
+        return false;
+    }
     if (self->frame_count >= HUB_MOCK_FRAME_LOG_MAX || size > HUB_MOCK_FRAME_SIZE) {
         return false;
     }

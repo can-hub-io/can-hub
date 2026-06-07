@@ -132,17 +132,19 @@ ADMIN_PEERS (total 8)
 @4   offset u16        (pagination start index)
 @6   reserved u16
 
-ADMIN_PEERS_REPLY (total 8 + count * 204)
+ADMIN_PEERS_REPLY (total 8 + count * 212)
 @4   count u8          (0-16 entries in this reply)
 @5   flags u8          (bit 0: more entries beyond offset + count)
 @6   reserved u16
-@8   entries, each 204 bytes:
+@8   entries, each 212 bytes:
      +0   peer_id u32
-     +4   role u8 (0 unknown, 1 agent, 2 client, 3 admin)
-     +5   reserved u8[3]
-     +8   agent_name char[128]      (empty unless a registered agent)
-     +136 fingerprint_hex char[65]  (empty on plaintext transports)
-     +201 reserved u8[3]
+     +4   frames_forwarded u32      (frames the hub delivered to this peer)
+     +8   frames_dropped u32        (frames dropped towards this peer, TX budget full)
+     +12  role u8 (0 unknown, 1 agent, 2 client, 3 admin)
+     +13  reserved u8[3]
+     +16  agent_name char[128]      (empty unless a registered agent)
+     +144 fingerprint_hex char[65]  (empty on plaintext transports)
+     +209 reserved u8[3]
 
 ADMIN_KICK (total 132)
 @4   agent_name char[128]

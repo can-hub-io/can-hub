@@ -13,6 +13,7 @@
 
 #define CONTROL_BUFFER_SIZE 4096
 #define PING_REPLY_FLAG 0x01
+#define HELLO_TIMEOUT_US 5000000
 #define FRAME_CHANNEL_OFFSET (MESSAGE_HEADER_SIZE + 12)
 #define FRAME_BUFFER_SIZE (MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD)
 
@@ -44,8 +45,9 @@ static void handleAdminClients(Broker *self, HubPeer *peer, const MessageHeader 
 static void disconnectPeer(Broker *self, uint32_t peer_id);
 static bool agentIdentityAccepted(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
-static void sendControl(Broker *self, uint32_t peer_id, const uint8_t *encoded, size_t encoded_size);
+static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size);
 static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *data, size_t size);
+static void tickHelloDeadline(Broker *self, HubPeer *peer, uint64_t now_us);
 
 static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
     [kMESSAGE_TYPE_HELLO] = handleHello,
@@ -86,6 +88,19 @@ HubTransportEvents Broker_Events(Broker *self)
     };
 
     return events;
+}
+
+void Broker_Tick(Broker *self, uint64_t now_us)
+{
+    HubPeer *peer;
+    uint8_t i;
+
+    for(i=0; i<PEER_DIRECTORY_MAX; i++) {
+        peer = PeerDirectory_At(&self->directory, i);
+        if (peer != NULL && peer->role == kHUB_PEER_ROLE_UNKNOWN) {
+            tickHelloDeadline(self, peer, now_us);
+        }
+    }
 }
 
 /* ---------- private: events ---------- */
@@ -146,6 +161,11 @@ static void onPeerControl(void *context, uint32_t peer_id, const uint8_t *data, 
     }
 
     control_handlers[header.type](self, peer, &header, data + MESSAGE_HEADER_SIZE);
+
+    peer = PeerDirectory_Find(&self->directory, peer_id);
+    if (peer != NULL && peer->send_failed) {
+        disconnectPeer(self, peer_id);
+    }
 }
 
 static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size)
@@ -226,13 +246,13 @@ static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *hea
     if (!agentIdentityAccepted(self, peer, &registration)) {
         memset(&ack, 0, sizeof(ack));
         ack.status = REGISTER_STATUS_IDENTITY_MISMATCH;
-        sendControl(self, peer->peer_id, encoded, RegisterAckMessage_Encode(&ack, encoded, sizeof(encoded)));
+        sendControl(self, peer, encoded, RegisterAckMessage_Encode(&ack, encoded, sizeof(encoded)));
         self->transport->close_peer(self->transport->context, peer->peer_id);
         return;
     }
 
     registered = InterfaceRegistry_RegisterAgent(&self->registry, peer->peer_id, &registration, &ack);
-    sendControl(self, peer->peer_id, encoded, RegisterAckMessage_Encode(&ack, encoded, sizeof(encoded)));
+    sendControl(self, peer, encoded, RegisterAckMessage_Encode(&ack, encoded, sizeof(encoded)));
 
     if (!registered) {
         self->transport->close_peer(self->transport->context, peer->peer_id);
@@ -253,7 +273,7 @@ static void handleList(Broker *self, HubPeer *peer, const MessageHeader *header,
     }
 
     InterfaceRegistry_List(&self->registry, list.offset, &reply);
-    sendControl(self, peer->peer_id, encoded, ListReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+    sendControl(self, peer, encoded, ListReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 
 static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
@@ -279,7 +299,7 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
         ack.status = OPEN_STATUS_OK;
     }
 
-    sendControl(self, peer->peer_id, encoded, OpenAckMessage_Encode(&ack, encoded, sizeof(encoded)));
+    sendControl(self, peer, encoded, OpenAckMessage_Encode(&ack, encoded, sizeof(encoded)));
 }
 
 static void handleClose(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
@@ -313,7 +333,7 @@ static void handlePing(Broker *self, HubPeer *peer, const MessageHeader *header,
     pong.flags = PING_REPLY_FLAG;
     pong.length = 0;
     MessageHeader_Encode(&pong, encoded, sizeof(encoded));
-    sendControl(self, peer->peer_id, encoded, sizeof(encoded));
+    sendControl(self, peer, encoded, sizeof(encoded));
 }
 
 /* ---------- private: admin handlers ---------- */
@@ -334,7 +354,7 @@ static void handleAdminStatus(Broker *self, HubPeer *peer, const MessageHeader *
     reply.agent_count = PeerDirectory_CountRole(&self->directory, kHUB_PEER_ROLE_AGENT);
     reply.client_count = PeerDirectory_CountRole(&self->directory, kHUB_PEER_ROLE_CLIENT);
     reply.interface_count = InterfaceRegistry_Count(&self->registry);
-    sendControl(self, peer->peer_id, encoded, AdminStatusReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+    sendControl(self, peer, encoded, AdminStatusReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 
 static void handleAdminPeers(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
@@ -351,7 +371,7 @@ static void handleAdminPeers(Broker *self, HubPeer *peer, const MessageHeader *h
     }
 
     PeerDirectory_List(&self->directory, request.offset, &reply);
-    sendControl(self, peer->peer_id, encoded, AdminPeersReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+    sendControl(self, peer, encoded, AdminPeersReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 
 static void handleAdminKick(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
@@ -376,7 +396,7 @@ static void handleAdminKick(Broker *self, HubPeer *peer, const MessageHeader *he
         reply.status = ADMIN_STATUS_OK;
     }
 
-    sendControl(self, peer->peer_id, encoded, AdminKickReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+    sendControl(self, peer, encoded, AdminKickReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 
     if (reply.status == ADMIN_STATUS_OK) {
         disconnectPeer(self, agent_peer_id);
@@ -399,7 +419,7 @@ static void handleAdminKickPeer(Broker *self, HubPeer *peer, const MessageHeader
 
     found = PeerDirectory_Find(&self->directory, kick.peer_id) != NULL;
     reply.status = found ? ADMIN_STATUS_OK : ADMIN_STATUS_UNKNOWN_PEER;
-    sendControl(self, peer->peer_id, encoded, AdminKickPeerReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+    sendControl(self, peer, encoded, AdminKickPeerReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 
     if (found) {
         disconnectPeer(self, kick.peer_id);
@@ -420,7 +440,7 @@ static void handleAdminAgents(Broker *self, HubPeer *peer, const MessageHeader *
     }
 
     AdminViews_Agents(&self->registry, &self->directory, request.agent_name, request.offset, &reply);
-    sendControl(self, peer->peer_id, encoded, AdminAgentsReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+    sendControl(self, peer, encoded, AdminAgentsReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 
 static void handleAdminClients(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
@@ -437,7 +457,7 @@ static void handleAdminClients(Broker *self, HubPeer *peer, const MessageHeader 
     }
 
     AdminViews_Clients(&self->registry, &self->directory, request.agent_name, request.offset, &reply);
-    sendControl(self, peer->peer_id, encoded, AdminClientsReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+    sendControl(self, peer, encoded, AdminClientsReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 
 static void handleAdminPins(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
@@ -474,7 +494,7 @@ static void handleAdminPins(Broker *self, HubPeer *peer, const MessageHeader *he
         }
     }
 
-    sendControl(self, peer->peer_id, encoded, AdminPinsReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+    sendControl(self, peer, encoded, AdminPinsReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 
 static void handleAdminForget(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
@@ -495,7 +515,7 @@ static void handleAdminForget(Broker *self, HubPeer *peer, const MessageHeader *
         reply.status = ADMIN_STATUS_OK;
     }
 
-    sendControl(self, peer->peer_id, encoded, AdminForgetReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+    sendControl(self, peer, encoded, AdminForgetReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 
 /* ---------- private: helpers ---------- */
@@ -558,21 +578,46 @@ static void detachAgent(Broker *self, uint32_t agent_peer_id)
     InterfaceRegistry_RemovePeer(&self->registry, agent_peer_id);
 }
 
-static void sendControl(Broker *self, uint32_t peer_id, const uint8_t *encoded, size_t encoded_size)
+static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size)
 {
     if (encoded_size == 0) {
         return;
     }
 
-    self->transport->send_control(self->transport->context, peer_id, encoded, encoded_size);
+    if (!self->transport->send_control(self->transport->context, peer->peer_id, encoded, encoded_size)) {
+        peer->send_failed = true;
+    }
 }
 
 static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *data, size_t size)
 {
     uint8_t forwarded[FRAME_BUFFER_SIZE];
+    HubPeer *destination;
+    bool sent;
 
     memcpy(forwarded, data, size);
     forwarded[FRAME_CHANNEL_OFFSET] = route->channel;
 
-    self->transport->send_frame(self->transport->context, route->peer_id, forwarded, size);
+    sent = self->transport->send_frame(self->transport->context, route->peer_id, forwarded, size);
+
+    destination = PeerDirectory_Find(&self->directory, route->peer_id);
+    if (destination != NULL) {
+        if (sent) {
+            destination->frames_forwarded++;
+        } else {
+            destination->frames_dropped++;
+        }
+    }
+}
+
+static void tickHelloDeadline(Broker *self, HubPeer *peer, uint64_t now_us)
+{
+    if (peer->hello_deadline_us == 0) {
+        peer->hello_deadline_us = now_us + HELLO_TIMEOUT_US;
+        return;
+    }
+
+    if (now_us >= peer->hello_deadline_us) {
+        disconnectPeer(self, peer->peer_id);
+    }
 }

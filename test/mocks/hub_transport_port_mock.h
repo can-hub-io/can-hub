@@ -19,6 +19,8 @@ typedef struct {
     size_t frame_sizes[HUB_MOCK_FRAME_LOG_MAX];
     int close_count;
     uint32_t last_closed_peer;
+    bool control_result;
+    bool frame_result;
 } HubTransportPortMock;
 
 void HubTransportPortMock_Reset(HubTransportPortMock *self);

@@ -413,15 +413,17 @@ static void handlePeersReply(const uint8_t *payload, uint16_t payload_length)
     }
 
     if (!page_header_printed) {
-        printf("%-12s %-8s %-32s %s\n", "peer-id", "role", "agent", "fingerprint");
+        printf("%-12s %-8s %-32s %-10s %-8s %s\n", "peer-id", "role", "agent", "forwarded", "dropped", "fingerprint");
         page_header_printed = true;
     }
     for(i=0; i<reply.count; i++) {
         printf(
-            "0x%08X   %-8s %-32s %s\n",
+            "0x%08X   %-8s %-32s %-10u %-8u %s\n",
             reply.entries[i].peer_id,
             roleName(reply.entries[i].role),
             textOrDash(reply.entries[i].agent_name),
+            reply.entries[i].frames_forwarded,
+            reply.entries[i].frames_dropped,
             textOrDash(reply.entries[i].fingerprint_hex)
         );
     }

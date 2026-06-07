@@ -68,8 +68,8 @@ describe("admin_peers_message", []() {
 
     it("round-trips peer entries with the more flag", []() {
         AdminPeersReplyMessage reply = { 2, ADMIN_REPLY_FLAG_MORE, {
-            { 0x80000001, 1, "truck42", FINGERPRINT },
-            { 0x40000001, 3, "", "" },
+            { 0x80000001, 1500, 7, 1, "truck42", FINGERPRINT },
+            { 0x40000001, 0, 0, 3, "", "" },
         } };
         AdminPeersReplyMessage decoded;
         uint8_t buffer[1024];
@@ -85,6 +85,8 @@ describe("admin_peers_message", []() {
         expect(decoded.count).toBe(2);
         expect(decoded.flags).toBe(ADMIN_REPLY_FLAG_MORE);
         expect(decoded.entries[0].peer_id).toBe((uint32_t)0x80000001);
+        expect(decoded.entries[0].frames_forwarded).toBe((uint32_t)1500);
+        expect(decoded.entries[0].frames_dropped).toBe((uint32_t)7);
         expect(decoded.entries[0].role).toBe(1);
         expect((const char *)decoded.entries[0].agent_name).toBe("truck42");
         expect((const char *)decoded.entries[0].fingerprint_hex).toBe(FINGERPRINT);

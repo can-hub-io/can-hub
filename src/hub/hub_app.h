@@ -15,3 +15,4 @@ typedef struct {
 
 void HubApp_Init(HubApp *self, HubTransportPort *transport, IdentityStorePort *identity_store);
 HubTransportEvents HubApp_Events(HubApp *self);
+void HubApp_Tick(HubApp *self, uint64_t now_us);

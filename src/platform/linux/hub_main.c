@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 
 #include "hub/hub_app.h"
+#include "platform/linux/clock/clock.h"
 #include "platform/linux/quic/quic_server_transport.h"
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
@@ -128,6 +129,8 @@ int main(int argc, char **argv)
         for(i=0; i<event_count; i++) {
             dispatchEvent(&events[i]);
         }
+
+        HubApp_Tick(&app, Clock_RealtimeUs());
     }
 }
 

@@ -25,8 +25,12 @@ typedef enum thub_peer_role_e {
 typedef struct {
     bool in_use;
     bool local;
+    bool send_failed;
     uint32_t peer_id;
     uint8_t role;
+    uint64_t hello_deadline_us;
+    uint32_t frames_forwarded;
+    uint32_t frames_dropped;
     char fingerprint_hex[IDENTITY_FINGERPRINT_HEX_SIZE];
     char agent_name[REGISTER_AGENT_NAME_SIZE];
     ClientSession session;

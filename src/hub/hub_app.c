@@ -11,3 +11,8 @@ HubTransportEvents HubApp_Events(HubApp *self)
 {
     return Broker_Events(&self->broker);
 }
+
+void HubApp_Tick(HubApp *self, uint64_t now_us)
+{
+    Broker_Tick(&self->broker, now_us);
+}

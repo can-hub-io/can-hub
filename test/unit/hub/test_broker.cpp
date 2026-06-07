@@ -538,4 +538,70 @@ describe("broker", []() {
             expect(reply.status).toBe(ADMIN_STATUS_UNKNOWN_AGENT);
         });
     });
+
+    describe("backpressure", []() {
+        beforeEach([]() {
+            uint32_t interface_id;
+
+            HubTransportPortMock_Reset(&transport);
+            Broker_Init(&broker, &transport.port, NULL);
+            events = Broker_Events(&broker);
+            BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
+            BrokerDriver_ConnectClient(&events, CLIENT_PEER);
+            BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
+            interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            client_channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id);
+        });
+
+        it("counts forwarded and dropped frames per peer", []() {
+            FrameMessage frame = { 0x123, 1000, 0, 1, 0, { 0x55 } };
+            AdminPeersMessage request = { 0 };
+            AdminPeersReplyMessage reply;
+            uint8_t frame_encoded[128];
+            uint8_t encoded[64];
+            size_t frame_size = FrameMessage_Encode(&frame, frame_encoded, sizeof(frame_encoded));
+            size_t encoded_size = AdminPeersMessage_Encode(&request, encoded, sizeof(encoded));
+
+            events.on_peer_frame(events.context, AGENT_PEER, frame_encoded, frame_size);
+            transport.frame_result = false;
+            events.on_peer_frame(events.context, AGENT_PEER, frame_encoded, frame_size);
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            lastReply(&reply, AdminPeersReplyMessage_Decode);
+
+            expect(reply.entries[1].peer_id).toBe((uint32_t)CLIENT_PEER);
+            expect(reply.entries[1].frames_forwarded).toBe((uint32_t)1);
+            expect(reply.entries[1].frames_dropped).toBe((uint32_t)1);
+        });
+
+        it("evicts a peer whose control send fails", []() {
+            ListMessage list = { 0 };
+            uint8_t encoded[64];
+            size_t encoded_size = ListMessage_Encode(&list, encoded, sizeof(encoded));
+
+            transport.control_result = false;
+            sendControlFrom(CLIENT_PEER, encoded, encoded_size);
+
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)CLIENT_PEER);
+        });
+
+        it("evicts an unknown peer that misses the hello deadline", []() {
+            events.on_peer_connected(events.context, 999, NULL, false);
+
+            Broker_Tick(&broker, 0);
+            Broker_Tick(&broker, 4999999);
+            expect(transport.close_count).toBe(0);
+
+            Broker_Tick(&broker, 5000000);
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)999);
+        });
+
+        it("never evicts peers that declared a role", []() {
+            Broker_Tick(&broker, 0);
+            Broker_Tick(&broker, 60000000);
+
+            expect(transport.close_count).toBe(0);
+        });
+    });
 });

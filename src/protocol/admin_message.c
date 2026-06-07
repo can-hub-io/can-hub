@@ -18,9 +18,11 @@
 #define AGENT_NAME_OFFSET 0
 
 #define PEER_ENTRY_PEER_ID_OFFSET 0
-#define PEER_ENTRY_ROLE_OFFSET 4
-#define PEER_ENTRY_AGENT_NAME_OFFSET 8
-#define PEER_ENTRY_FINGERPRINT_OFFSET 136
+#define PEER_ENTRY_FRAMES_FORWARDED_OFFSET 4
+#define PEER_ENTRY_FRAMES_DROPPED_OFFSET 8
+#define PEER_ENTRY_ROLE_OFFSET 12
+#define PEER_ENTRY_AGENT_NAME_OFFSET 16
+#define PEER_ENTRY_FINGERPRINT_OFFSET 144
 
 #define PIN_ENTRY_AGENT_NAME_OFFSET 0
 #define PIN_ENTRY_FINGERPRINT_OFFSET 128
@@ -616,6 +618,8 @@ static bool decodeFilteredRequest(
 static void writePeerEntry(uint8_t *destination, const AdminPeersReplyEntry *entry)
 {
     Wire_WriteU32(destination + PEER_ENTRY_PEER_ID_OFFSET, entry->peer_id);
+    Wire_WriteU32(destination + PEER_ENTRY_FRAMES_FORWARDED_OFFSET, entry->frames_forwarded);
+    Wire_WriteU32(destination + PEER_ENTRY_FRAMES_DROPPED_OFFSET, entry->frames_dropped);
     destination[PEER_ENTRY_ROLE_OFFSET] = entry->role;
     memcpy(destination + PEER_ENTRY_AGENT_NAME_OFFSET, entry->agent_name, strlen(entry->agent_name));
     memcpy(destination + PEER_ENTRY_FINGERPRINT_OFFSET, entry->fingerprint_hex, strlen(entry->fingerprint_hex));
@@ -624,6 +628,8 @@ static void writePeerEntry(uint8_t *destination, const AdminPeersReplyEntry *ent
 static void readPeerEntry(const uint8_t *source, AdminPeersReplyEntry *entry)
 {
     entry->peer_id = Wire_ReadU32(source + PEER_ENTRY_PEER_ID_OFFSET);
+    entry->frames_forwarded = Wire_ReadU32(source + PEER_ENTRY_FRAMES_FORWARDED_OFFSET);
+    entry->frames_dropped = Wire_ReadU32(source + PEER_ENTRY_FRAMES_DROPPED_OFFSET);
     entry->role = source[PEER_ENTRY_ROLE_OFFSET];
     memcpy(entry->agent_name, source + PEER_ENTRY_AGENT_NAME_OFFSET, REGISTER_AGENT_NAME_SIZE);
     entry->agent_name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';

@@ -21,3 +21,4 @@ typedef struct {
 
 void Broker_Init(Broker *self, HubTransportPort *transport, IdentityStorePort *identity_store);
 HubTransportEvents Broker_Events(Broker *self);
+void Broker_Tick(Broker *self, uint64_t now_us);

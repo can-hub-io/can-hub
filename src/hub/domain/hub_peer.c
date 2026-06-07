@@ -31,6 +31,8 @@ void HubPeer_FillAdminEntry(const HubPeer *self, AdminPeersReplyEntry *entry)
     memset(entry, 0, sizeof(*entry));
     entry->peer_id = self->peer_id;
     entry->role = self->role;
+    entry->frames_forwarded = self->frames_forwarded;
+    entry->frames_dropped = self->frames_dropped;
     memcpy(entry->agent_name, self->agent_name, REGISTER_AGENT_NAME_SIZE);
     memcpy(entry->fingerprint_hex, self->fingerprint_hex, IDENTITY_FINGERPRINT_HEX_SIZE);
 }

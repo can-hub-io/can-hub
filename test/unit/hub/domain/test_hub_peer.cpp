@@ -47,6 +47,8 @@ describe("hub_peer", []() {
 
         peer.peer_id = 0x80000001;
         peer.role = kHUB_PEER_ROLE_AGENT;
+        peer.frames_forwarded = 1500;
+        peer.frames_dropped = 7;
         HubPeer_SetAgentName(&peer, "truck42");
         strncpy(peer.fingerprint_hex, FINGERPRINT, IDENTITY_FINGERPRINT_HEX_SIZE - 1);
 
@@ -54,6 +56,8 @@ describe("hub_peer", []() {
 
         expect(entry.peer_id).toBe((uint32_t)0x80000001);
         expect(entry.role).toBe(kHUB_PEER_ROLE_AGENT);
+        expect(entry.frames_forwarded).toBe((uint32_t)1500);
+        expect(entry.frames_dropped).toBe((uint32_t)7);
         expect((const char *)entry.agent_name).toBe("truck42");
         expect((const char *)entry.fingerprint_hex).toBe(FINGERPRINT);
     });
