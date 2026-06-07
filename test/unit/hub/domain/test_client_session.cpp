@@ -17,8 +17,8 @@ describe("client_session", []() {
         bool first_opened;
         bool second_opened;
 
-        first_opened = ClientSession_OpenInterface(&session, 7, false, &first_channel);
-        second_opened = ClientSession_OpenInterface(&session, 9, false, &second_channel);
+        first_opened = ClientSession_OpenInterface(&session, 7, false, false, &first_channel);
+        second_opened = ClientSession_OpenInterface(&session, 9, false, false, &second_channel);
 
         expect(first_opened).toBe(true);
         expect(second_opened).toBe(true);
@@ -32,7 +32,7 @@ describe("client_session", []() {
         bool channel_found;
         bool interface_found;
 
-        ClientSession_OpenInterface(&session, 7, false, &channel);
+        ClientSession_OpenInterface(&session, 7, false, false, &channel);
 
         interface_found = ClientSession_InterfaceForChannel(&session, channel, &found_interface);
         channel_found = ClientSession_ChannelForInterface(&session, 7, &found_channel);
@@ -48,7 +48,7 @@ describe("client_session", []() {
         uint32_t found_interface = 0;
         bool interface_found;
 
-        ClientSession_OpenInterface(&session, 7, false, &channel);
+        ClientSession_OpenInterface(&session, 7, false, false, &channel);
 
         ClientSession_CloseChannel(&session, channel);
         interface_found = ClientSession_InterfaceForChannel(&session, channel, &found_interface);
@@ -61,7 +61,7 @@ describe("client_session", []() {
         bool channel_found;
         uint8_t found_channel = 0;
 
-        ClientSession_OpenInterface(&session, 7, false, &channel);
+        ClientSession_OpenInterface(&session, 7, false, false, &channel);
 
         ClientSession_RemoveInterface(&session, 7);
         channel_found = ClientSession_ChannelForInterface(&session, 7, &found_channel);
@@ -75,10 +75,10 @@ describe("client_session", []() {
         uint8_t i;
 
         for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
-            ClientSession_OpenInterface(&session, i, false, &channel);
+            ClientSession_OpenInterface(&session, i, false, false, &channel);
         }
 
-        opened = ClientSession_OpenInterface(&session, 100, false, &channel);
+        opened = ClientSession_OpenInterface(&session, 100, false, false, &channel);
 
         expect(opened).toBe(false);
     });

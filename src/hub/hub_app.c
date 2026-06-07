@@ -2,9 +2,15 @@
 
 /* ---------- public ---------- */
 
-void HubApp_Init(HubApp *self, HubTransportPort *transport, IdentityStorePort *identity_store, bool require_known_agents)
+void HubApp_Init(
+    HubApp *self,
+    HubTransportPort *transport,
+    IdentityStorePort *identity_store,
+    AuthorizationPort *authorization,
+    bool require_known_agents
+)
 {
-    Broker_Init(&self->broker, transport, identity_store, require_known_agents);
+    Broker_Init(&self->broker, transport, identity_store, authorization, require_known_agents);
 }
 
 HubTransportEvents HubApp_Events(HubApp *self)

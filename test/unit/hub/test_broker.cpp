@@ -5,6 +5,7 @@ extern "C" {
 #include "broker_driver.h"
 #include "hub_transport_port_mock.h"
 #include "identity_store_mock.h"
+#include "authorization_mock.h"
 #include "protocol/admin_message.h"
 #include "protocol/error_message.h"
 #include "protocol/frame_message.h"
@@ -23,9 +24,38 @@ extern "C" {
 static Broker broker;
 static HubTransportPortMock transport;
 static IdentityStoreMock identity_store;
+static AuthorizationMock authorization;
 static HubTransportEvents events;
 static uint8_t client_channel;
 static const RegisterMessage truck_registration = { "truck42", 2, { "can0", "can1" } };
+
+static void connectClientWithFingerprint(uint32_t peer_id, const char *fingerprint)
+{
+    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0 };
+    uint8_t encoded[64];
+    size_t encoded_size;
+
+    events.on_peer_connected(events.context, peer_id, fingerprint, false);
+    encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+    events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
+}
+
+static uint8_t openInterface(uint32_t peer_id, uint32_t interface_id, uint8_t open_flags)
+{
+    OpenMessage open = { interface_id, open_flags };
+    OpenAckMessage ack;
+    MessageHeader header;
+    uint8_t encoded[64];
+    size_t encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
+    int reply_index;
+
+    events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
+    reply_index = transport.control_count - 1;
+    MessageHeader_Decode(&header, transport.control_log[reply_index], transport.control_sizes[reply_index]);
+    OpenAckMessage_Decode(&ack, transport.control_log[reply_index] + MESSAGE_HEADER_SIZE, header.length);
+
+    return ack.status == OPEN_STATUS_OK ? ack.channel : 0xFF;
+}
 
 static void registerAgentWithFingerprint(uint32_t peer_id, const char *fingerprint)
 {
@@ -77,7 +107,7 @@ describe("broker", []() {
     describe("agent registration", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, false);
             events = Broker_Events(&broker);
         });
 
@@ -133,7 +163,7 @@ describe("broker", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
             IdentityStoreMock_Reset(&identity_store);
-            Broker_Init(&broker, &transport.port, &identity_store.port, false);
+            Broker_Init(&broker, &transport.port, &identity_store.port, NULL, false);
             events = Broker_Events(&broker);
         });
 
@@ -178,7 +208,7 @@ describe("broker", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
             IdentityStoreMock_Reset(&identity_store);
-            Broker_Init(&broker, &transport.port, &identity_store.port, true);
+            Broker_Init(&broker, &transport.port, &identity_store.port, NULL, true);
             events = Broker_Events(&broker);
         });
 
@@ -232,7 +262,7 @@ describe("broker", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
             IdentityStoreMock_Reset(&identity_store);
-            Broker_Init(&broker, &transport.port, &identity_store.port, true);
+            Broker_Init(&broker, &transport.port, &identity_store.port, NULL, true);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
         });
@@ -262,7 +292,7 @@ describe("broker", []() {
     describe("client control plane", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);
@@ -321,7 +351,7 @@ describe("broker", []() {
             uint32_t interface_id;
 
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);
@@ -388,7 +418,7 @@ describe("broker", []() {
     describe("liveness", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, false);
             events = Broker_Events(&broker);
             events.on_peer_connected(events.context, AGENT_PEER, NULL, false);
         });
@@ -413,7 +443,7 @@ describe("broker", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
             IdentityStoreMock_Reset(&identity_store);
-            Broker_Init(&broker, &transport.port, &identity_store.port, false);
+            Broker_Init(&broker, &transport.port, &identity_store.port, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);
@@ -643,7 +673,7 @@ describe("broker", []() {
     describe("echo fan-out", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);
@@ -723,12 +753,104 @@ describe("broker", []() {
         });
     });
 
+    describe("client write authorization", []() {
+        static uint32_t can0_interface_id;
+
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            AuthorizationMock_Reset(&authorization);
+            Broker_Init(&broker, &transport.port, NULL, &authorization.port, false);
+            events = Broker_Events(&broker);
+            BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
+            can0_interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+        });
+
+        it("drops an injected frame from a client without a write grant", []() {
+            uint8_t channel;
+            FrameMessage frame;
+            uint8_t encoded[128];
+            size_t encoded_size;
+
+            connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
+            channel = openInterface(CLIENT_PEER, can0_interface_id, 0);
+            HubTransportPortMock_Reset(&transport);
+            frame = { 0x123, 1000, channel, 1, 0, 0, { 0x55 } };
+            encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+
+            events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
+
+            expect(transport.frame_count).toBe(0);
+        });
+
+        it("forwards an injected frame from a client with a write grant", []() {
+            uint8_t channel;
+            FrameMessage frame;
+            uint8_t encoded[128];
+            size_t encoded_size;
+
+            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true);
+            connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
+            channel = openInterface(CLIENT_PEER, can0_interface_id, 0);
+            HubTransportPortMock_Reset(&transport);
+            frame = { 0x123, 1000, channel, 1, 0, 0, { 0x55 } };
+            encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+
+            events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
+
+            expect(transport.frame_count).toBe(1);
+            expect(transport.frame_peers[0]).toBe((uint32_t)AGENT_PEER);
+        });
+
+        it("rejects OPEN with want_write when the client has no grant", []() {
+            OpenMessage open = { can0_interface_id, OPEN_FLAG_WANT_WRITE };
+            OpenAckMessage ack;
+            MessageHeader header;
+            uint8_t encoded[64];
+            size_t encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
+
+            connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
+            HubTransportPortMock_Reset(&transport);
+            events.on_peer_control(events.context, CLIENT_PEER, encoded, encoded_size, 0);
+            MessageHeader_Decode(&header, transport.control_log[0], transport.control_sizes[0]);
+            OpenAckMessage_Decode(&ack, transport.control_log[0] + MESSAGE_HEADER_SIZE, header.length);
+
+            expect(ack.status).toBe(OPEN_STATUS_WRITE_DENIED);
+        });
+
+        it("allows OPEN with want_write once granted", []() {
+            uint8_t channel;
+
+            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true);
+            connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
+            channel = openInterface(CLIENT_PEER, can0_interface_id, OPEN_FLAG_WANT_WRITE);
+
+            expect(channel != 0xFF).toBe(true);
+        });
+
+        it("lets a plaintext client (no fingerprint) inject without a grant", []() {
+            uint8_t channel;
+            FrameMessage frame;
+            uint8_t encoded[128];
+            size_t encoded_size;
+
+            BrokerDriver_ConnectClient(&events, CLIENT_PEER);
+            channel = openInterface(CLIENT_PEER, can0_interface_id, 0);
+            HubTransportPortMock_Reset(&transport);
+            frame = { 0x123, 1000, channel, 1, 0, 0, { 0x55 } };
+            encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+
+            events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
+
+            expect(transport.frame_count).toBe(1);
+        });
+    });
+
     describe("backpressure", []() {
         beforeEach([]() {
             uint32_t interface_id;
 
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);

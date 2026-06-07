@@ -13,7 +13,13 @@ void ClientSession_Reset(ClientSession *self)
     memset(self, 0, sizeof(*self));
 }
 
-bool ClientSession_OpenInterface(ClientSession *self, uint32_t interface_id, bool suppress_echo, uint8_t *channel)
+bool ClientSession_OpenInterface(
+    ClientSession *self,
+    uint32_t interface_id,
+    bool suppress_echo,
+    bool can_write,
+    uint8_t *channel
+)
 {
     ChannelBinding *binding = findFree(self);
 
@@ -23,10 +29,24 @@ bool ClientSession_OpenInterface(ClientSession *self, uint32_t interface_id, boo
 
     binding->in_use = true;
     binding->suppress_echo = suppress_echo;
+    binding->can_write = can_write;
     binding->interface_id = interface_id;
     binding->channel = *channel;
 
     return true;
+}
+
+bool ClientSession_CanWrite(const ClientSession *self, uint8_t channel)
+{
+    uint8_t i;
+
+    for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
+        if (self->bindings[i].in_use && self->bindings[i].channel == channel) {
+            return self->bindings[i].can_write;
+        }
+    }
+
+    return false;
 }
 
 void ClientSession_CloseChannel(ClientSession *self, uint8_t channel)

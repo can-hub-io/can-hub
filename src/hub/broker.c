@@ -55,6 +55,7 @@ static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, siz
 static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char *detail);
 static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *data, size_t size, uint8_t route_flags);
 static uint8_t injectionToken(Broker *self, const HubPeer *sender);
+static bool clientCanWrite(Broker *self, const HubPeer *peer, const InterfaceEntry *entry);
 static uint32_t echoOriginatorPeerId(Broker *self, uint8_t route_flags);
 static void tickHelloDeadline(Broker *self, HubPeer *peer, uint64_t now_us);
 
@@ -79,11 +80,18 @@ static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
 
 /* ---------- public ---------- */
 
-void Broker_Init(Broker *self, HubTransportPort *transport, IdentityStorePort *identity_store, bool require_known_agents)
+void Broker_Init(
+    Broker *self,
+    HubTransportPort *transport,
+    IdentityStorePort *identity_store,
+    AuthorizationPort *authorization,
+    bool require_known_agents
+)
 {
     memset(self, 0, sizeof(*self));
     self->transport = transport;
     self->identity_store = identity_store;
+    self->authorization = authorization;
     self->require_known_agents = require_known_agents;
     InterfaceRegistry_Reset(&self->registry);
     PeerDirectory_Reset(&self->directory);
@@ -224,6 +232,10 @@ static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
         forwarded_route_flags = frame.route_flags & (FRAME_ROUTE_FLAG_BRIDGED | FRAME_ROUTE_FLAG_ECHO);
         echo_originator_peer_id = echoOriginatorPeerId(self, frame.route_flags);
     } else {
+        if (!ClientSession_CanWrite(&peer->session, frame.channel)) {
+            self->metrics.frames_dropped++;
+            return;
+        }
         route_count = FrameRoutes_FromClient(&self->registry, peer, frame.channel, routes, FRAME_ROUTES_MAX);
         forwarded_route_flags = (uint8_t)(injectionToken(self, peer) << FRAME_ROUTE_TOKEN_SHIFT);
     }
@@ -325,9 +337,10 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
 {
     OpenMessage open;
     OpenAckMessage ack;
+    const InterfaceEntry *entry;
     uint8_t encoded[CONTROL_BUFFER_SIZE];
-    bool interface_exists;
     bool suppress_echo;
+    bool can_write;
 
     if (peer->role != kHUB_PEER_ROLE_CLIENT) {
         return;
@@ -338,11 +351,24 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
 
     memset(&ack, 0, sizeof(ack));
     ack.interface_id = open.interface_id;
-    ack.status = 1;
+    ack.status = OPEN_STATUS_REJECTED;
 
-    interface_exists = InterfaceRegistry_FindById(&self->registry, open.interface_id) != NULL;
+    entry = InterfaceRegistry_FindById(&self->registry, open.interface_id);
+    if (entry == NULL) {
+        sendControl(self, peer, encoded, OpenAckMessage_Encode(&ack, encoded, sizeof(encoded)));
+        return;
+    }
+
+    can_write = clientCanWrite(self, peer, entry);
+    if ((open.flags & OPEN_FLAG_WANT_WRITE) && !can_write) {
+        ack.status = OPEN_STATUS_WRITE_DENIED;
+        sendControl(self, peer, encoded, OpenAckMessage_Encode(&ack, encoded, sizeof(encoded)));
+        sendError(self, peer->peer_id, kERROR_CODE_ROLE_REJECTED, "not authorized to inject on this interface");
+        return;
+    }
+
     suppress_echo = (open.flags & OPEN_FLAG_SUPPRESS_OWN_ECHO) != 0;
-    if (interface_exists && ClientSession_OpenInterface(&peer->session, open.interface_id, suppress_echo, &ack.channel)) {
+    if (ClientSession_OpenInterface(&peer->session, open.interface_id, suppress_echo, can_write, &ack.channel)) {
         ack.status = OPEN_STATUS_OK;
     }
 
@@ -725,6 +751,23 @@ static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *d
             destination->frames_dropped++;
         }
     }
+}
+
+static bool clientCanWrite(Broker *self, const HubPeer *peer, const InterfaceEntry *entry)
+{
+    if (peer->fingerprint_hex[0] == '\0') {
+        return true;
+    }
+    if (self->authorization == NULL) {
+        return true;
+    }
+
+    return self->authorization->write_allowed(
+        self->authorization->context,
+        peer->fingerprint_hex,
+        entry->agent_name,
+        entry->interface_name
+    );
 }
 
 static uint8_t injectionToken(Broker *self, const HubPeer *sender)

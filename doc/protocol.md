@@ -122,11 +122,14 @@ LIST_REPLY (total 8 + count * 148)
 OPEN (total 12)
 @4   interface_id u32
 @8   flags u8 (bit 0: suppress own echo — frames this client injects are not
-              echoed back to it when they return from the bus)
+              echoed back to it when they return from the bus.
+              bit 1: want write — the client intends to inject; the hub
+              rejects the OPEN up front if the client is not authorized to
+              write this interface, instead of silently dropping its frames)
 @9   reserved u8[3]
 
 OPEN_ACK (total 12)
-@4   status u8 (0 ok)
+@4   status u8 (0 ok, 1 rejected/unknown interface, 2 write denied)
 @5   channel u8
 @6   reserved u16
 @8   interface_id u32
@@ -278,6 +281,13 @@ FRAME (total 20 + payload)
                         hub strips it before fanning out to clients.)
 @20  payload 0-64 bytes
 ```
+
+Write authorization: a client may inject frames into an interface only if it
+is authorized to write it. Clients on transports that carry no fingerprint
+(unix socket, plain tcp) are network-trusted and may always write; on the
+encrypted transports the hub checks the client fingerprint against its ACLs
+and **drops** unauthorized injected frames (the security boundary). The OPEN
+`want write` flag surfaces this as an up-front rejection for honest clients.
 
 Injected frames become visible to the other subscribers of the interface only
 through their bus echo: the hub does not fan out client frames directly. The

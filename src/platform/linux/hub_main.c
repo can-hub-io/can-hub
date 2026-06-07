@@ -67,10 +67,12 @@ static char state_directory[TLS_IDENTITY_PATH_MAX];
 static char identity_certificate_path[TLS_IDENTITY_PATH_MAX];
 static char identity_key_path[TLS_IDENTITY_PATH_MAX];
 static IdentityDatabase identity_database;
+static bool database_open;
 
 static bool parseArguments(int argc, char **argv);
 static bool loadIdentity(const char *state_directory_override);
 static IdentityStorePort *identityStore(void);
+static AuthorizationPort *authorizationStore(void);
 static void importLegacyPinFile(void);
 static void applyDefaultListen(ListenAddress *listen_address, const char *bind_address, const char *port_text);
 static bool startListeners(const char *unix_path, const char *certificate, const char *key, bool explicit_listen);
@@ -321,7 +323,7 @@ static bool startListeners(const char *unix_path, const char *certificate, const
         return false;
     }
 
-    HubApp_Init(&app, &mux_port, identityStore(), require_known_agents);
+    HubApp_Init(&app, &mux_port, identityStore(), authorizationStore(), require_known_agents);
 
     return true;
 }
@@ -339,10 +341,16 @@ static IdentityStorePort *identityStore(void)
         fprintf(stderr, "agent identity pinning disabled: could not open %s\n", database_path);
         return NULL;
     }
+    database_open = true;
 
     importLegacyPinFile();
 
     return IdentityDatabase_Port(&identity_database);
+}
+
+static AuthorizationPort *authorizationStore(void)
+{
+    return database_open ? IdentityDatabase_AuthorizationPort(&identity_database) : NULL;
 }
 
 static void importLegacyPinFile(void)

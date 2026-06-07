@@ -2,6 +2,7 @@
 
 #include "hub/domain/interface_registry.h"
 #include "hub/domain/peer_directory.h"
+#include "hub/ports/authorization_port.h"
 #include "hub/ports/hub_transport_events.h"
 #include "hub/ports/identity_store_port.h"
 #include "hub/ports/hub_transport_port.h"
@@ -22,12 +23,19 @@ typedef struct {
 typedef struct {
     HubTransportPort *transport;
     IdentityStorePort *identity_store;
+    AuthorizationPort *authorization;
     InterfaceRegistry registry;
     PeerDirectory directory;
     HubMetrics metrics;
     bool require_known_agents;
 } Broker;
 
-void Broker_Init(Broker *self, HubTransportPort *transport, IdentityStorePort *identity_store, bool require_known_agents);
+void Broker_Init(
+    Broker *self,
+    HubTransportPort *transport,
+    IdentityStorePort *identity_store,
+    AuthorizationPort *authorization,
+    bool require_known_agents
+);
 HubTransportEvents Broker_Events(Broker *self);
 void Broker_Tick(Broker *self, uint64_t now_us);
