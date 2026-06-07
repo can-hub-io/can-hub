@@ -108,8 +108,11 @@ LIST_REPLY (total 8 + count * 148)
      +4   agent_name char[128]
      +132 interface_name char[16]
 
-OPEN (total 8)
+OPEN (total 12)
 @4   interface_id u32
+@8   flags u8 (bit 0: suppress own echo — frames this client injects are not
+              echoed back to it when they return from the bus)
+@9   reserved u8[3]
 
 OPEN_ACK (total 12)
 @4   status u8 (0 ok)
@@ -253,9 +256,23 @@ FRAME (total 20 + payload)
 @18  frame_flags u8    (bit 0: FD, bit 1: BRS)
 @19  route_flags u8    (bit 0: bridged — set by the hub when forwarding a
                         frame across a bus-to-bus bridge rule; bridged frames
-                        are never bridged again. other bits reserved)
+                        are never bridged again.
+                        bit 1: echo — this frame is the bus echo of an
+                        injected TX (set by the agent on kernel TX-confirm).
+                        bits 2-7: origin token — hub-assigned opaque tag of
+                        the injecting client (peer slot + 1, 0 = none). The
+                        hub stamps it on injections towards the agent; the
+                        agent carries it through its local TX/echo
+                        correlation and returns it on the echo frame; the
+                        hub strips it before fanning out to clients.)
 @20  payload 0-64 bytes
 ```
+
+Injected frames become visible to the other subscribers of the interface only
+through their bus echo: the hub does not fan out client frames directly. The
+echo returns in real bus order and only if the TX actually made it onto the
+wire; the injecting client receives its own echo too unless it opened the
+channel with the suppress-own-echo flag.
 
 Multiple FRAME messages may be packed back-to-back in one datagram up to the path MTU.
 

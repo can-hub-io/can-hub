@@ -37,6 +37,7 @@ static TlsClientTransport tls_transport;
 static TransportPort *active_port;
 static uint8_t command;
 static uint8_t connect_scheme;
+static uint8_t open_flags;
 static uint32_t dump_interface_id;
 static int32_t exit_code = -1;
 static const char *state_directory_override;
@@ -71,7 +72,7 @@ int main(int argc, char **argv)
 
     if (!parseArguments(argc, argv, host, port_text)) {
         fprintf(stderr, "usage: %s [--connect tls://<host>:<port>|tcp://<host>:<port>|unix://<path>]\n", argv[0]);
-        fprintf(stderr, "       [--state-dir <path>] list | dump <interface-id>\n");
+        fprintf(stderr, "       [--state-dir <path>] list | dump [--no-echo] <interface-id>\n");
         fprintf(stderr, "       default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
         return 1;
     }
@@ -101,6 +102,8 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
             connect_url = argv[++i];
         } else if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
             state_directory_override = argv[++i];
+        } else if (strcmp(argv[i], "--no-echo") == 0) {
+            open_flags |= OPEN_FLAG_SUPPRESS_OWN_ECHO;
         } else if (command_name == NULL) {
             command_name = argv[i];
             if (strcmp(command_name, "list") == 0) {
@@ -178,7 +181,7 @@ static void onConnected(void *context)
 {
     HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0 };
     ListMessage list = { 0 };
-    OpenMessage open = { dump_interface_id };
+    OpenMessage open = { dump_interface_id, open_flags };
     uint8_t encoded[64];
     size_t encoded_size;
 

@@ -73,6 +73,11 @@ HubPeer *PeerDirectory_FindAgentByName(PeerDirectory *self, const char *agent_na
     return NULL;
 }
 
+uint8_t PeerDirectory_SlotOf(const PeerDirectory *self, const HubPeer *peer)
+{
+    return (uint8_t)(peer - self->peers);
+}
+
 uint16_t PeerDirectory_Count(const PeerDirectory *self)
 {
     uint16_t count = 0;

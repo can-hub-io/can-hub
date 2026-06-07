@@ -6,8 +6,8 @@ extern "C" {
 }
 
 describe("open_message", []() {
-    it("round-trips the interface id", []() {
-        OpenMessage open = { 0xCAFE0007 };
+    it("round-trips the interface id and the flags", []() {
+        OpenMessage open = { 0xCAFE0007, OPEN_FLAG_SUPPRESS_OWN_ECHO };
         OpenMessage decoded;
         uint8_t buffer[16];
         size_t expected_size = MESSAGE_HEADER_SIZE + OPEN_BODY_SIZE;
@@ -20,6 +20,7 @@ describe("open_message", []() {
         expect(encoded_size).toBe(expected_size);
         expect(decoded_ok).toBe(true);
         expect(decoded.interface_id).toBe((uint32_t)0xCAFE0007);
+        expect(decoded.flags).toBe(OPEN_FLAG_SUPPRESS_OWN_ECHO);
     });
 
     it("rejects a truncated open payload", []() {

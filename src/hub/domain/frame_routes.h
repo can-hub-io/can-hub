@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "hub/domain/interface_registry.h"
@@ -15,6 +16,7 @@
 typedef struct {
     uint32_t peer_id;
     uint8_t channel;
+    bool suppress_echo;
 } FrameRoute;
 
 uint8_t FrameRoutes_FromAgent(

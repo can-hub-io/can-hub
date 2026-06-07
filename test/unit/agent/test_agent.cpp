@@ -98,7 +98,7 @@ describe("agent", []() {
         });
 
         it("drops can frames while not running", []() {
-            FrameMessage frame = { 0x123, 1000, 0, 2, 0, { 0xAA, 0xBB } };
+            FrameMessage frame = { 0x123, 1000, 0, 2, 0, 0, { 0xAA, 0xBB } };
 
             Agent_OnCanFrame(&agent, 0, &frame);
 
@@ -185,7 +185,7 @@ describe("agent", []() {
         });
 
         it("forwards can frames with the assigned channel", []() {
-            FrameMessage frame = { 0x123, 1000, 0, 2, 0, { 0xAA, 0xBB } };
+            FrameMessage frame = { 0x123, 1000, 0, 2, 0, 0, { 0xAA, 0xBB } };
             FrameMessage sent_frame;
             MessageHeader sent_header;
 
@@ -200,7 +200,7 @@ describe("agent", []() {
         });
 
         it("injects transport frames into the owning interface", []() {
-            FrameMessage frame = { 0x456, 2000, 7, 3, 0, { 1, 2, 3 } };
+            FrameMessage frame = { 0x456, 2000, 7, 3, 0, 0, { 1, 2, 3 } };
             uint8_t encoded_frame[128];
             size_t encoded_frame_size = FrameMessage_Encode(&frame, encoded_frame, sizeof(encoded_frame));
 
@@ -212,7 +212,7 @@ describe("agent", []() {
         });
 
         it("ignores transport frames for unknown channels", []() {
-            FrameMessage frame = { 0x456, 2000, 42, 3, 0, { 1, 2, 3 } };
+            FrameMessage frame = { 0x456, 2000, 42, 3, 0, 0, { 1, 2, 3 } };
             uint8_t encoded_frame[128];
             size_t encoded_frame_size = FrameMessage_Encode(&frame, encoded_frame, sizeof(encoded_frame));
 
@@ -229,6 +229,64 @@ describe("agent", []() {
 
             expect(transport.connect_calls).toBe(2);
             expect(Agent_State(&agent)).toBe(kAGENT_STATE_CONNECTING);
+        });
+
+        it("returns the origin token on the bus echo of an injection", []() {
+            FrameMessage injected = { 0x456, 2000, 7, 1, 0, 8 << FRAME_ROUTE_TOKEN_SHIFT, { 0x55 } };
+            FrameMessage echo = { 0x456, 2100, 0, 1, 0, FRAME_ROUTE_FLAG_ECHO, { 0x55 } };
+            FrameMessage sent_frame;
+            MessageHeader sent_header;
+            uint8_t encoded_frame[128];
+            size_t encoded_frame_size = FrameMessage_Encode(&injected, encoded_frame, sizeof(encoded_frame));
+
+            Agent_OnTransportFrame(&agent, encoded_frame, encoded_frame_size);
+            Agent_OnCanFrame(&agent, 0, &echo);
+            MessageHeader_Decode(&sent_header, transport.last_frame, transport.last_frame_size);
+            FrameMessage_Decode(&sent_frame, transport.last_frame + MESSAGE_HEADER_SIZE, sent_header.length);
+
+            expect(transport.frame_count).toBe(1);
+            expect(sent_frame.route_flags).toBe(FRAME_ROUTE_FLAG_ECHO | (8 << FRAME_ROUTE_TOKEN_SHIFT));
+        });
+
+        it("forwards an unmatched echo without a token", []() {
+            FrameMessage echo = { 0x456, 2100, 0, 1, 0, FRAME_ROUTE_FLAG_ECHO, { 0x55 } };
+            FrameMessage sent_frame;
+            MessageHeader sent_header;
+
+            Agent_OnCanFrame(&agent, 0, &echo);
+            MessageHeader_Decode(&sent_header, transport.last_frame, transport.last_frame_size);
+            FrameMessage_Decode(&sent_frame, transport.last_frame + MESSAGE_HEADER_SIZE, sent_header.length);
+
+            expect(sent_frame.route_flags).toBe(FRAME_ROUTE_FLAG_ECHO);
+        });
+
+        it("drops the pending token when the bus write fails", []() {
+            FrameMessage injected = { 0x456, 2000, 7, 1, 0, 8 << FRAME_ROUTE_TOKEN_SHIFT, { 0x55 } };
+            FrameMessage echo = { 0x456, 2100, 0, 1, 0, FRAME_ROUTE_FLAG_ECHO, { 0x55 } };
+            FrameMessage sent_frame;
+            MessageHeader sent_header;
+            uint8_t encoded_frame[128];
+            size_t encoded_frame_size = FrameMessage_Encode(&injected, encoded_frame, sizeof(encoded_frame));
+
+            can.write_result = false;
+            Agent_OnTransportFrame(&agent, encoded_frame, encoded_frame_size);
+            Agent_OnCanFrame(&agent, 0, &echo);
+            MessageHeader_Decode(&sent_header, transport.last_frame, transport.last_frame_size);
+            FrameMessage_Decode(&sent_frame, transport.last_frame + MESSAGE_HEADER_SIZE, sent_header.length);
+
+            expect(sent_frame.route_flags).toBe(FRAME_ROUTE_FLAG_ECHO);
+        });
+
+        it("strips stale route flags from genuine bus frames", []() {
+            FrameMessage frame = { 0x123, 1000, 0, 1, 0, FRAME_ROUTE_TOKEN_MASK, { 0x55 } };
+            FrameMessage sent_frame;
+            MessageHeader sent_header;
+
+            Agent_OnCanFrame(&agent, 0, &frame);
+            MessageHeader_Decode(&sent_header, transport.last_frame, transport.last_frame_size);
+            FrameMessage_Decode(&sent_frame, transport.last_frame + MESSAGE_HEADER_SIZE, sent_header.length);
+
+            expect(sent_frame.route_flags).toBe(0);
         });
     });
 

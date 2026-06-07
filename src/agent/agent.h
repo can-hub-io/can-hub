@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "agent/domain/channel_map.h"
+#include "agent/domain/echo_correlator.h"
 #include "agent/domain/reconnect_backoff.h"
 #include "agent/ports/can_events.h"
 #include "agent/ports/can_port.h"
@@ -35,6 +36,7 @@ typedef struct {
     RegisterMessage registration;
     ChannelMap channel_map;
     ReconnectBackoff backoff;
+    EchoCorrelator echo;
     uint8_t state;
     uint64_t next_connect_at_us;
     uint64_t register_deadline_us;

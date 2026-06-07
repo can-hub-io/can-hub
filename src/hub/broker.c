@@ -14,7 +14,9 @@
 #define CONTROL_BUFFER_SIZE 4096
 #define PING_REPLY_FLAG 0x01
 #define HELLO_TIMEOUT_US 5000000
+#define FRAME_ROUTE_TOKEN_VALUES_MAX 63
 #define FRAME_CHANNEL_OFFSET (MESSAGE_HEADER_SIZE + 12)
+#define FRAME_ROUTE_FLAGS_OFFSET (MESSAGE_HEADER_SIZE + 15)
 #define FRAME_BUFFER_SIZE (MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD)
 
 typedef void (*TControlHandler)(
@@ -48,7 +50,9 @@ static void disconnectPeer(Broker *self, uint32_t peer_id);
 static bool agentIdentityAccepted(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
 static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size);
-static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *data, size_t size);
+static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *data, size_t size, uint8_t route_flags);
+static uint8_t injectionToken(Broker *self, const HubPeer *sender);
+static uint32_t echoOriginatorPeerId(Broker *self, uint8_t route_flags);
 static void tickHelloDeadline(Broker *self, HubPeer *peer, uint64_t now_us);
 
 static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
@@ -178,6 +182,8 @@ static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
     MessageHeader header;
     FrameMessage frame;
     FrameRoute routes[FRAME_ROUTES_MAX];
+    uint32_t echo_originator_peer_id = 0;
+    uint8_t forwarded_route_flags = 0;
     uint8_t route_count = 0;
     uint8_t i;
 
@@ -209,8 +215,11 @@ static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
             routes,
             FRAME_ROUTES_MAX
         );
+        forwarded_route_flags = frame.route_flags & (FRAME_ROUTE_FLAG_BRIDGED | FRAME_ROUTE_FLAG_ECHO);
+        echo_originator_peer_id = echoOriginatorPeerId(self, frame.route_flags);
     } else {
         route_count = FrameRoutes_FromClient(&self->registry, peer, frame.channel, routes, FRAME_ROUTES_MAX);
+        forwarded_route_flags = (uint8_t)(injectionToken(self, peer) << FRAME_ROUTE_TOKEN_SHIFT);
     }
 
     if (route_count == 0) {
@@ -219,7 +228,10 @@ static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
     }
 
     for(i=0; i<route_count; i++) {
-        forwardFrame(self, &routes[i], data, size);
+        if (routes[i].suppress_echo && routes[i].peer_id == echo_originator_peer_id) {
+            continue;
+        }
+        forwardFrame(self, &routes[i], data, size, forwarded_route_flags);
     }
 }
 
@@ -296,6 +308,7 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
     OpenAckMessage ack;
     uint8_t encoded[CONTROL_BUFFER_SIZE];
     bool interface_exists;
+    bool suppress_echo;
 
     if (peer->role != kHUB_PEER_ROLE_CLIENT) {
         return;
@@ -309,7 +322,8 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
     ack.status = 1;
 
     interface_exists = InterfaceRegistry_FindById(&self->registry, open.interface_id) != NULL;
-    if (interface_exists && ClientSession_OpenInterface(&peer->session, open.interface_id, &ack.channel)) {
+    suppress_echo = (open.flags & OPEN_FLAG_SUPPRESS_OWN_ECHO) != 0;
+    if (interface_exists && ClientSession_OpenInterface(&peer->session, open.interface_id, suppress_echo, &ack.channel)) {
         ack.status = OPEN_STATUS_OK;
     }
 
@@ -624,7 +638,7 @@ static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, siz
     }
 }
 
-static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *data, size_t size)
+static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *data, size_t size, uint8_t route_flags)
 {
     uint8_t forwarded[FRAME_BUFFER_SIZE];
     HubPeer *destination;
@@ -632,6 +646,7 @@ static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *d
 
     memcpy(forwarded, data, size);
     forwarded[FRAME_CHANNEL_OFFSET] = route->channel;
+    forwarded[FRAME_ROUTE_FLAGS_OFFSET] = route_flags;
 
     sent = self->transport->send_frame(self->transport->context, route->peer_id, forwarded, size);
     if (sent) {
@@ -648,6 +663,34 @@ static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *d
             destination->frames_dropped++;
         }
     }
+}
+
+static uint8_t injectionToken(Broker *self, const HubPeer *sender)
+{
+    uint8_t slot = PeerDirectory_SlotOf(&self->directory, sender);
+
+    if (slot >= FRAME_ROUTE_TOKEN_VALUES_MAX) {
+        return FRAME_ROUTE_NO_TOKEN;
+    }
+
+    return (uint8_t)(slot + 1);
+}
+
+static uint32_t echoOriginatorPeerId(Broker *self, uint8_t route_flags)
+{
+    HubPeer *originator;
+    uint8_t token = (uint8_t)((route_flags & FRAME_ROUTE_TOKEN_MASK) >> FRAME_ROUTE_TOKEN_SHIFT);
+
+    if ((route_flags & FRAME_ROUTE_FLAG_ECHO) == 0 || token == FRAME_ROUTE_NO_TOKEN) {
+        return 0;
+    }
+
+    originator = PeerDirectory_At(&self->directory, (uint8_t)(token - 1));
+    if (originator == NULL) {
+        return 0;
+    }
+
+    return originator->peer_id;
 }
 
 static void countInterfaceFrame(Broker *self, const HubPeer *peer, uint8_t channel)

@@ -12,10 +12,10 @@ uint8_t FrameRoutes_FromAgent(
 )
 {
     const InterfaceEntry *entry;
+    const ChannelBinding *binding;
     HubPeer *peer;
     uint8_t route_count = 0;
     uint8_t peer_index;
-    uint8_t client_channel;
 
     entry = InterfaceRegistry_FindByAgentChannel(registry, agent_peer_id, agent_channel);
     if (entry == NULL) {
@@ -27,7 +27,8 @@ uint8_t FrameRoutes_FromAgent(
         if (peer == NULL || peer->role != kHUB_PEER_ROLE_CLIENT) {
             continue;
         }
-        if (!ClientSession_ChannelForInterface(&peer->session, entry->interface_id, &client_channel)) {
+        binding = ClientSession_BindingForInterface(&peer->session, entry->interface_id);
+        if (binding == NULL) {
             continue;
         }
         if (route_count == routes_max) {
@@ -35,7 +36,8 @@ uint8_t FrameRoutes_FromAgent(
         }
 
         routes[route_count].peer_id = peer->peer_id;
-        routes[route_count].channel = client_channel;
+        routes[route_count].channel = binding->channel;
+        routes[route_count].suppress_echo = binding->suppress_echo;
         route_count++;
     }
 
@@ -67,6 +69,7 @@ uint8_t FrameRoutes_FromClient(
 
     routes[0].peer_id = entry->agent_peer_id;
     routes[0].channel = entry->agent_channel;
+    routes[0].suppress_echo = false;
 
     return 1;
 }

@@ -29,10 +29,14 @@ C (C11), cmake + gcc, static or dynamic linking. Make wraps cmake: `make release
 
 - QUIC (ngtcp2): primary. TLS 1.3 built in, reliable streams for control, unreliable datagrams (RFC 9221) for CAN frames — latest-wins, no head-of-line blocking.
 - Reliable data plane (later): flows that need guaranteed delivery (ISOTP, UDS/firmware upgrades) can ride dedicated QUIC streams, reliable and ordered per flow, without blocking cyclic traffic. See protocol.md open questions.
-- TCP (plaintext today, optional TLS later): fallback for networks that block UDP. Both planes share the single stream; frames lose latest-wins semantics (head-of-line blocking under WAN loss) — documented trade-off of the fallback.
+- TCP (plaintext on 7228, TLS-over-TCP on 7227): fallback for networks that block UDP. Both planes share the single stream; frames lose latest-wins semantics (head-of-line blocking under WAN loss) — documented trade-off of the fallback.
 - Plain UDP: discarded (2026-06-06). If the network passes UDP it passes QUIC, so plain UDP only removes encryption; a reliable-control-over-UDP lite (stop-and-wait in the adapter) and a TCP-control + UDP-data hybrid (needs a session token so the hub can correlate the flows) were evaluated and parked — revisit only if a microcontroller target cannot carry ngtcp2.
 - SCTP: rejected. Middleboxes kill it, QUIC already provides multistreaming.
 - UDP beacon discovery: discarded (2026-06-06). Clients are configured with the hub address and query the catalogue with LIST.
+
+### Injection echo (decision 2026-06-07)
+
+Client-injected frames become visible to the other subscribers of an interface through their **bus echo**, never by hub-side fan-out: the agent enables `CAN_RAW_RECV_OWN_MSGS`, the kernel returns the TX on completion (`MSG_CONFIRM`), and that echo travels back to the hub and fans out like any bus frame. Truth from the wire — if the TX never made it, nobody sees it — and real bus ordering. The hub tags each injection with an origin token (FRAME route_flags); the agent's EchoCorrelator pairs TX↔echo locally, where every loss mode is synchronously observable (failed writes drop their entry), and returns the token so the hub can suppress the echo towards its own originator when the channel was opened with the suppress-own-echo flag. Hub-side fan-out was rejected: it lies under TX failure and reorders against genuine bus traffic.
 
 The transport is a port; adapters implement it. Adding a transport must not touch the domain.
 

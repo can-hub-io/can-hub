@@ -16,12 +16,19 @@
 #define FRAME_FLAG_FD (1u << 0)
 #define FRAME_FLAG_BRS (1u << 1)
 
+#define FRAME_ROUTE_FLAG_BRIDGED (1u << 0)
+#define FRAME_ROUTE_FLAG_ECHO (1u << 1)
+#define FRAME_ROUTE_TOKEN_SHIFT 2
+#define FRAME_ROUTE_TOKEN_MASK 0xFC
+#define FRAME_ROUTE_NO_TOKEN 0
+
 typedef struct {
     uint32_t can_id;
     uint64_t timestamp_us;
     uint8_t channel;
     uint8_t payload_length;
     uint8_t frame_flags;
+    uint8_t route_flags;
     uint8_t payload[FRAME_PAYLOAD_MAX_FD];
 } FrameMessage;
 

@@ -6,6 +6,7 @@
 #include "protocol/wire.h"
 
 #define OPEN_INTERFACE_ID_OFFSET 0
+#define OPEN_FLAGS_OFFSET 4
 #define ACK_STATUS_OFFSET 0
 #define ACK_CHANNEL_OFFSET 1
 #define ACK_INTERFACE_ID_OFFSET 4
@@ -29,7 +30,9 @@ size_t OpenMessage_Encode(const OpenMessage *self, uint8_t *buffer, size_t buffe
     MessageHeader_Encode(&header, buffer, buffer_size);
 
     body = buffer + MESSAGE_HEADER_SIZE;
+    memset(body, 0, OPEN_BODY_SIZE);
     Wire_WriteU32(body + OPEN_INTERFACE_ID_OFFSET, self->interface_id);
+    body[OPEN_FLAGS_OFFSET] = self->flags;
 
     return total_size;
 }
@@ -41,6 +44,7 @@ bool OpenMessage_Decode(OpenMessage *self, const uint8_t *payload, size_t payloa
     }
 
     self->interface_id = Wire_ReadU32(payload + OPEN_INTERFACE_ID_OFFSET);
+    self->flags = payload[OPEN_FLAGS_OFFSET];
 
     return true;
 }

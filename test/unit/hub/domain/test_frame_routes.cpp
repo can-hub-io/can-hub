@@ -30,7 +30,7 @@ describe("frame_routes", []() {
         uint8_t client_channel = 0;
         uint8_t route_count;
 
-        ClientSession_OpenInterface(&client->session, entry->interface_id, &client_channel);
+        ClientSession_OpenInterface(&client->session, entry->interface_id, false, &client_channel);
 
         route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX);
 
@@ -64,7 +64,7 @@ describe("frame_routes", []() {
         uint8_t client_channel = 0;
         uint8_t route_count;
 
-        ClientSession_OpenInterface(&client->session, entry->interface_id, &client_channel);
+        ClientSession_OpenInterface(&client->session, entry->interface_id, false, &client_channel);
 
         route_count = FrameRoutes_FromClient(&registry, client, client_channel, routes, FRAME_ROUTES_MAX);
 

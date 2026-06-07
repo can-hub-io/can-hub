@@ -68,9 +68,15 @@ int32_t SocketCanAdapter_Fd(const SocketCanAdapter *self, uint8_t interface_inde
 bool SocketCanAdapter_ReadFrame(SocketCanAdapter *self, uint8_t interface_index, FrameMessage *frame)
 {
     struct canfd_frame fd_frame;
+    struct iovec frame_vector = { &fd_frame, sizeof(fd_frame) };
+    struct msghdr message;
     ssize_t bytes_received;
 
-    bytes_received = read(self->can_fds[interface_index], &fd_frame, sizeof(fd_frame));
+    memset(&message, 0, sizeof(message));
+    message.msg_iov = &frame_vector;
+    message.msg_iovlen = 1;
+
+    bytes_received = recvmsg(self->can_fds[interface_index], &message, 0);
     if (bytes_received == (ssize_t)CAN_MTU) {
         classicToMessage((const struct can_frame *)&fd_frame, frame);
     } else if (bytes_received == (ssize_t)CANFD_MTU) {
@@ -79,6 +85,7 @@ bool SocketCanAdapter_ReadFrame(SocketCanAdapter *self, uint8_t interface_index,
         return false;
     }
 
+    frame->route_flags = (message.msg_flags & MSG_CONFIRM) ? FRAME_ROUTE_FLAG_ECHO : 0;
     frame->timestamp_us = Clock_RealtimeUs();
 
     return true;
@@ -134,6 +141,7 @@ static int32_t openCanSocket(const char *interface_name)
     struct ifreq interface_request;
     int32_t receive_buffer_bytes = RECEIVE_BUFFER_BYTES;
     int32_t fd_frames_enabled = 1;
+    int32_t receive_own_messages = 1;
     int32_t can_fd;
 
     can_fd = socket(PF_CAN, SOCK_RAW | SOCK_NONBLOCK, CAN_RAW);
@@ -149,6 +157,7 @@ static int32_t openCanSocket(const char *interface_name)
 
     setsockopt(can_fd, SOL_SOCKET, SO_RCVBUF, &receive_buffer_bytes, sizeof(receive_buffer_bytes));
     setsockopt(can_fd, SOL_CAN_RAW, CAN_RAW_FD_FRAMES, &fd_frames_enabled, sizeof(fd_frames_enabled));
+    setsockopt(can_fd, SOL_CAN_RAW, CAN_RAW_RECV_OWN_MSGS, &receive_own_messages, sizeof(receive_own_messages));
 
     memset(&address, 0, sizeof(address));
     address.can_family = AF_CAN;

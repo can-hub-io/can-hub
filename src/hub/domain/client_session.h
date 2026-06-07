@@ -11,6 +11,7 @@
  */
 typedef struct {
     bool in_use;
+    bool suppress_echo;
     uint32_t interface_id;
     uint8_t channel;
 } ChannelBinding;
@@ -21,8 +22,9 @@ typedef struct {
 } ClientSession;
 
 void ClientSession_Reset(ClientSession *self);
-bool ClientSession_OpenInterface(ClientSession *self, uint32_t interface_id, uint8_t *channel);
+bool ClientSession_OpenInterface(ClientSession *self, uint32_t interface_id, bool suppress_echo, uint8_t *channel);
 void ClientSession_CloseChannel(ClientSession *self, uint8_t channel);
 bool ClientSession_InterfaceForChannel(const ClientSession *self, uint8_t channel, uint32_t *interface_id);
 bool ClientSession_ChannelForInterface(const ClientSession *self, uint32_t interface_id, uint8_t *channel);
+const ChannelBinding *ClientSession_BindingForInterface(const ClientSession *self, uint32_t interface_id);
 void ClientSession_RemoveInterface(ClientSession *self, uint32_t interface_id);

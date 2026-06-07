@@ -154,7 +154,7 @@ static uint8_t openInterfaceAt(HubPeer *client, uint8_t registry_index)
 {
     uint8_t channel = 0;
 
-    ClientSession_OpenInterface(&client->session, registry.entries[registry_index].interface_id, &channel);
+    ClientSession_OpenInterface(&client->session, registry.entries[registry_index].interface_id, false, &channel);
 
     return channel;
 }

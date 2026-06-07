@@ -24,5 +24,6 @@ uint8_t BrokerDriver_OpenInterface(
     const HubTransportEvents *events,
     HubTransportPortMock *transport,
     uint32_t peer_id,
-    uint32_t interface_id
+    uint32_t interface_id,
+    uint8_t open_flags
 );

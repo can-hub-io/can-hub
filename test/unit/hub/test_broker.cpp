@@ -236,11 +236,11 @@ describe("broker", []() {
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);
             interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 1);
-            client_channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id);
+            client_channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, 0);
         });
 
         it("forwards an agent frame to the subscribed client", []() {
-            FrameMessage frame = { 0x123, 1000, 1, 2, 0, { 0xAA, 0xBB } };
+            FrameMessage frame = { 0x123, 1000, 1, 2, 0, 0, { 0xAA, 0xBB } };
             FrameMessage routed;
             MessageHeader header;
             uint8_t encoded[128];
@@ -258,7 +258,7 @@ describe("broker", []() {
         });
 
         it("forwards a client frame to the owning agent with its channel", []() {
-            FrameMessage frame = { 0x456, 2000, client_channel, 1, 0, { 0x55 } };
+            FrameMessage frame = { 0x456, 2000, client_channel, 1, 0, 0, { 0x55 } };
             FrameMessage routed;
             MessageHeader header;
             uint8_t encoded[128];
@@ -274,7 +274,7 @@ describe("broker", []() {
         });
 
         it("drops agent frames on channels nobody opened", []() {
-            FrameMessage frame = { 0x123, 1000, 0, 1, 0, { 0x55 } };
+            FrameMessage frame = { 0x123, 1000, 0, 1, 0, 0, { 0x55 } };
             uint8_t encoded[128];
             size_t encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
 
@@ -284,7 +284,7 @@ describe("broker", []() {
         });
 
         it("stops routing after the agent disconnects", []() {
-            FrameMessage frame = { 0x456, 2000, client_channel, 1, 0, { 0x55 } };
+            FrameMessage frame = { 0x456, 2000, client_channel, 1, 0, 0, { 0x55 } };
             uint8_t encoded[128];
             size_t encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
 
@@ -511,7 +511,7 @@ describe("broker", []() {
             uint8_t encoded[256];
             size_t encoded_size;
             uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
-            uint8_t channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id);
+            uint8_t channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, 0);
 
             encoded_size = AdminClientsMessage_Encode(&request, encoded, sizeof(encoded));
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
@@ -539,6 +539,89 @@ describe("broker", []() {
         });
     });
 
+    describe("echo fan-out", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            Broker_Init(&broker, &transport.port, NULL);
+            events = Broker_Events(&broker);
+            BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
+            BrokerDriver_ConnectClient(&events, CLIENT_PEER);
+        });
+
+        it("stamps injections towards the agent with the sender token", []() {
+            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            uint8_t channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, 0);
+            FrameMessage frame = { 0x456, 2000, channel, 1, 0, 0, { 0x55 } };
+            FrameMessage forwarded;
+            MessageHeader header;
+            uint8_t encoded[128];
+            size_t encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+
+            events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
+            MessageHeader_Decode(&header, transport.frame_log[0], transport.frame_sizes[0]);
+            FrameMessage_Decode(&forwarded, transport.frame_log[0] + MESSAGE_HEADER_SIZE, header.length);
+
+            expect(transport.frame_peers[0]).toBe((uint32_t)AGENT_PEER);
+            expect(forwarded.route_flags).toBe(2 << FRAME_ROUTE_TOKEN_SHIFT);
+        });
+
+        it("fans an echo out to subscribers and strips the token", []() {
+            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            FrameMessage echo = { 0x456, 2100, 0, 1, 0, 0, { 0x55 } };
+            FrameMessage forwarded;
+            MessageHeader header;
+            uint8_t encoded[128];
+            size_t encoded_size;
+
+            BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, 0);
+            echo.route_flags = FRAME_ROUTE_FLAG_ECHO | (2 << FRAME_ROUTE_TOKEN_SHIFT);
+            encoded_size = FrameMessage_Encode(&echo, encoded, sizeof(encoded));
+
+            events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
+            MessageHeader_Decode(&header, transport.frame_log[0], transport.frame_sizes[0]);
+            FrameMessage_Decode(&forwarded, transport.frame_log[0] + MESSAGE_HEADER_SIZE, header.length);
+
+            expect(transport.frame_count).toBe(1);
+            expect(transport.frame_peers[0]).toBe((uint32_t)CLIENT_PEER);
+            expect(forwarded.route_flags).toBe(FRAME_ROUTE_FLAG_ECHO);
+        });
+
+        it("suppresses the echo only for its opted-out originator", []() {
+            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            FrameMessage echo = { 0x456, 2100, 0, 1, 0, 0, { 0x55 } };
+            uint8_t encoded[128];
+            size_t encoded_size;
+
+            BrokerDriver_ConnectClient(&events, CLIENT_PEER + 1);
+            BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, OPEN_FLAG_SUPPRESS_OWN_ECHO);
+            BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER + 1, interface_id, 0);
+            echo.route_flags = FRAME_ROUTE_FLAG_ECHO | (2 << FRAME_ROUTE_TOKEN_SHIFT);
+            encoded_size = FrameMessage_Encode(&echo, encoded, sizeof(encoded));
+
+            events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
+
+            expect(transport.frame_count).toBe(1);
+            expect(transport.frame_peers[0]).toBe((uint32_t)(CLIENT_PEER + 1));
+        });
+
+        it("delivers the echo to an opted-out client when it is not the originator", []() {
+            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            FrameMessage echo = { 0x456, 2100, 0, 1, 0, 0, { 0x55 } };
+            uint8_t encoded[128];
+            size_t encoded_size;
+
+            BrokerDriver_ConnectClient(&events, CLIENT_PEER + 1);
+            BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, OPEN_FLAG_SUPPRESS_OWN_ECHO);
+            BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER + 1, interface_id, 0);
+            echo.route_flags = FRAME_ROUTE_FLAG_ECHO | (3 << FRAME_ROUTE_TOKEN_SHIFT);
+            encoded_size = FrameMessage_Encode(&echo, encoded, sizeof(encoded));
+
+            events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
+
+            expect(transport.frame_count).toBe(2);
+        });
+    });
+
     describe("backpressure", []() {
         beforeEach([]() {
             uint32_t interface_id;
@@ -550,11 +633,11 @@ describe("broker", []() {
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);
             BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
             interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
-            client_channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id);
+            client_channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, 0);
         });
 
         it("counts forwarded and dropped frames per peer", []() {
-            FrameMessage frame = { 0x123, 1000, 0, 1, 0, { 0x55 } };
+            FrameMessage frame = { 0x123, 1000, 0, 1, 0, 0, { 0x55 } };
             AdminPeersMessage request = { 0 };
             AdminPeersReplyMessage reply;
             uint8_t frame_encoded[128];
@@ -574,8 +657,8 @@ describe("broker", []() {
         });
 
         it("aggregates frame totals in the status reply", []() {
-            FrameMessage routable = { 0x123, 1000, 0, 1, 0, { 0x55 } };
-            FrameMessage unroutable = { 0x456, 1000, 1, 1, 0, { 0x55 } };
+            FrameMessage routable = { 0x123, 1000, 0, 1, 0, 0, { 0x55 } };
+            FrameMessage unroutable = { 0x456, 1000, 1, 1, 0, 0, { 0x55 } };
             AdminStatusReplyMessage reply;
             uint8_t frame_encoded[128];
             uint8_t encoded[64];
@@ -598,7 +681,7 @@ describe("broker", []() {
         });
 
         it("lists interfaces with their traffic through the admin plane", []() {
-            FrameMessage frame = { 0x123, 1000, 0, 1, 0, { 0x55 } };
+            FrameMessage frame = { 0x123, 1000, 0, 1, 0, 0, { 0x55 } };
             AdminInterfacesMessage request = { 0 };
             AdminInterfacesReplyMessage reply;
             uint8_t reply_type;

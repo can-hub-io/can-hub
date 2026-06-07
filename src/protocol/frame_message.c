@@ -10,7 +10,7 @@
 #define CHANNEL_OFFSET 12
 #define PAYLOAD_LENGTH_OFFSET 13
 #define FRAME_FLAGS_OFFSET 14
-#define RESERVED_OFFSET 15
+#define ROUTE_FLAGS_OFFSET 15
 #define PAYLOAD_OFFSET 16
 
 static bool isPayloadLengthValid(uint8_t payload_length, uint8_t frame_flags);
@@ -41,7 +41,7 @@ size_t FrameMessage_Encode(const FrameMessage *self, uint8_t *buffer, size_t buf
     body[CHANNEL_OFFSET] = self->channel;
     body[PAYLOAD_LENGTH_OFFSET] = self->payload_length;
     body[FRAME_FLAGS_OFFSET] = self->frame_flags;
-    body[RESERVED_OFFSET] = 0;
+    body[ROUTE_FLAGS_OFFSET] = self->route_flags;
     memcpy(body + PAYLOAD_OFFSET, self->payload, self->payload_length);
 
     return total_size;
@@ -58,6 +58,7 @@ bool FrameMessage_Decode(FrameMessage *self, const uint8_t *payload, size_t payl
     self->channel = payload[CHANNEL_OFFSET];
     self->payload_length = payload[PAYLOAD_LENGTH_OFFSET];
     self->frame_flags = payload[FRAME_FLAGS_OFFSET];
+    self->route_flags = payload[ROUTE_FLAGS_OFFSET];
 
     if (!isPayloadLengthValid(self->payload_length, self->frame_flags)) {
         return false;

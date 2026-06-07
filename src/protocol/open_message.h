@@ -4,14 +4,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define OPEN_BODY_SIZE 4
+#define OPEN_BODY_SIZE 8
 #define OPEN_ACK_BODY_SIZE 8
 #define CLOSE_BODY_SIZE 4
 
 #define OPEN_STATUS_OK 0
+#define OPEN_FLAG_SUPPRESS_OWN_ECHO (1u << 0)
 
 typedef struct {
     uint32_t interface_id;
+    uint8_t flags;
 } OpenMessage;
 
 typedef struct {

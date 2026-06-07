@@ -13,7 +13,7 @@ void ClientSession_Reset(ClientSession *self)
     memset(self, 0, sizeof(*self));
 }
 
-bool ClientSession_OpenInterface(ClientSession *self, uint32_t interface_id, uint8_t *channel)
+bool ClientSession_OpenInterface(ClientSession *self, uint32_t interface_id, bool suppress_echo, uint8_t *channel)
 {
     ChannelBinding *binding = findFree(self);
 
@@ -22,6 +22,7 @@ bool ClientSession_OpenInterface(ClientSession *self, uint32_t interface_id, uin
     }
 
     binding->in_use = true;
+    binding->suppress_echo = suppress_echo;
     binding->interface_id = interface_id;
     binding->channel = *channel;
 
@@ -63,6 +64,19 @@ bool ClientSession_ChannelForInterface(const ClientSession *self, uint32_t inter
     }
 
     return false;
+}
+
+const ChannelBinding *ClientSession_BindingForInterface(const ClientSession *self, uint32_t interface_id)
+{
+    uint8_t i;
+
+    for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
+        if (self->bindings[i].in_use && self->bindings[i].interface_id == interface_id) {
+            return &self->bindings[i];
+        }
+    }
+
+    return NULL;
 }
 
 void ClientSession_RemoveInterface(ClientSession *self, uint32_t interface_id)

@@ -34,6 +34,7 @@ void Agent_Init(Agent *self, TransportPort *transport, CanPort *can, const Regis
     self->can = can;
     self->registration = *registration;
     ChannelMap_Reset(&self->channel_map);
+    EchoCorrelator_Reset(&self->echo);
     ReconnectBackoff_Init(&self->backoff, RECONNECT_DEFAULT_INITIAL_DELAY_MS, RECONNECT_DEFAULT_MAX_DELAY_MS);
     self->state = kAGENT_STATE_DISCONNECTED;
     self->next_connect_at_us = 0;
@@ -96,6 +97,7 @@ void Agent_OnDisconnected(Agent *self, uint64_t now_us)
     }
 
     ChannelMap_Reset(&self->channel_map);
+    EchoCorrelator_Reset(&self->echo);
     self->state = kAGENT_STATE_DISCONNECTED;
     self->register_deadline_us = 0;
     scheduleReconnect(self, now_us);
@@ -123,12 +125,22 @@ void Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *
     FrameMessage outgoing = *frame;
     uint8_t encoded[MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD];
     size_t encoded_size;
+    uint8_t token;
 
     if (self->state != kAGENT_STATE_RUNNING) {
         return;
     }
     if (!ChannelMap_ChannelForInterface(&self->channel_map, interface_index, &outgoing.channel)) {
         return;
+    }
+
+    if (frame->route_flags & FRAME_ROUTE_FLAG_ECHO) {
+        outgoing.route_flags = FRAME_ROUTE_FLAG_ECHO;
+        if (EchoCorrelator_PopMatch(&self->echo, interface_index, frame->can_id, &token)) {
+            outgoing.route_flags |= (uint8_t)(token << FRAME_ROUTE_TOKEN_SHIFT);
+        }
+    } else {
+        outgoing.route_flags = 0;
     }
 
     encoded_size = FrameMessage_Encode(&outgoing, encoded, sizeof(encoded));
@@ -144,6 +156,7 @@ void Agent_OnTransportFrame(Agent *self, const uint8_t *data, size_t size)
     MessageHeader header;
     FrameMessage frame;
     uint8_t interface_index;
+    uint8_t token;
 
     if (self->state != kAGENT_STATE_RUNNING) {
         return;
@@ -161,7 +174,11 @@ void Agent_OnTransportFrame(Agent *self, const uint8_t *data, size_t size)
         return;
     }
 
-    self->can->write_frame(self->can->context, interface_index, &frame);
+    token = (uint8_t)((frame.route_flags & FRAME_ROUTE_TOKEN_MASK) >> FRAME_ROUTE_TOKEN_SHIFT);
+    EchoCorrelator_Push(&self->echo, interface_index, token, frame.can_id);
+    if (!self->can->write_frame(self->can->context, interface_index, &frame)) {
+        EchoCorrelator_DropNewest(&self->echo, interface_index);
+    }
 }
 
 uint8_t Agent_State(const Agent *self)

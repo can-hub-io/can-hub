@@ -69,10 +69,11 @@ uint8_t BrokerDriver_OpenInterface(
     const HubTransportEvents *events,
     HubTransportPortMock *transport,
     uint32_t peer_id,
-    uint32_t interface_id
+    uint32_t interface_id,
+    uint8_t open_flags
 )
 {
-    OpenMessage open = { interface_id };
+    OpenMessage open = { interface_id, open_flags };
     OpenAckMessage ack;
     MessageHeader header;
     uint8_t encoded[DRIVER_BUFFER_SIZE];

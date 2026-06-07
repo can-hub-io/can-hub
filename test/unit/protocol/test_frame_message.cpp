@@ -7,7 +7,15 @@ extern "C" {
 
 describe("frame_message", []() {
     it("round-trips a classic frame", []() {
-        FrameMessage frame = { 0x123, 1700000000123456ULL, 7, 4, 0, { 0xDE, 0xAD, 0xBE, 0xEF } };
+        FrameMessage frame = {
+            0x123,
+            1700000000123456ULL,
+            7,
+            4,
+            0,
+            FRAME_ROUTE_FLAG_ECHO | (9 << FRAME_ROUTE_TOKEN_SHIFT),
+            { 0xDE, 0xAD, 0xBE, 0xEF },
+        };
         FrameMessage decoded;
         uint8_t buffer[128];
         size_t expected_size = MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + 4;
@@ -23,11 +31,12 @@ describe("frame_message", []() {
         expect(decoded.timestamp_us).toBe(1700000000123456ULL);
         expect(decoded.channel).toBe(7);
         expect(decoded.payload_length).toBe(4);
+        expect(decoded.route_flags).toBe(FRAME_ROUTE_FLAG_ECHO | (9 << FRAME_ROUTE_TOKEN_SHIFT));
         expect(decoded.payload).toEqualMemory(frame.payload, 4);
     });
 
     it("round-trips a 64-byte FD frame", []() {
-        FrameMessage frame = { 0x123, 1, 1, FRAME_PAYLOAD_MAX_FD, FRAME_FLAG_FD | FRAME_FLAG_BRS, { 0 } };
+        FrameMessage frame = { 0x123, 1, 1, FRAME_PAYLOAD_MAX_FD, FRAME_FLAG_FD | FRAME_FLAG_BRS, 0, { 0 } };
         FrameMessage decoded;
         uint8_t buffer[128];
         size_t expected_size = MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD;
@@ -49,7 +58,7 @@ describe("frame_message", []() {
     });
 
     it("rejects a classic frame with more than 8 payload bytes", []() {
-        FrameMessage frame = { 0x123, 1, 1, 9, 0, { 0 } };
+        FrameMessage frame = { 0x123, 1, 1, 9, 0, 0, { 0 } };
         uint8_t buffer[128];
         size_t encoded_size;
 
@@ -59,7 +68,7 @@ describe("frame_message", []() {
     });
 
     it("rejects decoding when the payload is truncated", []() {
-        FrameMessage frame = { 0x123, 1, 1, 4, 0, { 1, 2, 3, 4 } };
+        FrameMessage frame = { 0x123, 1, 1, 4, 0, 0, { 1, 2, 3, 4 } };
         FrameMessage decoded;
         uint8_t buffer[128];
         size_t encoded_size;
@@ -74,7 +83,7 @@ describe("frame_message", []() {
     });
 
     it("rejects encoding into a too small buffer", []() {
-        FrameMessage frame = { 0x123, 1, 1, 4, 0, { 1, 2, 3, 4 } };
+        FrameMessage frame = { 0x123, 1, 1, 4, 0, 0, { 1, 2, 3, 4 } };
         uint8_t buffer[16];
         size_t encoded_size;
 
