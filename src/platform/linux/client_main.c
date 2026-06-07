@@ -6,6 +6,7 @@
 
 #include <sys/epoll.h>
 
+#include "platform/linux/clock/clock.h"
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/hub_defaults.h"
@@ -29,6 +30,7 @@
 typedef enum tclient_command_e {
     kCLIENT_COMMAND_LIST = 0,
     kCLIENT_COMMAND_DUMP,
+    kCLIENT_COMMAND_SEND,
     kCLIENT_COMMAND_MAX,
 } TCLIENT_COMMAND;
 
@@ -38,7 +40,8 @@ static TransportPort *active_port;
 static uint8_t command;
 static uint8_t connect_scheme;
 static uint8_t open_flags;
-static uint32_t dump_interface_id;
+static uint32_t target_interface_id;
+static FrameMessage frame_to_send;
 static int32_t exit_code = -1;
 static const char *state_directory_override;
 static char state_directory[TLS_IDENTITY_PATH_MAX];
@@ -48,6 +51,9 @@ static char known_hubs_path[KNOWN_HUBS_PATH_MAX];
 static char pin_key[PIN_KEY_MAX];
 
 static bool parseArguments(int argc, char **argv, char *host, char *port_text);
+static bool parseFrameSpec(const char *text, FrameMessage *frame);
+static bool parseHexPayload(const char *text, FrameMessage *frame);
+static void sendFrameAndQuit(uint8_t channel);
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *events);
 static bool initTlsTransport(const char *host, const char *port_text, const TransportEvents *events);
 static void onConnected(void *context);
@@ -73,6 +79,7 @@ int main(int argc, char **argv)
     if (!parseArguments(argc, argv, host, port_text)) {
         fprintf(stderr, "usage: %s [--connect tls://<host>:<port>|tcp://<host>:<port>|unix://<path>]\n", argv[0]);
         fprintf(stderr, "       [--state-dir <path>] list | dump [--no-echo] <interface-id>\n");
+        fprintf(stderr, "       | send <interface-id> <can-id>#<hex-payload>   (cansend syntax, e.g. 123#DEADBEEF)\n");
         fprintf(stderr, "       default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
         return 1;
     }
@@ -110,7 +117,13 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
                 command = kCLIENT_COMMAND_LIST;
             } else if (strcmp(command_name, "dump") == 0 && i + 1 < argc) {
                 command = kCLIENT_COMMAND_DUMP;
-                dump_interface_id = (uint32_t)strtoul(argv[++i], NULL, 10);
+                target_interface_id = (uint32_t)strtoul(argv[++i], NULL, 10);
+            } else if (strcmp(command_name, "send") == 0 && i + 2 < argc) {
+                command = kCLIENT_COMMAND_SEND;
+                target_interface_id = (uint32_t)strtoul(argv[++i], NULL, 10);
+                if (!parseFrameSpec(argv[++i], &frame_to_send)) {
+                    return false;
+                }
             } else {
                 return false;
             }
@@ -133,6 +146,75 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
     }
 
     return connect_scheme != kCONNECT_SCHEME_QUIC;
+}
+
+static bool parseFrameSpec(const char *text, FrameMessage *frame)
+{
+    const char *separator = strchr(text, '#');
+    char *id_end = NULL;
+    size_t id_digits;
+
+    if (separator == NULL) {
+        return false;
+    }
+
+    memset(frame, 0, sizeof(*frame));
+    frame->can_id = (uint32_t)strtoul(text, &id_end, 16);
+    if (id_end != separator || id_end == text) {
+        return false;
+    }
+
+    id_digits = (size_t)(separator - text);
+    if (id_digits > 3 || frame->can_id > FRAME_CAN_ID_SFF_MAX) {
+        frame->can_id |= FRAME_CAN_ID_FLAG_EFF;
+    }
+
+    return parseHexPayload(separator + 1, frame);
+}
+
+static bool parseHexPayload(const char *text, FrameMessage *frame)
+{
+    char byte_text[3] = { 0, 0, 0 };
+    char *byte_end = NULL;
+    size_t digits = strlen(text);
+    size_t i;
+
+    if (digits % 2 != 0 || digits / 2 > FRAME_PAYLOAD_MAX_FD) {
+        return false;
+    }
+
+    frame->payload_length = (uint8_t)(digits / 2);
+    if (frame->payload_length > FRAME_PAYLOAD_MAX_CLASSIC) {
+        frame->frame_flags |= FRAME_FLAG_FD;
+    }
+
+    for(i=0; i<frame->payload_length; i++) {
+        byte_text[0] = text[i * 2];
+        byte_text[1] = text[i * 2 + 1];
+        frame->payload[i] = (uint8_t)strtoul(byte_text, &byte_end, 16);
+        if (byte_end != byte_text + 2) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static void sendFrameAndQuit(uint8_t channel)
+{
+    uint8_t encoded[MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD];
+    size_t encoded_size;
+
+    frame_to_send.channel = channel;
+    frame_to_send.timestamp_us = Clock_RealtimeUs();
+    encoded_size = FrameMessage_Encode(&frame_to_send, encoded, sizeof(encoded));
+    if (encoded_size == 0 || !active_port->send_frame(active_port->context, encoded, encoded_size)) {
+        fprintf(stderr, "could not send the frame\n");
+        exit_code = 1;
+        return;
+    }
+
+    exit_code = 0;
 }
 
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *events)
@@ -181,7 +263,7 @@ static void onConnected(void *context)
 {
     HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0 };
     ListMessage list = { 0 };
-    OpenMessage open = { dump_interface_id, open_flags };
+    OpenMessage open = { target_interface_id, open_flags };
     uint8_t encoded[64];
     size_t encoded_size;
 
@@ -229,6 +311,10 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
         if (ack.status != OPEN_STATUS_OK) {
             fprintf(stderr, "open rejected for interface %u\n", ack.interface_id);
             exit_code = 1;
+            return;
+        }
+        if (command == kCLIENT_COMMAND_SEND) {
+            sendFrameAndQuit(ack.channel);
             return;
         }
         fprintf(stderr, "dumping interface %u (channel %u), ctrl-c to stop\n", ack.interface_id, ack.channel);
