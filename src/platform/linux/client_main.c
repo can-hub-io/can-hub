@@ -7,6 +7,7 @@
 #include <sys/epoll.h>
 
 #include "platform/linux/clock/clock.h"
+#include "platform/linux/quic/quic_client_transport.h"
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/hub_defaults.h"
@@ -37,6 +38,7 @@ typedef enum tclient_command_e {
 
 static TcpClientTransport transport;
 static TlsClientTransport tls_transport;
+static QuicClientTransport quic_transport;
 static TransportPort *active_port;
 static uint8_t command;
 static uint8_t connect_scheme;
@@ -56,7 +58,10 @@ static bool parseFrameSpec(const char *text, FrameMessage *frame);
 static bool parseHexPayload(const char *text, FrameMessage *frame);
 static void sendFrameAndQuit(uint8_t channel);
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *events);
+static bool prepareSecurityMaterial(const char *host, const char *port_text);
 static bool initTlsTransport(const char *host, const char *port_text, const TransportEvents *events);
+static bool initQuicTransport(const char *host, const char *port_text, const TransportEvents *events);
+static int32_t runQuicEventLoop(void);
 static void onConnected(void *context);
 static void onDisconnected(void *context, uint64_t now_us);
 static void onControl(void *context, const uint8_t *data, size_t size, uint64_t now_us);
@@ -78,7 +83,7 @@ int main(int argc, char **argv)
     };
 
     if (!parseArguments(argc, argv, host, port_text)) {
-        fprintf(stderr, "usage: %s [--connect tls://<host>:<port>|tcp://<host>:<port>|unix://<path>]\n", argv[0]);
+        fprintf(stderr, "usage: %s [--connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>|unix://<path>]\n", argv[0]);
         fprintf(stderr, "       [--state-dir <path>] list | dump [--no-echo] <interface-id>\n");
         fprintf(stderr, "       | send <interface-id> <can-id>#<hex-payload>   (cansend syntax, e.g. 123#DEADBEEF)\n");
         fprintf(stderr, "       default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
@@ -142,11 +147,7 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
         return true;
     }
 
-    if (!ConnectUrl_Parse(connect_url, &connect_scheme, host, port_text)) {
-        return false;
-    }
-
-    return connect_scheme != kCONNECT_SCHEME_QUIC;
+    return ConnectUrl_Parse(connect_url, &connect_scheme, host, port_text);
 }
 
 static bool parseFrameSpec(const char *text, FrameMessage *frame)
@@ -222,6 +223,12 @@ static bool initTransport(const char *host, const char *port_text, const Transpo
 {
     bool initialized;
 
+    if (connect_scheme == kCONNECT_SCHEME_QUIC) {
+        initialized = initQuicTransport(host, port_text, events);
+        active_port = QuicClientTransport_Port(&quic_transport);
+        return initialized;
+    }
+
     if (connect_scheme == kCONNECT_SCHEME_TLS) {
         initialized = initTlsTransport(host, port_text, events);
         active_port = TlsClientTransport_Port(&tls_transport);
@@ -238,10 +245,8 @@ static bool initTransport(const char *host, const char *port_text, const Transpo
     return initialized;
 }
 
-static bool initTlsTransport(const char *host, const char *port_text, const TransportEvents *events)
+static bool prepareSecurityMaterial(const char *host, const char *port_text)
 {
-    TlsClientSecurityConfig security_config;
-
     if (!TlsIdentity_ResolveStateDirectory(state_directory_override, state_directory)) {
         return false;
     }
@@ -252,12 +257,39 @@ static bool initTlsTransport(const char *host, const char *port_text, const Tran
     snprintf(known_hubs_path, sizeof(known_hubs_path), "%s/%s", state_directory, KNOWN_HUBS_FILE);
     snprintf(pin_key, sizeof(pin_key), "%s:%s", host, port_text);
 
+    return true;
+}
+
+static bool initTlsTransport(const char *host, const char *port_text, const TransportEvents *events)
+{
+    TlsClientSecurityConfig security_config;
+
+    if (!prepareSecurityMaterial(host, port_text)) {
+        return false;
+    }
+
     security_config.certificate_path = identity_certificate_path;
     security_config.key_path = identity_key_path;
     security_config.pin_store_path = known_hubs_path;
     security_config.pin_key = pin_key;
 
     return TlsClientTransport_Init(&tls_transport, host, port_text, events, &security_config);
+}
+
+static bool initQuicTransport(const char *host, const char *port_text, const TransportEvents *events)
+{
+    QuicClientSecurityConfig security_config;
+
+    if (!prepareSecurityMaterial(host, port_text)) {
+        return false;
+    }
+
+    security_config.certificate_path = identity_certificate_path;
+    security_config.key_path = identity_key_path;
+    security_config.pin_store_path = known_hubs_path;
+    security_config.pin_key = pin_key;
+
+    return QuicClientTransport_Init(&quic_transport, host, port_text, events, &security_config);
 }
 
 static void onConnected(void *context)
@@ -395,6 +427,10 @@ static int32_t runEventLoop(void)
     int32_t current_fd;
     int32_t i;
 
+    if (connect_scheme == kCONNECT_SCHEME_QUIC) {
+        return runQuicEventLoop();
+    }
+
     if (!EpollRegistry_Open(&poll_registry)) {
         return 1;
     }
@@ -431,6 +467,40 @@ static int32_t runEventLoop(void)
                 if (events[i].events & EPOLLIN) {
                     TcpClientTransport_OnReadable(&transport);
                 }
+            }
+        }
+    }
+
+    return exit_code;
+}
+
+static int32_t runQuicEventLoop(void)
+{
+    struct epoll_event events[MAX_EPOLL_EVENTS];
+    EpollRegistry poll_registry;
+    int32_t udp_fd = QuicClientTransport_UdpFd(&quic_transport);
+    int32_t timer_fd = QuicClientTransport_TimerFd(&quic_transport);
+    int32_t event_count;
+    int32_t i;
+
+    if (!EpollRegistry_Open(&poll_registry)) {
+        return 1;
+    }
+    if (!EpollRegistry_AddStatic(&poll_registry, udp_fd, (uint32_t)udp_fd)) {
+        return 1;
+    }
+    if (!EpollRegistry_AddStatic(&poll_registry, timer_fd, (uint32_t)timer_fd)) {
+        return 1;
+    }
+
+    while (exit_code < 0) {
+        event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
+        for(i=0; i<event_count; i++) {
+            if ((int32_t)events[i].data.u32 == udp_fd) {
+                QuicClientTransport_OnUdpReadable(&quic_transport);
+            }
+            if ((int32_t)events[i].data.u32 == timer_fd) {
+                QuicClientTransport_OnTimer(&quic_transport);
             }
         }
     }
