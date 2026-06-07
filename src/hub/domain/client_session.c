@@ -49,6 +49,46 @@ bool ClientSession_CanWrite(const ClientSession *self, uint8_t channel)
     return false;
 }
 
+bool ClientSession_SetFilters(ClientSession *self, uint8_t channel, const CanFilter *filters, uint8_t count)
+{
+    ChannelBinding *binding = findByChannel(self, channel);
+
+    if (binding == NULL || count > SUBSCRIBE_FILTERS_MAX) {
+        return false;
+    }
+
+    binding->filter_count = count;
+    if (count > 0) {
+        memcpy(binding->filters, filters, (size_t)count * sizeof(*filters));
+    }
+
+    return true;
+}
+
+bool ClientSession_ChannelAccepts(const ClientSession *self, uint8_t channel, uint32_t can_id)
+{
+    uint8_t i;
+    uint8_t f;
+
+    for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
+        if (!self->bindings[i].in_use || self->bindings[i].channel != channel) {
+            continue;
+        }
+        if (self->bindings[i].filter_count == 0) {
+            return true;
+        }
+        for(f=0; f<self->bindings[i].filter_count; f++) {
+            if ((can_id & self->bindings[i].filters[f].can_mask)
+                == (self->bindings[i].filters[f].can_id & self->bindings[i].filters[f].can_mask)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    return true;
+}
+
 void ClientSession_CloseChannel(ClientSession *self, uint8_t channel)
 {
     ChannelBinding *binding = findByChannel(self, channel);

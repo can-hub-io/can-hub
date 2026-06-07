@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "protocol/subscribe_message.h"
+
 #define CLIENT_SESSION_BINDINGS_MAX 32
 
 /*
@@ -15,6 +17,8 @@ typedef struct {
     bool can_write;
     uint32_t interface_id;
     uint8_t channel;
+    uint8_t filter_count;
+    CanFilter filters[SUBSCRIBE_FILTERS_MAX];
 } ChannelBinding;
 
 typedef struct {
@@ -31,6 +35,8 @@ bool ClientSession_OpenInterface(
     uint8_t *channel
 );
 bool ClientSession_CanWrite(const ClientSession *self, uint8_t channel);
+bool ClientSession_SetFilters(ClientSession *self, uint8_t channel, const CanFilter *filters, uint8_t count);
+bool ClientSession_ChannelAccepts(const ClientSession *self, uint8_t channel, uint32_t can_id);
 void ClientSession_CloseChannel(ClientSession *self, uint8_t channel);
 bool ClientSession_InterfaceForChannel(const ClientSession *self, uint8_t channel, uint32_t *interface_id);
 bool ClientSession_ChannelForInterface(const ClientSession *self, uint32_t interface_id, uint8_t *channel);

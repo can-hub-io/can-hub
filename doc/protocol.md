@@ -39,7 +39,7 @@ offset  size  field
 0x05  LIST_REPLY
 0x06  OPEN         client opens an interface by global id, returns a channel
 0x07  CLOSE
-0x08  SUBSCRIBE    CAN id filters for an open channel (layout deferred)
+0x08  SUBSCRIBE    CAN id mask filters for an open channel
 0x09  ERROR        code + human-readable detail
 0x0A  OPEN_ACK     status + assigned channel
 0x10  ADMIN_STATUS        admin: hub counters
@@ -154,6 +154,23 @@ OPEN_ACK (total 12)
 CLOSE (total 8)
 @4   channel u8
 @5   reserved u8[3]
+
+SUBSCRIBE (total 8 + filter_count * 8)
+@4   channel u8
+@5   filter_count u8   (0-16; 0 clears the channel back to pass-all)
+@6   reserved u16
+@8   filters, each 8 bytes:
+     +0   can_id u32
+     +4   can_mask u32
+
+Per-channel CAN id filter, hub-side, replace semantics: each SUBSCRIBE sets
+the channel's complete filter list (it does not accumulate). A frame is
+delivered on the channel when filter_count is 0, or when any filter matches
+SocketCAN-style: (frame.can_id & can_mask) == (can_id & can_mask) — the same
+mask test as struct can_filter, flag bits 29-31 included. The filter applies
+only to frames the hub fans out toward the client; it never affects injection
+toward the agent. SUBSCRIBE on an unopened channel returns an ERROR and is
+otherwise ignored (no SUBSCRIBE_ACK).
 
 ADMIN_STATUS (total 4)
 empty payload
@@ -324,4 +341,3 @@ Multiple FRAME messages may be packed back-to-back in one datagram up to the pat
 - Reliable data plane: flows that need guaranteed in-order delivery (ISOTP transfers, UDS/firmware upgrades) mapped to dedicated QUIC streams instead of datagrams — reliable per flow without head-of-line blocking the cyclic traffic. Candidate signalling: a flag on OPEN/SUBSCRIBE selecting reliable transport for matching CAN ids.
 - Timestamp cost: u64 is the largest FRAME field. A u32 microsecond timestamp relative to a negotiated session base (wraps every ~71 min) would save 4 bytes per frame.
 - Interface configuration messaging (bitrate, bit timings, FD parameters, up/down): deferred. Needs its own message family and an authorization story.
-- SUBSCRIBE filter semantics: deferred. In version 0, OPEN delivers every frame of the interface.

@@ -11,6 +11,7 @@
 #include "protocol/hello_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
+#include "protocol/subscribe_message.h"
 
 #define CONTROL_BUFFER_SIZE 4096
 #define PING_REPLY_FLAG 0x01
@@ -36,6 +37,7 @@ static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *hea
 static void handleList(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleClose(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleSubscribe(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handlePing(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminStatus(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminPeers(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
@@ -56,7 +58,7 @@ static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const Regi
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
 static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size);
 static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char *detail);
-static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *data, size_t size, uint8_t route_flags);
+static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id, const uint8_t *data, size_t size, uint8_t route_flags);
 static uint8_t injectionToken(Broker *self, const HubPeer *sender);
 static bool clientCanRead(Broker *self, const HubPeer *peer, const InterfaceEntry *entry);
 static bool clientCanWrite(Broker *self, const HubPeer *peer, const InterfaceEntry *entry);
@@ -69,6 +71,7 @@ static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
     [kMESSAGE_TYPE_LIST] = handleList,
     [kMESSAGE_TYPE_OPEN] = handleOpen,
     [kMESSAGE_TYPE_CLOSE] = handleClose,
+    [kMESSAGE_TYPE_SUBSCRIBE] = handleSubscribe,
     [kMESSAGE_TYPE_PING] = handlePing,
     [kMESSAGE_TYPE_ADMIN_STATUS] = handleAdminStatus,
     [kMESSAGE_TYPE_ADMIN_PEERS] = handleAdminPeers,
@@ -256,7 +259,7 @@ static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
         if (routes[i].suppress_echo && routes[i].peer_id == echo_originator_peer_id) {
             continue;
         }
-        forwardFrame(self, &routes[i], data, size, forwarded_route_flags);
+        forwardFrame(self, &routes[i], frame.can_id, data, size, forwarded_route_flags);
     }
 }
 
@@ -403,6 +406,22 @@ static void handleClose(Broker *self, HubPeer *peer, const MessageHeader *header
     }
 
     ClientSession_CloseChannel(&peer->session, close.channel);
+}
+
+static void handleSubscribe(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    SubscribeMessage subscribe;
+
+    if (peer->role != kHUB_PEER_ROLE_CLIENT) {
+        return;
+    }
+    if (!SubscribeMessage_Decode(&subscribe, payload, header->length)) {
+        sendError(self, peer->peer_id, kERROR_CODE_MALFORMED, "malformed subscribe");
+        return;
+    }
+    if (!ClientSession_SetFilters(&peer->session, subscribe.channel, subscribe.filters, subscribe.filter_count)) {
+        sendError(self, peer->peer_id, kERROR_CODE_MALFORMED, "subscribe on unopened channel");
+    }
 }
 
 static void handlePing(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
@@ -834,11 +853,18 @@ static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char 
     self->transport->send_control(self->transport->context, peer_id, encoded, encoded_size);
 }
 
-static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *data, size_t size, uint8_t route_flags)
+static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id, const uint8_t *data, size_t size, uint8_t route_flags)
 {
     uint8_t forwarded[FRAME_BUFFER_SIZE];
     HubPeer *destination;
     bool sent;
+
+    destination = PeerDirectory_Find(&self->directory, route->peer_id);
+    if (destination != NULL
+        && destination->role == kHUB_PEER_ROLE_CLIENT
+        && !ClientSession_ChannelAccepts(&destination->session, route->channel, can_id)) {
+        return;
+    }
 
     memcpy(forwarded, data, size);
     forwarded[FRAME_CHANNEL_OFFSET] = route->channel;
@@ -851,7 +877,6 @@ static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *d
         self->metrics.frames_dropped++;
     }
 
-    destination = PeerDirectory_Find(&self->directory, route->peer_id);
     if (destination != NULL) {
         if (sent) {
             destination->frames_forwarded++;

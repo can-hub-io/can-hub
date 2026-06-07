@@ -20,6 +20,7 @@
 #include "protocol/list_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
+#include "protocol/subscribe_message.h"
 
 #define MAX_EPOLL_EVENTS 8
 #define POLL_PERIOD_MS 100
@@ -45,6 +46,8 @@ static uint8_t connect_scheme;
 static uint8_t open_flags;
 static uint32_t target_interface_id;
 static FrameMessage frame_to_send;
+static CanFilter dump_filters[SUBSCRIBE_FILTERS_MAX];
+static uint8_t dump_filter_count;
 static int32_t exit_code = -1;
 static const char *state_directory_override;
 static char state_directory[TLS_IDENTITY_PATH_MAX];
@@ -55,8 +58,10 @@ static char pin_key[PIN_KEY_MAX];
 
 static bool parseArguments(int argc, char **argv, char *host, char *port_text);
 static bool parseFrameSpec(const char *text, FrameMessage *frame);
+static bool parseFilterSpec(const char *text, CanFilter *filter);
 static bool parseHexPayload(const char *text, FrameMessage *frame);
 static void sendFrameAndQuit(uint8_t channel);
+static void sendDumpFilters(uint8_t channel);
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *events);
 static bool prepareSecurityMaterial(const char *host, const char *port_text);
 static int32_t showIdentity(void);
@@ -97,7 +102,7 @@ int main(int argc, char **argv)
 
     if (!parseArguments(argc, argv, host, port_text)) {
         fprintf(stderr, "usage: %s [--connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>|unix://<path>]\n", argv[0]);
-        fprintf(stderr, "       [--state-dir <path>] list | dump [--no-echo] <interface-id>\n");
+        fprintf(stderr, "       [--state-dir <path>] list | dump [--no-echo] <interface-id> [<id>[:<mask>] ...]\n");
         fprintf(stderr, "       | send <interface-id> <can-id>#<hex-payload>   (cansend syntax, e.g. 123#DEADBEEF)\n");
         fprintf(stderr, "       %s --show-identity [--state-dir <path>]   print this client's TLS fingerprint\n", argv[0]);
         fprintf(stderr, "       default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
@@ -148,6 +153,11 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
             } else {
                 return false;
             }
+        } else if (command == kCLIENT_COMMAND_DUMP && dump_filter_count < SUBSCRIBE_FILTERS_MAX) {
+            if (!parseFilterSpec(argv[i], &dump_filters[dump_filter_count])) {
+                return false;
+            }
+            dump_filter_count++;
         }
     }
 
@@ -187,6 +197,30 @@ static bool parseFrameSpec(const char *text, FrameMessage *frame)
     }
 
     return parseHexPayload(separator + 1, frame);
+}
+
+static bool parseFilterSpec(const char *text, CanFilter *filter)
+{
+    const char *separator = strchr(text, ':');
+    char *id_end = NULL;
+    char *mask_end = NULL;
+
+    memset(filter, 0, sizeof(*filter));
+    filter->can_id = (uint32_t)strtoul(text, &id_end, 16);
+    if (id_end == text) {
+        return false;
+    }
+
+    if (separator == NULL) {
+        filter->can_mask = FRAME_CAN_ID_MASK;
+        return id_end == text + strlen(text);
+    }
+    if (id_end != separator) {
+        return false;
+    }
+
+    filter->can_mask = (uint32_t)strtoul(separator + 1, &mask_end, 16);
+    return mask_end != separator + 1 && mask_end == text + strlen(text);
 }
 
 static bool parseHexPayload(const char *text, FrameMessage *frame)
@@ -232,6 +266,19 @@ static void sendFrameAndQuit(uint8_t channel)
     }
 
     exit_code = 0;
+}
+
+static void sendDumpFilters(uint8_t channel)
+{
+    SubscribeMessage subscribe;
+    uint8_t encoded[MESSAGE_HEADER_SIZE + SUBSCRIBE_FIXED_FIELDS_SIZE + SUBSCRIBE_FILTERS_MAX * CAN_FILTER_SIZE];
+    size_t encoded_size;
+
+    subscribe.channel = channel;
+    subscribe.filter_count = dump_filter_count;
+    memcpy(subscribe.filters, dump_filters, (size_t)dump_filter_count * sizeof(*dump_filters));
+    encoded_size = SubscribeMessage_Encode(&subscribe, encoded, sizeof(encoded));
+    active_port->send_control(active_port->context, encoded, encoded_size);
 }
 
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *events)
@@ -390,6 +437,9 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
         if (command == kCLIENT_COMMAND_SEND) {
             sendFrameAndQuit(ack.channel);
             return;
+        }
+        if (dump_filter_count > 0) {
+            sendDumpFilters(ack.channel);
         }
         fprintf(stderr, "dumping interface %u (channel %u), ctrl-c to stop\n", ack.interface_id, ack.channel);
     }
