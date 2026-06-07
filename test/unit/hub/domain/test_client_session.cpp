@@ -69,6 +69,61 @@ describe("client_session", []() {
         expect(channel_found).toBe(false);
     });
 
+    it("accepts every frame on a channel with no filters", []() {
+        uint8_t channel = 0;
+
+        ClientSession_OpenInterface(&session, 7, false, false, &channel);
+
+        expect(ClientSession_ChannelAccepts(&session, channel, 0x123)).toBe(true);
+        expect(ClientSession_ChannelAccepts(&session, channel, 0x7AB)).toBe(true);
+    });
+
+    it("accepts only frames matching a mask filter", []() {
+        uint8_t channel = 0;
+        CanFilter filters[1] = { { 0x100, 0x700 } };
+        bool set_ok;
+
+        ClientSession_OpenInterface(&session, 7, false, false, &channel);
+        set_ok = ClientSession_SetFilters(&session, channel, filters, 1);
+
+        expect(set_ok).toBe(true);
+        expect(ClientSession_ChannelAccepts(&session, channel, 0x123)).toBe(true);
+        expect(ClientSession_ChannelAccepts(&session, channel, 0x1FF)).toBe(true);
+        expect(ClientSession_ChannelAccepts(&session, channel, 0x223)).toBe(false);
+    });
+
+    it("accepts a frame matching any filter in the list", []() {
+        uint8_t channel = 0;
+        CanFilter filters[2] = { { 0x100, 0x7FF }, { 0x200, 0x7FF } };
+
+        ClientSession_OpenInterface(&session, 7, false, false, &channel);
+        ClientSession_SetFilters(&session, channel, filters, 2);
+
+        expect(ClientSession_ChannelAccepts(&session, channel, 0x100)).toBe(true);
+        expect(ClientSession_ChannelAccepts(&session, channel, 0x200)).toBe(true);
+        expect(ClientSession_ChannelAccepts(&session, channel, 0x300)).toBe(false);
+    });
+
+    it("clears filters back to pass-all on an empty set", []() {
+        uint8_t channel = 0;
+        CanFilter filters[1] = { { 0x100, 0x7FF } };
+
+        ClientSession_OpenInterface(&session, 7, false, false, &channel);
+        ClientSession_SetFilters(&session, channel, filters, 1);
+        ClientSession_SetFilters(&session, channel, NULL, 0);
+
+        expect(ClientSession_ChannelAccepts(&session, channel, 0x300)).toBe(true);
+    });
+
+    it("rejects setting filters on an unopened channel", []() {
+        CanFilter filters[1] = { { 0x100, 0x7FF } };
+        bool set_ok;
+
+        set_ok = ClientSession_SetFilters(&session, 42, filters, 1);
+
+        expect(set_ok).toBe(false);
+    });
+
     it("rejects opening beyond the binding capacity", []() {
         uint8_t channel = 0;
         bool opened = true;
