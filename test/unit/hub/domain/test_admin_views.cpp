@@ -90,6 +90,27 @@ describe("admin_views", []() {
         expect((const char *)clients_reply.entries[0].interface_name).toBe("can0");
     });
 
+    it("lists interfaces with subscribers and traffic", []() {
+        AdminInterfacesReplyMessage reply;
+        HubPeer *client = addClient(CLIENT_PEER);
+
+        openInterfaceAt(client, 0);
+        InterfaceRegistry_CountFrame(&registry, registry.entries[0].interface_id);
+        InterfaceRegistry_CountFrame(&registry, registry.entries[0].interface_id);
+
+        AdminViews_Interfaces(&registry, &directory, 0, &reply);
+
+        expect(reply.count).toBe(3);
+        expect(reply.entries[0].interface_id).toBe(registry.entries[0].interface_id);
+        expect(reply.entries[0].subscriber_count).toBe(1);
+        expect(reply.entries[0].frames_received).toBe((uint64_t)2);
+        expect((const char *)reply.entries[0].agent_name).toBe("truck42");
+        expect((const char *)reply.entries[0].interface_name).toBe("can0");
+        expect(reply.entries[1].subscriber_count).toBe(0);
+        expect(reply.entries[1].frames_received).toBe((uint64_t)0);
+        expect((const char *)reply.entries[2].agent_name).toBe("van7");
+    });
+
     it("flags more and honours the offset when rows exceed one reply", []() {
         uint8_t i;
 

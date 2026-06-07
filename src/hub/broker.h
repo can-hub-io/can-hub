@@ -13,10 +13,18 @@
  * orchestration — every rule lives in domain/.
  */
 typedef struct {
+    uint64_t frames_received;
+    uint64_t frames_forwarded;
+    uint64_t frames_dropped;
+    uint64_t frames_unroutable;
+} HubMetrics;
+
+typedef struct {
     HubTransportPort *transport;
     IdentityStorePort *identity_store;
     InterfaceRegistry registry;
     PeerDirectory directory;
+    HubMetrics metrics;
 } Broker;
 
 void Broker_Init(Broker *self, HubTransportPort *transport, IdentityStorePort *identity_store);

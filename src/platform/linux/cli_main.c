@@ -66,6 +66,7 @@ static void handleStatusReply(const uint8_t *payload, uint16_t payload_length);
 static void handlePeersReply(const uint8_t *payload, uint16_t payload_length);
 static void handleAgentsReply(const uint8_t *payload, uint16_t payload_length);
 static void handleClientsReply(const uint8_t *payload, uint16_t payload_length);
+static void handleInterfacesReply(const uint8_t *payload, uint16_t payload_length);
 static void handleListReply(const uint8_t *payload, uint16_t payload_length);
 static void handlePinsReply(const uint8_t *payload, uint16_t payload_length);
 static void printClientRow(const AdminClientsReplyEntry *entry, const char *indent);
@@ -268,6 +269,10 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
         handleClientsReply(data + MESSAGE_HEADER_SIZE, header.length);
         return;
     }
+    if (header.type == kMESSAGE_TYPE_ADMIN_INTERFACES_REPLY) {
+        handleInterfacesReply(data + MESSAGE_HEADER_SIZE, header.length);
+        return;
+    }
     if (header.type == kMESSAGE_TYPE_LIST_REPLY) {
         handleListReply(data + MESSAGE_HEADER_SIZE, header.length);
         return;
@@ -307,7 +312,7 @@ static void sendRequest(void)
 {
     AdminPeersMessage peers = { page_offset };
     AdminPinsMessage pins = { page_offset };
-    ListMessage list = { page_offset };
+    AdminInterfacesMessage interfaces = { page_offset };
     AdminAgentsMessage agents;
     AdminClientsMessage clients;
     AdminKickMessage kick;
@@ -339,7 +344,7 @@ static void sendRequest(void)
     } else if (command == kCLI_COMMAND_CLIENTS) {
         encoded_size = AdminClientsMessage_Encode(&clients, encoded, sizeof(encoded));
     } else if (command == kCLI_COMMAND_INTERFACES) {
-        encoded_size = ListMessage_Encode(&list, encoded, sizeof(encoded));
+        encoded_size = AdminInterfacesMessage_Encode(&interfaces, encoded, sizeof(encoded));
     } else if (command == kCLI_COMMAND_PINS) {
         encoded_size = AdminPinsMessage_Encode(&pins, encoded, sizeof(encoded));
     } else if (command == kCLI_COMMAND_PINS_FORGET) {
@@ -399,6 +404,13 @@ static void handleStatusReply(const uint8_t *payload, uint16_t payload_length)
 
     printf("peers: %u (agents %u, clients %u)\n", reply.peer_count, reply.agent_count, reply.client_count);
     printf("interfaces: %u\n", reply.interface_count);
+    printf(
+        "frames: received %llu, forwarded %llu, dropped %llu, unroutable %llu\n",
+        (unsigned long long)reply.frames_received,
+        (unsigned long long)reply.frames_forwarded,
+        (unsigned long long)reply.frames_dropped,
+        (unsigned long long)reply.frames_unroutable
+    );
     exit_code = 0;
 }
 
@@ -509,10 +521,39 @@ static void handleClientsReply(const uint8_t *payload, uint16_t payload_length)
     }
 }
 
+static void handleInterfacesReply(const uint8_t *payload, uint16_t payload_length)
+{
+    AdminInterfacesReplyMessage reply;
+    uint8_t i;
+
+    if (!AdminInterfacesReplyMessage_Decode(&reply, payload, payload_length)) {
+        exit_code = 1;
+        return;
+    }
+
+    if (!page_header_printed) {
+        printf("%-10s %-32s %-16s %-12s %s\n", "id", "agent", "interface", "subscribers", "frames");
+        page_header_printed = true;
+    }
+    for(i=0; i<reply.count; i++) {
+        printf(
+            "%-10u %-32s %-16s %-12u %llu\n",
+            reply.entries[i].interface_id,
+            reply.entries[i].agent_name,
+            reply.entries[i].interface_name,
+            reply.entries[i].subscriber_count,
+            (unsigned long long)reply.entries[i].frames_received
+        );
+    }
+
+    if (!requestNextPage(reply.flags, reply.count)) {
+        exit_code = 0;
+    }
+}
+
 static void handleListReply(const uint8_t *payload, uint16_t payload_length)
 {
     ListReplyMessage reply;
-    bool showing = command == kCLI_COMMAND_AGENTS_SHOW;
     uint8_t i;
 
     if (!ListReplyMessage_Decode(&reply, payload, payload_length)) {
@@ -520,45 +561,23 @@ static void handleListReply(const uint8_t *payload, uint16_t payload_length)
         return;
     }
 
-    if (!showing && !page_header_printed) {
-        printf("%-10s %-32s %s\n", "id", "agent", "interface");
-        page_header_printed = true;
-    }
     for(i=0; i<reply.count; i++) {
-        if (showing) {
-            if (strcmp(reply.entries[i].agent_name, target_agent) == 0) {
-                printf("  %-10u %s\n", reply.entries[i].interface_id, reply.entries[i].interface_name);
-            }
-        } else {
-            printf(
-                "%-10u %-32s %s\n",
-                reply.entries[i].interface_id,
-                reply.entries[i].agent_name,
-                reply.entries[i].interface_name
-            );
+        if (strcmp(reply.entries[i].agent_name, target_agent) == 0) {
+            printf("  %-10u %s\n", reply.entries[i].interface_id, reply.entries[i].interface_name);
         }
     }
 
     if (reply.flags & LIST_REPLY_FLAG_MORE) {
         page_offset += reply.count;
-        if (showing) {
-            sendShowStage(show_stage);
-        } else {
-            sendRequest();
-        }
-        return;
-    }
-
-    if (showing) {
-        printf("clients:\n");
-        show_stage = kCLI_SHOW_STAGE_CLIENTS;
-        page_offset = 0;
-        page_header_printed = false;
         sendShowStage(show_stage);
         return;
     }
 
-    exit_code = 0;
+    printf("clients:\n");
+    show_stage = kCLI_SHOW_STAGE_CLIENTS;
+    page_offset = 0;
+    page_header_printed = false;
+    sendShowStage(show_stage);
 }
 
 static void handlePinsReply(const uint8_t *payload, uint16_t payload_length)

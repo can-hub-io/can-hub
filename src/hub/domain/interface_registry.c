@@ -130,6 +130,18 @@ void InterfaceRegistry_List(const InterfaceRegistry *self, uint16_t offset, List
     }
 }
 
+void InterfaceRegistry_CountFrame(InterfaceRegistry *self, uint32_t interface_id)
+{
+    uint32_t i;
+
+    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
+        if (self->entries[i].in_use && self->entries[i].interface_id == interface_id) {
+            self->entries[i].frames_received++;
+            return;
+        }
+    }
+}
+
 uint16_t InterfaceRegistry_Count(const InterfaceRegistry *self)
 {
     uint16_t count = 0;

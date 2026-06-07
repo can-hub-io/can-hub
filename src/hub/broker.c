@@ -42,6 +42,8 @@ static void handleAdminForget(Broker *self, HubPeer *peer, const MessageHeader *
 static void handleAdminKickPeer(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminAgents(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminClients(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleAdminInterfaces(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void countInterfaceFrame(Broker *self, const HubPeer *peer, uint8_t channel);
 static void disconnectPeer(Broker *self, uint32_t peer_id);
 static bool agentIdentityAccepted(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
@@ -64,6 +66,7 @@ static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
     [kMESSAGE_TYPE_ADMIN_KICK_PEER] = handleAdminKickPeer,
     [kMESSAGE_TYPE_ADMIN_AGENTS] = handleAdminAgents,
     [kMESSAGE_TYPE_ADMIN_CLIENTS] = handleAdminClients,
+    [kMESSAGE_TYPE_ADMIN_INTERFACES] = handleAdminInterfaces,
 };
 
 /* ---------- public ---------- */
@@ -190,6 +193,12 @@ static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
     if (!FrameMessage_Decode(&frame, data + MESSAGE_HEADER_SIZE, header.length)) {
         return;
     }
+    if (peer->role != kHUB_PEER_ROLE_AGENT && peer->role != kHUB_PEER_ROLE_CLIENT) {
+        return;
+    }
+
+    self->metrics.frames_received++;
+    countInterfaceFrame(self, peer, frame.channel);
 
     if (peer->role == kHUB_PEER_ROLE_AGENT) {
         route_count = FrameRoutes_FromAgent(
@@ -200,8 +209,13 @@ static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
             routes,
             FRAME_ROUTES_MAX
         );
-    } else if (peer->role == kHUB_PEER_ROLE_CLIENT) {
+    } else {
         route_count = FrameRoutes_FromClient(&self->registry, peer, frame.channel, routes, FRAME_ROUTES_MAX);
+    }
+
+    if (route_count == 0) {
+        self->metrics.frames_unroutable++;
+        return;
     }
 
     for(i=0; i<route_count; i++) {
@@ -354,6 +368,10 @@ static void handleAdminStatus(Broker *self, HubPeer *peer, const MessageHeader *
     reply.agent_count = PeerDirectory_CountRole(&self->directory, kHUB_PEER_ROLE_AGENT);
     reply.client_count = PeerDirectory_CountRole(&self->directory, kHUB_PEER_ROLE_CLIENT);
     reply.interface_count = InterfaceRegistry_Count(&self->registry);
+    reply.frames_received = self->metrics.frames_received;
+    reply.frames_forwarded = self->metrics.frames_forwarded;
+    reply.frames_dropped = self->metrics.frames_dropped;
+    reply.frames_unroutable = self->metrics.frames_unroutable;
     sendControl(self, peer, encoded, AdminStatusReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 
@@ -458,6 +476,23 @@ static void handleAdminClients(Broker *self, HubPeer *peer, const MessageHeader 
 
     AdminViews_Clients(&self->registry, &self->directory, request.agent_name, request.offset, &reply);
     sendControl(self, peer, encoded, AdminClientsReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+}
+
+static void handleAdminInterfaces(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    AdminInterfacesMessage request;
+    AdminInterfacesReplyMessage reply;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN) {
+        return;
+    }
+    if (!AdminInterfacesMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    AdminViews_Interfaces(&self->registry, &self->directory, request.offset, &reply);
+    sendControl(self, peer, encoded, AdminInterfacesReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 
 static void handleAdminPins(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
@@ -599,6 +634,11 @@ static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *d
     forwarded[FRAME_CHANNEL_OFFSET] = route->channel;
 
     sent = self->transport->send_frame(self->transport->context, route->peer_id, forwarded, size);
+    if (sent) {
+        self->metrics.frames_forwarded++;
+    } else {
+        self->metrics.frames_dropped++;
+    }
 
     destination = PeerDirectory_Find(&self->directory, route->peer_id);
     if (destination != NULL) {
@@ -607,6 +647,24 @@ static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *d
         } else {
             destination->frames_dropped++;
         }
+    }
+}
+
+static void countInterfaceFrame(Broker *self, const HubPeer *peer, uint8_t channel)
+{
+    const InterfaceEntry *entry;
+    uint32_t interface_id;
+
+    if (peer->role == kHUB_PEER_ROLE_AGENT) {
+        entry = InterfaceRegistry_FindByAgentChannel(&self->registry, peer->peer_id, channel);
+        if (entry != NULL) {
+            InterfaceRegistry_CountFrame(&self->registry, entry->interface_id);
+        }
+        return;
+    }
+
+    if (ClientSession_InterfaceForChannel(&peer->session, channel, &interface_id)) {
+        InterfaceRegistry_CountFrame(&self->registry, interface_id);
     }
 }
 

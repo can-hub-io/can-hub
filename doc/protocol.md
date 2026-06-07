@@ -54,6 +54,8 @@ offset  size  field
 0x1D  ADMIN_AGENTS_REPLY
 0x1E  ADMIN_CLIENTS       admin: open client channels (paginated, agent filter)
 0x1F  ADMIN_CLIENTS_REPLY
+0x20  ADMIN_INTERFACES    admin: interface catalogue with traffic counters (paginated)
+0x21  ADMIN_INTERFACES_REPLY
 0x7F  PING/PONG    liveness (flags bit 0: reply)
 ```
 
@@ -122,11 +124,16 @@ CLOSE (total 8)
 ADMIN_STATUS (total 4)
 empty payload
 
-ADMIN_STATUS_REPLY (total 12)
+ADMIN_STATUS_REPLY (total 48)
 @4   peer_count u16
 @6   agent_count u16
 @8   client_count u16
 @10  interface_count u16
+@12  reserved u32
+@16  frames_received u64    (valid data-plane frames accepted by the hub)
+@24  frames_forwarded u64   (frame deliveries that reached a peer)
+@32  frames_dropped u64     (deliveries dropped, destination TX budget full)
+@40  frames_unroutable u64  (valid frames with no route: channel nobody opened)
 
 ADMIN_PEERS (total 8)
 @4   offset u16        (pagination start index)
@@ -201,6 +208,22 @@ ADMIN_CLIENTS (total 136)
 @4   offset u16        (pagination start index)
 @6   reserved u16
 @8   agent_name char[128]  (filter: only channels on this agent; empty = all)
+
+ADMIN_INTERFACES (total 8)
+@4   offset u16        (pagination start index)
+@6   reserved u16
+
+ADMIN_INTERFACES_REPLY (total 8 + count * 160)
+@4   count u8          (0-16 entries in this reply)
+@5   flags u8          (bit 0: more entries beyond offset + count)
+@6   reserved u16
+@8   entries, each 160 bytes:
+     +0   interface_id u32
+     +4   subscriber_count u8  (clients holding the interface open right now)
+     +5   reserved u8[3]
+     +8   frames_received u64  (frames seen on the interface, both directions)
+     +16  agent_name char[128]
+     +144 interface_name char[16]
 
 ADMIN_CLIENTS_REPLY (total 8 + count * 156)
 @4   count u8          (0-16 entries in this reply)

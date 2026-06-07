@@ -26,3 +26,9 @@ void AdminViews_Clients(
     uint16_t offset,
     AdminClientsReplyMessage *reply
 );
+void AdminViews_Interfaces(
+    const InterfaceRegistry *registry,
+    const PeerDirectory *directory,
+    uint16_t offset,
+    AdminInterfacesReplyMessage *reply
+);

@@ -24,9 +24,9 @@ describe("admin_status_message", []() {
     });
 
     it("round-trips the status reply counters", []() {
-        AdminStatusReplyMessage reply = { 5, 2, 3, 8 };
+        AdminStatusReplyMessage reply = { 5, 2, 3, 8, 5000000000ULL, 4999000000ULL, 999999, 1 };
         AdminStatusReplyMessage decoded;
-        uint8_t buffer[32];
+        uint8_t buffer[64];
         size_t expected_size = MESSAGE_HEADER_SIZE + ADMIN_STATUS_REPLY_BODY_SIZE;
         size_t encoded_size;
         bool decoded_ok;
@@ -40,6 +40,10 @@ describe("admin_status_message", []() {
         expect(decoded.agent_count).toBe(2);
         expect(decoded.client_count).toBe(3);
         expect(decoded.interface_count).toBe(8);
+        expect(decoded.frames_received).toBe(5000000000ULL);
+        expect(decoded.frames_forwarded).toBe(4999000000ULL);
+        expect(decoded.frames_dropped).toBe((uint64_t)999999);
+        expect(decoded.frames_unroutable).toBe((uint64_t)1);
     });
 
     it("rejects a truncated status reply", []() {
@@ -270,6 +274,53 @@ describe("admin_agents_message", []() {
         expect(decoded.entries[0].interface_count).toBe(2);
         expect((const char *)decoded.entries[0].agent_name).toBe("truck42");
         expect((const char *)decoded.entries[0].fingerprint_hex).toBe(FINGERPRINT);
+    });
+});
+
+describe("admin_interfaces_message", []() {
+    it("round-trips the pagination offset", []() {
+        AdminInterfacesMessage request = { 9 };
+        AdminInterfacesMessage decoded;
+        uint8_t buffer[16];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminInterfacesMessage_Encode(&request, buffer, sizeof(buffer));
+        decoded_ok = AdminInterfacesMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + ADMIN_INTERFACES_BODY_SIZE));
+        expect(decoded_ok).toBe(true);
+        expect(decoded.offset).toBe(9);
+    });
+
+    it("round-trips interface entries", []() {
+        AdminInterfacesReplyMessage reply = { 1, 0, { { 7, 2, 5000000000ULL, "truck42", "can0" } } };
+        AdminInterfacesReplyMessage decoded;
+        uint8_t buffer[512];
+        size_t expected_size = MESSAGE_HEADER_SIZE + ADMIN_INTERFACES_REPLY_FIXED_FIELDS_SIZE + ADMIN_INTERFACES_REPLY_ENTRY_SIZE;
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminInterfacesReplyMessage_Encode(&reply, buffer, sizeof(buffer));
+        decoded_ok = AdminInterfacesReplyMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe(expected_size);
+        expect(decoded_ok).toBe(true);
+        expect(decoded.count).toBe(1);
+        expect(decoded.entries[0].interface_id).toBe((uint32_t)7);
+        expect(decoded.entries[0].subscriber_count).toBe(2);
+        expect(decoded.entries[0].frames_received).toBe(5000000000ULL);
+        expect((const char *)decoded.entries[0].agent_name).toBe("truck42");
+        expect((const char *)decoded.entries[0].interface_name).toBe("can0");
+    });
+
+    it("rejects a payload shorter than its declared entries", []() {
+        AdminInterfacesReplyMessage decoded;
+        uint8_t payload[ADMIN_INTERFACES_REPLY_FIXED_FIELDS_SIZE + ADMIN_INTERFACES_REPLY_ENTRY_SIZE] = { 0 };
+
+        payload[0] = 2;
+
+        expect(AdminInterfacesReplyMessage_Decode(&decoded, payload, sizeof(payload))).toBe(false);
     });
 });
 

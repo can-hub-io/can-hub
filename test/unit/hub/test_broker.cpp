@@ -573,6 +573,53 @@ describe("broker", []() {
             expect(reply.entries[1].frames_dropped).toBe((uint32_t)1);
         });
 
+        it("aggregates frame totals in the status reply", []() {
+            FrameMessage routable = { 0x123, 1000, 0, 1, 0, { 0x55 } };
+            FrameMessage unroutable = { 0x456, 1000, 1, 1, 0, { 0x55 } };
+            AdminStatusReplyMessage reply;
+            uint8_t frame_encoded[128];
+            uint8_t encoded[64];
+            size_t routable_size = FrameMessage_Encode(&routable, frame_encoded, sizeof(frame_encoded));
+            size_t encoded_size = AdminStatusMessage_Encode(encoded, sizeof(encoded));
+
+            events.on_peer_frame(events.context, AGENT_PEER, frame_encoded, routable_size);
+            transport.frame_result = false;
+            events.on_peer_frame(events.context, AGENT_PEER, frame_encoded, routable_size);
+            transport.frame_result = true;
+            routable_size = FrameMessage_Encode(&unroutable, frame_encoded, sizeof(frame_encoded));
+            events.on_peer_frame(events.context, AGENT_PEER, frame_encoded, routable_size);
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            lastReply(&reply, AdminStatusReplyMessage_Decode);
+
+            expect(reply.frames_received).toBe((uint64_t)3);
+            expect(reply.frames_forwarded).toBe((uint64_t)1);
+            expect(reply.frames_dropped).toBe((uint64_t)1);
+            expect(reply.frames_unroutable).toBe((uint64_t)1);
+        });
+
+        it("lists interfaces with their traffic through the admin plane", []() {
+            FrameMessage frame = { 0x123, 1000, 0, 1, 0, { 0x55 } };
+            AdminInterfacesMessage request = { 0 };
+            AdminInterfacesReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t frame_encoded[128];
+            uint8_t encoded[64];
+            size_t frame_size = FrameMessage_Encode(&frame, frame_encoded, sizeof(frame_encoded));
+            size_t encoded_size = AdminInterfacesMessage_Encode(&request, encoded, sizeof(encoded));
+
+            events.on_peer_frame(events.context, AGENT_PEER, frame_encoded, frame_size);
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminInterfacesReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_INTERFACES_REPLY);
+            expect(reply.count).toBe(2);
+            expect(reply.entries[0].subscriber_count).toBe(1);
+            expect(reply.entries[0].frames_received).toBe((uint64_t)1);
+            expect((const char *)reply.entries[0].agent_name).toBe("truck42");
+            expect((const char *)reply.entries[0].interface_name).toBe("can0");
+            expect(reply.entries[1].subscriber_count).toBe(0);
+        });
+
         it("evicts a peer whose control send fails", []() {
             ListMessage list = { 0 };
             uint8_t encoded[64];

@@ -3,6 +3,7 @@
 #include <string.h>
 
 static uint8_t countAgentInterfaces(const InterfaceRegistry *registry, uint32_t agent_peer_id);
+static uint8_t countSubscribers(const PeerDirectory *directory, uint32_t interface_id);
 static bool clientHasOpenChannels(const HubPeer *peer);
 static bool appendClientRow(
     AdminClientsReplyMessage *reply,
@@ -119,6 +120,42 @@ void AdminViews_Clients(
     }
 }
 
+void AdminViews_Interfaces(
+    const InterfaceRegistry *registry,
+    const PeerDirectory *directory,
+    uint16_t offset,
+    AdminInterfacesReplyMessage *reply
+)
+{
+    const InterfaceEntry *interface_entry;
+    AdminInterfacesReplyEntry *entry;
+    uint16_t skipped = 0;
+    uint32_t i;
+
+    memset(reply, 0, sizeof(*reply));
+
+    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
+        interface_entry = &registry->entries[i];
+        if (!interface_entry->in_use) {
+            continue;
+        }
+        if (skipped < offset) {
+            skipped++;
+            continue;
+        }
+        if (reply->count == ADMIN_INTERFACES_REPLY_ENTRIES_MAX) {
+            reply->flags |= ADMIN_REPLY_FLAG_MORE;
+            return;
+        }
+        entry = &reply->entries[reply->count++];
+        entry->interface_id = interface_entry->interface_id;
+        entry->subscriber_count = countSubscribers(directory, interface_entry->interface_id);
+        entry->frames_received = interface_entry->frames_received;
+        memcpy(entry->agent_name, interface_entry->agent_name, REGISTER_AGENT_NAME_SIZE);
+        memcpy(entry->interface_name, interface_entry->interface_name, REGISTER_INTERFACE_NAME_SIZE);
+    }
+}
+
 /* ---------- private ---------- */
 
 static uint8_t countAgentInterfaces(const InterfaceRegistry *registry, uint32_t agent_peer_id)
@@ -128,6 +165,24 @@ static uint8_t countAgentInterfaces(const InterfaceRegistry *registry, uint32_t 
 
     for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
         if (registry->entries[i].in_use && registry->entries[i].agent_peer_id == agent_peer_id) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
+static uint8_t countSubscribers(const PeerDirectory *directory, uint32_t interface_id)
+{
+    uint8_t channel;
+    uint8_t count = 0;
+    uint8_t i;
+
+    for(i=0; i<PEER_DIRECTORY_MAX; i++) {
+        if (!directory->peers[i].in_use || directory->peers[i].role != kHUB_PEER_ROLE_CLIENT) {
+            continue;
+        }
+        if (ClientSession_ChannelForInterface(&directory->peers[i].session, interface_id, &channel)) {
             count++;
         }
     }

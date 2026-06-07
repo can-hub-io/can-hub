@@ -9,6 +9,10 @@
 #define AGENT_COUNT_OFFSET 2
 #define CLIENT_COUNT_OFFSET 4
 #define INTERFACE_COUNT_OFFSET 6
+#define FRAMES_RECEIVED_OFFSET 12
+#define FRAMES_FORWARDED_OFFSET 20
+#define FRAMES_DROPPED_OFFSET 28
+#define FRAMES_UNROUTABLE_OFFSET 36
 
 #define OFFSET_OFFSET 0
 #define COUNT_OFFSET 0
@@ -41,6 +45,12 @@
 #define CLIENT_ENTRY_AGENT_NAME_OFFSET 12
 #define CLIENT_ENTRY_INTERFACE_NAME_OFFSET 140
 
+#define INTERFACE_ENTRY_ID_OFFSET 0
+#define INTERFACE_ENTRY_SUBSCRIBERS_OFFSET 4
+#define INTERFACE_ENTRY_FRAMES_OFFSET 8
+#define INTERFACE_ENTRY_AGENT_NAME_OFFSET 16
+#define INTERFACE_ENTRY_INTERFACE_NAME_OFFSET 144
+
 static size_t encodeFixedBody(uint8_t type, size_t body_size, uint8_t *buffer, size_t buffer_size, uint8_t **body);
 static bool isNameTerminated(const char *agent_name);
 static size_t encodeAgentName(uint8_t type, const char *agent_name, uint8_t *buffer, size_t buffer_size);
@@ -69,6 +79,8 @@ static void writeAgentEntry(uint8_t *destination, const AdminAgentsReplyEntry *e
 static void readAgentEntry(const uint8_t *source, AdminAgentsReplyEntry *entry);
 static void writeClientEntry(uint8_t *destination, const AdminClientsReplyEntry *entry);
 static void readClientEntry(const uint8_t *source, AdminClientsReplyEntry *entry);
+static void writeInterfaceEntry(uint8_t *destination, const AdminInterfacesReplyEntry *entry);
+static void readInterfaceEntry(const uint8_t *source, AdminInterfacesReplyEntry *entry);
 
 /* ---------- public ---------- */
 
@@ -93,6 +105,10 @@ size_t AdminStatusReplyMessage_Encode(const AdminStatusReplyMessage *self, uint8
     Wire_WriteU16(body + AGENT_COUNT_OFFSET, self->agent_count);
     Wire_WriteU16(body + CLIENT_COUNT_OFFSET, self->client_count);
     Wire_WriteU16(body + INTERFACE_COUNT_OFFSET, self->interface_count);
+    Wire_WriteU64(body + FRAMES_RECEIVED_OFFSET, self->frames_received);
+    Wire_WriteU64(body + FRAMES_FORWARDED_OFFSET, self->frames_forwarded);
+    Wire_WriteU64(body + FRAMES_DROPPED_OFFSET, self->frames_dropped);
+    Wire_WriteU64(body + FRAMES_UNROUTABLE_OFFSET, self->frames_unroutable);
 
     return total_size;
 }
@@ -107,6 +123,10 @@ bool AdminStatusReplyMessage_Decode(AdminStatusReplyMessage *self, const uint8_t
     self->agent_count = Wire_ReadU16(payload + AGENT_COUNT_OFFSET);
     self->client_count = Wire_ReadU16(payload + CLIENT_COUNT_OFFSET);
     self->interface_count = Wire_ReadU16(payload + INTERFACE_COUNT_OFFSET);
+    self->frames_received = Wire_ReadU64(payload + FRAMES_RECEIVED_OFFSET);
+    self->frames_forwarded = Wire_ReadU64(payload + FRAMES_FORWARDED_OFFSET);
+    self->frames_dropped = Wire_ReadU64(payload + FRAMES_DROPPED_OFFSET);
+    self->frames_unroutable = Wire_ReadU64(payload + FRAMES_UNROUTABLE_OFFSET);
 
     return true;
 }
@@ -471,6 +491,80 @@ bool AdminClientsReplyMessage_Decode(AdminClientsReplyMessage *self, const uint8
     return true;
 }
 
+size_t AdminInterfacesMessage_Encode(const AdminInterfacesMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    return encodeOffsetRequest(kMESSAGE_TYPE_ADMIN_INTERFACES, self->offset, buffer, buffer_size);
+}
+
+bool AdminInterfacesMessage_Decode(AdminInterfacesMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    if (payload_length < ADMIN_INTERFACES_BODY_SIZE) {
+        return false;
+    }
+
+    self->offset = Wire_ReadU16(payload + OFFSET_OFFSET);
+
+    return true;
+}
+
+size_t AdminInterfacesReplyMessage_Encode(const AdminInterfacesReplyMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t body_size;
+    size_t total_size;
+    uint8_t i;
+
+    if (self->count > ADMIN_INTERFACES_REPLY_ENTRIES_MAX) {
+        return 0;
+    }
+    for(i=0; i<self->count; i++) {
+        if (!isNameTerminated(self->entries[i].agent_name)) {
+            return 0;
+        }
+        if (self->entries[i].interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] != '\0') {
+            return 0;
+        }
+    }
+
+    body_size = ADMIN_INTERFACES_REPLY_FIXED_FIELDS_SIZE + (size_t)self->count * ADMIN_INTERFACES_REPLY_ENTRY_SIZE;
+    total_size = encodeFixedBody(kMESSAGE_TYPE_ADMIN_INTERFACES_REPLY, body_size, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    body[COUNT_OFFSET] = self->count;
+    body[FLAGS_OFFSET] = self->flags;
+    for(i=0; i<self->count; i++) {
+        writeInterfaceEntry(body + ENTRIES_OFFSET + i * ADMIN_INTERFACES_REPLY_ENTRY_SIZE, &self->entries[i]);
+    }
+
+    return total_size;
+}
+
+bool AdminInterfacesReplyMessage_Decode(AdminInterfacesReplyMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    uint8_t i;
+
+    if (payload_length < ADMIN_INTERFACES_REPLY_FIXED_FIELDS_SIZE) {
+        return false;
+    }
+
+    self->count = payload[COUNT_OFFSET];
+    self->flags = payload[FLAGS_OFFSET];
+    if (self->count > ADMIN_INTERFACES_REPLY_ENTRIES_MAX) {
+        return false;
+    }
+    if (payload_length < ADMIN_INTERFACES_REPLY_FIXED_FIELDS_SIZE + (size_t)self->count * ADMIN_INTERFACES_REPLY_ENTRY_SIZE) {
+        return false;
+    }
+
+    for(i=0; i<self->count; i++) {
+        readInterfaceEntry(payload + ENTRIES_OFFSET + i * ADMIN_INTERFACES_REPLY_ENTRY_SIZE, &self->entries[i]);
+    }
+
+    return true;
+}
+
 /* ---------- private ---------- */
 
 static size_t encodeFixedBody(uint8_t type, size_t body_size, uint8_t *buffer, size_t buffer_size, uint8_t **body)
@@ -686,5 +780,25 @@ static void readClientEntry(const uint8_t *source, AdminClientsReplyEntry *entry
     memcpy(entry->agent_name, source + CLIENT_ENTRY_AGENT_NAME_OFFSET, REGISTER_AGENT_NAME_SIZE);
     entry->agent_name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';
     memcpy(entry->interface_name, source + CLIENT_ENTRY_INTERFACE_NAME_OFFSET, REGISTER_INTERFACE_NAME_SIZE);
+    entry->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] = '\0';
+}
+
+static void writeInterfaceEntry(uint8_t *destination, const AdminInterfacesReplyEntry *entry)
+{
+    Wire_WriteU32(destination + INTERFACE_ENTRY_ID_OFFSET, entry->interface_id);
+    destination[INTERFACE_ENTRY_SUBSCRIBERS_OFFSET] = entry->subscriber_count;
+    Wire_WriteU64(destination + INTERFACE_ENTRY_FRAMES_OFFSET, entry->frames_received);
+    memcpy(destination + INTERFACE_ENTRY_AGENT_NAME_OFFSET, entry->agent_name, strlen(entry->agent_name));
+    memcpy(destination + INTERFACE_ENTRY_INTERFACE_NAME_OFFSET, entry->interface_name, strlen(entry->interface_name));
+}
+
+static void readInterfaceEntry(const uint8_t *source, AdminInterfacesReplyEntry *entry)
+{
+    entry->interface_id = Wire_ReadU32(source + INTERFACE_ENTRY_ID_OFFSET);
+    entry->subscriber_count = source[INTERFACE_ENTRY_SUBSCRIBERS_OFFSET];
+    entry->frames_received = Wire_ReadU64(source + INTERFACE_ENTRY_FRAMES_OFFSET);
+    memcpy(entry->agent_name, source + INTERFACE_ENTRY_AGENT_NAME_OFFSET, REGISTER_AGENT_NAME_SIZE);
+    entry->agent_name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';
+    memcpy(entry->interface_name, source + INTERFACE_ENTRY_INTERFACE_NAME_OFFSET, REGISTER_INTERFACE_NAME_SIZE);
     entry->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] = '\0';
 }
