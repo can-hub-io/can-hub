@@ -54,6 +54,23 @@ Requirements: cmake >= 3.16, ninja, gcc, GnuTLS development headers
 (`libgnutls28-dev` on Debian/Ubuntu). The first configure needs network:
 ngtcp2 and the SQLite amalgamation are fetched and built statically.
 
+### Debian packages
+
+`make deb` builds one `.deb` per binary (CPack components, dynamic GnuTLS):
+
+```sh
+make deb                 # build/x86_64/package/*.deb
+```
+
+- `can-hub` — hub daemon, installs `can-hub.service` (enabled and started on
+  install) under a dedicated `can-hub` system user.
+- `can-hub-agent` — SocketCAN exporter, `can-hub-agent.service` (runs with
+  `CAP_NET_RAW`); edit `/etc/can-hub/agent.conf` then
+  `systemctl enable --now can-hub-agent`.
+- `can-hub-cli`, `can-hub-client` — admin and consumer tools, no service.
+
+The fully static, service-less edge binaries come from `make static` instead.
+
 ## Quickstart
 
 On the hub host (defaults: quic://7227 UDP, tls://7227 TCP, plain
