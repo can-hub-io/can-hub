@@ -7,12 +7,12 @@ Date: 2026-06-05
 
 socketcand and cannelloni assume the machine that owns the CAN interfaces is reachable: socketcand is a TCP server on the device, cannelloni a point-to-point tunnel. Both break behind NAT/firewalls (vehicles on cellular, machines on factory LANs) and neither has built-in authentication or encryption.
 
-can-hub inverts the model: a device agent dials out to a central hub over QUIC with mutual TLS. Clients reach the buses through the hub, or directly P2P when the network allows it. Own binary protocol, clean-room, MIT licensed.
+can-hub inverts the model: a device agent dials out to a central hub over QUIC with mutual TLS. Clients reach the buses through the hub, or directly P2P when the network allows it. Own binary protocol, clean-room, dual-licensed AGPL-3.0 + commercial (protocol spec CC-BY-4.0).
 
 ```
-[can-hub-agent] --QUIC (mTLS)--> [can-hub] <--QUIC/TCP-- [clients]
-                                     |
-                                 [can-hub-cli] (unix socket)
+[can-hub-agent] --quic/tls/tcp--> [can-hub] <--quic/tls/tcp-- [clients]
+                                      |            (+unix for local clients)
+                                  [can-hub-cli] (unix socket)
 ```
 
 ## Decisions
@@ -34,11 +34,11 @@ C (C11), cmake + gcc, static or dynamic linking. Make wraps cmake: `make release
 - SCTP: rejected. Middleboxes kill it, QUIC already provides multistreaming.
 - UDP beacon discovery: discarded (2026-06-06). Clients are configured with the hub address and query the catalogue with LIST.
 
+The transport is a port; adapters implement it. Adding a transport must not touch the domain.
+
 ### Injection echo (decision 2026-06-07)
 
 Client-injected frames become visible to the other subscribers of an interface through their **bus echo**, never by hub-side fan-out: the agent enables `CAN_RAW_RECV_OWN_MSGS`, the kernel returns the TX on completion (`MSG_CONFIRM`), and that echo travels back to the hub and fans out like any bus frame. Truth from the wire — if the TX never made it, nobody sees it — and real bus ordering. The hub tags each injection with an origin token (FRAME route_flags); the agent's EchoCorrelator pairs TX↔echo locally, where every loss mode is synchronously observable (failed writes drop their entry), and returns the token so the hub can suppress the echo towards its own originator when the channel was opened with the suppress-own-echo flag. Hub-side fan-out was rejected: it lies under TX failure and reorders against genuine bus traffic.
-
-The transport is a port; adapters implement it. Adding a transport must not touch the domain.
 
 ### P2P (phased)
 
@@ -66,7 +66,7 @@ Single-threaded epoll event loop; ngtcp2 is callback-driven and fits. Threads on
 
 ### Agent portability (microcontroller target)
 
-The agent core (domain + application) is freestanding: no POSIX, no file descriptors, no heap, no syscalls. Ports are structs of function pointers with a context pointer; events are pushed in (`Agent_OnCanFrame`, `Agent_OnControlMessage`, ...) and time is injected (`Agent_Tick(now_us)`). On Linux the epoll loop in `apps/agent` drives it; on a microcontroller an ISR/systick does, and the transport adapter can be QUIC, TCP or UDP (lwIP or bare) without touching the core.
+The agent core (domain + application) is freestanding: no POSIX, no file descriptors, no heap, no syscalls. Ports are structs of function pointers with a context pointer; events are pushed in (`Agent_OnCanFrame`, `Agent_OnControlMessage`, ...) and time is injected (`Agent_Tick(now_us)`). On Linux the epoll loop in `platform/linux/agent_main.c` drives it; on a microcontroller an ISR/systick does, and the transport adapter can be QUIC, TCP or UDP (lwIP or bare) without touching the core.
 
 ### Listeners and defaults
 
@@ -86,7 +86,7 @@ agents                 live agents with their interface count
 agents show <name>     agent detail: interfaces and consuming clients
 agents kick <name>     disconnect an agent by registered name
 clients                open client channels (one row per channel, idle clients included)
-interfaces             interface catalogue (reuses LIST)
+interfaces             interface catalogue with subscribers and traffic counters
 pins                   pinned TOFU identities
 pins forget <name>     drop a pin so a re-keyed agent can pin again
 ```
@@ -99,15 +99,15 @@ Protocol compatibility needs no license: optional adapters may let socketcand or
 
 Shims run as additional listener transports on the hub itself: the hub listens on TCP and QUIC for its own protocol by default, and each enabled shim (e.g. socketcand ASCII) adds another listener that translates to the broker's transport contract — legacy clients connect to the hub directly, no separate proxy process.
 
-### Administration
+### Web admin (future)
 
-Two admin surfaces over the same admin plane: `can-hub-cli` (unix socket) and a web panel (peers, interfaces, metrics, kick, ACLs). How the web panel is served (embedded HTTP server vs separate process consuming the admin socket) is decided when it lands.
+A web panel (peers, interfaces, metrics, kick, ACLs) shares the admin plane with `can-hub-cli`. How it is served (embedded HTTP server vs separate process consuming the admin socket) is decided when it lands.
 
 ## Stories
 
-- E0 — spikes: ngtcp2 datagram proof of concept (vcan over QUIC), latency/CPU baseline against socketcand and cannelloni.
-- E1 — protocol: binary wire format spec (doc/protocol.md) + encode/decode module with unit tests.
-- E2 — agent: SocketCAN capture/injection, QUIC client, registration, reconnect with backoff.
-- E3 — hub: QUIC server, registry, relay routing, SQLite persistence, unix socket admin, CLI.
-- E4 — P2P phase 2: endpoint exchange, hole punch, path migration, relay fallback.
-- E5 — hardening: backpressure, session limits, metrics, packaging.
+- E0 — spikes: ngtcp2 datagram proof of concept (vcan over QUIC), latency/CPU baseline against socketcand and cannelloni. Done.
+- E1 — protocol: binary wire format spec (doc/protocol.md) + encode/decode module with unit tests. Done.
+- E2 — agent: SocketCAN capture/injection, QUIC client, registration, reconnect with backoff. Done.
+- E3 — hub: QUIC server, registry, relay routing, SQLite persistence, unix socket admin, CLI. Done.
+- E4 — hardening/security: TOFU identities, mTLS, TLS-over-TCP, admin plane, backpressure/eviction, metrics. Done.
+- E5 — P2P phase 2: endpoint exchange, hole punch, path migration, relay fallback.
