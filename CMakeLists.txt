@@ -29,6 +29,7 @@ set(COMMON_SOURCES
     src/protocol/list_message.c
     src/protocol/open_message.c
     src/protocol/register_message.c
+    src/protocol/subscribe_message.c
 )
 
 include(FetchContent)

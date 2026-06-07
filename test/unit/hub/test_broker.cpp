@@ -13,6 +13,7 @@ extern "C" {
 #include "protocol/list_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
+#include "protocol/subscribe_message.h"
 }
 
 #define AGENT_PEER 100
@@ -412,6 +413,48 @@ describe("broker", []() {
             events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
 
             expect(transport.frame_count).toBe(0);
+        });
+
+        it("delivers only frames matching the channel subscribe filter", []() {
+            SubscribeMessage subscribe = { client_channel, 1, { { 0x100, 0x700 } } };
+            FrameMessage matching = { 0x123, 1000, 1, 1, 0, 0, { 0x11 } };
+            FrameMessage other = { 0x223, 1000, 1, 1, 0, 0, { 0x22 } };
+            FrameMessage routed;
+            MessageHeader header;
+            uint8_t encoded[128];
+            size_t encoded_size;
+
+            encoded_size = SubscribeMessage_Encode(&subscribe, encoded, sizeof(encoded));
+            sendControlFrom(CLIENT_PEER, encoded, encoded_size);
+
+            encoded_size = FrameMessage_Encode(&other, encoded, sizeof(encoded));
+            events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
+            encoded_size = FrameMessage_Encode(&matching, encoded, sizeof(encoded));
+            events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
+
+            MessageHeader_Decode(&header, transport.frame_log[0], transport.frame_sizes[0]);
+            FrameMessage_Decode(&routed, transport.frame_log[0] + MESSAGE_HEADER_SIZE, header.length);
+
+            expect(transport.frame_count).toBe(1);
+            expect(routed.can_id).toBe((uint32_t)0x123);
+        });
+
+        it("resumes passing every frame after an empty subscribe", []() {
+            SubscribeMessage filtered = { client_channel, 1, { { 0x100, 0x700 } } };
+            SubscribeMessage cleared = { client_channel, 0, {} };
+            FrameMessage other = { 0x223, 1000, 1, 1, 0, 0, { 0x22 } };
+            uint8_t encoded[128];
+            size_t encoded_size;
+
+            encoded_size = SubscribeMessage_Encode(&filtered, encoded, sizeof(encoded));
+            sendControlFrom(CLIENT_PEER, encoded, encoded_size);
+            encoded_size = SubscribeMessage_Encode(&cleared, encoded, sizeof(encoded));
+            sendControlFrom(CLIENT_PEER, encoded, encoded_size);
+
+            encoded_size = FrameMessage_Encode(&other, encoded, sizeof(encoded));
+            events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
+
+            expect(transport.frame_count).toBe(1);
         });
     });
 
