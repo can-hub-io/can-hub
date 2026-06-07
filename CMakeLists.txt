@@ -9,6 +9,12 @@ set(CMAKE_C_FLAGS_DEBUG "-O0 -g")
 
 add_compile_options(-Wall -Wextra)
 
+option(CAN_HUB_STATIC "Fully static binaries against a static GnuTLS stack" OFF)
+if(CAN_HUB_STATIC)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
+    set(GNUTLS_STATIC_EXTRA_LIBRARIES hogweed nettle gmp atomic)
+endif()
+
 include_directories(src)
 
 set(COMMON_SOURCES
@@ -104,7 +110,7 @@ set(HUB_SOURCES
 add_executable(can-hub src/platform/linux/hub_main.c ${COMMON_SOURCES} ${HUB_SOURCES})
 target_link_libraries(can-hub PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls sqlite3)
 add_executable(can-hub-agent src/platform/linux/agent_main.c ${COMMON_SOURCES} ${AGENT_SOURCES})
-target_link_libraries(can-hub-agent PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls)
+target_link_libraries(can-hub-agent PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls ${GNUTLS_STATIC_EXTRA_LIBRARIES})
 set(CLIENT_SOURCES
     src/platform/linux/clock/clock.c
     src/platform/linux/shared/connect_url.c
@@ -130,7 +136,7 @@ set(CLIENT_TLS_SOURCES
 )
 
 add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES} ${CLIENT_TLS_SOURCES})
-target_link_libraries(can-hub-client PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls)
+target_link_libraries(can-hub-client PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls ${GNUTLS_STATIC_EXTRA_LIBRARIES})
 add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES})
 
 install(TARGETS can-hub can-hub-agent can-hub-cli RUNTIME DESTINATION bin)

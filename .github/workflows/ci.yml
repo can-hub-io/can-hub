@@ -1,0 +1,92 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test-x86_64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgnutls28-dev
+      - name: cache build trees
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: x86_64-${{ hashFiles('CMakeLists.txt', 'test/CMakeLists.txt', 'cmake/**') }}
+      - name: unit tests
+        run: make test
+      - name: release build
+        run: make release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: can-hub-x86_64
+          path: build/x86_64/release/can-hub*
+
+  release-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgnutls28-dev
+      - name: cache build tree
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: arm64-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
+      - name: release build
+        run: make release ARCH=arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: can-hub-arm64
+          path: build/arm64/release/can-hub*
+
+  release-armhf:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dependencies
+        run: |
+          sudo dpkg --add-architecture armhf
+          sudo apt-get update
+          sudo apt-get install -y ninja-build gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libgnutls28-dev:armhf
+      - name: cache build tree
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: armhf-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
+      - name: release build
+        run: make release ARCH=armhf
+      - uses: actions/upload-artifact@v4
+        with:
+          name: can-hub-armhf
+          path: build/armhf/release/can-hub*
+
+  static:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [armv7, arm64, x86_64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: static build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/static.Dockerfile
+          build-args: ARCH=${{ matrix.arch }}
+          outputs: type=local,dest=dist/${{ matrix.arch }}
+          cache-from: type=gha,scope=static-${{ matrix.arch }}
+          cache-to: type=gha,scope=static-${{ matrix.arch }},mode=max
+      - name: verify static linkage
+        run: |
+          file dist/${{ matrix.arch }}/can-hub-agent
+          file dist/${{ matrix.arch }}/can-hub-agent | grep -q "statically linked"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: can-hub-static-${{ matrix.arch }}
+          path: dist/${{ matrix.arch }}/can-hub*

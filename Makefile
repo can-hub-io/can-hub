@@ -3,6 +3,8 @@
 #   make release [ARCH=x86_64|armhf|arm64]   Optimized build (-O2).
 #   make debug   [ARCH=...]                  Debug build (-O0 -g).
 #   make install [ARCH=...] [PREFIX=...]     Install release binaries.
+#   make static  [ARCH=armv7|arm64|x86_64]   Fully static edge binaries
+#                                            (agent/client/cli, musl, docker).
 #   make test                                Build + run host unit tests (CEST).
 #   make clean                               Remove build trees.
 
@@ -17,7 +19,7 @@ _BUILD_DEBUG := build/$(ARCH)/debug
 _BUILD_TEST := build/test
 _CEST_RUNNER := test/vendor/cest-runner_linux_x86_64
 
-.PHONY: release debug install test clean
+.PHONY: release debug install static test clean
 
 release:
 	$(CMAKE) -B $(_BUILD_RELEASE) \
@@ -37,6 +39,10 @@ debug:
 
 install: release
 	$(CMAKE) --install $(_BUILD_RELEASE)
+
+# Fully static edge binaries; ARCH=armv7|arm64|x86_64 (pins live in the Dockerfile).
+static:
+	docker build -f docker/static.Dockerfile --build-arg ARCH=$(ARCH) --output dist/$(ARCH) .
 
 test:
 	$(CMAKE) -B $(_BUILD_TEST) test/ \
