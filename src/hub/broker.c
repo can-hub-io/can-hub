@@ -6,6 +6,7 @@
 #include "hub/domain/frame_routes.h"
 #include "hub/domain/hub_peer.h"
 #include "protocol/admin_message.h"
+#include "protocol/error_message.h"
 #include "protocol/frame_message.h"
 #include "protocol/hello_message.h"
 #include "protocol/message_header.h"
@@ -50,6 +51,7 @@ static void disconnectPeer(Broker *self, uint32_t peer_id);
 static bool agentIdentityAccepted(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
 static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size);
+static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char *detail);
 static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *data, size_t size, uint8_t route_flags);
 static uint8_t injectionToken(Broker *self, const HubPeer *sender);
 static uint32_t echoOriginatorPeerId(Broker *self, uint8_t route_flags);
@@ -118,6 +120,7 @@ static void onPeerConnected(void *context, uint32_t peer_id, const char *fingerp
     HubPeer *peer = PeerDirectory_Allocate(&self->directory, peer_id);
 
     if (peer == NULL) {
+        sendError(self, peer_id, kERROR_CODE_HUB_FULL, "no peer slot available");
         self->transport->close_peer(self->transport->context, peer_id);
         return;
     }
@@ -245,11 +248,13 @@ static void handleHello(Broker *self, HubPeer *peer, const MessageHeader *header
         return;
     }
     if (!HelloMessage_Decode(&hello, payload, header->length)) {
+        sendError(self, peer->peer_id, kERROR_CODE_MALFORMED, "malformed hello");
         self->transport->close_peer(self->transport->context, peer->peer_id);
         return;
     }
 
     if (!HubPeer_AdoptRole(peer, hello.role)) {
+        sendError(self, peer->peer_id, kERROR_CODE_ROLE_REJECTED, "admin role requires a local transport");
         self->transport->close_peer(self->transport->context, peer->peer_id);
     }
 }
@@ -265,6 +270,7 @@ static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *hea
         return;
     }
     if (!RegisterMessage_Decode(&registration, payload, header->length)) {
+        sendError(self, peer->peer_id, kERROR_CODE_MALFORMED, "malformed register");
         self->transport->close_peer(self->transport->context, peer->peer_id);
         return;
     }
@@ -431,6 +437,7 @@ static void handleAdminKick(Broker *self, HubPeer *peer, const MessageHeader *he
     sendControl(self, peer, encoded, AdminKickReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 
     if (reply.status == ADMIN_STATUS_OK) {
+        sendError(self, agent_peer_id, kERROR_CODE_KICKED, "kicked by the hub administrator");
         disconnectPeer(self, agent_peer_id);
     }
 }
@@ -454,6 +461,7 @@ static void handleAdminKickPeer(Broker *self, HubPeer *peer, const MessageHeader
     sendControl(self, peer, encoded, AdminKickPeerReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 
     if (found) {
+        sendError(self, kick.peer_id, kERROR_CODE_KICKED, "kicked by the hub administrator");
         disconnectPeer(self, kick.peer_id);
     }
 }
@@ -638,6 +646,20 @@ static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, siz
     }
 }
 
+static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char *detail)
+{
+    ErrorMessage error;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    size_t encoded_size;
+
+    memset(&error, 0, sizeof(error));
+    error.code = code;
+    strncpy(error.detail, detail, ERROR_DETAIL_SIZE - 1);
+    encoded_size = ErrorMessage_Encode(&error, encoded, sizeof(encoded));
+
+    self->transport->send_control(self->transport->context, peer_id, encoded, encoded_size);
+}
+
 static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *data, size_t size, uint8_t route_flags)
 {
     uint8_t forwarded[FRAME_BUFFER_SIZE];
@@ -719,6 +741,7 @@ static void tickHelloDeadline(Broker *self, HubPeer *peer, uint64_t now_us)
     }
 
     if (now_us >= peer->hello_deadline_us) {
+        sendError(self, peer->peer_id, kERROR_CODE_HELLO_TIMEOUT, "no hello within the deadline");
         disconnectPeer(self, peer->peer_id);
     }
 }

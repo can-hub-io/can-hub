@@ -210,6 +210,7 @@ add_unit_test(test_broker
         ${ROOT_SRC_DIR}/hub/broker.c
         ${ROOT_SRC_DIR}/hub/domain/admin_views.c
         ${ROOT_SRC_DIR}/hub/domain/frame_routes.c
+        ${ROOT_SRC_DIR}/protocol/error_message.c
         ${ROOT_SRC_DIR}/hub/domain/hub_peer.c
         ${ROOT_SRC_DIR}/hub/domain/interface_registry.c
         ${ROOT_SRC_DIR}/hub/domain/client_session.c

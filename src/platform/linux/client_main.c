@@ -13,6 +13,7 @@
 #include "platform/linux/shared/tls_identity.h"
 #include "platform/linux/tcp/tcp_client_transport.h"
 #include "platform/linux/tls/tls_client_transport.h"
+#include "protocol/error_message.h"
 #include "protocol/frame_message.h"
 #include "protocol/hello_message.h"
 #include "protocol/list_message.h"
@@ -293,6 +294,7 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
 {
     MessageHeader header;
     OpenAckMessage ack;
+    ErrorMessage error;
 
     (void)context;
     (void)now_us;
@@ -301,6 +303,13 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
         return;
     }
 
+    if (header.type == kMESSAGE_TYPE_ERROR) {
+        if (ErrorMessage_Decode(&error, data + MESSAGE_HEADER_SIZE, header.length)) {
+            fprintf(stderr, "hub error %u: %s\n", error.code, error.detail);
+        }
+        exit_code = 1;
+        return;
+    }
     if (header.type == kMESSAGE_TYPE_LIST_REPLY) {
         printListReply(data + MESSAGE_HEADER_SIZE, header.length);
         exit_code = 0;

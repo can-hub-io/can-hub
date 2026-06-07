@@ -7,6 +7,15 @@
 #define ERROR_BODY_SIZE 68
 #define ERROR_DETAIL_SIZE 64
 
+typedef enum terror_code_e {
+    kERROR_CODE_MALFORMED = 1,
+    kERROR_CODE_ROLE_REJECTED = 2,
+    kERROR_CODE_HUB_FULL = 3,
+    kERROR_CODE_HELLO_TIMEOUT = 4,
+    kERROR_CODE_KICKED = 5,
+    kERROR_CODE_MAX,
+} TERROR_CODE;
+
 typedef struct {
     uint16_t code;
     char detail[ERROR_DETAIL_SIZE];

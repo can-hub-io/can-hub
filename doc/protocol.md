@@ -76,9 +76,16 @@ HELLO (total 12)
 @8   capabilities u32
 
 ERROR (total 72)
-@4   code u16
+@4   code u16 (1 malformed message, 2 role rejected, 3 hub full,
+              4 hello timeout, 5 kicked)
 @6   reserved u16
 @8   detail char[64]
+
+The hub sends ERROR before every deliberate disconnect where the transport
+still works (malformed HELLO/REGISTER, admin role on a non-local transport,
+no free peer slot, missed HELLO deadline, admin kick). Evictions caused by a
+failing control plane cannot carry one. REGISTER_ACK and OPEN_ACK rejections
+keep their own status codes; no duplicate ERROR is sent for those.
 
 REGISTER (total 392)
 @4   agent_name char[128]

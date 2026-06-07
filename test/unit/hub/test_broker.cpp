@@ -6,6 +6,7 @@ extern "C" {
 #include "hub_transport_port_mock.h"
 #include "identity_store_mock.h"
 #include "protocol/admin_message.h"
+#include "protocol/error_message.h"
 #include "protocol/frame_message.h"
 #include "protocol/hello_message.h"
 #include "protocol/list_message.h"
@@ -52,15 +53,20 @@ static uint8_t lastAckStatus(void)
 }
 
 template <typename TMessage>
-static uint8_t lastReply(TMessage *message, bool (*decode)(TMessage *, const uint8_t *, size_t))
+static uint8_t replyAt(int reply_index, TMessage *message, bool (*decode)(TMessage *, const uint8_t *, size_t))
 {
     MessageHeader header;
-    int reply_index = transport.control_count - 1;
 
     MessageHeader_Decode(&header, transport.control_log[reply_index], transport.control_sizes[reply_index]);
     decode(message, transport.control_log[reply_index] + MESSAGE_HEADER_SIZE, header.length);
 
     return header.type;
+}
+
+template <typename TMessage>
+static uint8_t lastReply(TMessage *message, bool (*decode)(TMessage *, const uint8_t *, size_t))
+{
+    return replyAt(transport.control_count - 1, message, decode);
 }
 
 static void sendControlFrom(uint32_t peer_id, const uint8_t *encoded, size_t encoded_size)
@@ -330,14 +336,19 @@ describe("broker", []() {
             BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
         });
 
-        it("closes a non-local peer claiming the admin role", []() {
+        it("closes a non-local peer claiming the admin role telling it why", []() {
             HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_ADMIN, 0 };
+            ErrorMessage error;
+            uint8_t error_type;
             uint8_t encoded[64];
             size_t encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
 
             events.on_peer_connected(events.context, 999, NULL, false);
             sendControlFrom(999, encoded, encoded_size);
+            error_type = lastReply(&error, ErrorMessage_Decode);
 
+            expect(error_type).toBe(kMESSAGE_TYPE_ERROR);
+            expect(error.code).toBe(kERROR_CODE_ROLE_REJECTED);
             expect(transport.close_count).toBe(1);
             expect(transport.last_closed_peer).toBe((uint32_t)999);
         });
@@ -396,7 +407,7 @@ describe("broker", []() {
             size_t encoded_size = AdminKickMessage_Encode(&kick, encoded, sizeof(encoded));
 
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
-            reply_type = lastReply(&reply, AdminKickReplyMessage_Decode);
+            reply_type = replyAt(transport.control_count - 2, &reply, AdminKickReplyMessage_Decode);
 
             expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_KICK_REPLY);
             expect(reply.status).toBe(ADMIN_STATUS_OK);
@@ -458,18 +469,24 @@ describe("broker", []() {
             expect(identity_store.entry_count).toBe(0);
         });
 
-        it("kicks any peer by id", []() {
+        it("kicks any peer by id telling it why", []() {
             AdminKickPeerMessage kick = { CLIENT_PEER };
             AdminKickPeerReplyMessage reply;
+            ErrorMessage error;
             uint8_t reply_type;
+            uint8_t error_type;
             uint8_t encoded[64];
             size_t encoded_size = AdminKickPeerMessage_Encode(&kick, encoded, sizeof(encoded));
 
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
-            reply_type = lastReply(&reply, AdminKickPeerReplyMessage_Decode);
+            reply_type = replyAt(transport.control_count - 2, &reply, AdminKickPeerReplyMessage_Decode);
+            error_type = lastReply(&error, ErrorMessage_Decode);
 
             expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_KICK_PEER_REPLY);
             expect(reply.status).toBe(ADMIN_STATUS_OK);
+            expect(error_type).toBe(kMESSAGE_TYPE_ERROR);
+            expect(error.code).toBe(kERROR_CODE_KICKED);
+            expect(transport.control_peers[transport.control_count - 1]).toBe((uint32_t)CLIENT_PEER);
             expect(transport.close_count).toBe(1);
             expect(transport.last_closed_peer).toBe((uint32_t)CLIENT_PEER);
         });
@@ -715,7 +732,10 @@ describe("broker", []() {
             expect(transport.last_closed_peer).toBe((uint32_t)CLIENT_PEER);
         });
 
-        it("evicts an unknown peer that misses the hello deadline", []() {
+        it("evicts an unknown peer that misses the hello deadline telling it why", []() {
+            ErrorMessage error;
+            uint8_t error_type;
+
             events.on_peer_connected(events.context, 999, NULL, false);
 
             Broker_Tick(&broker, 0);
@@ -723,6 +743,9 @@ describe("broker", []() {
             expect(transport.close_count).toBe(0);
 
             Broker_Tick(&broker, 5000000);
+            error_type = lastReply(&error, ErrorMessage_Decode);
+            expect(error_type).toBe(kMESSAGE_TYPE_ERROR);
+            expect(error.code).toBe(kERROR_CODE_HELLO_TIMEOUT);
             expect(transport.close_count).toBe(1);
             expect(transport.last_closed_peer).toBe((uint32_t)999);
         });

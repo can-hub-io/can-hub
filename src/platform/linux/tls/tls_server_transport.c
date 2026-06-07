@@ -142,6 +142,7 @@ void TlsServerTransport_OnSlotReadable(TlsServerTransport *self, uint8_t slot)
     }
 
     if (!TlsChannel_Receive(&peer->channel)) {
+        dispatchMessages(self, peer);
         closePeer(self, peer, true);
         return;
     }

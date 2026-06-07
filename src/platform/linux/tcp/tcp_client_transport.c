@@ -77,6 +77,7 @@ void TcpClientTransport_OnReadable(TcpClientTransport *self)
     }
 
     if (!TcpChannel_Receive(&self->channel)) {
+        dispatchMessages(self);
         closeConnection(self, true);
         return;
     }

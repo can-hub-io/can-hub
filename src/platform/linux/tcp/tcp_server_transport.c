@@ -143,6 +143,7 @@ void TcpServerTransport_OnSlotReadable(TcpServerTransport *self, uint8_t slot)
     }
 
     if (!TcpChannel_Receive(&peer->channel)) {
+        dispatchMessages(self, peer);
         closePeer(self, peer, true);
         return;
     }

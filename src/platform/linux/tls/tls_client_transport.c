@@ -77,6 +77,7 @@ void TlsClientTransport_OnReadable(TlsClientTransport *self)
     }
 
     if (!TlsChannel_Receive(&self->channel)) {
+        dispatchMessages(self);
         closeConnection(self, true);
         return;
     }
