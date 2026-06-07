@@ -19,12 +19,24 @@
 #define ADMIN_PINS_REPLY_ENTRY_SIZE 196
 #define ADMIN_FORGET_BODY_SIZE 128
 #define ADMIN_FORGET_REPLY_BODY_SIZE 4
+#define ADMIN_KICK_PEER_BODY_SIZE 4
+#define ADMIN_KICK_PEER_REPLY_BODY_SIZE 4
+#define ADMIN_AGENTS_BODY_SIZE 132
+#define ADMIN_AGENTS_REPLY_FIXED_FIELDS_SIZE 4
+#define ADMIN_AGENTS_REPLY_ENTRIES_MAX 16
+#define ADMIN_AGENTS_REPLY_ENTRY_SIZE 204
+#define ADMIN_CLIENTS_BODY_SIZE 132
+#define ADMIN_CLIENTS_REPLY_FIXED_FIELDS_SIZE 4
+#define ADMIN_CLIENTS_REPLY_ENTRIES_MAX 16
+#define ADMIN_CLIENTS_REPLY_ENTRY_SIZE 156
 
 #define ADMIN_FINGERPRINT_HEX_SIZE 65
 #define ADMIN_REPLY_FLAG_MORE (1u << 0)
+#define ADMIN_CLIENT_NO_CHANNEL 0xFF
 
 #define ADMIN_STATUS_OK 0
 #define ADMIN_STATUS_UNKNOWN_AGENT 1
+#define ADMIN_STATUS_UNKNOWN_PEER 1
 
 typedef struct {
     uint16_t peer_count;
@@ -81,6 +93,51 @@ typedef struct {
     uint8_t status;
 } AdminForgetReplyMessage;
 
+typedef struct {
+    uint32_t peer_id;
+} AdminKickPeerMessage;
+
+typedef struct {
+    uint8_t status;
+} AdminKickPeerReplyMessage;
+
+typedef struct {
+    uint16_t offset;
+    char agent_name[REGISTER_AGENT_NAME_SIZE];
+} AdminAgentsMessage;
+
+typedef struct {
+    uint32_t peer_id;
+    uint8_t interface_count;
+    char agent_name[REGISTER_AGENT_NAME_SIZE];
+    char fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE];
+} AdminAgentsReplyEntry;
+
+typedef struct {
+    uint8_t count;
+    uint8_t flags;
+    AdminAgentsReplyEntry entries[ADMIN_AGENTS_REPLY_ENTRIES_MAX];
+} AdminAgentsReplyMessage;
+
+typedef struct {
+    uint16_t offset;
+    char agent_name[REGISTER_AGENT_NAME_SIZE];
+} AdminClientsMessage;
+
+typedef struct {
+    uint32_t peer_id;
+    uint32_t interface_id;
+    uint8_t channel;
+    char agent_name[REGISTER_AGENT_NAME_SIZE];
+    char interface_name[REGISTER_INTERFACE_NAME_SIZE];
+} AdminClientsReplyEntry;
+
+typedef struct {
+    uint8_t count;
+    uint8_t flags;
+    AdminClientsReplyEntry entries[ADMIN_CLIENTS_REPLY_ENTRIES_MAX];
+} AdminClientsReplyMessage;
+
 size_t AdminStatusMessage_Encode(uint8_t *buffer, size_t buffer_size);
 
 size_t AdminStatusReplyMessage_Encode(const AdminStatusReplyMessage *self, uint8_t *buffer, size_t buffer_size);
@@ -109,3 +166,21 @@ bool AdminForgetMessage_Decode(AdminForgetMessage *self, const uint8_t *payload,
 
 size_t AdminForgetReplyMessage_Encode(const AdminForgetReplyMessage *self, uint8_t *buffer, size_t buffer_size);
 bool AdminForgetReplyMessage_Decode(AdminForgetReplyMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminKickPeerMessage_Encode(const AdminKickPeerMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminKickPeerMessage_Decode(AdminKickPeerMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminKickPeerReplyMessage_Encode(const AdminKickPeerReplyMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminKickPeerReplyMessage_Decode(AdminKickPeerReplyMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminAgentsMessage_Encode(const AdminAgentsMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminAgentsMessage_Decode(AdminAgentsMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminAgentsReplyMessage_Encode(const AdminAgentsReplyMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminAgentsReplyMessage_Decode(AdminAgentsReplyMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminClientsMessage_Encode(const AdminClientsMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminClientsMessage_Decode(AdminClientsMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminClientsReplyMessage_Encode(const AdminClientsReplyMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminClientsReplyMessage_Decode(AdminClientsReplyMessage *self, const uint8_t *payload, size_t payload_length);

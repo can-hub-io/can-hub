@@ -72,7 +72,22 @@ Without `--listen` flags the hub also serves tcp://7227 and quic://7227 (same nu
 
 ### Administration
 
-`can-hub-cli` talks to the hub over the unix domain socket above using the same binary protocol with admin message types (`status`, `peers`, `kick <agent>`, `pins`, `forget <agent>`). The hub accepts the admin HELLO role only on local transports: a peer claiming it over TCP or QUIC is disconnected. Kick closes the live connection of an agent by registered name; pins/forget manage the TOFU identity pins through the same IdentityStorePort the broker pins with, so a legitimately re-keyed agent can be re-pinned without touching hub.db. ACL management joins the family when ACLs land.
+`can-hub-cli` talks to the hub over the unix domain socket above using the same binary protocol with admin message types. The grammar is noun-first (`<noun> [verb] [args]`, omitted verb = list) so future admin surfaces (ACLs, bridges) join without reshaping it:
+
+```
+status                 hub counters
+peers                  every live connection (including pre-HELLO and admin peers)
+peers kick <peer-id>   disconnect any peer (id as printed by the tables)
+agents                 live agents with their interface count
+agents show <name>     agent detail: interfaces and consuming clients
+agents kick <name>     disconnect an agent by registered name
+clients                open client channels (one row per channel, idle clients included)
+interfaces             interface catalogue (reuses LIST)
+pins                   pinned TOFU identities
+pins forget <name>     drop a pin so a re-keyed agent can pin again
+```
+
+The hub accepts the admin HELLO role only on local transports: a peer claiming it over TCP or QUIC is disconnected. Clients carry no self-declared name — identity stays the TLS fingerprint, so interaction with clients goes through their peer id (`clients`/`agents show` print it, `peers kick` consumes it); if readable handles are ever needed they will be admin-assigned aliases bound to fingerprints, decided together with the ACL design. ACL management joins the admin family when ACLs land.
 
 ### Compatibility adapters (future)
 

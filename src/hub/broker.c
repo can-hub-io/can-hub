@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "hub/domain/admin_views.h"
 #include "hub/domain/frame_routes.h"
 #include "hub/domain/hub_peer.h"
 #include "protocol/admin_message.h"
@@ -37,6 +38,10 @@ static void handleAdminPeers(Broker *self, HubPeer *peer, const MessageHeader *h
 static void handleAdminKick(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminPins(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminForget(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleAdminKickPeer(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleAdminAgents(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleAdminClients(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void disconnectPeer(Broker *self, uint32_t peer_id);
 static bool agentIdentityAccepted(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
 static void sendControl(Broker *self, uint32_t peer_id, const uint8_t *encoded, size_t encoded_size);
@@ -54,6 +59,9 @@ static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
     [kMESSAGE_TYPE_ADMIN_KICK] = handleAdminKick,
     [kMESSAGE_TYPE_ADMIN_PINS] = handleAdminPins,
     [kMESSAGE_TYPE_ADMIN_FORGET] = handleAdminForget,
+    [kMESSAGE_TYPE_ADMIN_KICK_PEER] = handleAdminKickPeer,
+    [kMESSAGE_TYPE_ADMIN_AGENTS] = handleAdminAgents,
+    [kMESSAGE_TYPE_ADMIN_CLIENTS] = handleAdminClients,
 };
 
 /* ---------- public ---------- */
@@ -351,7 +359,7 @@ static void handleAdminKick(Broker *self, HubPeer *peer, const MessageHeader *he
     AdminKickMessage kick;
     AdminKickReplyMessage reply;
     HubPeer *agent;
-    uint32_t agent_peer_id;
+    uint32_t agent_peer_id = 0;
     uint8_t encoded[CONTROL_BUFFER_SIZE];
 
     if (peer->role != kHUB_PEER_ROLE_ADMIN) {
@@ -365,13 +373,71 @@ static void handleAdminKick(Broker *self, HubPeer *peer, const MessageHeader *he
     agent = PeerDirectory_FindAgentByName(&self->directory, kick.agent_name);
     if (agent != NULL) {
         agent_peer_id = agent->peer_id;
-        detachAgent(self, agent_peer_id);
-        PeerDirectory_Release(&self->directory, agent_peer_id);
-        self->transport->close_peer(self->transport->context, agent_peer_id);
         reply.status = ADMIN_STATUS_OK;
     }
 
     sendControl(self, peer->peer_id, encoded, AdminKickReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+
+    if (reply.status == ADMIN_STATUS_OK) {
+        disconnectPeer(self, agent_peer_id);
+    }
+}
+
+static void handleAdminKickPeer(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    AdminKickPeerMessage kick;
+    AdminKickPeerReplyMessage reply;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    bool found;
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN) {
+        return;
+    }
+    if (!AdminKickPeerMessage_Decode(&kick, payload, header->length)) {
+        return;
+    }
+
+    found = PeerDirectory_Find(&self->directory, kick.peer_id) != NULL;
+    reply.status = found ? ADMIN_STATUS_OK : ADMIN_STATUS_UNKNOWN_PEER;
+    sendControl(self, peer->peer_id, encoded, AdminKickPeerReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+
+    if (found) {
+        disconnectPeer(self, kick.peer_id);
+    }
+}
+
+static void handleAdminAgents(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    AdminAgentsMessage request;
+    AdminAgentsReplyMessage reply;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN) {
+        return;
+    }
+    if (!AdminAgentsMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    AdminViews_Agents(&self->registry, &self->directory, request.agent_name, request.offset, &reply);
+    sendControl(self, peer->peer_id, encoded, AdminAgentsReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+}
+
+static void handleAdminClients(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    AdminClientsMessage request;
+    AdminClientsReplyMessage reply;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN) {
+        return;
+    }
+    if (!AdminClientsMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    AdminViews_Clients(&self->registry, &self->directory, request.agent_name, request.offset, &reply);
+    sendControl(self, peer->peer_id, encoded, AdminClientsReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 
 static void handleAdminPins(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
@@ -451,6 +517,22 @@ static bool agentIdentityAccepted(Broker *self, const HubPeer *peer, const Regis
     }
 
     return strcmp(pinned, peer->fingerprint_hex) == 0;
+}
+
+static void disconnectPeer(Broker *self, uint32_t peer_id)
+{
+    HubPeer *peer = PeerDirectory_Find(&self->directory, peer_id);
+
+    if (peer == NULL) {
+        return;
+    }
+
+    if (peer->role == kHUB_PEER_ROLE_AGENT) {
+        detachAgent(self, peer_id);
+    }
+
+    PeerDirectory_Release(&self->directory, peer_id);
+    self->transport->close_peer(self->transport->context, peer_id);
 }
 
 static void detachAgent(Broker *self, uint32_t agent_peer_id)

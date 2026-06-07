@@ -193,3 +193,117 @@ describe("admin_pins_message", []() {
         expect(decoded_reply.status).toBe(ADMIN_STATUS_OK);
     });
 });
+
+describe("admin_kick_peer_message", []() {
+    it("round-trips the peer id and the reply status", []() {
+        AdminKickPeerMessage kick = { 0x80000001 };
+        AdminKickPeerMessage decoded_kick;
+        AdminKickPeerReplyMessage reply = { ADMIN_STATUS_UNKNOWN_PEER };
+        AdminKickPeerReplyMessage decoded_reply;
+        uint8_t buffer[32];
+        size_t encoded_size;
+
+        encoded_size = AdminKickPeerMessage_Encode(&kick, buffer, sizeof(buffer));
+        expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + ADMIN_KICK_PEER_BODY_SIZE));
+        expect(AdminKickPeerMessage_Decode(&decoded_kick, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE)).toBe(true);
+        expect(decoded_kick.peer_id).toBe((uint32_t)0x80000001);
+
+        encoded_size = AdminKickPeerReplyMessage_Encode(&reply, buffer, sizeof(buffer));
+        expect(AdminKickPeerReplyMessage_Decode(&decoded_reply, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE)).toBe(true);
+        expect(decoded_reply.status).toBe(ADMIN_STATUS_UNKNOWN_PEER);
+    });
+
+    it("rejects a truncated kick peer payload", []() {
+        AdminKickPeerMessage decoded;
+        uint8_t payload[ADMIN_KICK_PEER_BODY_SIZE] = { 0 };
+
+        expect(AdminKickPeerMessage_Decode(&decoded, payload, ADMIN_KICK_PEER_BODY_SIZE - 1)).toBe(false);
+    });
+});
+
+describe("admin_agents_message", []() {
+    it("round-trips the offset and the name filter", []() {
+        AdminAgentsMessage request = { 5, "truck42" };
+        AdminAgentsMessage decoded;
+        uint8_t buffer[256];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminAgentsMessage_Encode(&request, buffer, sizeof(buffer));
+        decoded_ok = AdminAgentsMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + ADMIN_AGENTS_BODY_SIZE));
+        expect(decoded_ok).toBe(true);
+        expect(decoded.offset).toBe(5);
+        expect((const char *)decoded.agent_name).toBe("truck42");
+    });
+
+    it("accepts an empty filter", []() {
+        AdminAgentsMessage request = { 0, "" };
+        AdminAgentsMessage decoded;
+        uint8_t buffer[256];
+        size_t encoded_size;
+
+        encoded_size = AdminAgentsMessage_Encode(&request, buffer, sizeof(buffer));
+
+        expect(AdminAgentsMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE)).toBe(true);
+        expect((const char *)decoded.agent_name).toBe("");
+    });
+
+    it("round-trips agent entries", []() {
+        AdminAgentsReplyMessage reply = { 1, 0, { { 0x80000001, 2, "truck42", FINGERPRINT } } };
+        AdminAgentsReplyMessage decoded;
+        uint8_t buffer[512];
+        size_t expected_size = MESSAGE_HEADER_SIZE + ADMIN_AGENTS_REPLY_FIXED_FIELDS_SIZE + ADMIN_AGENTS_REPLY_ENTRY_SIZE;
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminAgentsReplyMessage_Encode(&reply, buffer, sizeof(buffer));
+        decoded_ok = AdminAgentsReplyMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe(expected_size);
+        expect(decoded_ok).toBe(true);
+        expect(decoded.count).toBe(1);
+        expect(decoded.entries[0].peer_id).toBe((uint32_t)0x80000001);
+        expect(decoded.entries[0].interface_count).toBe(2);
+        expect((const char *)decoded.entries[0].agent_name).toBe("truck42");
+        expect((const char *)decoded.entries[0].fingerprint_hex).toBe(FINGERPRINT);
+    });
+});
+
+describe("admin_clients_message", []() {
+    it("round-trips client channel entries including the no-channel sentinel", []() {
+        AdminClientsReplyMessage reply = { 2, 0, {
+            { 0x40000003, 7, 0, "truck42", "can0" },
+            { 0x40000004, 0, ADMIN_CLIENT_NO_CHANNEL, "", "" },
+        } };
+        AdminClientsReplyMessage decoded;
+        uint8_t buffer[512];
+        size_t expected_size = MESSAGE_HEADER_SIZE + ADMIN_CLIENTS_REPLY_FIXED_FIELDS_SIZE + 2 * ADMIN_CLIENTS_REPLY_ENTRY_SIZE;
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminClientsReplyMessage_Encode(&reply, buffer, sizeof(buffer));
+        decoded_ok = AdminClientsReplyMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe(expected_size);
+        expect(decoded_ok).toBe(true);
+        expect(decoded.count).toBe(2);
+        expect(decoded.entries[0].peer_id).toBe((uint32_t)0x40000003);
+        expect(decoded.entries[0].interface_id).toBe((uint32_t)7);
+        expect(decoded.entries[0].channel).toBe(0);
+        expect((const char *)decoded.entries[0].agent_name).toBe("truck42");
+        expect((const char *)decoded.entries[0].interface_name).toBe("can0");
+        expect(decoded.entries[1].channel).toBe(ADMIN_CLIENT_NO_CHANNEL);
+        expect((const char *)decoded.entries[1].agent_name).toBe("");
+    });
+
+    it("rejects a payload shorter than its declared entries", []() {
+        AdminClientsReplyMessage decoded;
+        uint8_t payload[ADMIN_CLIENTS_REPLY_FIXED_FIELDS_SIZE + ADMIN_CLIENTS_REPLY_ENTRY_SIZE] = { 0 };
+
+        payload[0] = 2;
+
+        expect(AdminClientsReplyMessage_Decode(&decoded, payload, sizeof(payload))).toBe(false);
+    });
+});

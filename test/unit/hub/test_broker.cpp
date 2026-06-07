@@ -458,6 +458,74 @@ describe("broker", []() {
             expect(identity_store.entry_count).toBe(0);
         });
 
+        it("kicks any peer by id", []() {
+            AdminKickPeerMessage kick = { CLIENT_PEER };
+            AdminKickPeerReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[64];
+            size_t encoded_size = AdminKickPeerMessage_Encode(&kick, encoded, sizeof(encoded));
+
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminKickPeerReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_KICK_PEER_REPLY);
+            expect(reply.status).toBe(ADMIN_STATUS_OK);
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)CLIENT_PEER);
+        });
+
+        it("rejects kicking an unknown peer id", []() {
+            AdminKickPeerMessage kick = { 0xDEAD };
+            AdminKickPeerReplyMessage reply;
+            uint8_t encoded[64];
+            size_t encoded_size = AdminKickPeerMessage_Encode(&kick, encoded, sizeof(encoded));
+
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            lastReply(&reply, AdminKickPeerReplyMessage_Decode);
+
+            expect(reply.status).toBe(ADMIN_STATUS_UNKNOWN_PEER);
+            expect(transport.close_count).toBe(0);
+        });
+
+        it("lists the agents with their interface count", []() {
+            AdminAgentsMessage request = { 0, "" };
+            AdminAgentsReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[256];
+            size_t encoded_size = AdminAgentsMessage_Encode(&request, encoded, sizeof(encoded));
+
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminAgentsReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_AGENTS_REPLY);
+            expect(reply.count).toBe(1);
+            expect(reply.entries[0].peer_id).toBe((uint32_t)AGENT_PEER);
+            expect(reply.entries[0].interface_count).toBe(2);
+            expect((const char *)reply.entries[0].agent_name).toBe("truck42");
+        });
+
+        it("lists the open client channels", []() {
+            AdminClientsMessage request = { 0, "truck42" };
+            AdminClientsReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[256];
+            size_t encoded_size;
+            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            uint8_t channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id);
+
+            encoded_size = AdminClientsMessage_Encode(&request, encoded, sizeof(encoded));
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminClientsReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_CLIENTS_REPLY);
+            expect(reply.count).toBe(1);
+            expect(reply.entries[0].peer_id).toBe((uint32_t)CLIENT_PEER);
+            expect(reply.entries[0].channel).toBe(channel);
+            expect(reply.entries[0].interface_id).toBe(interface_id);
+            expect((const char *)reply.entries[0].agent_name).toBe("truck42");
+            expect((const char *)reply.entries[0].interface_name).toBe("can0");
+        });
+
         it("rejects forgetting an unknown pin", []() {
             AdminForgetMessage forget = { "ghost" };
             AdminForgetReplyMessage reply;

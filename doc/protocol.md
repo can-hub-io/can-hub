@@ -48,6 +48,12 @@ offset  size  field
 0x17  ADMIN_PINS_REPLY
 0x18  ADMIN_FORGET        admin: drop a pinned identity by agent name
 0x19  ADMIN_FORGET_REPLY
+0x1A  ADMIN_KICK_PEER     admin: disconnect any peer by peer id
+0x1B  ADMIN_KICK_PEER_REPLY
+0x1C  ADMIN_AGENTS        admin: live agents (paginated, name filter)
+0x1D  ADMIN_AGENTS_REPLY
+0x1E  ADMIN_CLIENTS       admin: open client channels (paginated, agent filter)
+0x1F  ADMIN_CLIENTS_REPLY
 0x7F  PING/PONG    liveness (flags bit 0: reply)
 ```
 
@@ -164,6 +170,49 @@ ADMIN_FORGET (total 132)
 ADMIN_FORGET_REPLY (total 8)
 @4   status u8 (0 ok, 1 unknown agent)
 @5   reserved u8[3]
+
+ADMIN_KICK_PEER (total 8)
+@4   peer_id u32
+
+ADMIN_KICK_PEER_REPLY (total 8)
+@4   status u8 (0 ok, 1 unknown peer)
+@5   reserved u8[3]
+
+ADMIN_AGENTS (total 136)
+@4   offset u16        (pagination start index)
+@6   reserved u16
+@8   agent_name char[128]  (filter: only this agent; empty = all)
+
+ADMIN_AGENTS_REPLY (total 8 + count * 204)
+@4   count u8          (0-16 entries in this reply)
+@5   flags u8          (bit 0: more entries beyond offset + count)
+@6   reserved u16
+@8   entries, each 204 bytes:
+     +0   peer_id u32
+     +4   interface_count u8
+     +5   reserved u8[3]
+     +8   agent_name char[128]
+     +136 fingerprint_hex char[65]  (empty on plaintext transports)
+     +201 reserved u8[3]
+
+ADMIN_CLIENTS (total 136)
+@4   offset u16        (pagination start index)
+@6   reserved u16
+@8   agent_name char[128]  (filter: only channels on this agent; empty = all)
+
+ADMIN_CLIENTS_REPLY (total 8 + count * 156)
+@4   count u8          (0-16 entries in this reply)
+@5   flags u8          (bit 0: more entries beyond offset + count)
+@6   reserved u16
+@8   entries, each 156 bytes, one per open channel; a client with no open
+     channels yields one entry with channel 0xFF and empty names (only when
+     the filter is empty):
+     +0   peer_id u32
+     +4   interface_id u32
+     +8   channel u8 (0xFF: none)
+     +9   reserved u8[3]
+     +12  agent_name char[128]
+     +140 interface_name char[16]
 ```
 
 Limits: agent name <= 127 chars, interface name 1-15 chars (Linux IFNAMSIZ), <= 16 interfaces per agent, error detail <= 63 chars.

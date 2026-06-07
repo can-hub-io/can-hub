@@ -71,6 +71,7 @@ set(AGENT_SOURCES
 set(HUB_SOURCES
     src/hub/broker.c
     src/hub/hub_app.c
+    src/hub/domain/admin_views.c
     src/hub/domain/client_session.c
     src/hub/domain/frame_routes.c
     src/hub/domain/hub_peer.c
