@@ -110,6 +110,21 @@ add_unit_test(test_quic_control_channel
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
 
+add_unit_test(test_tls_channel
+    SOURCES
+        platform/test_tls_channel.cpp
+        ${ROOT_SRC_DIR}/platform/linux/tls/tls_channel.c
+        ${ROOT_SRC_DIR}/platform/linux/tls/tls_client_security.c
+        ${ROOT_SRC_DIR}/platform/linux/tls/tls_server_security.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/pin_store.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/pinned_server_verifier.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/tls_identity.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/message_framer.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+target_link_libraries(test_tls_channel PRIVATE gnutls)
+
 add_unit_test(test_identity_database
     SOURCES
         platform/test_identity_database.cpp

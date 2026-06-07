@@ -88,7 +88,7 @@ int main(int argc, char **argv)
     };
 
     if (!parseArguments(argc, argv, host, port_text)) {
-        fprintf(stderr, "usage: %s [--connect tcp://<host>:<port>|unix://<path>] <command>\n", argv[0]);
+        fprintf(stderr, "usage: %s [--connect unix://<path>] <command>\n", argv[0]);
         fprintf(stderr, "commands:\n");
         fprintf(stderr, "  status                 hub counters\n");
         fprintf(stderr, "  peers                  every live connection\n");
@@ -150,7 +150,7 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
         return false;
     }
 
-    return connect_scheme != kCONNECT_SCHEME_QUIC;
+    return connect_scheme == kCONNECT_SCHEME_UNIX;
 }
 
 static bool mapCommand(const char *words[], uint8_t word_count)
@@ -208,11 +208,9 @@ static bool parsePeerId(const char *text)
 
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *events)
 {
-    if (connect_scheme == kCONNECT_SCHEME_UNIX) {
-        return TcpClientTransport_InitUnix(&transport, host, events);
-    }
+    (void)port_text;
 
-    return TcpClientTransport_Init(&transport, host, port_text, events);
+    return TcpClientTransport_InitUnix(&transport, host, events);
 }
 
 /* ---------- private: transport events ---------- */
@@ -235,7 +233,7 @@ static void onDisconnected(void *context, uint64_t now_us)
     (void)context;
     (void)now_us;
 
-    fprintf(stderr, "connection lost (is the admin role allowed on this transport?)\n");
+    fprintf(stderr, "connection lost\n");
     exit_code = 1;
 }
 

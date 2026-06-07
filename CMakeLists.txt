@@ -55,11 +55,15 @@ set(AGENT_SOURCES
     src/platform/linux/shared/connect_url.c
     src/platform/linux/shared/epoll_registry.c
     src/platform/linux/shared/pin_store.c
+    src/platform/linux/shared/pinned_server_verifier.c
     src/platform/linux/shared/tls_identity.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/socketcan/socketcan_adapter.c
     src/platform/linux/tcp/tcp_channel.c
     src/platform/linux/tcp/tcp_client_transport.c
+    src/platform/linux/tls/tls_channel.c
+    src/platform/linux/tls/tls_client_security.c
+    src/platform/linux/tls/tls_client_transport.c
     src/platform/linux/quic/quic_client_security.c
     src/platform/linux/quic/quic_client_transport.c
     src/platform/linux/quic/quic_connection.c
@@ -85,6 +89,9 @@ set(HUB_SOURCES
     src/platform/linux/shared/message_framer.c
     src/platform/linux/tcp/tcp_channel.c
     src/platform/linux/tcp/tcp_server_transport.c
+    src/platform/linux/tls/tls_channel.c
+    src/platform/linux/tls/tls_server_security.c
+    src/platform/linux/tls/tls_server_transport.c
     src/platform/linux/quic/quic_connection.c
     src/platform/linux/quic/quic_control_channel.c
     src/platform/linux/quic/quic_egress.c
@@ -106,7 +113,17 @@ set(CLIENT_SOURCES
     src/platform/linux/tcp/tcp_client_transport.c
 )
 
-add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES})
+set(CLIENT_TLS_SOURCES
+    src/platform/linux/shared/pin_store.c
+    src/platform/linux/shared/pinned_server_verifier.c
+    src/platform/linux/shared/tls_identity.c
+    src/platform/linux/tls/tls_channel.c
+    src/platform/linux/tls/tls_client_security.c
+    src/platform/linux/tls/tls_client_transport.c
+)
+
+add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES} ${CLIENT_TLS_SOURCES})
+target_link_libraries(can-hub-client PRIVATE gnutls)
 add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES})
 
 install(TARGETS can-hub can-hub-agent can-hub-cli RUNTIME DESTINATION bin)

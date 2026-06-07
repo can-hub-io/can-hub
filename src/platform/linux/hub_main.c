@@ -15,6 +15,7 @@
 #include "platform/linux/shared/tls_identity.h"
 #include "platform/linux/sqlite/identity_database.h"
 #include "platform/linux/tcp/tcp_server_transport.h"
+#include "platform/linux/tls/tls_server_transport.h"
 #include "version.h"
 
 #define MAX_EPOLL_EVENTS 32
@@ -27,13 +28,16 @@
 #define TCP_PEER_ID_BASE 0x00000001
 #define UNIX_PEER_ID_BASE 0x40000001
 #define QUIC_PEER_ID_BASE 0x80000001
+#define TLS_PEER_ID_BASE 0xC0000001
 #define UNIX_SLOT_OFFSET TCP_SERVER_PEERS_MAX
+#define TLS_SLOT_OFFSET (2 * TCP_SERVER_PEERS_MAX)
 
 typedef enum thub_event_tag_e {
     kHUB_EVENT_TAG_TCP_LISTENER = 0x100,
     kHUB_EVENT_TAG_UNIX_LISTENER,
     kHUB_EVENT_TAG_QUIC_UDP,
     kHUB_EVENT_TAG_QUIC_TIMER,
+    kHUB_EVENT_TAG_TLS_LISTENER,
     kHUB_EVENT_TAG_MAX,
 } THUB_EVENT_TAG;
 
@@ -41,10 +45,12 @@ static HubApp app;
 static TcpServerTransport tcp_transport;
 static TcpServerTransport unix_transport;
 static QuicServerTransport quic_transport;
+static TlsServerTransport tls_transport;
 static HubTransportPort mux_port;
 static bool tcp_enabled;
 static bool unix_enabled;
 static bool quic_enabled;
+static bool tls_enabled;
 static EpollRegistry poll_registry;
 static char state_directory[TLS_IDENTITY_PATH_MAX];
 static char identity_certificate_path[TLS_IDENTITY_PATH_MAX];
@@ -58,6 +64,7 @@ static void importLegacyPinFile(void);
 static bool startListeners(
     const char *tcp_port,
     const char *quic_port,
+    const char *tls_port,
     const char *unix_path,
     const char *certificate,
     const char *key,
@@ -69,6 +76,7 @@ static void muxClosePeer(void *context, uint32_t peer_id);
 static HubTransportPort *portForPeer(uint32_t peer_id);
 static bool registerStaticPollFds(void);
 static void syncStreamSlotRegistrations(TcpServerTransport *transport, uint8_t slot_offset);
+static void syncTlsSlotRegistrations(void);
 static void dispatchEvent(const struct epoll_event *event);
 static void dispatchStreamSlotEvent(const struct epoll_event *event);
 
@@ -81,10 +89,11 @@ int main(int argc, char **argv)
     if (!parseArguments(argc, argv)) {
         fprintf(
             stderr,
-            "usage: %s [--listen tcp://<port>] [--listen quic://<port>] [--listen unix://<path>]\n"
-            "       [--cert <pem> --key <pem>] [--state-dir <path>]\n"
-            "       defaults: tcp://" HUB_DEFAULT_PORT_TEXT ", quic://" HUB_DEFAULT_PORT_TEXT
-            ", unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "; TLS identity auto-generated\n",
+            "usage: %s [--listen tls://<port>] [--listen quic://<port>] [--listen tcp://<port>]\n"
+            "       [--listen unix://<path>] [--cert <pem> --key <pem>] [--state-dir <path>]\n"
+            "       defaults: tls://" HUB_DEFAULT_PORT_TEXT ", quic://" HUB_DEFAULT_PORT_TEXT
+            ", tcp://" HUB_DEFAULT_PLAIN_TCP_PORT_TEXT ", unix://" HUB_DEFAULT_UNIX_SOCKET_PATH
+            "; TLS identity auto-generated\n",
             argv[0]
         );
         return 1;
@@ -96,10 +105,11 @@ int main(int argc, char **argv)
 
     fprintf(
         stderr,
-        "can-hub %s ready (tcp:%s quic:%s unix:%s)\n",
+        "can-hub %s ready (tls:%s quic:%s tcp:%s unix:%s)\n",
         Version_String(),
-        tcp_enabled ? "on" : "off",
+        tls_enabled ? "on" : "off",
         quic_enabled ? "on" : "off",
+        tcp_enabled ? "on" : "off",
         unix_enabled ? "on" : "off"
     );
 
@@ -109,6 +119,9 @@ int main(int argc, char **argv)
         }
         if (unix_enabled) {
             syncStreamSlotRegistrations(&unix_transport, UNIX_SLOT_OFFSET);
+        }
+        if (tls_enabled) {
+            syncTlsSlotRegistrations();
         }
         event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
 
@@ -124,6 +137,7 @@ static bool parseArguments(int argc, char **argv)
 {
     const char *tcp_port = NULL;
     const char *quic_port = NULL;
+    const char *tls_port = NULL;
     const char *unix_path = NULL;
     const char *certificate = NULL;
     const char *key = NULL;
@@ -131,6 +145,7 @@ static bool parseArguments(int argc, char **argv)
     const char *remainder;
     bool explicit_listen = false;
     bool explicit_quic = false;
+    bool explicit_tls = false;
     uint8_t scheme;
     int32_t i;
 
@@ -146,6 +161,10 @@ static bool parseArguments(int argc, char **argv)
                 quic_port = remainder;
                 explicit_listen = true;
                 explicit_quic = true;
+            } else if (scheme == kCONNECT_SCHEME_TLS) {
+                tls_port = remainder;
+                explicit_listen = true;
+                explicit_tls = true;
             } else {
                 unix_path = remainder;
             }
@@ -159,24 +178,26 @@ static bool parseArguments(int argc, char **argv)
     }
 
     if (!explicit_listen) {
-        tcp_port = HUB_DEFAULT_PORT_TEXT;
+        tcp_port = HUB_DEFAULT_PLAIN_TCP_PORT_TEXT;
         quic_port = HUB_DEFAULT_PORT_TEXT;
+        tls_port = HUB_DEFAULT_PORT_TEXT;
     }
 
-    if (quic_port != NULL && (certificate == NULL || key == NULL)) {
+    if ((quic_port != NULL || tls_port != NULL) && (certificate == NULL || key == NULL)) {
         if (loadIdentity(state_directory_override)) {
             certificate = identity_certificate_path;
             key = identity_key_path;
         } else {
-            fprintf(stderr, "QUIC listener disabled: could not load or create TLS identity\n");
-            if (explicit_quic) {
+            fprintf(stderr, "TLS listeners disabled: could not load or create TLS identity\n");
+            if (explicit_quic || explicit_tls) {
                 return false;
             }
             quic_port = NULL;
+            tls_port = NULL;
         }
     }
 
-    return startListeners(tcp_port, quic_port, unix_path, certificate, key, explicit_listen);
+    return startListeners(tcp_port, quic_port, tls_port, unix_path, certificate, key, explicit_listen);
 }
 
 static bool loadIdentity(const char *state_directory_override)
@@ -191,6 +212,7 @@ static bool loadIdentity(const char *state_directory_override)
 static bool startListeners(
     const char *tcp_port,
     const char *quic_port,
+    const char *tls_port,
     const char *unix_path,
     const char *certificate,
     const char *key,
@@ -233,6 +255,24 @@ static bool startListeners(
             }
         }
     }
+    if (tls_port != NULL) {
+        bool tls_started = TlsServerTransport_Init(
+            &tls_transport,
+            tls_port,
+            certificate,
+            key,
+            TLS_PEER_ID_BASE,
+            &transport_events
+        );
+        if (tls_started) {
+            tls_enabled = true;
+        } else {
+            fprintf(stderr, "could not open TLS listener on port %s\n", tls_port);
+            if (explicit_listen) {
+                return false;
+            }
+        }
+    }
 
     if (unix_path == NULL) {
         unix_path = HUB_DEFAULT_UNIX_SOCKET_PATH;
@@ -247,7 +287,7 @@ static bool startListeners(
         }
     }
 
-    if (!tcp_enabled && !quic_enabled && !unix_enabled) {
+    if (!tcp_enabled && !quic_enabled && !tls_enabled && !unix_enabled) {
         return false;
     }
 
@@ -324,6 +364,9 @@ static void muxClosePeer(void *context, uint32_t peer_id)
 
 static HubTransportPort *portForPeer(uint32_t peer_id)
 {
+    if (peer_id >= TLS_PEER_ID_BASE) {
+        return TlsServerTransport_Port(&tls_transport);
+    }
     if (peer_id >= QUIC_PEER_ID_BASE) {
         return QuicServerTransport_Port(&quic_transport);
     }
@@ -358,6 +401,12 @@ static bool registerStaticPollFds(void)
             return false;
         }
     }
+    if (tls_enabled) {
+        int32_t listen_fd = TlsServerTransport_ListenFd(&tls_transport);
+        if (!EpollRegistry_AddStatic(&poll_registry, listen_fd, kHUB_EVENT_TAG_TLS_LISTENER)) {
+            return false;
+        }
+    }
 
     return true;
 }
@@ -379,6 +428,23 @@ static void syncStreamSlotRegistrations(TcpServerTransport *transport, uint8_t s
     }
 }
 
+static void syncTlsSlotRegistrations(void)
+{
+    int32_t current_fd;
+    uint32_t wanted_mask;
+    uint8_t slot;
+
+    for(slot=0; slot<TLS_SERVER_PEERS_MAX; slot++) {
+        current_fd = TlsServerTransport_SlotFd(&tls_transport, slot);
+        wanted_mask = EPOLLIN;
+        if (TlsServerTransport_SlotWantsWritable(&tls_transport, slot)) {
+            wanted_mask |= EPOLLOUT;
+        }
+
+        EpollRegistry_SyncSlot(&poll_registry, TLS_SLOT_OFFSET + slot, current_fd, wanted_mask, TLS_SLOT_OFFSET + slot);
+    }
+}
+
 static void dispatchEvent(const struct epoll_event *event)
 {
     if (event->data.u32 == kHUB_EVENT_TAG_TCP_LISTENER) {
@@ -397,6 +463,10 @@ static void dispatchEvent(const struct epoll_event *event)
         QuicServerTransport_OnTimer(&quic_transport);
         return;
     }
+    if (event->data.u32 == kHUB_EVENT_TAG_TLS_LISTENER) {
+        TlsServerTransport_OnAcceptReady(&tls_transport);
+        return;
+    }
 
     dispatchStreamSlotEvent(event);
 }
@@ -405,6 +475,17 @@ static void dispatchStreamSlotEvent(const struct epoll_event *event)
 {
     TcpServerTransport *transport = &tcp_transport;
     uint8_t slot = (uint8_t)event->data.u32;
+
+    if (slot >= TLS_SLOT_OFFSET) {
+        slot -= TLS_SLOT_OFFSET;
+        if (event->events & EPOLLOUT) {
+            TlsServerTransport_OnSlotWritable(&tls_transport, slot);
+        }
+        if (event->events & EPOLLIN) {
+            TlsServerTransport_OnSlotReadable(&tls_transport, slot);
+        }
+        return;
+    }
 
     if (slot >= UNIX_SLOT_OFFSET) {
         transport = &unix_transport;

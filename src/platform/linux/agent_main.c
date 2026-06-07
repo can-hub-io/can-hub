@@ -13,6 +13,7 @@
 #include "platform/linux/shared/tls_identity.h"
 #include "platform/linux/socketcan/socketcan_adapter.h"
 #include "platform/linux/tcp/tcp_client_transport.h"
+#include "platform/linux/tls/tls_client_transport.h"
 #include "version.h"
 
 #define MAX_EPOLL_EVENTS 16
@@ -26,6 +27,7 @@
 static AgentApp app;
 static QuicClientTransport quic_transport;
 static TcpClientTransport tcp_transport;
+static TlsClientTransport tls_transport;
 static SocketCanAdapter can_adapter;
 static RegisterMessage registration;
 static uint8_t transport_scheme;
@@ -38,11 +40,11 @@ static char known_hubs_path[KNOWN_HUBS_PATH_MAX];
 static char pin_key[PIN_KEY_MAX];
 
 static bool parseArguments(int argc, char **argv, char *host, char *port_text);
-static bool prepareQuicSecurity(const char *host, const char *port_text, QuicClientSecurityConfig *config);
+static bool prepareSecurityMaterial(const char *host, const char *port_text);
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *transport_events);
 static TransportPort *transportPort(void);
 static bool registerStaticPollFds(void);
-static void syncTcpRegistration(void);
+static void syncStreamRegistration(void);
 static void dispatchEvent(const struct epoll_event *event, const CanEvents *can_events);
 static void drainCanInterface(uint8_t interface_index, const CanEvents *can_events);
 
@@ -59,8 +61,8 @@ int main(int argc, char **argv)
     if (!parseArguments(argc, argv, host, port_text)) {
         fprintf(
             stderr,
-            "usage: %s --connect quic://<host>:<port>|tcp://<host>:<port> [--name <agent-name>]"
-            " [--state-dir <path>] <can-if> [...]\n",
+            "usage: %s --connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>"
+            " [--name <agent-name>] [--state-dir <path>] <can-if> [...]\n",
             argv[0]
         );
         return 1;
@@ -87,7 +89,7 @@ int main(int argc, char **argv)
     fprintf(stderr, "can-hub-agent %s connecting to %s:%s\n", Version_String(), host, port_text);
 
     for (;;) {
-        syncTcpRegistration();
+        syncStreamRegistration();
         event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, TICK_PERIOD_MS);
 
         for(i=0; i<event_count; i++) {
@@ -138,7 +140,7 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
     return ConnectUrl_Parse(connect_url, &transport_scheme, host, port_text);
 }
 
-static bool prepareQuicSecurity(const char *host, const char *port_text, QuicClientSecurityConfig *config)
+static bool prepareSecurityMaterial(const char *host, const char *port_text)
 {
     if (!TlsIdentity_ResolveStateDirectory(state_directory_override, state_directory)) {
         return false;
@@ -150,24 +152,34 @@ static bool prepareQuicSecurity(const char *host, const char *port_text, QuicCli
     snprintf(known_hubs_path, sizeof(known_hubs_path), "%s/%s", state_directory, KNOWN_HUBS_FILE);
     snprintf(pin_key, sizeof(pin_key), "%s:%s", host, port_text);
 
-    config->certificate_path = identity_certificate_path;
-    config->key_path = identity_key_path;
-    config->pin_store_path = known_hubs_path;
-    config->pin_key = pin_key;
-
     return true;
 }
 
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *transport_events)
 {
-    QuicClientSecurityConfig security_config;
+    QuicClientSecurityConfig quic_security_config;
+    TlsClientSecurityConfig tls_security_config;
 
-    if (transport_scheme == kCONNECT_SCHEME_QUIC) {
-        if (!prepareQuicSecurity(host, port_text, &security_config)) {
+    if (transport_scheme == kCONNECT_SCHEME_QUIC || transport_scheme == kCONNECT_SCHEME_TLS) {
+        if (!prepareSecurityMaterial(host, port_text)) {
             fprintf(stderr, "could not load or create TLS identity\n");
             return false;
         }
-        return QuicClientTransport_Init(&quic_transport, host, port_text, transport_events, &security_config);
+    }
+
+    if (transport_scheme == kCONNECT_SCHEME_QUIC) {
+        quic_security_config.certificate_path = identity_certificate_path;
+        quic_security_config.key_path = identity_key_path;
+        quic_security_config.pin_store_path = known_hubs_path;
+        quic_security_config.pin_key = pin_key;
+        return QuicClientTransport_Init(&quic_transport, host, port_text, transport_events, &quic_security_config);
+    }
+    if (transport_scheme == kCONNECT_SCHEME_TLS) {
+        tls_security_config.certificate_path = identity_certificate_path;
+        tls_security_config.key_path = identity_key_path;
+        tls_security_config.pin_store_path = known_hubs_path;
+        tls_security_config.pin_key = pin_key;
+        return TlsClientTransport_Init(&tls_transport, host, port_text, transport_events, &tls_security_config);
     }
 
     return TcpClientTransport_Init(&tcp_transport, host, port_text, transport_events);
@@ -177,6 +189,9 @@ static TransportPort *transportPort(void)
 {
     if (transport_scheme == kCONNECT_SCHEME_QUIC) {
         return QuicClientTransport_Port(&quic_transport);
+    }
+    if (transport_scheme == kCONNECT_SCHEME_TLS) {
+        return TlsClientTransport_Port(&tls_transport);
     }
 
     return TcpClientTransport_Port(&tcp_transport);
@@ -208,19 +223,23 @@ static bool registerStaticPollFds(void)
     return true;
 }
 
-static void syncTcpRegistration(void)
+static void syncStreamRegistration(void)
 {
     int32_t current_fd;
-    uint32_t wanted_mask;
+    uint32_t wanted_mask = EPOLLIN;
 
-    if (transport_scheme != kCONNECT_SCHEME_TCP) {
+    if (transport_scheme == kCONNECT_SCHEME_TCP) {
+        current_fd = TcpClientTransport_Fd(&tcp_transport);
+        if (TcpClientTransport_WantsWritable(&tcp_transport)) {
+            wanted_mask |= EPOLLOUT;
+        }
+    } else if (transport_scheme == kCONNECT_SCHEME_TLS) {
+        current_fd = TlsClientTransport_Fd(&tls_transport);
+        if (TlsClientTransport_WantsWritable(&tls_transport)) {
+            wanted_mask |= EPOLLOUT;
+        }
+    } else {
         return;
-    }
-
-    current_fd = TcpClientTransport_Fd(&tcp_transport);
-    wanted_mask = EPOLLIN;
-    if (TcpClientTransport_WantsWritable(&tcp_transport)) {
-        wanted_mask |= EPOLLOUT;
     }
 
     EpollRegistry_SyncSlot(&poll_registry, TCP_SLOT, current_fd, wanted_mask, (uint32_t)current_fd);
@@ -240,7 +259,15 @@ static void dispatchEvent(const struct epoll_event *event, const CanEvents *can_
             QuicClientTransport_OnTimer(&quic_transport);
             return;
         }
-    } else if (event_fd == TcpClientTransport_Fd(&tcp_transport)) {
+    } else if (transport_scheme == kCONNECT_SCHEME_TLS && event_fd == TlsClientTransport_Fd(&tls_transport)) {
+        if (event->events & EPOLLOUT) {
+            TlsClientTransport_OnWritable(&tls_transport);
+        }
+        if (event->events & EPOLLIN) {
+            TlsClientTransport_OnReadable(&tls_transport);
+        }
+        return;
+    } else if (transport_scheme == kCONNECT_SCHEME_TCP && event_fd == TcpClientTransport_Fd(&tcp_transport)) {
         if (event->events & EPOLLOUT) {
             TcpClientTransport_OnWritable(&tcp_transport);
         }

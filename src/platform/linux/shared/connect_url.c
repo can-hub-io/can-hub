@@ -6,6 +6,7 @@
 #define TCP_URL_PREFIX "tcp://"
 #define QUIC_URL_PREFIX "quic://"
 #define UNIX_URL_PREFIX "unix://"
+#define TLS_URL_PREFIX "tls://"
 
 bool ConnectUrl_ParseScheme(const char *url, uint8_t *scheme, const char **remainder)
 {
@@ -22,6 +23,11 @@ bool ConnectUrl_ParseScheme(const char *url, uint8_t *scheme, const char **remai
     if (strncmp(url, UNIX_URL_PREFIX, strlen(UNIX_URL_PREFIX)) == 0) {
         *scheme = kCONNECT_SCHEME_UNIX;
         *remainder = url + strlen(UNIX_URL_PREFIX);
+        return true;
+    }
+    if (strncmp(url, TLS_URL_PREFIX, strlen(TLS_URL_PREFIX)) == 0) {
+        *scheme = kCONNECT_SCHEME_TLS;
+        *remainder = url + strlen(TLS_URL_PREFIX);
         return true;
     }
 

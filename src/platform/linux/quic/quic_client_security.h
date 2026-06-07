@@ -5,16 +5,13 @@
 #include <gnutls/gnutls.h>
 #include <ngtcp2/ngtcp2_crypto.h>
 
-#include "platform/linux/shared/pin_store.h"
+#include "platform/linux/shared/pinned_server_verifier.h"
 
 /*
  * TLS side of a QUIC client connection: GnuTLS session + credentials wired
  * to ngtcp2. Presents the agent identity certificate (mTLS) and verifies
- * the server against the TOFU pin store: first contact records the
- * fingerprint, later contacts must match it.
+ * the server against the TOFU pin store through PinnedServerVerifier.
  */
-
-#define QUIC_CLIENT_SECURITY_PATH_MAX 512
 
 typedef struct {
     const char *certificate_path;
@@ -26,8 +23,7 @@ typedef struct {
 typedef struct {
     gnutls_session_t session;
     gnutls_certificate_credentials_t credentials;
-    char pin_store_path[QUIC_CLIENT_SECURITY_PATH_MAX];
-    char pin_key[PIN_STORE_KEY_MAX];
+    PinnedServerVerifier verifier;
 } QuicClientSecurity;
 
 bool QuicClientSecurity_Init(

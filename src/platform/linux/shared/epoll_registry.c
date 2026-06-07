@@ -34,10 +34,16 @@ void EpollRegistry_SyncSlot(
 )
 {
     struct epoll_event event;
-    int32_t registered_fd = self->registered_fds[slot];
-    bool unchanged = current_fd == registered_fd
-                     && (current_fd == EPOLL_REGISTRY_NO_SOCKET || wanted_mask == self->registered_masks[slot]);
+    int32_t registered_fd;
+    bool unchanged;
 
+    if (slot >= EPOLL_REGISTRY_SLOTS_MAX) {
+        return;
+    }
+
+    registered_fd = self->registered_fds[slot];
+    unchanged = current_fd == registered_fd
+                && (current_fd == EPOLL_REGISTRY_NO_SOCKET || wanted_mask == self->registered_masks[slot]);
     if (unchanged) {
         return;
     }
