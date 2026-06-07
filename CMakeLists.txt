@@ -11,7 +11,8 @@ add_compile_options(-Wall -Wextra)
 
 option(CAN_HUB_STATIC "Fully static binaries against a static GnuTLS stack" OFF)
 if(CAN_HUB_STATIC)
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
+    add_compile_options(-ffunction-sections -fdata-sections)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static -Wl,--gc-sections")
     set(GNUTLS_STATIC_EXTRA_LIBRARIES hogweed nettle gmp atomic)
 endif()
 

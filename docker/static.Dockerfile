@@ -58,7 +58,7 @@ RUN . /etc/static-build.env \
     && echo "$GMP_SHA256  /tmp/gmp.tar.xz" | sha256sum -c \
     && mkdir /tmp/gmp && tar -xf /tmp/gmp.tar.xz --strip-components=1 -C /tmp/gmp \
     && cd /tmp/gmp \
-    && ./configure --host=$CROSS_TRIPLET --prefix=$STAGING --disable-shared --enable-static \
+    && ./configure --host=$CROSS_TRIPLET --prefix=$STAGING --disable-shared --enable-static CFLAGS="-O2 -ffunction-sections -fdata-sections" \
     && make -j"$(nproc)" && make install \
     && rm -rf /tmp/gmp /tmp/gmp.tar.xz
 
@@ -69,7 +69,7 @@ RUN . /etc/static-build.env \
     && echo "$NETTLE_SHA256  /tmp/nettle.tar.gz" | sha256sum -c \
     && mkdir /tmp/nettle && tar -xf /tmp/nettle.tar.gz --strip-components=1 -C /tmp/nettle \
     && cd /tmp/nettle \
-    && ./configure --host=$CROSS_TRIPLET --prefix=$STAGING --disable-shared --enable-static \
+    && ./configure --host=$CROSS_TRIPLET --prefix=$STAGING --disable-shared --enable-static CFLAGS="-O2 -ffunction-sections -fdata-sections" \
         --disable-documentation CPPFLAGS="-I$STAGING/include" LDFLAGS="-L$STAGING/lib" \
     && make -j"$(nproc)" && make install \
     && rm -rf /tmp/nettle /tmp/nettle.tar.gz
@@ -81,7 +81,7 @@ RUN . /etc/static-build.env \
     && echo "$GNUTLS_SHA256  /tmp/gnutls.tar.xz" | sha256sum -c \
     && mkdir /tmp/gnutls && tar -xf /tmp/gnutls.tar.xz --strip-components=1 -C /tmp/gnutls \
     && cd /tmp/gnutls \
-    && ./configure --host=$CROSS_TRIPLET --prefix=$STAGING --disable-shared --enable-static \
+    && ./configure --host=$CROSS_TRIPLET --prefix=$STAGING --disable-shared --enable-static CFLAGS="-O2 -ffunction-sections -fdata-sections" \
         --with-included-libtasn1 --with-included-unistring --without-p11-kit --without-idn \
         --without-brotli --without-zstd --without-zlib --without-tpm --without-tpm2 \
         --disable-doc --disable-tools --disable-tests --disable-cxx --disable-guile \
@@ -98,7 +98,9 @@ RUN . /etc/static-build.env \
         -DCMAKE_TOOLCHAIN_FILE=/src/cmake/toolchain-musl-static.cmake \
         -DCAN_HUB_STATIC=ON \
     && cmake --build /build --target can-hub-agent can-hub-client can-hub-cli \
+    && $CROSS_TRIPLET-strip /build/can-hub-agent /build/can-hub-client /build/can-hub-cli \
     && file /build/can-hub-agent /build/can-hub-client /build/can-hub-cli \
+    && ls -la /build/can-hub-agent /build/can-hub-client /build/can-hub-cli \
     && file /build/can-hub-agent | grep -q "statically linked" \
     && file /build/can-hub-client | grep -q "statically linked" \
     && file /build/can-hub-cli | grep -q "statically linked"
