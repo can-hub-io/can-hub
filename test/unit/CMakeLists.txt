@@ -81,6 +81,14 @@ add_unit_test(test_register_message
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
 
+add_unit_test(test_admin_message
+    SOURCES
+        protocol/test_admin_message.cpp
+        ${ROOT_SRC_DIR}/protocol/admin_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+
 add_unit_test(test_reconnect_backoff
     SOURCES
         agent/domain/test_reconnect_backoff.cpp
@@ -139,12 +147,20 @@ add_unit_test(test_client_session
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
 )
 
+add_unit_test(test_hub_peer
+    SOURCES
+        hub/domain/test_hub_peer.cpp
+        ${ROOT_SRC_DIR}/hub/domain/hub_peer.c
+        ${ROOT_SRC_DIR}/hub/domain/client_session.c
+)
+
 add_unit_test(test_frame_routes
     SOURCES
         hub/domain/test_frame_routes.cpp
         ${ROOT_SRC_DIR}/hub/domain/frame_routes.c
         ${ROOT_SRC_DIR}/hub/domain/interface_registry.c
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
+        ${ROOT_SRC_DIR}/hub/domain/hub_peer.c
         ${ROOT_SRC_DIR}/hub/domain/peer_directory.c
         ${ROOT_SRC_DIR}/protocol/list_message.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
@@ -157,9 +173,11 @@ add_unit_test(test_broker
         hub/test_broker.cpp
         ${ROOT_SRC_DIR}/hub/broker.c
         ${ROOT_SRC_DIR}/hub/domain/frame_routes.c
+        ${ROOT_SRC_DIR}/hub/domain/hub_peer.c
         ${ROOT_SRC_DIR}/hub/domain/interface_registry.c
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
         ${ROOT_SRC_DIR}/hub/domain/peer_directory.c
+        ${ROOT_SRC_DIR}/protocol/admin_message.c
         ${ROOT_SRC_DIR}/protocol/frame_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c
         ${ROOT_SRC_DIR}/protocol/list_message.c

@@ -43,3 +43,4 @@ const InterfaceEntry *InterfaceRegistry_FindByAgentChannel(
     uint8_t agent_channel
 );
 void InterfaceRegistry_List(const InterfaceRegistry *self, uint16_t offset, ListReplyMessage *reply);
+uint16_t InterfaceRegistry_Count(const InterfaceRegistry *self);

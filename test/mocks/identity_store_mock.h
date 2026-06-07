@@ -11,6 +11,8 @@ typedef struct {
     int entry_count;
     int lookup_calls;
     int pin_calls;
+    int forget_calls;
+    int list_calls;
     bool pin_result;
 } IdentityStoreMock;
 

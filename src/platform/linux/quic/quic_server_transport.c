@@ -499,7 +499,8 @@ static void onHandshakeCompleted(void *context)
     peer->transport->events.on_peer_connected(
         peer->transport->events.context,
         peer->peer_id,
-        peer->fingerprint_hex[0] != '\0' ? peer->fingerprint_hex : NULL
+        peer->fingerprint_hex[0] != '\0' ? peer->fingerprint_hex : NULL,
+        false
     );
 }
 

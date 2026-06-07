@@ -26,6 +26,7 @@ typedef struct {
     HubTransportEvents events;
     int32_t listen_fd;
     uint32_t next_peer_id;
+    bool local;
     TcpServerPeer peers[TCP_SERVER_PEERS_MAX];
 } TcpServerTransport;
 

@@ -5,6 +5,7 @@ extern "C" {
 #include "broker_driver.h"
 #include "hub_transport_port_mock.h"
 #include "identity_store_mock.h"
+#include "protocol/admin_message.h"
 #include "protocol/frame_message.h"
 #include "protocol/hello_message.h"
 #include "protocol/list_message.h"
@@ -14,6 +15,7 @@ extern "C" {
 
 #define AGENT_PEER 100
 #define CLIENT_PEER 200
+#define ADMIN_PEER 300
 #define TRUCK_FINGERPRINT "aa11bb22cc33dd44ee55ff66aa77bb88cc99dd00ee11ff22aa33bb44cc55dd66"
 #define OTHER_FINGERPRINT "0000000000000000000000000000000000000000000000000000000000000000"
 
@@ -30,7 +32,7 @@ static void registerAgentWithFingerprint(uint32_t peer_id, const char *fingerpri
     uint8_t encoded[512];
     size_t encoded_size;
 
-    events.on_peer_connected(events.context, peer_id, fingerprint);
+    events.on_peer_connected(events.context, peer_id, fingerprint, false);
     encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
     events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
     encoded_size = RegisterMessage_Encode(&truck_registration, encoded, sizeof(encoded));
@@ -49,6 +51,23 @@ static uint8_t lastAckStatus(void)
     return ack.status;
 }
 
+template <typename TMessage>
+static uint8_t lastReply(TMessage *message, bool (*decode)(TMessage *, const uint8_t *, size_t))
+{
+    MessageHeader header;
+    int reply_index = transport.control_count - 1;
+
+    MessageHeader_Decode(&header, transport.control_log[reply_index], transport.control_sizes[reply_index]);
+    decode(message, transport.control_log[reply_index] + MESSAGE_HEADER_SIZE, header.length);
+
+    return header.type;
+}
+
+static void sendControlFrom(uint32_t peer_id, const uint8_t *encoded, size_t encoded_size)
+{
+    events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
+}
+
 describe("broker", []() {
     describe("agent registration", []() {
         beforeEach([]() {
@@ -64,7 +83,7 @@ describe("broker", []() {
             uint8_t encoded[512];
             size_t encoded_size;
 
-            events.on_peer_connected(events.context, AGENT_PEER, NULL);
+            events.on_peer_connected(events.context, AGENT_PEER, NULL, false);
             encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
             events.on_peer_control(events.context, AGENT_PEER, encoded, encoded_size, 0);
             encoded_size = RegisterMessage_Encode(&truck_registration, encoded, sizeof(encoded));
@@ -90,7 +109,7 @@ describe("broker", []() {
             size_t hello_size;
 
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
-            events.on_peer_connected(events.context, 101, NULL);
+            events.on_peer_connected(events.context, 101, NULL, false);
             hello_size = HelloMessage_Encode(&hello, hello_encoded, sizeof(hello_encoded));
             events.on_peer_control(events.context, 101, hello_encoded, hello_size, 0);
             encoded_size = RegisterMessage_Encode(&truck_registration, encoded, sizeof(encoded));
@@ -281,7 +300,7 @@ describe("broker", []() {
             HubTransportPortMock_Reset(&transport);
             Broker_Init(&broker, &transport.port, NULL);
             events = Broker_Events(&broker);
-            events.on_peer_connected(events.context, AGENT_PEER, NULL);
+            events.on_peer_connected(events.context, AGENT_PEER, NULL, false);
         });
 
         it("answers ping with pong", []() {
@@ -297,6 +316,158 @@ describe("broker", []() {
             expect(transport.control_count).toBe(1);
             expect(reply.type).toBe(kMESSAGE_TYPE_PING);
             expect(reply.flags).toBe(0x01);
+        });
+    });
+
+    describe("admin plane", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            IdentityStoreMock_Reset(&identity_store);
+            Broker_Init(&broker, &transport.port, &identity_store.port);
+            events = Broker_Events(&broker);
+            BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
+            BrokerDriver_ConnectClient(&events, CLIENT_PEER);
+            BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
+        });
+
+        it("closes a non-local peer claiming the admin role", []() {
+            HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_ADMIN, 0 };
+            uint8_t encoded[64];
+            size_t encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+
+            events.on_peer_connected(events.context, 999, NULL, false);
+            sendControlFrom(999, encoded, encoded_size);
+
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)999);
+        });
+
+        it("answers status with peer and interface counters", []() {
+            AdminStatusReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[64];
+            size_t encoded_size = AdminStatusMessage_Encode(encoded, sizeof(encoded));
+
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminStatusReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_STATUS_REPLY);
+            expect(reply.peer_count).toBe(3);
+            expect(reply.agent_count).toBe(1);
+            expect(reply.client_count).toBe(1);
+            expect(reply.interface_count).toBe(2);
+        });
+
+        it("ignores admin requests from non-admin peers", []() {
+            uint8_t encoded[64];
+            size_t encoded_size = AdminStatusMessage_Encode(encoded, sizeof(encoded));
+
+            sendControlFrom(CLIENT_PEER, encoded, encoded_size);
+
+            expect(transport.control_count).toBe(0);
+        });
+
+        it("lists the live peers with role and agent name", []() {
+            AdminPeersMessage request = { 0 };
+            AdminPeersReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[64];
+            size_t encoded_size = AdminPeersMessage_Encode(&request, encoded, sizeof(encoded));
+
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminPeersReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_PEERS_REPLY);
+            expect(reply.count).toBe(3);
+            expect(reply.entries[0].peer_id).toBe((uint32_t)AGENT_PEER);
+            expect(reply.entries[0].role).toBe(kPEER_ROLE_AGENT);
+            expect((const char *)reply.entries[0].agent_name).toBe("truck42");
+            expect(reply.entries[1].role).toBe(kPEER_ROLE_CLIENT);
+            expect(reply.entries[2].role).toBe(kPEER_ROLE_ADMIN);
+        });
+
+        it("kicks a registered agent by name", []() {
+            AdminKickMessage kick = { "truck42" };
+            AdminKickReplyMessage reply;
+            ListMessage list = { 0 };
+            ListReplyMessage catalogue;
+            uint8_t reply_type;
+            uint8_t encoded[256];
+            size_t encoded_size = AdminKickMessage_Encode(&kick, encoded, sizeof(encoded));
+
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminKickReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_KICK_REPLY);
+            expect(reply.status).toBe(ADMIN_STATUS_OK);
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)AGENT_PEER);
+
+            encoded_size = ListMessage_Encode(&list, encoded, sizeof(encoded));
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            lastReply(&catalogue, ListReplyMessage_Decode);
+            expect(catalogue.count).toBe(0);
+        });
+
+        it("rejects kicking an unknown agent", []() {
+            AdminKickMessage kick = { "ghost" };
+            AdminKickReplyMessage reply;
+            uint8_t encoded[256];
+            size_t encoded_size = AdminKickMessage_Encode(&kick, encoded, sizeof(encoded));
+
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            lastReply(&reply, AdminKickReplyMessage_Decode);
+
+            expect(reply.status).toBe(ADMIN_STATUS_UNKNOWN_AGENT);
+            expect(transport.close_count).toBe(0);
+        });
+
+        it("lists the pinned identities", []() {
+            AdminPinsMessage request = { 0 };
+            AdminPinsReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[64];
+            size_t encoded_size = AdminPinsMessage_Encode(&request, encoded, sizeof(encoded));
+
+            IdentityStoreMock_Preload(&identity_store, "truck42", TRUCK_FINGERPRINT);
+
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminPinsReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_PINS_REPLY);
+            expect(reply.count).toBe(1);
+            expect((const char *)reply.entries[0].agent_name).toBe("truck42");
+            expect((const char *)reply.entries[0].fingerprint_hex).toBe(TRUCK_FINGERPRINT);
+        });
+
+        it("forgets a pinned identity", []() {
+            AdminForgetMessage forget = { "truck42" };
+            AdminForgetReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[256];
+            size_t encoded_size = AdminForgetMessage_Encode(&forget, encoded, sizeof(encoded));
+
+            IdentityStoreMock_Preload(&identity_store, "truck42", TRUCK_FINGERPRINT);
+
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminForgetReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_FORGET_REPLY);
+            expect(reply.status).toBe(ADMIN_STATUS_OK);
+            expect(identity_store.forget_calls).toBe(1);
+            expect(identity_store.entry_count).toBe(0);
+        });
+
+        it("rejects forgetting an unknown pin", []() {
+            AdminForgetMessage forget = { "ghost" };
+            AdminForgetReplyMessage reply;
+            uint8_t encoded[256];
+            size_t encoded_size = AdminForgetMessage_Encode(&forget, encoded, sizeof(encoded));
+
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            lastReply(&reply, AdminForgetReplyMessage_Decode);
+
+            expect(reply.status).toBe(ADMIN_STATUS_UNKNOWN_AGENT);
         });
     });
 });

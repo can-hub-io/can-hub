@@ -130,6 +130,20 @@ void InterfaceRegistry_List(const InterfaceRegistry *self, uint16_t offset, List
     }
 }
 
+uint16_t InterfaceRegistry_Count(const InterfaceRegistry *self)
+{
+    uint16_t count = 0;
+    uint32_t i;
+
+    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
+        if (self->entries[i].in_use) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
 /* ---------- private ---------- */
 
 static bool isRegistrationColliding(const InterfaceRegistry *self, const RegisterMessage *registration)

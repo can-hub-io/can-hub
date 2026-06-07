@@ -44,6 +44,39 @@ describe("identity_database", []() {
         expect(port->pin(port->context, "truck42", OTHER_FINGERPRINT)).toBe(false);
     });
 
+    it("forgets a pinned name so it can be pinned again", []() {
+        char fingerprint[IDENTITY_FINGERPRINT_HEX_SIZE];
+
+        port->pin(port->context, "truck42", TRUCK_FINGERPRINT);
+
+        expect(port->forget(port->context, "truck42")).toBe(true);
+        expect(port->lookup(port->context, "truck42", fingerprint)).toBe(false);
+        expect(port->pin(port->context, "truck42", OTHER_FINGERPRINT)).toBe(true);
+    });
+
+    it("refuses to forget a name that was never pinned", []() {
+        expect(port->forget(port->context, "ghost")).toBe(false);
+    });
+
+    it("lists pins ordered by name with pagination", []() {
+        IdentityPin pins[2];
+        bool more;
+
+        port->pin(port->context, "van7", OTHER_FINGERPRINT);
+        port->pin(port->context, "truck42", TRUCK_FINGERPRINT);
+        port->pin(port->context, "bus1", OTHER_FINGERPRINT);
+
+        expect(port->list(port->context, 0, pins, 2, &more)).toBe(2);
+        expect(more).toBe(true);
+        expect((const char *)pins[0].agent_name).toBe("bus1");
+        expect((const char *)pins[1].agent_name).toBe("truck42");
+        expect((const char *)pins[1].fingerprint_hex).toBe(TRUCK_FINGERPRINT);
+
+        expect(port->list(port->context, 2, pins, 2, &more)).toBe(1);
+        expect(more).toBe(false);
+        expect((const char *)pins[0].agent_name).toBe("van7");
+    });
+
     it("imports a known_agents pin file without overwriting existing pins", []() {
         char fingerprint[IDENTITY_FINGERPRINT_HEX_SIZE];
         FILE *pin_file = fopen(PIN_FILE_PATH, "w");

@@ -18,6 +18,7 @@ void BrokerDriver_ConnectAgent(
     const RegisterMessage *registration
 );
 void BrokerDriver_ConnectClient(const HubTransportEvents *events, uint32_t peer_id);
+void BrokerDriver_ConnectAdmin(const HubTransportEvents *events, uint32_t peer_id);
 uint32_t BrokerDriver_InterfaceIdAt(const HubTransportEvents *events, HubTransportPortMock *transport, uint8_t index);
 uint8_t BrokerDriver_OpenInterface(
     const HubTransportEvents *events,

@@ -66,13 +66,13 @@ The agent core (domain + application) is freestanding: no POSIX, no file descrip
 
 ### Listeners and defaults
 
-The hub always listens on a single unix domain socket (`/run/can-hub/hub.sock` by default, `--listen unix://<path>` overrides). It speaks the wire protocol and carries every local consumer: can-hub-client today, can-hub-cli admin traffic when the admin message family lands — demuxed by the HELLO role field, not by socket. Filesystem permissions as access control; it splits into a separate admin socket only if admin ever needs stricter permissions (decision 2026-06-06).
+The hub always listens on a single unix domain socket (`/run/can-hub/hub.sock` by default, `--listen unix://<path>` overrides). It speaks the wire protocol and carries every local consumer: can-hub-client and can-hub-cli admin traffic — demuxed by the HELLO role field, not by socket. Filesystem permissions as access control; it splits into a separate admin socket only if admin ever needs stricter permissions (decision 2026-06-06).
 
 Without `--listen` flags the hub also serves tcp://7227 and quic://7227 (same number, different protocols); the QUIC identity is auto-generated when `--cert`/`--key` are absent. Explicit `--listen tcp://`/`quic://` replaces the network defaults; default listeners that cannot start warn and are skipped, explicitly requested ones are fatal.
 
 ### Administration
 
-`can-hub-cli` talks to the hub over the unix domain socket above using the same binary protocol with admin message types.
+`can-hub-cli` talks to the hub over the unix domain socket above using the same binary protocol with admin message types (`status`, `peers`, `kick <agent>`, `pins`, `forget <agent>`). The hub accepts the admin HELLO role only on local transports: a peer claiming it over TCP or QUIC is disconnected. Kick closes the live connection of an agent by registered name; pins/forget manage the TOFU identity pins through the same IdentityStorePort the broker pins with, so a legitimately re-keyed agent can be re-pinned without touching hub.db. ACL management joins the family when ACLs land.
 
 ### Compatibility adapters (future)
 

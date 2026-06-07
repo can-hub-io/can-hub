@@ -14,6 +14,7 @@ include_directories(src)
 set(COMMON_SOURCES
     src/version.c
     src/protocol/wire.c
+    src/protocol/admin_message.c
     src/protocol/message_header.c
     src/protocol/frame_message.c
     src/protocol/hello_message.c
@@ -72,6 +73,7 @@ set(HUB_SOURCES
     src/hub/hub_app.c
     src/hub/domain/client_session.c
     src/hub/domain/frame_routes.c
+    src/hub/domain/hub_peer.c
     src/hub/domain/interface_registry.c
     src/hub/domain/peer_directory.c
     src/platform/linux/clock/clock.c
@@ -104,6 +106,6 @@ set(CLIENT_SOURCES
 )
 
 add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES})
-add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES})
+add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES})
 
 install(TARGETS can-hub can-hub-agent can-hub-cli RUNTIME DESTINATION bin)

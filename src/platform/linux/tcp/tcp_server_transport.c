@@ -67,6 +67,7 @@ bool TcpServerTransport_InitUnix(
     struct sockaddr_un address;
 
     initTransportBase(self, peer_id_base, events);
+    self->local = true;
 
     if (strlen(socket_path) >= sizeof(address.sun_path)) {
         return false;
@@ -129,7 +130,7 @@ void TcpServerTransport_OnAcceptReady(TcpServerTransport *self)
         setsockopt(peer_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
         TcpChannel_Bind(&peer->channel, peer_fd);
         peer->peer_id = self->next_peer_id++;
-        self->events.on_peer_connected(self->events.context, peer->peer_id, NULL);
+        self->events.on_peer_connected(self->events.context, peer->peer_id, NULL, self->local);
     }
 }
 

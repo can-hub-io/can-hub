@@ -38,8 +38,23 @@ offset  size  field
 0x08  SUBSCRIBE    CAN id filters for an open channel (layout deferred)
 0x09  ERROR        code + human-readable detail
 0x0A  OPEN_ACK     status + assigned channel
+0x10  ADMIN_STATUS        admin: hub counters
+0x11  ADMIN_STATUS_REPLY
+0x12  ADMIN_PEERS         admin: live peer table (paginated)
+0x13  ADMIN_PEERS_REPLY
+0x14  ADMIN_KICK          admin: disconnect an agent by name
+0x15  ADMIN_KICK_REPLY
+0x16  ADMIN_PINS          admin: pinned identities (paginated)
+0x17  ADMIN_PINS_REPLY
+0x18  ADMIN_FORGET        admin: drop a pinned identity by agent name
+0x19  ADMIN_FORGET_REPLY
 0x7F  PING/PONG    liveness (flags bit 0: reply)
 ```
+
+Admin messages are accepted only from peers whose HELLO declared the admin
+role, and the hub accepts that role only on local transports (the unix
+socket); an admin HELLO arriving over TCP or QUIC closes the connection.
+ACL management joins this family when ACLs land.
 
 ### Control payload layouts (version 0)
 
@@ -97,6 +112,58 @@ OPEN_ACK (total 12)
 CLOSE (total 8)
 @4   channel u8
 @5   reserved u8[3]
+
+ADMIN_STATUS (total 4)
+empty payload
+
+ADMIN_STATUS_REPLY (total 12)
+@4   peer_count u16
+@6   agent_count u16
+@8   client_count u16
+@10  interface_count u16
+
+ADMIN_PEERS (total 8)
+@4   offset u16        (pagination start index)
+@6   reserved u16
+
+ADMIN_PEERS_REPLY (total 8 + count * 204)
+@4   count u8          (0-16 entries in this reply)
+@5   flags u8          (bit 0: more entries beyond offset + count)
+@6   reserved u16
+@8   entries, each 204 bytes:
+     +0   peer_id u32
+     +4   role u8 (0 unknown, 1 agent, 2 client, 3 admin)
+     +5   reserved u8[3]
+     +8   agent_name char[128]      (empty unless a registered agent)
+     +136 fingerprint_hex char[65]  (empty on plaintext transports)
+     +201 reserved u8[3]
+
+ADMIN_KICK (total 132)
+@4   agent_name char[128]
+
+ADMIN_KICK_REPLY (total 8)
+@4   status u8 (0 ok, 1 unknown agent)
+@5   reserved u8[3]
+
+ADMIN_PINS (total 8)
+@4   offset u16        (pagination start index)
+@6   reserved u16
+
+ADMIN_PINS_REPLY (total 8 + count * 196)
+@4   count u8          (0-16 entries in this reply)
+@5   flags u8          (bit 0: more entries beyond offset + count)
+@6   reserved u16
+@8   entries, each 196 bytes:
+     +0   agent_name char[128]
+     +128 fingerprint_hex char[65]
+     +193 reserved u8[3]
+
+ADMIN_FORGET (total 132)
+@4   agent_name char[128]
+
+ADMIN_FORGET_REPLY (total 8)
+@4   status u8 (0 ok, 1 unknown agent)
+@5   reserved u8[3]
 ```
 
 Limits: agent name <= 127 chars, interface name 1-15 chars (Linux IFNAMSIZ), <= 16 interfaces per agent, error detail <= 63 chars.
@@ -121,7 +188,7 @@ Multiple FRAME messages may be packed back-to-back in one datagram up to the pat
 ## Open questions
 
 - Version negotiation details and capability bits in HELLO.
-- Admin message types for can-hub-cli (status, kick, ACL management).
+- ACL management messages in the admin family (waiting on the ACL feature itself).
 - Flow control / backpressure signalling on the data plane.
 - P2P phase 2: endpoint exchange messages (OFFER/ANSWER pattern).
 - Reliable data plane: flows that need guaranteed in-order delivery (ISOTP transfers, UDS/firmware upgrades) mapped to dedicated QUIC streams instead of datagrams — reliable per flow without head-of-line blocking the cyclic traffic. Candidate signalling: a flag on OPEN/SUBSCRIBE selecting reliable transport for matching CAN ids.
