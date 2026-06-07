@@ -17,5 +17,6 @@ void AuthorizationMock_Grant(
     const char *fingerprint_hex,
     const char *agent_name,
     const char *interface_name,
+    bool can_read,
     bool can_write
 );

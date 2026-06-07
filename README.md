@@ -95,7 +95,8 @@ can-hub-cli clients
 can-hub-cli peers kick 0x40000003
 can-hub-cli pins                     # the authorized agent fingerprints
 can-hub-cli pins add truck42 <fp>    # authorize an agent (see below)
-can-hub-cli pins forget truck42      # allow a re-keyed agent to pin again
+can-hub-cli pins delete truck42      # allow a re-keyed agent to pin again
+can-hub-cli acl                      # client read/write grants
 ```
 
 ## Locking down agents
@@ -119,6 +120,31 @@ retries on its own backoff, so authorizing it while it is trying is enough.
 Locking applies to the encrypted transports (quic/tls) that carry an
 identity; plain tcp carries none and binds to 127.0.0.1 by default — only
 expose it (`--listen tcp://0.0.0.0:7228`) on a trusted network or VPN.
+
+## Locking down clients
+
+By default any client may read every interface and none may inject frames.
+ACLs override that per client (TLS fingerprint) and per interface, with `*`
+wildcards on either side and three levels — `none` (no read, no write), `ro`
+(read only), `rw` (read and write):
+
+```sh
+# the client prints its fingerprint the same way an agent does
+can-hub-client --show-identity
+
+# on the hub host — grant, narrow, and inspect
+can-hub-cli acl add * */* rw                  # everyone read+write everywhere
+can-hub-cli acl add <fp> truck42/* ro         # this client: truck42 read-only
+can-hub-cli acl add <fp> truck42/can0 none    # ...except can0, fully denied
+can-hub-cli acl
+can-hub-cli acl delete <fp> truck42/can0
+```
+
+Resolution is most-specific-wins with the subject dominating: a rule naming
+the fingerprint always beats a `*` rule, then the narrower interface scope
+wins (`agent/can0` > `agent/*` > `*/*`). With no matching rule a client may
+read but not write. Clients on the plaintext transports (unix, plain tcp)
+carry no fingerprint, are network-trusted, and always get full access.
 
 No CAN hardware around? `sudo ip link add dev vcan0 type vcan && sudo ip
 link set up vcan0`, run the agent against `vcan0` and talk to it with

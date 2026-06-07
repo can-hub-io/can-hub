@@ -48,7 +48,8 @@
 #define ACL_AGENT_NAME_OFFSET 0
 #define ACL_INTERFACE_NAME_OFFSET 128
 #define ACL_FINGERPRINT_OFFSET 144
-#define ACL_CAN_WRITE_OFFSET 209
+#define ACL_CAN_READ_OFFSET 209
+#define ACL_CAN_WRITE_OFFSET 210
 
 #define INTERFACE_ENTRY_ID_OFFSET 0
 #define INTERFACE_ENTRY_SUBSCRIBERS_OFFSET 4
@@ -566,6 +567,7 @@ size_t AdminAclSetMessage_Encode(const AdminAclSetMessage *self, uint8_t *buffer
     memcpy(body + ACL_AGENT_NAME_OFFSET, self->agent_name, strlen(self->agent_name));
     memcpy(body + ACL_INTERFACE_NAME_OFFSET, self->interface_name, strlen(self->interface_name));
     memcpy(body + ACL_FINGERPRINT_OFFSET, self->fingerprint_hex, strlen(self->fingerprint_hex));
+    body[ACL_CAN_READ_OFFSET] = self->can_read;
     body[ACL_CAN_WRITE_OFFSET] = self->can_write;
 
     return total_size;
@@ -583,6 +585,7 @@ bool AdminAclSetMessage_Decode(AdminAclSetMessage *self, const uint8_t *payload,
     self->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] = '\0';
     memcpy(self->fingerprint_hex, payload + ACL_FINGERPRINT_OFFSET, ADMIN_FINGERPRINT_HEX_SIZE);
     self->fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] = '\0';
+    self->can_read = payload[ACL_CAN_READ_OFFSET];
     self->can_write = payload[ACL_CAN_WRITE_OFFSET];
 
     return self->agent_name[0] != '\0' && self->interface_name[0] != '\0' && self->fingerprint_hex[0] != '\0';
@@ -692,6 +695,7 @@ size_t AdminAclListReplyMessage_Encode(const AdminAclListReplyMessage *self, uin
         memcpy(entry + ACL_AGENT_NAME_OFFSET, self->entries[i].agent_name, strlen(self->entries[i].agent_name));
         memcpy(entry + ACL_INTERFACE_NAME_OFFSET, self->entries[i].interface_name, strlen(self->entries[i].interface_name));
         memcpy(entry + ACL_FINGERPRINT_OFFSET, self->entries[i].fingerprint_hex, strlen(self->entries[i].fingerprint_hex));
+        entry[ACL_CAN_READ_OFFSET] = self->entries[i].can_read;
         entry[ACL_CAN_WRITE_OFFSET] = self->entries[i].can_write;
     }
 
@@ -724,6 +728,7 @@ bool AdminAclListReplyMessage_Decode(AdminAclListReplyMessage *self, const uint8
         self->entries[i].interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] = '\0';
         memcpy(self->entries[i].fingerprint_hex, entry + ACL_FINGERPRINT_OFFSET, ADMIN_FINGERPRINT_HEX_SIZE);
         self->entries[i].fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] = '\0';
+        self->entries[i].can_read = entry[ACL_CAN_READ_OFFSET];
         self->entries[i].can_write = entry[ACL_CAN_WRITE_OFFSET];
     }
 

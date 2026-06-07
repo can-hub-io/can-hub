@@ -47,6 +47,8 @@ Hub defaults: always-on unix socket (`/run/can-hub/hub.sock`, one socket for wir
 
 Agent allowlist: default is TOFU; `--require-known-agents` rejects fingerprints not pinned (quic/tls only). Enrollment is authorized_keys-style: `can-hub-agent --show-identity` prints the fingerprint, `can-hub-cli pins add <name> <fingerprint>` authorizes it. The agent's ED25519 identity (`agent.crt`/`agent.key`) lives in the state dir and is stable across restarts. When the broker initiates a close (reject/kick), it must release the peer itself via `disconnectPeer` — the transport's broker-initiated close does not fire `on_peer_disconnected`.
 
+Client ACLs (AuthorizationPort, SQLite client_acls): grants keyed by client fingerprint (subject) + namespaced interface `agent/iface` (object), `*` wildcard on any of the three, level none/ro/rw (`can_read`/`can_write`). Resolution most-specific-wins, subject dominating (fingerprint beats `*`, then exact > `agent/*` > `*/*`); no match → read-open, no-write. Broker enforces at OPEN (`OPEN_STATUS_READ_DENIED`/`WRITE_DENIED`) and drops unauthorized client FRAMEs (the real boundary). Plaintext/unix clients carry no fingerprint, trusted full read+write. Admin family 0x24-0x29; `can-hub-cli acl add|delete|list`, `can-hub-client --show-identity`.
+
 ## Code style
 
 `CODE_STYLE.md` is mandatory — read it before writing C. Highlights that differ from common habits:

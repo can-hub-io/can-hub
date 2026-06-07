@@ -58,24 +58,71 @@ describe("identity_database", []() {
         expect(port->forget(port->context, "ghost")).toBe(false);
     });
 
-    it("denies writes with no acl and grants them after acl_grant", []() {
+    it("reads open and denies writes with no acl", []() {
         AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
 
+        expect(acl->read_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(true);
         expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(false);
-        expect(acl->grant(acl->context, TRUCK_FINGERPRINT, "truck42", "can0", true)).toBe(true);
+    });
+
+    it("grants a specific write and scopes it to that fingerprint and interface", []() {
+        AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
+
+        expect(acl->grant(acl->context, TRUCK_FINGERPRINT, "truck42", "can0", true, true)).toBe(true);
         expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(true);
         expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can1")).toBe(false);
         expect(acl->write_allowed(acl->context, OTHER_FINGERPRINT, "truck42", "can0")).toBe(false);
     });
 
-    it("downgrades and revokes a write grant", []() {
+    it("downgrades and revokes a grant", []() {
         AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
 
-        acl->grant(acl->context, TRUCK_FINGERPRINT, "truck42", "can0", true);
-        expect(acl->grant(acl->context, TRUCK_FINGERPRINT, "truck42", "can0", false)).toBe(true);
+        acl->grant(acl->context, TRUCK_FINGERPRINT, "truck42", "can0", true, true);
+        expect(acl->grant(acl->context, TRUCK_FINGERPRINT, "truck42", "can0", true, false)).toBe(true);
         expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(false);
         expect(acl->revoke(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(true);
         expect(acl->revoke(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(false);
+    });
+
+    it("applies the global wildcard baseline", []() {
+        AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
+
+        acl->grant(acl->context, "*", "*", "*", true, true);
+        expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(true);
+        expect(acl->write_allowed(acl->context, OTHER_FINGERPRINT, "van7", "can9")).toBe(true);
+    });
+
+    it("locks an interface for everyone with a wildcard-subject deny", []() {
+        AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
+
+        acl->grant(acl->context, "*", "*", "*", true, false);
+        acl->grant(acl->context, "*", "truck42", "can0", false, false);
+        expect(acl->read_allowed(acl->context, OTHER_FINGERPRINT, "truck42", "can0")).toBe(false);
+        expect(acl->read_allowed(acl->context, OTHER_FINGERPRINT, "truck42", "can1")).toBe(true);
+    });
+
+    it("lets a named fingerprint override a wildcard-subject deny (subject dominates)", []() {
+        AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
+
+        acl->grant(acl->context, "*", "truck42", "can0", false, false);
+        acl->grant(acl->context, TRUCK_FINGERPRINT, "*", "*", true, true);
+        expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(true);
+        expect(acl->write_allowed(acl->context, OTHER_FINGERPRINT, "truck42", "can0")).toBe(false);
+    });
+
+    it("resolves the worked example (most specific within subject)", []() {
+        AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
+
+        acl->grant(acl->context, "*", "*", "*", true, true);
+        acl->grant(acl->context, TRUCK_FINGERPRINT, "agent1", "*", true, false);
+        acl->grant(acl->context, TRUCK_FINGERPRINT, "agent1", "can1", false, false);
+
+        expect(acl->read_allowed(acl->context, TRUCK_FINGERPRINT, "agent1", "can1")).toBe(false);
+        expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "agent1", "can1")).toBe(false);
+        expect(acl->read_allowed(acl->context, TRUCK_FINGERPRINT, "agent1", "can0")).toBe(true);
+        expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "agent1", "can0")).toBe(false);
+        expect(acl->read_allowed(acl->context, TRUCK_FINGERPRINT, "agent2", "can0")).toBe(true);
+        expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "agent2", "can0")).toBe(true);
     });
 
     it("lists acl entries with pagination", []() {
@@ -83,8 +130,8 @@ describe("identity_database", []() {
         AclEntry entries[1];
         bool more;
 
-        acl->grant(acl->context, TRUCK_FINGERPRINT, "truck42", "can0", true);
-        acl->grant(acl->context, OTHER_FINGERPRINT, "truck42", "can1", false);
+        acl->grant(acl->context, TRUCK_FINGERPRINT, "truck42", "can0", true, true);
+        acl->grant(acl->context, OTHER_FINGERPRINT, "truck42", "can1", true, false);
 
         expect(acl->list(acl->context, 0, entries, 1, &more)).toBe(1);
         expect(more).toBe(true);

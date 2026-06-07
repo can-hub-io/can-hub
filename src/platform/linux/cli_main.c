@@ -54,6 +54,7 @@ static uint8_t show_stage;
 static char target_agent[REGISTER_AGENT_NAME_SIZE];
 static char target_interface[REGISTER_INTERFACE_NAME_SIZE];
 static char target_fingerprint[ADMIN_FINGERPRINT_HEX_SIZE];
+static bool target_can_read;
 static bool target_can_write;
 static uint32_t target_peer_id;
 static uint16_t page_offset;
@@ -111,10 +112,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "  interfaces             interface catalogue\n");
         fprintf(stderr, "  pins                   pinned TOFU identities\n");
         fprintf(stderr, "  pins add <name> <fp>   allow an agent (its --show-identity fingerprint)\n");
-        fprintf(stderr, "  pins forget <name>     drop a pin so the agent can re-pin\n");
-        fprintf(stderr, "  acl                    client write grants\n");
-        fprintf(stderr, "  acl add <fp|default> <agent>/<iface> ro|rw   grant (default = baseline)\n");
-        fprintf(stderr, "  acl revoke <fp|default> <agent>/<iface>      drop a grant\n");
+        fprintf(stderr, "  pins delete <name>     drop a pin so the agent can re-pin\n");
+        fprintf(stderr, "  acl                    client read/write grants\n");
+        fprintf(stderr, "  acl add <fp|*> <agent|*>/<iface|*> none|ro|rw   grant (* = baseline)\n");
+        fprintf(stderr, "  acl delete <fp|*> <agent|*>/<iface|*>          drop a grant\n");
         fprintf(stderr, "default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
         return 1;
     }
@@ -195,11 +196,19 @@ static bool mapCommand(const char *words[], uint8_t word_count)
         if (strcmp(words[0], "acl") != 0 || strcmp(words[1], "add") != 0) {
             return false;
         }
-        if (strcmp(words[4], "rw") != 0 && strcmp(words[4], "ro") != 0) {
+        command = kCLI_COMMAND_ACL_ADD;
+        if (strcmp(words[4], "rw") == 0) {
+            target_can_read = true;
+            target_can_write = true;
+        } else if (strcmp(words[4], "ro") == 0) {
+            target_can_read = true;
+            target_can_write = false;
+        } else if (strcmp(words[4], "none") == 0) {
+            target_can_read = false;
+            target_can_write = false;
+        } else {
             return false;
         }
-        command = kCLI_COMMAND_ACL_ADD;
-        target_can_write = strcmp(words[4], "rw") == 0;
         snprintf(target_fingerprint, sizeof(target_fingerprint), "%s", words[2]);
         return parseInterfaceRef(words[3]);
     }
@@ -211,7 +220,7 @@ static bool mapCommand(const char *words[], uint8_t word_count)
             snprintf(target_fingerprint, sizeof(target_fingerprint), "%s", words[3]);
             return target_agent[0] != '\0' && target_fingerprint[0] != '\0';
         }
-        if (strcmp(words[0], "acl") == 0 && strcmp(words[1], "revoke") == 0) {
+        if (strcmp(words[0], "acl") == 0 && strcmp(words[1], "delete") == 0) {
             command = kCLI_COMMAND_ACL_REVOKE;
             snprintf(target_fingerprint, sizeof(target_fingerprint), "%s", words[2]);
             return parseInterfaceRef(words[3]);
@@ -231,7 +240,7 @@ static bool mapCommand(const char *words[], uint8_t word_count)
         command = kCLI_COMMAND_AGENTS_SHOW;
     } else if (strcmp(words[0], "agents") == 0 && strcmp(words[1], "kick") == 0) {
         command = kCLI_COMMAND_AGENTS_KICK;
-    } else if (strcmp(words[0], "pins") == 0 && strcmp(words[1], "forget") == 0) {
+    } else if (strcmp(words[0], "pins") == 0 && strcmp(words[1], "delete") == 0) {
         command = kCLI_COMMAND_PINS_FORGET;
     } else {
         return false;
@@ -253,9 +262,20 @@ static bool parsePeerId(const char *text)
 
 static bool parseInterfaceRef(const char *text)
 {
-    const char *separator = strchr(text, '/');
+    const char *separator;
     size_t agent_length;
 
+    if (target_fingerprint[0] == '\0') {
+        return false;
+    }
+
+    if (strcmp(text, "*") == 0) {
+        snprintf(target_agent, sizeof(target_agent), "*");
+        snprintf(target_interface, sizeof(target_interface), "*");
+        return true;
+    }
+
+    separator = strchr(text, '/');
     if (separator == NULL || separator == text || separator[1] == '\0') {
         return false;
     }
@@ -269,7 +289,7 @@ static bool parseInterfaceRef(const char *text)
     target_agent[agent_length] = '\0';
     snprintf(target_interface, sizeof(target_interface), "%s", separator + 1);
 
-    return target_fingerprint[0] != '\0';
+    return true;
 }
 
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *events)
@@ -395,7 +415,13 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
             exit_code = 1;
             return;
         }
-        printf("acl %s %s/%s %s\n", target_fingerprint, target_agent, target_interface, target_can_write ? "rw" : "ro");
+        printf(
+            "acl %s %s/%s %s\n",
+            target_fingerprint,
+            target_agent,
+            target_interface,
+            target_can_write ? "rw" : (target_can_read ? "ro" : "none")
+        );
         exit_code = 0;
         return;
     }
@@ -480,6 +506,7 @@ static void sendRequest(void)
         snprintf(acl_set.agent_name, sizeof(acl_set.agent_name), "%s", target_agent);
         snprintf(acl_set.interface_name, sizeof(acl_set.interface_name), "%s", target_interface);
         snprintf(acl_set.fingerprint_hex, sizeof(acl_set.fingerprint_hex), "%s", target_fingerprint);
+        acl_set.can_read = target_can_read ? 1 : 0;
         acl_set.can_write = target_can_write ? 1 : 0;
         encoded_size = AdminAclSetMessage_Encode(&acl_set, encoded, sizeof(encoded));
     } else if (command == kCLI_COMMAND_ACL_REVOKE) {
@@ -760,7 +787,7 @@ static void handleAclListReply(const uint8_t *payload, uint16_t payload_length)
             reply.entries[i].agent_name,
             REGISTER_INTERFACE_NAME_SIZE,
             reply.entries[i].interface_name,
-            reply.entries[i].can_write ? "rw" : "ro",
+            reply.entries[i].can_write ? "rw" : (reply.entries[i].can_read ? "ro" : "none"),
             reply.entries[i].fingerprint_hex
         );
     }

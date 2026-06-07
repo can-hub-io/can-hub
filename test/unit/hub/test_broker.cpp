@@ -788,7 +788,7 @@ describe("broker", []() {
             uint8_t encoded[128];
             size_t encoded_size;
 
-            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true);
+            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true, true);
             connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
             channel = openInterface(CLIENT_PEER, can0_interface_id, 0);
             HubTransportPortMock_Reset(&transport);
@@ -820,9 +820,35 @@ describe("broker", []() {
         it("allows OPEN with want_write once granted", []() {
             uint8_t channel;
 
-            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true);
+            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true, true);
             connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
             channel = openInterface(CLIENT_PEER, can0_interface_id, OPEN_FLAG_WANT_WRITE);
+
+            expect(channel != 0xFF).toBe(true);
+        });
+
+        it("rejects OPEN when read is denied for the client", []() {
+            OpenMessage open = { can0_interface_id, 0 };
+            OpenAckMessage ack;
+            MessageHeader header;
+            uint8_t encoded[64];
+            size_t encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
+
+            AuthorizationMock_Grant(&authorization, "*", "truck42", "can0", false, false);
+            connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
+            HubTransportPortMock_Reset(&transport);
+            events.on_peer_control(events.context, CLIENT_PEER, encoded, encoded_size, 0);
+            MessageHeader_Decode(&header, transport.control_log[0], transport.control_sizes[0]);
+            OpenAckMessage_Decode(&ack, transport.control_log[0] + MESSAGE_HEADER_SIZE, header.length);
+
+            expect(ack.status).toBe(OPEN_STATUS_READ_DENIED);
+        });
+
+        it("opens read-only when read is allowed but write is not", []() {
+            uint8_t channel;
+
+            connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
+            channel = openInterface(CLIENT_PEER, can0_interface_id, 0);
 
             expect(channel != 0xFF).toBe(true);
         });
@@ -855,7 +881,7 @@ describe("broker", []() {
         });
 
         it("grants a write acl from the admin plane", []() {
-            AdminAclSetMessage request = { "truck42", "can0", TRUCK_FINGERPRINT, 1 };
+            AdminAclSetMessage request = { "truck42", "can0", TRUCK_FINGERPRINT, 1, 1 };
             AdminAclSetReplyMessage reply;
             uint8_t reply_type;
             uint8_t encoded[256];
@@ -875,7 +901,7 @@ describe("broker", []() {
             uint8_t encoded[256];
             size_t encoded_size = AdminAclRevokeMessage_Encode(&request, encoded, sizeof(encoded));
 
-            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true);
+            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true, true);
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
             lastReply(&reply, AdminAclRevokeReplyMessage_Decode);
 
@@ -890,7 +916,7 @@ describe("broker", []() {
             uint8_t encoded[64];
             size_t encoded_size = AdminAclListMessage_Encode(&request, encoded, sizeof(encoded));
 
-            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true);
+            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true, true);
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
             reply_type = lastReply(&reply, AdminAclListReplyMessage_Decode);
 

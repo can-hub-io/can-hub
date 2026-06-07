@@ -71,16 +71,19 @@ offset  size  field
 0x7F  PING/PONG    liveness (flags bit 0: reply)
 ```
 
-Admin ACL grants are keyed by the client TLS fingerprint and the stable
-namespaced interface (agent_name + interface_name); the reserved literal
-fingerprint `default` is the per-interface baseline. The hub resolves a
-client's write permission as specific grant, else interface default, else
-the global default (read open, no write).
+Admin ACL grants are keyed by the client TLS fingerprint (subject) and the
+stable namespaced interface (agent_name + interface_name, the object). Any
+of the three may be the literal `*` wildcard. Each grant carries a level:
+`none` (no read, no write), `ro` (read), `rw` (read and write); on the wire
+this is the `can_read`/`can_write` byte pair. The hub resolves a client's
+permission most-specific-wins with the subject dominating: a rule naming the
+fingerprint beats any `*`-subject rule, then narrower object scope wins
+(exact > agent/* > */*). With no matching rule the baseline is read-open,
+no-write.
 
 Admin messages are accepted only from peers whose HELLO declared the admin
 role, and the hub accepts that role only on local transports (the unix
 socket); an admin HELLO arriving over TCP or QUIC closes the connection.
-ACL management joins this family when ACLs land.
 
 ### Control payload layouts (version 0)
 
@@ -143,7 +146,7 @@ OPEN (total 12)
 @9   reserved u8[3]
 
 OPEN_ACK (total 12)
-@4   status u8 (0 ok, 1 rejected/unknown interface, 2 write denied)
+@4   status u8 (0 ok, 1 rejected/unknown interface, 2 write denied, 3 read denied)
 @5   channel u8
 @6   reserved u16
 @8   interface_id u32
@@ -296,12 +299,14 @@ FRAME (total 20 + payload)
 @20  payload 0-64 bytes
 ```
 
-Write authorization: a client may inject frames into an interface only if it
-is authorized to write it. Clients on transports that carry no fingerprint
-(unix socket, plain tcp) are network-trusted and may always write; on the
-encrypted transports the hub checks the client fingerprint against its ACLs
-and **drops** unauthorized injected frames (the security boundary). The OPEN
-`want write` flag surfaces this as an up-front rejection for honest clients.
+Authorization: a client may read an interface unless an ACL denies it, and
+may inject frames only if an ACL grants write. Clients on transports that
+carry no fingerprint (unix socket, plain tcp) are network-trusted and may
+always read and write; on the encrypted transports the hub checks the client
+fingerprint against its ACLs. OPEN is rejected up front with status read
+denied (3) or write denied (2) per the `want write` flag, and an injected
+frame on a non-writable channel is **dropped** regardless (the security
+boundary behind the honest-client OPEN check).
 
 Injected frames become visible to the other subscribers of the interface only
 through their bus echo: the hub does not fan out client frames directly. The
@@ -314,7 +319,6 @@ Multiple FRAME messages may be packed back-to-back in one datagram up to the pat
 ## Open questions
 
 - Version negotiation details and capability bits in HELLO.
-- ACL management messages in the admin family (waiting on the ACL feature itself).
 - Flow control / backpressure signalling on the data plane.
 - P2P phase 2: endpoint exchange messages (OFFER/ANSWER pattern).
 - Reliable data plane: flows that need guaranteed in-order delivery (ISOTP transfers, UDS/firmware upgrades) mapped to dedicated QUIC streams instead of datagrams — reliable per flow without head-of-line blocking the cyclic traffic. Candidate signalling: a flag on OPEN/SUBSCRIBE selecting reliable transport for matching CAN ids.

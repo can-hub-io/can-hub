@@ -172,6 +172,7 @@ typedef struct {
     char agent_name[REGISTER_AGENT_NAME_SIZE];
     char interface_name[REGISTER_INTERFACE_NAME_SIZE];
     char fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE];
+    uint8_t can_read;
     uint8_t can_write;
 } AdminAclSetMessage;
 
@@ -197,6 +198,7 @@ typedef struct {
     char agent_name[REGISTER_AGENT_NAME_SIZE];
     char interface_name[REGISTER_INTERFACE_NAME_SIZE];
     char fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE];
+    uint8_t can_read;
     uint8_t can_write;
 } AdminAclListReplyEntry;
 

@@ -58,6 +58,7 @@ static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, siz
 static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char *detail);
 static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *data, size_t size, uint8_t route_flags);
 static uint8_t injectionToken(Broker *self, const HubPeer *sender);
+static bool clientCanRead(Broker *self, const HubPeer *peer, const InterfaceEntry *entry);
 static bool clientCanWrite(Broker *self, const HubPeer *peer, const InterfaceEntry *entry);
 static uint32_t echoOriginatorPeerId(Broker *self, uint8_t route_flags);
 static void tickHelloDeadline(Broker *self, HubPeer *peer, uint64_t now_us);
@@ -365,6 +366,13 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
         return;
     }
 
+    if (!clientCanRead(self, peer, entry)) {
+        ack.status = OPEN_STATUS_READ_DENIED;
+        sendControl(self, peer, encoded, OpenAckMessage_Encode(&ack, encoded, sizeof(encoded)));
+        sendError(self, peer->peer_id, kERROR_CODE_ROLE_REJECTED, "not authorized to read this interface");
+        return;
+    }
+
     can_write = clientCanWrite(self, peer, entry);
     if ((open.flags & OPEN_FLAG_WANT_WRITE) && !can_write) {
         ack.status = OPEN_STATUS_WRITE_DENIED;
@@ -603,6 +611,7 @@ static void handleAdminAclSet(Broker *self, HubPeer *peer, const MessageHeader *
             request.fingerprint_hex,
             request.agent_name,
             request.interface_name,
+            request.can_read != 0,
             request.can_write != 0
         );
     }
@@ -665,6 +674,7 @@ static void handleAdminAclList(Broker *self, HubPeer *peer, const MessageHeader 
             memcpy(reply.entries[i].agent_name, entries[i].agent_name, REGISTER_AGENT_NAME_SIZE);
             memcpy(reply.entries[i].interface_name, entries[i].interface_name, REGISTER_INTERFACE_NAME_SIZE);
             memcpy(reply.entries[i].fingerprint_hex, entries[i].fingerprint_hex, IDENTITY_FINGERPRINT_HEX_SIZE);
+            reply.entries[i].can_read = entries[i].can_read ? 1 : 0;
             reply.entries[i].can_write = entries[i].can_write ? 1 : 0;
         }
         if (more) {
@@ -849,6 +859,23 @@ static void forwardFrame(Broker *self, const FrameRoute *route, const uint8_t *d
             destination->frames_dropped++;
         }
     }
+}
+
+static bool clientCanRead(Broker *self, const HubPeer *peer, const InterfaceEntry *entry)
+{
+    if (peer->fingerprint_hex[0] == '\0') {
+        return true;
+    }
+    if (self->authorization == NULL) {
+        return true;
+    }
+
+    return self->authorization->read_allowed(
+        self->authorization->context,
+        peer->fingerprint_hex,
+        entry->agent_name,
+        entry->interface_name
+    );
 }
 
 static bool clientCanWrite(Broker *self, const HubPeer *peer, const InterfaceEntry *entry)

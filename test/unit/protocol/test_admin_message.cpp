@@ -317,8 +317,8 @@ describe("admin_pin_add_message", []() {
 });
 
 describe("admin_acl_message", []() {
-    it("round-trips an acl set with permission", []() {
-        AdminAclSetMessage request = { "truck42", "can0", FINGERPRINT, 1 };
+    it("round-trips an acl set with read and write permission", []() {
+        AdminAclSetMessage request = { "truck42", "can0", FINGERPRINT, 1, 1 };
         AdminAclSetMessage decoded;
         uint8_t buffer[256];
         size_t encoded_size;
@@ -332,17 +332,21 @@ describe("admin_acl_message", []() {
         expect((const char *)decoded.agent_name).toBe("truck42");
         expect((const char *)decoded.interface_name).toBe("can0");
         expect((const char *)decoded.fingerprint_hex).toBe(FINGERPRINT);
+        expect(decoded.can_read).toBe(1);
         expect(decoded.can_write).toBe(1);
     });
 
-    it("carries the default pseudo-fingerprint", []() {
-        AdminAclSetMessage request = { "truck42", "can0", "default", 1 };
+    it("carries the none level and the wildcard scopes", []() {
+        AdminAclSetMessage request = { "*", "*", "*", 0, 0 };
         AdminAclSetMessage decoded;
         uint8_t buffer[256];
         size_t encoded_size = AdminAclSetMessage_Encode(&request, buffer, sizeof(buffer));
 
         expect(AdminAclSetMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE)).toBe(true);
-        expect((const char *)decoded.fingerprint_hex).toBe("default");
+        expect((const char *)decoded.fingerprint_hex).toBe("*");
+        expect((const char *)decoded.agent_name).toBe("*");
+        expect(decoded.can_read).toBe(0);
+        expect(decoded.can_write).toBe(0);
     });
 
     it("round-trips an acl revoke and its reply", []() {
@@ -363,7 +367,7 @@ describe("admin_acl_message", []() {
     });
 
     it("round-trips acl list entries", []() {
-        AdminAclListReplyMessage reply = { 1, 0, { { "truck42", "can0", FINGERPRINT, 1 } } };
+        AdminAclListReplyMessage reply = { 1, 0, { { "truck42", "can0", FINGERPRINT, 1, 1 } } };
         AdminAclListReplyMessage decoded;
         uint8_t buffer[512];
         size_t expected_size = MESSAGE_HEADER_SIZE + ADMIN_ACL_LIST_REPLY_FIXED_FIELDS_SIZE + ADMIN_ACL_LIST_REPLY_ENTRY_SIZE;
