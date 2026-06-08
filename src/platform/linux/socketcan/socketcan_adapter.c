@@ -21,13 +21,13 @@ static bool portWriteFrame(void *context, uint8_t interface_index, const FrameMe
 static bool portConfigure(void *context, uint8_t interface_index, uint8_t op, uint32_t bitrate);
 static bool writeClassicFrame(int32_t can_fd, const FrameMessage *frame);
 static bool writeFdFrame(int32_t can_fd, const FrameMessage *frame);
-static int32_t openCanSocket(const char *interface_name);
+static int32_t openCanSocket(const char *interface_name, bool receive_own_messages);
 static void classicToMessage(const struct can_frame *classic, FrameMessage *frame);
 static void fdToMessage(const struct canfd_frame *fd_frame, FrameMessage *frame);
 
 /* ---------- public ---------- */
 
-bool SocketCanAdapter_Open(SocketCanAdapter *self, const RegisterMessage *registration)
+bool SocketCanAdapter_Open(SocketCanAdapter *self, const RegisterMessage *registration, bool receive_own_messages)
 {
     uint8_t i;
 
@@ -39,7 +39,7 @@ bool SocketCanAdapter_Open(SocketCanAdapter *self, const RegisterMessage *regist
 
     for(i=0; i<self->interface_count; i++) {
         snprintf(self->interface_names[i], REGISTER_INTERFACE_NAME_SIZE, "%s", registration->interface_names[i]);
-        self->can_fds[i] = openCanSocket(registration->interface_names[i]);
+        self->can_fds[i] = openCanSocket(registration->interface_names[i], receive_own_messages);
         if (self->can_fds[i] < 0) {
             SocketCanAdapter_Close(self);
             return false;
@@ -172,13 +172,13 @@ static bool writeFdFrame(int32_t can_fd, const FrameMessage *frame)
     return write(can_fd, &fd_frame, CANFD_MTU) == (ssize_t)CANFD_MTU;
 }
 
-static int32_t openCanSocket(const char *interface_name)
+static int32_t openCanSocket(const char *interface_name, bool receive_own_messages)
 {
     struct sockaddr_can address;
     struct ifreq interface_request;
     int32_t receive_buffer_bytes = RECEIVE_BUFFER_BYTES;
     int32_t fd_frames_enabled = 1;
-    int32_t receive_own_messages = 1;
+    int32_t receive_own_messages_enabled = receive_own_messages ? 1 : 0;
     int32_t can_fd;
 
     can_fd = socket(PF_CAN, SOCK_RAW | SOCK_NONBLOCK, CAN_RAW);
@@ -194,7 +194,7 @@ static int32_t openCanSocket(const char *interface_name)
 
     setsockopt(can_fd, SOL_SOCKET, SO_RCVBUF, &receive_buffer_bytes, sizeof(receive_buffer_bytes));
     setsockopt(can_fd, SOL_CAN_RAW, CAN_RAW_FD_FRAMES, &fd_frames_enabled, sizeof(fd_frames_enabled));
-    setsockopt(can_fd, SOL_CAN_RAW, CAN_RAW_RECV_OWN_MSGS, &receive_own_messages, sizeof(receive_own_messages));
+    setsockopt(can_fd, SOL_CAN_RAW, CAN_RAW_RECV_OWN_MSGS, &receive_own_messages_enabled, sizeof(receive_own_messages_enabled));
 
     memset(&address, 0, sizeof(address));
     address.can_family = AF_CAN;

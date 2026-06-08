@@ -20,7 +20,7 @@ typedef struct {
     uint8_t interface_count;
 } SocketCanAdapter;
 
-bool SocketCanAdapter_Open(SocketCanAdapter *self, const RegisterMessage *registration);
+bool SocketCanAdapter_Open(SocketCanAdapter *self, const RegisterMessage *registration, bool receive_own_messages);
 void SocketCanAdapter_Close(SocketCanAdapter *self);
 CanPort *SocketCanAdapter_Port(SocketCanAdapter *self);
 int32_t SocketCanAdapter_Fd(const SocketCanAdapter *self, uint8_t interface_index);

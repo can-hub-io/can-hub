@@ -83,7 +83,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (!SocketCanAdapter_Open(&can_adapter, &registration)) {
+    if (!SocketCanAdapter_Open(&can_adapter, &registration, true)) {
         fprintf(stderr, "could not open CAN interfaces\n");
         return 1;
     }
