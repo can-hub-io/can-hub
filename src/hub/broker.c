@@ -61,6 +61,7 @@ static void releasePendingIfconfig(Broker *self, uint32_t peer_id);
 static uint8_t adminIfconfigStatus(uint8_t agent_status);
 static void countInterfaceFrame(Broker *self, const HubPeer *peer, uint8_t channel);
 static void disconnectPeer(Broker *self, uint32_t peer_id);
+static bool displaceGhostPeer(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
 static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
 static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size);
@@ -329,6 +330,9 @@ static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *hea
     }
 
     registered = InterfaceRegistry_RegisterAgent(&self->registry, peer->peer_id, &registration, &ack);
+    if (!registered && displaceGhostPeer(self, peer, &registration)) {
+        registered = InterfaceRegistry_RegisterAgent(&self->registry, peer->peer_id, &registration, &ack);
+    }
     sendControl(self, peer, encoded, RegisterAckMessage_Encode(&ack, encoded, sizeof(encoded)));
 
     if (!registered) {
@@ -958,6 +962,31 @@ static void disconnectPeer(Broker *self, uint32_t peer_id)
     releasePendingIfconfig(self, peer_id);
     PeerDirectory_Release(&self->directory, peer_id);
     self->transport->close_peer(self->transport->context, peer_id);
+}
+
+static bool displaceGhostPeer(Broker *self, const HubPeer *peer, const RegisterMessage *registration)
+{
+    HubPeer *ghost;
+    uint32_t ghost_peer_id;
+
+    if (peer->fingerprint_hex[0] == '\0') {
+        return false;
+    }
+    if (!InterfaceRegistry_CollidingPeer(&self->registry, registration, &ghost_peer_id)) {
+        return false;
+    }
+    if (ghost_peer_id == peer->peer_id) {
+        return false;
+    }
+
+    ghost = PeerDirectory_Find(&self->directory, ghost_peer_id);
+    if (ghost == NULL || strcmp(ghost->fingerprint_hex, peer->fingerprint_hex) != 0) {
+        return false;
+    }
+
+    disconnectPeer(self, ghost_peer_id);
+
+    return true;
 }
 
 static void detachAgent(Broker *self, uint32_t agent_peer_id)
