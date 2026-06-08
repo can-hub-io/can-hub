@@ -106,7 +106,9 @@ Protocol compatibility needs no license: adapters let socketcand or cannelloni c
 
 **socketcand (shipped, client-hosted):** `can-hub-client socketcand` runs a local socketcand TCP server (default `127.0.0.1:29536`) plus the UDP discovery beacon (port 42000). It dials the hub as an ordinary client and bridges: a socketcand `< open agent/iface >` is resolved against a cached hub `LIST` to an interface id, then `OPEN`ed; received frames become `< frame … >`, a socketcand `< send … >` becomes a hub `FRAME`. Rawmode only for now (BCM/ISO-TP/control parsed and rejected). The bridge core is freestanding (`src/socketcand/`), the TCP server and beacon are Linux adapters (`src/platform/linux/socketcand/`). The hub is untouched — **authorization is the existing client ACLs** the bridge already carries as a hub client (a write-denied bus opens read-only; `< send >` on it is refused). Each socketcand connection maps to one hub session channel.
 
-This is deliberately client-hosted rather than a hub listener: it keeps the hub free of a second, unauthenticated ASCII plane, reuses ACLs instead of inventing a parallel exposure model, and composes like the planned `attach` bridge. A hub-side listener shim (for protocols better terminated centrally, e.g. cannelloni) remains an option as an additional listener transport that translates to the broker's transport contract.
+**attach (shipped, client-hosted):** `can-hub-client attach <interface-id> <vcan>` mirrors a remote bus into a pre-existing local `vcan`, bidirectionally, so the whole SocketCAN ecosystem (candump, SavvyCAN, Wireshark, python-can) reaches the remote bus unmodified, no `CAP_NET_ADMIN`. Pure composition: a freestanding mirror core (`src/mirror/`, an Agent-like state machine HELLO→OPEN→pump) drives the existing client transport on one side and the `SocketCanAdapter` on the other. Hub→local writes the decoded `FRAME` to the vcan; local→hub reads the vcan and sends a `FRAME` on the open channel. `OPEN` carries `WANT_WRITE`; on `WRITE_DENIED` it reopens read-only (mirror still flows remote→local). Echo loop is broken on two fronts: `SUPPRESS_OWN_ECHO` stops the hub returning our own injections, and the client's vcan socket sets `CAN_RAW_RECV_OWN_MSGS` off so locally-written frames are not re-read and re-sent (the agent keeps it on for TX↔echo correlation — hence the per-open flag on `SocketCanAdapter_Open`).
+
+Both shims are deliberately client-hosted rather than hub listeners: it keeps the hub free of a second, unauthenticated plane and reuses the existing client ACLs instead of inventing a parallel exposure model. A hub-side listener shim (for protocols better terminated centrally) remains an option as an additional listener transport that translates to the broker's transport contract.
 
 ### Web admin (future)
 
@@ -122,10 +124,11 @@ Delivered:
 - Hub — QUIC server, registry, relay routing, SQLite persistence, unix-socket admin, CLI.
 - Hardening & security — TOFU identities, mTLS, TLS-over-TCP, admin plane, backpressure/eviction, metrics.
 - Authorization & control — client ACLs, SUBSCRIBE id-mask filters, interface configuration (bitrate/link), socketcand shim.
+- Compatibility — `attach` mirrors a remote bus into a local vcan (bidirectional).
 
 Pending work is tracked as GitHub issues, grouped by milestone (priority order — 0 users today, so adoption first, freeze last):
 
-- **Adoption & product** — cannelloni-replacement `attach`, namespaced interface names, bus-to-bus bridge rules, cansend syntax gaps, error-frame export.
+- **Adoption & product** — namespaced interface names, bus-to-bus bridge rules, cansend syntax gaps, error-frame export.
 - **Reach** — microcontroller agent (lwIP + bxCAN), R-UDP transport, web admin panel.
 - **Protocol v1 freeze** — version negotiation, timestamp encoding decision, reconnect-matrix verification, then freeze (deprioritized while there are no users to break compat with).
 - **Backlog** — P2P phase 2 and deferred epics/polish.

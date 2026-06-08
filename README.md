@@ -40,7 +40,7 @@ to socketcand and cannelloni.
 |---|---|
 | `can-hub` | the hub: registry, frame relay, admin plane |
 | `can-hub-agent` | device daemon: exports local SocketCAN interfaces |
-| `can-hub-client` | consumer: `list`, `dump`, `send`, `socketcand` |
+| `can-hub-client` | consumer: `list`, `dump`, `send`, `socketcand`, `attach` |
 | `can-hub-cli` | hub administration over the local unix socket |
 
 ## Build
@@ -118,6 +118,24 @@ socketcand server on 127.0.0.1:29536, hub hub.example.com, beacon on
 It opens read-only when the client lacks a write ACL on a bus (receive still
 works); `--listen [<bind-ip>:]<port>` moves the server off the loopback default
 and `--no-beacon` silences discovery.
+
+Or mirror a remote bus straight into a local `vcan`, so `candump`, SavvyCAN,
+Wireshark and python-can work against the remote bus with zero changes. The
+`vcan` must already exist (no `CAP_NET_ADMIN` needed); the mirror is
+bidirectional:
+
+```sh
+$ ip link add vcan0 type vcan && ip link set vcan0 up    # once, as root
+$ can-hub-client --connect tls://hub.example.com:7227 attach 1 vcan0
+mirroring interface 1 to vcan0, ctrl-c to stop
+
+# now the whole SocketCAN toolbox sees the remote bus:
+$ candump vcan0
+$ cansend vcan0 123#DEADBEEF        # reaches the remote bus
+```
+
+It downgrades to read-only when the client lacks a write ACL (frames flow
+remote→local, local writes are refused at the hub).
 
 Administration, on the hub host:
 
