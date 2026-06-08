@@ -5,6 +5,7 @@ add_library(port_mocks STATIC
     identity_store_mock.c
     authorization_mock.c
     broker_driver.c
+    socketcand_server_port_mock.c
 )
 
 target_include_directories(port_mocks PUBLIC

@@ -100,11 +100,13 @@ acl delete <fp|*> <agent|*>/<iface|*>           drop a grant
 
 The hub accepts the admin HELLO role only on local transports: a peer claiming it over TCP or QUIC is disconnected. Clients carry no self-declared name — identity stays the TLS fingerprint, so interaction with clients goes through their peer id (`clients`/`agents show` print it, `peers kick` consumes it); if readable handles are ever needed they will be admin-assigned aliases bound to fingerprints, decided together with the ACL design.
 
-### Compatibility adapters (future)
+### Compatibility adapters
 
-Protocol compatibility needs no license: optional adapters may let socketcand or cannelloni clients talk to the hub, implemented from their public specs. Out of MVP scope.
+Protocol compatibility needs no license: adapters let socketcand or cannelloni clients reach hub interfaces, implemented from their public specs. socketcand is dual GPL-2.0-only OR BSD-3-Clause; we reimplement it clean-room and would take any borrowed code under the BSD arm (the GPL arm is incompatible with the AGPL/commercial dual-license).
 
-Shims run as additional listener transports on the hub itself: the hub listens on TCP and QUIC for its own protocol by default, and each enabled shim (e.g. socketcand ASCII) adds another listener that translates to the broker's transport contract — legacy clients connect to the hub directly, no separate proxy process.
+**socketcand (shipped, client-hosted):** `can-hub-client socketcand` runs a local socketcand TCP server (default `127.0.0.1:29536`) plus the UDP discovery beacon (port 42000). It dials the hub as an ordinary client and bridges: a socketcand `< open agent/iface >` is resolved against a cached hub `LIST` to an interface id, then `OPEN`ed; received frames become `< frame … >`, a socketcand `< send … >` becomes a hub `FRAME`. Rawmode only for now (BCM/ISO-TP/control parsed and rejected). The bridge core is freestanding (`src/socketcand/`), the TCP server and beacon are Linux adapters (`src/platform/linux/socketcand/`). The hub is untouched — **authorization is the existing client ACLs** the bridge already carries as a hub client (a write-denied bus opens read-only; `< send >` on it is refused). Each socketcand connection maps to one hub session channel.
+
+This is deliberately client-hosted rather than a hub listener: it keeps the hub free of a second, unauthenticated ASCII plane, reuses ACLs instead of inventing a parallel exposure model, and composes like the planned `attach` bridge. A hub-side listener shim (for protocols better terminated centrally, e.g. cannelloni) remains an option as an additional listener transport that translates to the broker's transport contract.
 
 ### Web admin (future)
 

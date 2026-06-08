@@ -367,6 +367,10 @@ channel with the suppress-own-echo flag.
 
 Multiple FRAME messages may be packed back-to-back in one datagram up to the path MTU.
 
+## External protocol bridging
+
+This document specifies the can-hub wire protocol only. Foreign protocols are bridged outside it, not added to the message set. socketcand (its own ASCII protocol, separate spec) is bridged by `can-hub-client socketcand`, which terminates socketcand locally and speaks ordinary HELLO/LIST/OPEN/FRAME to the hub on the client's behalf — the hub sees a normal client. See doc/design.md "Compatibility adapters".
+
 ## Open questions
 
 - Version negotiation details and capability bits in HELLO.
