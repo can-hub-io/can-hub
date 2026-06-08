@@ -161,10 +161,19 @@ static bool portConnect(void *context)
 static void portDisconnect(void *context)
 {
     QuicClientTransport *self = context;
+    uint8_t packet[UDP_PACKET_BUFFER_SIZE];
+    ngtcp2_ssize written;
 
     if (self->dispatching) {
         self->disconnect_pending = true;
         return;
+    }
+
+    if (self->connected && QuicConnection_IsOpen(&self->connection)) {
+        written = QuicConnection_WriteConnectionClose(&self->connection, packet, sizeof(packet));
+        if (written > 0) {
+            QuicUdpEndpoint_Send(&self->udp, packet, (size_t)written);
+        }
     }
 
     teardown(self, false);
