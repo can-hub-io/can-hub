@@ -22,6 +22,7 @@
 #include "protocol/error_message.h"
 #include "protocol/frame_message.h"
 #include "protocol/hello_message.h"
+#include "protocol/interface_name.h"
 #include "protocol/list_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
@@ -64,6 +65,9 @@ static uint8_t command;
 static uint8_t connect_scheme;
 static uint8_t open_flags;
 static uint32_t target_interface_id;
+static char target_interface_text[INTERFACE_NAME_NAMESPACED_SIZE];
+static bool resolving;
+static uint16_t resolve_offset;
 static FrameMessage frame_to_send;
 static CanFilter dump_filters[SUBSCRIBE_FILTERS_MAX];
 static uint8_t dump_filter_count;
@@ -103,6 +107,9 @@ static bool parseFilterSpec(const char *text, CanFilter *filter);
 static bool parseHexPayload(const char *text, FrameMessage *frame);
 static void sendFrameAndQuit(uint8_t channel);
 static void sendDumpFilters(uint8_t channel);
+static void sendListPage(uint16_t offset);
+static void sendOpenInterface(uint32_t interface_id);
+static void resolveAndOpen(const uint8_t *body, uint16_t length);
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *events);
 static bool prepareSecurityMaterial(const char *host, const char *port_text);
 static int32_t showIdentity(void);
@@ -143,11 +150,12 @@ int main(int argc, char **argv)
 
     if (!parseArguments(argc, argv, host, port_text)) {
         fprintf(stderr, "usage: %s [--connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>|unix://<path>]\n", argv[0]);
-        fprintf(stderr, "       [--state-dir <path>] list | dump [--no-echo] <interface-id> [<id>[:<mask>] ...]\n");
-        fprintf(stderr, "       | send <interface-id> <can-id>#<hex-payload>   (cansend syntax, e.g. 123#DEADBEEF)\n");
+        fprintf(stderr, "       [--state-dir <path>] list | dump [--no-echo] <interface> [<id>[:<mask>] ...]\n");
+        fprintf(stderr, "       | send <interface> <can-id>#<hex-payload>   (cansend syntax, e.g. 123#DEADBEEF)\n");
         fprintf(stderr, "       | socketcand [--listen [<bind-ip>:]<port>] [--no-beacon]\n");
         fprintf(stderr, "                                           local socketcand server (default 127.0.0.1:" SOCKETCAND_DEFAULT_PORT_TEXT ")\n");
-        fprintf(stderr, "       | attach <interface-id> <vcan>   mirror a remote bus into a local pre-created vcan (bidirectional)\n");
+        fprintf(stderr, "       | attach <interface> <vcan>   mirror a remote bus into a local pre-created vcan (bidirectional)\n");
+        fprintf(stderr, "       <interface> is the numeric id (from list) or the namespaced name agent/iface\n");
         fprintf(stderr, "       %s --show-identity [--state-dir <path>]   print this client's TLS fingerprint\n", argv[0]);
         fprintf(stderr, "       default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
         return 1;
@@ -201,17 +209,17 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
                 command = kCLIENT_COMMAND_SOCKETCAND;
             } else if (strcmp(command_name, "dump") == 0 && i + 1 < argc) {
                 command = kCLIENT_COMMAND_DUMP;
-                target_interface_id = (uint32_t)strtoul(argv[++i], NULL, 10);
+                snprintf(target_interface_text, sizeof(target_interface_text), "%s", argv[++i]);
             } else if (strcmp(command_name, "send") == 0 && i + 2 < argc) {
                 command = kCLIENT_COMMAND_SEND;
                 open_flags |= OPEN_FLAG_WANT_WRITE;
-                target_interface_id = (uint32_t)strtoul(argv[++i], NULL, 10);
+                snprintf(target_interface_text, sizeof(target_interface_text), "%s", argv[++i]);
                 if (!parseFrameSpec(argv[++i], &frame_to_send)) {
                     return false;
                 }
             } else if (strcmp(command_name, "attach") == 0 && i + 2 < argc) {
                 command = kCLIENT_COMMAND_ATTACH;
-                target_interface_id = (uint32_t)strtoul(argv[++i], NULL, 10);
+                snprintf(target_interface_text, sizeof(target_interface_text), "%s", argv[++i]);
                 snprintf(attach_interface_name, sizeof(attach_interface_name), "%s", argv[++i]);
             } else {
                 return false;
@@ -226,6 +234,14 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
 
     if (command_name == NULL) {
         return false;
+    }
+
+    if (command == kCLIENT_COMMAND_DUMP || command == kCLIENT_COMMAND_SEND) {
+        if (InterfaceName_IsNamespaced(target_interface_text)) {
+            resolving = true;
+        } else {
+            target_interface_id = (uint32_t)strtoul(target_interface_text, NULL, 10);
+        }
     }
 
     if (connect_url == NULL) {
@@ -344,6 +360,52 @@ static void sendDumpFilters(uint8_t channel)
     active_port->send_control(active_port->context, encoded, encoded_size);
 }
 
+static void sendListPage(uint16_t offset)
+{
+    ListMessage list = { offset };
+    uint8_t encoded[64];
+    size_t encoded_size = ListMessage_Encode(&list, encoded, sizeof(encoded));
+
+    active_port->send_control(active_port->context, encoded, encoded_size);
+}
+
+static void sendOpenInterface(uint32_t interface_id)
+{
+    OpenMessage open = { interface_id, open_flags };
+    uint8_t encoded[64];
+    size_t encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
+
+    active_port->send_control(active_port->context, encoded, encoded_size);
+}
+
+static void resolveAndOpen(const uint8_t *body, uint16_t length)
+{
+    ListReplyMessage reply;
+    uint32_t interface_id;
+
+    if (!ListReplyMessage_Decode(&reply, body, length)) {
+        fprintf(stderr, "malformed list reply\n");
+        exit_code = 1;
+        return;
+    }
+
+    if (InterfaceName_Find(&reply, target_interface_text, &interface_id)) {
+        resolving = false;
+        target_interface_id = interface_id;
+        sendOpenInterface(interface_id);
+        return;
+    }
+
+    if ((reply.flags & LIST_REPLY_FLAG_MORE) != 0 && reply.count > 0) {
+        resolve_offset = (uint16_t)(resolve_offset + reply.count);
+        sendListPage(resolve_offset);
+        return;
+    }
+
+    fprintf(stderr, "interface %s not found\n", target_interface_text);
+    exit_code = 1;
+}
+
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *events)
 {
     bool initialized;
@@ -438,8 +500,6 @@ static bool initQuicTransport(const char *host, const char *port_text, const Tra
 static void onConnected(void *context)
 {
     HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0 };
-    ListMessage list = { 0 };
-    OpenMessage open = { target_interface_id, open_flags };
     uint8_t encoded[64];
     size_t encoded_size;
 
@@ -448,12 +508,12 @@ static void onConnected(void *context)
     encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
     active_port->send_control(active_port->context, encoded, encoded_size);
 
-    if (command == kCLIENT_COMMAND_LIST) {
-        encoded_size = ListMessage_Encode(&list, encoded, sizeof(encoded));
-    } else {
-        encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
+    if (command == kCLIENT_COMMAND_LIST || resolving) {
+        sendListPage(resolve_offset);
+        return;
     }
-    active_port->send_control(active_port->context, encoded, encoded_size);
+
+    sendOpenInterface(target_interface_id);
 }
 
 static void onDisconnected(void *context, uint64_t now_us)
@@ -486,6 +546,10 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
         return;
     }
     if (header.type == kMESSAGE_TYPE_LIST_REPLY) {
+        if (resolving) {
+            resolveAndOpen(data + MESSAGE_HEADER_SIZE, header.length);
+            return;
+        }
         printListReply(data + MESSAGE_HEADER_SIZE, header.length);
         exit_code = 0;
         return;
@@ -855,14 +919,24 @@ static int32_t runAttach(const char *host, const char *port_text)
         return 1;
     }
 
-    MirrorApp_Init(&mirror_app, active_port, SocketCanAdapter_Port(&mirror_can_adapter), target_interface_id);
+    if (InterfaceName_IsNamespaced(target_interface_text)) {
+        MirrorApp_Init(&mirror_app, active_port, SocketCanAdapter_Port(&mirror_can_adapter), 0, target_interface_text);
+    } else {
+        MirrorApp_Init(
+            &mirror_app,
+            active_port,
+            SocketCanAdapter_Port(&mirror_can_adapter),
+            (uint32_t)strtoul(target_interface_text, NULL, 10),
+            NULL
+        );
+    }
 
     if (!active_port->connect(active_port->context)) {
         fprintf(stderr, "could not connect to %s\n", host);
         return 1;
     }
 
-    fprintf(stderr, "mirroring interface %u to %s, ctrl-c to stop\n", target_interface_id, attach_interface_name);
+    fprintf(stderr, "mirroring interface %s to %s, ctrl-c to stop\n", target_interface_text, attach_interface_name);
 
     return runAttachLoop();
 }
