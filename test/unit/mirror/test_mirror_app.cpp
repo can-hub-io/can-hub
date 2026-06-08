@@ -1,11 +1,13 @@
 #include <cest>
 
+#include <cstdio>
 #include <cstring>
 
 extern "C" {
 #include "can_port_mock.h"
 #include "mirror/mirror_app.h"
 #include "protocol/frame_message.h"
+#include "protocol/list_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
 #include "transport_port_mock.h"
@@ -19,18 +21,21 @@ static CanPortMock can;
 static TransportEvents hub_events;
 
 static void connect();
+static void connectByName(const char *name);
 static void feedOpenAck(uint8_t status, uint8_t channel);
+static void feedListReply(uint8_t flags, const char *agent, const char *iface, uint32_t interface_id);
 static void feedHubFrame(uint8_t channel, uint32_t can_id, uint8_t byte0, uint8_t byte1);
 static void feedHubError();
 static void sendLocalFrame(uint32_t can_id, uint8_t byte0);
 static void decodeSentOpen(uint8_t slot, OpenMessage *open);
+static uint8_t sentMessageType(uint8_t slot);
 static void decodeSentFrame(FrameMessage *frame);
 
 describe("mirror_app", []() {
     beforeEach([]() {
         TransportPortMock_Reset(&hub);
         CanPortMock_Reset(&can);
-        MirrorApp_Init(&mirror, &hub.port, &can.port, TEST_INTERFACE_ID);
+        MirrorApp_Init(&mirror, &hub.port, &can.port, TEST_INTERFACE_ID, nullptr);
         hub_events = MirrorApp_TransportEvents(&mirror);
     });
 
@@ -122,11 +127,64 @@ describe("mirror_app", []() {
 
         expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_FAILED);
     });
+
+    it("resolves a namespaced name via LIST then opens", []() {
+        OpenMessage open;
+
+        connectByName("truck42/can0");
+        feedListReply(0, "truck42", "can0", TEST_INTERFACE_ID);
+        decodeSentOpen(2, &open);
+
+        expect(sentMessageType(1)).toBe((uint8_t)kMESSAGE_TYPE_LIST);
+        expect(sentMessageType(2)).toBe((uint8_t)kMESSAGE_TYPE_OPEN);
+        expect(open.interface_id).toBe((uint32_t)TEST_INTERFACE_ID);
+
+        feedOpenAck(OPEN_STATUS_OK, 5);
+        expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_PUMPING);
+    });
+
+    it("paginates LIST until the name is found", []() {
+        connectByName("truck42/can1");
+        feedListReply(LIST_REPLY_FLAG_MORE, "truck42", "can0", 5);
+        feedListReply(0, "truck42", "can1", TEST_INTERFACE_ID);
+        feedOpenAck(OPEN_STATUS_OK, 5);
+
+        expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_PUMPING);
+    });
+
+    it("fails when the namespaced name is not in the catalogue", []() {
+        connectByName("truck42/can9");
+        feedListReply(0, "truck42", "can0", TEST_INTERFACE_ID);
+
+        expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_FAILED);
+    });
 });
 
 static void connect()
 {
     hub_events.on_connected(hub_events.context);
+}
+
+static void connectByName(const char *name)
+{
+    MirrorApp_Init(&mirror, &hub.port, &can.port, 0, name);
+    hub_events.on_connected(hub_events.context);
+}
+
+static void feedListReply(uint8_t flags, const char *agent, const char *iface, uint32_t interface_id)
+{
+    ListReplyMessage reply;
+    uint8_t wire[256];
+    size_t size;
+
+    memset(&reply, 0, sizeof(reply));
+    reply.count = 1;
+    reply.flags = flags;
+    reply.entries[0].interface_id = interface_id;
+    snprintf(reply.entries[0].agent_name, REGISTER_AGENT_NAME_SIZE, "%s", agent);
+    snprintf(reply.entries[0].interface_name, REGISTER_INTERFACE_NAME_SIZE, "%s", iface);
+    size = ListReplyMessage_Encode(&reply, wire, sizeof(wire));
+    hub_events.on_control(hub_events.context, wire, size, 1000);
 }
 
 static void feedOpenAck(uint8_t status, uint8_t channel)
@@ -180,6 +238,15 @@ static void decodeSentOpen(uint8_t slot, OpenMessage *open)
 
     MessageHeader_Decode(&header, hub.control_log[slot], hub.control_sizes[slot]);
     OpenMessage_Decode(open, hub.control_log[slot] + MESSAGE_HEADER_SIZE, header.length);
+}
+
+static uint8_t sentMessageType(uint8_t slot)
+{
+    MessageHeader header;
+
+    MessageHeader_Decode(&header, hub.control_log[slot], hub.control_sizes[slot]);
+
+    return header.type;
 }
 
 static void decodeSentFrame(FrameMessage *frame)
