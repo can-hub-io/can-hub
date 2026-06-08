@@ -79,6 +79,23 @@ const InterfaceEntry *InterfaceRegistry_FindById(const InterfaceRegistry *self, 
     return NULL;
 }
 
+const InterfaceEntry *InterfaceRegistry_FindByName(
+    const InterfaceRegistry *self,
+    const char *agent_name,
+    const char *interface_name
+)
+{
+    uint32_t i;
+
+    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
+        if (self->entries[i].in_use && namesMatch(&self->entries[i], agent_name, interface_name)) {
+            return &self->entries[i];
+        }
+    }
+
+    return NULL;
+}
+
 const InterfaceEntry *InterfaceRegistry_FindByAgentChannel(
     const InterfaceRegistry *self,
     uint32_t agent_peer_id,

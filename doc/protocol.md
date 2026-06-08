@@ -42,6 +42,8 @@ offset  size  field
 0x08  SUBSCRIBE    CAN id mask filters for an open channel
 0x09  ERROR        code + human-readable detail
 0x0A  OPEN_ACK     status + assigned channel
+0x0B  IFCONFIG     hub -> agent: apply an interface change (bitrate, up, down)
+0x0C  IFCONFIG_REPLY agent -> hub: apply status
 0x10  ADMIN_STATUS        admin: hub counters
 0x11  ADMIN_STATUS_REPLY
 0x12  ADMIN_PEERS         admin: live peer table (paginated)
@@ -68,6 +70,8 @@ offset  size  field
 0x27  ADMIN_ACL_REVOKE_REPLY
 0x28  ADMIN_ACL_LIST      admin: list client grants (paginated)
 0x29  ADMIN_ACL_LIST_REPLY
+0x2A  ADMIN_IFCONFIG      admin: reconfigure an interface (bitrate, up, down)
+0x2B  ADMIN_IFCONFIG_REPLY
 0x7F  PING/PONG    liveness (flags bit 0: reply)
 ```
 
@@ -171,6 +175,36 @@ mask test as struct can_filter, flag bits 29-31 included. The filter applies
 only to frames the hub fans out toward the client; it never affects injection
 toward the agent. SUBSCRIBE on an unopened channel returns an ERROR and is
 otherwise ignored (no SUBSCRIBE_ACK).
+
+IFCONFIG (total 28, hub -> agent)
+@4   interface_name char[16]
+@20  op u8 (0 set bitrate, 1 link up, 2 link down)
+@21  reserved u8[3]
+@24  bitrate u32 (bits per second; only read for op 0)
+
+IFCONFIG_REPLY (total 24, agent -> hub)
+@4   interface_name char[16]   (echo, lets the hub correlate the request)
+@20  status u8 (0 ok, 1 unknown interface, 2 apply failed)
+@21  reserved u8[3]
+
+ADMIN_IFCONFIG (total 156, admin -> hub)
+@4   agent_name char[128]
+@132 interface_name char[16]
+@148 op u8 (0 set bitrate, 1 link up, 2 link down)
+@149 reserved u8[3]
+@152 bitrate u32
+
+ADMIN_IFCONFIG_REPLY (total 8)
+@4   status u8 (0 ok, 1 unknown interface, 2 agent unreachable, 3 apply failed)
+@5   reserved u8[3]
+
+Interface configuration is admin-only. The admin names the interface by its
+namespaced (agent_name, interface_name) pair; the hub resolves it, forwards an
+IFCONFIG to the owning agent, and relays the agent's IFCONFIG_REPLY back as an
+ADMIN_IFCONFIG_REPLY — a synchronous round trip. The agent applies the change
+through its CAN port (SocketCAN: rtnetlink, needs CAP_NET_ADMIN). A bitrate
+change brings the link down, sets the bitrate, brings it up. If the agent
+disconnects before replying the admin gets status agent unreachable.
 
 ADMIN_STATUS (total 4)
 empty payload
@@ -340,4 +374,4 @@ Multiple FRAME messages may be packed back-to-back in one datagram up to the pat
 - P2P phase 2: endpoint exchange messages (OFFER/ANSWER pattern).
 - Reliable data plane: flows that need guaranteed in-order delivery (ISOTP transfers, UDS/firmware upgrades) mapped to dedicated QUIC streams instead of datagrams — reliable per flow without head-of-line blocking the cyclic traffic. Candidate signalling: a flag on OPEN/SUBSCRIBE selecting reliable transport for matching CAN ids.
 - Timestamp cost: u64 is the largest FRAME field. A u32 microsecond timestamp relative to a negotiated session base (wraps every ~71 min) would save 4 bytes per frame.
-- Interface configuration messaging (bitrate, bit timings, FD parameters, up/down): deferred. Needs its own message family and an authorization story.
+- Interface configuration: only bitrate and link up/down ship today (admin-only). Bit timings and FD data parameters are not yet exposed.

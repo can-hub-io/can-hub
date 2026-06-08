@@ -1,6 +1,9 @@
 #include "agent/agent.h"
 
+#include <string.h>
+
 #include "protocol/hello_message.h"
+#include "protocol/ifconfig_message.h"
 #include "protocol/message_header.h"
 
 #define CONTROL_BUFFER_SIZE 512
@@ -20,10 +23,13 @@ static void scheduleReconnect(Agent *self, uint64_t now_us);
 static void sendHelloAndRegister(Agent *self);
 static void handleRegisterAck(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
 static void handlePing(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
+static void handleIfconfig(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
+static bool interfaceIndexForName(const Agent *self, const char *interface_name, uint8_t *interface_index);
 
 static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
     [kMESSAGE_TYPE_REGISTER_ACK] = handleRegisterAck,
     [kMESSAGE_TYPE_PING] = handlePing,
+    [kMESSAGE_TYPE_IFCONFIG] = handleIfconfig,
 };
 
 /* ---------- public ---------- */
@@ -296,4 +302,52 @@ static void handlePing(Agent *self, const MessageHeader *header, const uint8_t *
     pong.length = 0;
     MessageHeader_Encode(&pong, encoded, sizeof(encoded));
     self->transport->send_control(self->transport->context, encoded, sizeof(encoded));
+}
+
+static void handleIfconfig(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us)
+{
+    IfconfigMessage request;
+    IfconfigReplyMessage reply;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    uint8_t interface_index;
+    size_t encoded_size;
+
+    (void)now_us;
+
+    if (self->state != kAGENT_STATE_RUNNING) {
+        return;
+    }
+    if (!IfconfigMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    memset(reply.interface_name, 0, sizeof(reply.interface_name));
+    memcpy(reply.interface_name, request.interface_name, sizeof(reply.interface_name));
+
+    if (!interfaceIndexForName(self, request.interface_name, &interface_index)) {
+        reply.status = IFCONFIG_STATUS_UNKNOWN_INTERFACE;
+    } else if (self->can->configure(self->can->context, interface_index, request.op, request.bitrate)) {
+        reply.status = IFCONFIG_STATUS_OK;
+    } else {
+        reply.status = IFCONFIG_STATUS_APPLY_FAILED;
+    }
+
+    encoded_size = IfconfigReplyMessage_Encode(&reply, encoded, sizeof(encoded));
+    if (encoded_size > 0) {
+        self->transport->send_control(self->transport->context, encoded, encoded_size);
+    }
+}
+
+static bool interfaceIndexForName(const Agent *self, const char *interface_name, uint8_t *interface_index)
+{
+    uint8_t i;
+
+    for(i=0; i<self->registration.interface_count; i++) {
+        if (strcmp(self->registration.interface_names[i], interface_name) == 0) {
+            *interface_index = i;
+            return true;
+        }
+    }
+
+    return false;
 }

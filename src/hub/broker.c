@@ -9,6 +9,7 @@
 #include "protocol/error_message.h"
 #include "protocol/frame_message.h"
 #include "protocol/hello_message.h"
+#include "protocol/ifconfig_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
 #include "protocol/subscribe_message.h"
@@ -52,6 +53,12 @@ static void handleAdminPinAdd(Broker *self, HubPeer *peer, const MessageHeader *
 static void handleAdminAclSet(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminAclRevoke(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminAclList(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleAdminIfconfig(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleIfconfigReply(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static bool rememberPendingIfconfig(Broker *self, uint32_t admin_peer_id, uint32_t agent_peer_id, const char *interface_name);
+static bool takePendingIfconfig(Broker *self, uint32_t agent_peer_id, const char *interface_name, uint32_t *admin_peer_id);
+static void releasePendingIfconfig(Broker *self, uint32_t peer_id);
+static uint8_t adminIfconfigStatus(uint8_t agent_status);
 static void countInterfaceFrame(Broker *self, const HubPeer *peer, uint8_t channel);
 static void disconnectPeer(Broker *self, uint32_t peer_id);
 static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
@@ -86,6 +93,8 @@ static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
     [kMESSAGE_TYPE_ADMIN_ACL_SET] = handleAdminAclSet,
     [kMESSAGE_TYPE_ADMIN_ACL_REVOKE] = handleAdminAclRevoke,
     [kMESSAGE_TYPE_ADMIN_ACL_LIST] = handleAdminAclList,
+    [kMESSAGE_TYPE_ADMIN_IFCONFIG] = handleAdminIfconfig,
+    [kMESSAGE_TYPE_IFCONFIG_REPLY] = handleIfconfigReply,
 };
 
 /* ---------- public ---------- */
@@ -167,6 +176,7 @@ static void onPeerDisconnected(void *context, uint32_t peer_id, uint64_t now_us)
         detachAgent(self, peer_id);
     }
 
+    releasePendingIfconfig(self, peer_id);
     PeerDirectory_Release(&self->directory, peer_id);
 }
 
@@ -762,6 +772,74 @@ static void handleAdminForget(Broker *self, HubPeer *peer, const MessageHeader *
     sendControl(self, peer, encoded, AdminForgetReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 
+static void handleAdminIfconfig(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    AdminIfconfigMessage request;
+    AdminIfconfigReplyMessage reply;
+    IfconfigMessage forward;
+    const InterfaceEntry *entry;
+    HubPeer *agent;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN) {
+        return;
+    }
+    if (!AdminIfconfigMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    entry = InterfaceRegistry_FindByName(&self->registry, request.agent_name, request.interface_name);
+    if (entry == NULL) {
+        reply.status = ADMIN_IFCONFIG_STATUS_UNKNOWN_INTERFACE;
+        sendControl(self, peer, encoded, AdminIfconfigReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+        return;
+    }
+
+    reply.status = ADMIN_IFCONFIG_STATUS_AGENT_UNREACHABLE;
+    agent = PeerDirectory_Find(&self->directory, entry->agent_peer_id);
+    if (agent == NULL || agent->role != kHUB_PEER_ROLE_AGENT) {
+        sendControl(self, peer, encoded, AdminIfconfigReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+        return;
+    }
+    if (!rememberPendingIfconfig(self, peer->peer_id, entry->agent_peer_id, entry->interface_name)) {
+        sendControl(self, peer, encoded, AdminIfconfigReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+        return;
+    }
+
+    memset(&forward, 0, sizeof(forward));
+    memcpy(forward.interface_name, entry->interface_name, REGISTER_INTERFACE_NAME_SIZE);
+    forward.op = request.op;
+    forward.bitrate = request.bitrate;
+    sendControl(self, agent, encoded, IfconfigMessage_Encode(&forward, encoded, sizeof(encoded)));
+}
+
+static void handleIfconfigReply(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    IfconfigReplyMessage reply;
+    AdminIfconfigReplyMessage admin_reply;
+    HubPeer *admin;
+    uint32_t admin_peer_id;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+
+    if (peer->role != kHUB_PEER_ROLE_AGENT) {
+        return;
+    }
+    if (!IfconfigReplyMessage_Decode(&reply, payload, header->length)) {
+        return;
+    }
+    if (!takePendingIfconfig(self, peer->peer_id, reply.interface_name, &admin_peer_id)) {
+        return;
+    }
+
+    admin = PeerDirectory_Find(&self->directory, admin_peer_id);
+    if (admin == NULL) {
+        return;
+    }
+
+    admin_reply.status = adminIfconfigStatus(reply.status);
+    sendControl(self, admin, encoded, AdminIfconfigReplyMessage_Encode(&admin_reply, encoded, sizeof(encoded)));
+}
+
 /* ---------- private: helpers ---------- */
 
 static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const RegisterMessage *registration)
@@ -789,6 +867,82 @@ static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const Regi
     return strcmp(pinned, peer->fingerprint_hex) == 0 ? REGISTER_STATUS_OK : REGISTER_STATUS_IDENTITY_MISMATCH;
 }
 
+static bool rememberPendingIfconfig(Broker *self, uint32_t admin_peer_id, uint32_t agent_peer_id, const char *interface_name)
+{
+    uint8_t i;
+
+    for(i=0; i<BROKER_PENDING_IFCONFIG_MAX; i++) {
+        if (self->pending_ifconfig[i].in_use) {
+            continue;
+        }
+        self->pending_ifconfig[i].in_use = true;
+        self->pending_ifconfig[i].admin_peer_id = admin_peer_id;
+        self->pending_ifconfig[i].agent_peer_id = agent_peer_id;
+        memcpy(self->pending_ifconfig[i].interface_name, interface_name, REGISTER_INTERFACE_NAME_SIZE);
+        return true;
+    }
+
+    return false;
+}
+
+static bool takePendingIfconfig(Broker *self, uint32_t agent_peer_id, const char *interface_name, uint32_t *admin_peer_id)
+{
+    uint8_t i;
+
+    for(i=0; i<BROKER_PENDING_IFCONFIG_MAX; i++) {
+        if (!self->pending_ifconfig[i].in_use) {
+            continue;
+        }
+        if (self->pending_ifconfig[i].agent_peer_id != agent_peer_id) {
+            continue;
+        }
+        if (strncmp(self->pending_ifconfig[i].interface_name, interface_name, REGISTER_INTERFACE_NAME_SIZE) != 0) {
+            continue;
+        }
+        *admin_peer_id = self->pending_ifconfig[i].admin_peer_id;
+        self->pending_ifconfig[i].in_use = false;
+        return true;
+    }
+
+    return false;
+}
+
+static void releasePendingIfconfig(Broker *self, uint32_t peer_id)
+{
+    AdminIfconfigReplyMessage reply;
+    HubPeer *admin;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    uint8_t i;
+
+    for(i=0; i<BROKER_PENDING_IFCONFIG_MAX; i++) {
+        if (!self->pending_ifconfig[i].in_use) {
+            continue;
+        }
+        if (self->pending_ifconfig[i].agent_peer_id == peer_id) {
+            admin = PeerDirectory_Find(&self->directory, self->pending_ifconfig[i].admin_peer_id);
+            if (admin != NULL) {
+                reply.status = ADMIN_IFCONFIG_STATUS_AGENT_UNREACHABLE;
+                sendControl(self, admin, encoded, AdminIfconfigReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+            }
+            self->pending_ifconfig[i].in_use = false;
+        } else if (self->pending_ifconfig[i].admin_peer_id == peer_id) {
+            self->pending_ifconfig[i].in_use = false;
+        }
+    }
+}
+
+static uint8_t adminIfconfigStatus(uint8_t agent_status)
+{
+    if (agent_status == IFCONFIG_STATUS_OK) {
+        return ADMIN_IFCONFIG_STATUS_OK;
+    }
+    if (agent_status == IFCONFIG_STATUS_UNKNOWN_INTERFACE) {
+        return ADMIN_IFCONFIG_STATUS_UNKNOWN_INTERFACE;
+    }
+
+    return ADMIN_IFCONFIG_STATUS_APPLY_FAILED;
+}
+
 static void disconnectPeer(Broker *self, uint32_t peer_id)
 {
     HubPeer *peer = PeerDirectory_Find(&self->directory, peer_id);
@@ -801,6 +955,7 @@ static void disconnectPeer(Broker *self, uint32_t peer_id)
         detachAgent(self, peer_id);
     }
 
+    releasePendingIfconfig(self, peer_id);
     PeerDirectory_Release(&self->directory, peer_id);
     self->transport->close_peer(self->transport->context, peer_id);
 }

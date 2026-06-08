@@ -6,6 +6,9 @@
 #include "hub/ports/hub_transport_events.h"
 #include "hub/ports/identity_store_port.h"
 #include "hub/ports/hub_transport_port.h"
+#include "protocol/register_message.h"
+
+#define BROKER_PENDING_IFCONFIG_MAX 16
 
 /*
  * Broker: mediates between agents and clients. Admits peers, keeps the
@@ -21,12 +24,20 @@ typedef struct {
 } HubMetrics;
 
 typedef struct {
+    bool in_use;
+    uint32_t admin_peer_id;
+    uint32_t agent_peer_id;
+    char interface_name[REGISTER_INTERFACE_NAME_SIZE];
+} PendingIfconfig;
+
+typedef struct {
     HubTransportPort *transport;
     IdentityStorePort *identity_store;
     AuthorizationPort *authorization;
     InterfaceRegistry registry;
     PeerDirectory directory;
     HubMetrics metrics;
+    PendingIfconfig pending_ifconfig[BROKER_PENDING_IFCONFIG_MAX];
     bool require_known_agents;
 } Broker;
 
