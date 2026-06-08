@@ -27,26 +27,7 @@ jobs:
           path: build/x86_64/release/can-hub*
           retention-days: 7
 
-  release-arm64:
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v4
-      - name: install dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libgnutls28-dev
-      - name: cache build tree
-        uses: actions/cache@v4
-        with:
-          path: build
-          key: arm64-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
-      - name: release build
-        run: make release ARCH=arm64
-      - uses: actions/upload-artifact@v4
-        with:
-          name: can-hub-arm64
-          path: build/arm64/release/can-hub*
-          retention-days: 7
-
-  release-armhf:
+  cross-armhf:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
@@ -69,6 +50,7 @@ jobs:
           retention-days: 7
 
   static:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     strategy:
       matrix:
