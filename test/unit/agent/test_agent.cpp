@@ -4,6 +4,7 @@ extern "C" {
 #include "agent/agent.h"
 #include "can_port_mock.h"
 #include "protocol/hello_message.h"
+#include "protocol/ifconfig_message.h"
 #include "protocol/message_header.h"
 #include "transport_port_mock.h"
 }
@@ -287,6 +288,62 @@ describe("agent", []() {
             FrameMessage_Decode(&sent_frame, transport.last_frame + MESSAGE_HEADER_SIZE, sent_header.length);
 
             expect(sent_frame.route_flags).toBe(0);
+        });
+
+        it("applies an interface config and replies ok", []() {
+            IfconfigMessage request = { "can1", IFCONFIG_OP_SET_BITRATE, 250000 };
+            IfconfigReplyMessage reply;
+            MessageHeader header;
+            uint8_t encoded[64];
+            size_t encoded_size = IfconfigMessage_Encode(&request, encoded, sizeof(encoded));
+            int reply_index;
+
+            Agent_OnControlMessage(&agent, encoded, encoded_size, 0);
+            reply_index = transport.control_count - 1;
+            MessageHeader_Decode(&header, transport.control_log[reply_index], transport.control_sizes[reply_index]);
+            IfconfigReplyMessage_Decode(&reply, transport.control_log[reply_index] + MESSAGE_HEADER_SIZE, header.length);
+
+            expect(can.configure_count).toBe(1);
+            expect(can.last_configure_interface_index).toBe(1);
+            expect(can.last_configure_op).toBe(IFCONFIG_OP_SET_BITRATE);
+            expect(can.last_configure_bitrate).toBe((uint32_t)250000);
+            expect(header.type).toBe(kMESSAGE_TYPE_IFCONFIG_REPLY);
+            expect(reply.status).toBe(IFCONFIG_STATUS_OK);
+        });
+
+        it("replies unknown interface for a name it does not export", []() {
+            IfconfigMessage request = { "can9", IFCONFIG_OP_UP, 0 };
+            IfconfigReplyMessage reply;
+            MessageHeader header;
+            uint8_t encoded[64];
+            size_t encoded_size = IfconfigMessage_Encode(&request, encoded, sizeof(encoded));
+            int reply_index;
+
+            Agent_OnControlMessage(&agent, encoded, encoded_size, 0);
+            reply_index = transport.control_count - 1;
+            MessageHeader_Decode(&header, transport.control_log[reply_index], transport.control_sizes[reply_index]);
+            IfconfigReplyMessage_Decode(&reply, transport.control_log[reply_index] + MESSAGE_HEADER_SIZE, header.length);
+
+            expect(can.configure_count).toBe(0);
+            expect(reply.status).toBe(IFCONFIG_STATUS_UNKNOWN_INTERFACE);
+        });
+
+        it("replies apply failed when the adapter rejects the change", []() {
+            IfconfigMessage request = { "can0", IFCONFIG_OP_DOWN, 0 };
+            IfconfigReplyMessage reply;
+            MessageHeader header;
+            uint8_t encoded[64];
+            size_t encoded_size = IfconfigMessage_Encode(&request, encoded, sizeof(encoded));
+            int reply_index;
+
+            can.configure_result = false;
+            Agent_OnControlMessage(&agent, encoded, encoded_size, 0);
+            reply_index = transport.control_count - 1;
+            MessageHeader_Decode(&header, transport.control_log[reply_index], transport.control_sizes[reply_index]);
+            IfconfigReplyMessage_Decode(&reply, transport.control_log[reply_index] + MESSAGE_HEADER_SIZE, header.length);
+
+            expect(can.configure_count).toBe(1);
+            expect(reply.status).toBe(IFCONFIG_STATUS_APPLY_FAILED);
         });
     });
 

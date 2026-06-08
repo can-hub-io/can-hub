@@ -30,6 +30,7 @@ set(COMMON_SOURCES
     src/protocol/open_message.c
     src/protocol/register_message.c
     src/protocol/subscribe_message.c
+    src/protocol/ifconfig_message.c
 )
 
 include(FetchContent)
@@ -68,6 +69,7 @@ set(AGENT_SOURCES
     src/platform/linux/shared/tls_identity.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/socketcan/socketcan_adapter.c
+    src/platform/linux/socketcan/can_netlink.c
     src/platform/linux/tcp/tcp_channel.c
     src/platform/linux/tcp/tcp_client_transport.c
     src/platform/linux/tls/tls_channel.c

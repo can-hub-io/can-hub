@@ -14,6 +14,7 @@ extern "C" {
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
 #include "protocol/subscribe_message.h"
+#include "protocol/ifconfig_message.h"
 }
 
 #define AGENT_PEER 100
@@ -1086,6 +1087,110 @@ describe("broker", []() {
             Broker_Tick(&broker, 60000000);
 
             expect(transport.close_count).toBe(0);
+        });
+    });
+
+    describe("interface configuration", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            events = Broker_Events(&broker);
+            BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
+            BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
+        });
+
+        it("forwards an admin request to the owning agent", []() {
+            AdminIfconfigMessage request;
+            IfconfigMessage forwarded;
+            MessageHeader header;
+            uint8_t encoded[256];
+            size_t encoded_size;
+
+            memset(&request, 0, sizeof(request));
+            snprintf(request.agent_name, sizeof(request.agent_name), "truck42");
+            snprintf(request.interface_name, sizeof(request.interface_name), "can0");
+            request.op = IFCONFIG_OP_SET_BITRATE;
+            request.bitrate = 500000;
+            encoded_size = AdminIfconfigMessage_Encode(&request, encoded, sizeof(encoded));
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+
+            MessageHeader_Decode(&header, transport.control_log[0], transport.control_sizes[0]);
+            IfconfigMessage_Decode(&forwarded, transport.control_log[0] + MESSAGE_HEADER_SIZE, header.length);
+
+            expect(transport.control_count).toBe(1);
+            expect(transport.control_peers[0]).toBe((uint32_t)AGENT_PEER);
+            expect(header.type).toBe(kMESSAGE_TYPE_IFCONFIG);
+            expect((const char *)forwarded.interface_name).toBe("can0");
+            expect(forwarded.op).toBe(IFCONFIG_OP_SET_BITRATE);
+            expect(forwarded.bitrate).toBe((uint32_t)500000);
+        });
+
+        it("relays the agent reply back to the waiting admin", []() {
+            AdminIfconfigMessage request;
+            IfconfigReplyMessage agent_reply = { "can0", IFCONFIG_STATUS_OK };
+            AdminIfconfigReplyMessage admin_reply;
+            uint8_t reply_type;
+            uint8_t encoded[256];
+            size_t encoded_size;
+
+            memset(&request, 0, sizeof(request));
+            snprintf(request.agent_name, sizeof(request.agent_name), "truck42");
+            snprintf(request.interface_name, sizeof(request.interface_name), "can0");
+            request.op = IFCONFIG_OP_UP;
+            encoded_size = AdminIfconfigMessage_Encode(&request, encoded, sizeof(encoded));
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+
+            encoded_size = IfconfigReplyMessage_Encode(&agent_reply, encoded, sizeof(encoded));
+            sendControlFrom(AGENT_PEER, encoded, encoded_size);
+            reply_type = lastReply(&admin_reply, AdminIfconfigReplyMessage_Decode);
+
+            expect(transport.control_peers[transport.control_count - 1]).toBe((uint32_t)ADMIN_PEER);
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_IFCONFIG_REPLY);
+            expect(admin_reply.status).toBe(ADMIN_IFCONFIG_STATUS_OK);
+        });
+
+        it("answers unknown interface without reaching the agent", []() {
+            AdminIfconfigMessage request;
+            AdminIfconfigReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[256];
+            size_t encoded_size;
+
+            memset(&request, 0, sizeof(request));
+            snprintf(request.agent_name, sizeof(request.agent_name), "truck42");
+            snprintf(request.interface_name, sizeof(request.interface_name), "can9");
+            request.op = IFCONFIG_OP_DOWN;
+            encoded_size = AdminIfconfigMessage_Encode(&request, encoded, sizeof(encoded));
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminIfconfigReplyMessage_Decode);
+
+            expect(transport.control_count).toBe(1);
+            expect(transport.control_peers[0]).toBe((uint32_t)ADMIN_PEER);
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_IFCONFIG_REPLY);
+            expect(reply.status).toBe(ADMIN_IFCONFIG_STATUS_UNKNOWN_INTERFACE);
+        });
+
+        it("answers unreachable when the agent drops before replying", []() {
+            AdminIfconfigMessage request;
+            AdminIfconfigReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[256];
+            size_t encoded_size;
+
+            memset(&request, 0, sizeof(request));
+            snprintf(request.agent_name, sizeof(request.agent_name), "truck42");
+            snprintf(request.interface_name, sizeof(request.interface_name), "can0");
+            request.op = IFCONFIG_OP_SET_BITRATE;
+            request.bitrate = 250000;
+            encoded_size = AdminIfconfigMessage_Encode(&request, encoded, sizeof(encoded));
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+
+            events.on_peer_disconnected(events.context, AGENT_PEER, 0);
+            reply_type = lastReply(&reply, AdminIfconfigReplyMessage_Decode);
+
+            expect(transport.control_peers[transport.control_count - 1]).toBe((uint32_t)ADMIN_PEER);
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_IFCONFIG_REPLY);
+            expect(reply.status).toBe(ADMIN_IFCONFIG_STATUS_AGENT_UNREACHABLE);
         });
     });
 });

@@ -16,6 +16,7 @@
 typedef struct {
     CanPort port;
     int32_t can_fds[REGISTER_INTERFACES_MAX];
+    char interface_names[REGISTER_INTERFACES_MAX][REGISTER_INTERFACE_NAME_SIZE];
     uint8_t interface_count;
 } SocketCanAdapter;
 

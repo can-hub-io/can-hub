@@ -1,6 +1,9 @@
 #include "platform/linux/socketcan/socketcan_adapter.h"
 
 #include "platform/linux/clock/clock.h"
+#include "platform/linux/socketcan/can_netlink.h"
+
+#include "protocol/ifconfig_message.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -15,6 +18,7 @@
 #define RECEIVE_BUFFER_BYTES (1024 * 1024)
 
 static bool portWriteFrame(void *context, uint8_t interface_index, const FrameMessage *frame);
+static bool portConfigure(void *context, uint8_t interface_index, uint8_t op, uint32_t bitrate);
 static bool writeClassicFrame(int32_t can_fd, const FrameMessage *frame);
 static bool writeFdFrame(int32_t can_fd, const FrameMessage *frame);
 static int32_t openCanSocket(const char *interface_name);
@@ -30,9 +34,11 @@ bool SocketCanAdapter_Open(SocketCanAdapter *self, const RegisterMessage *regist
     memset(self, 0, sizeof(*self));
     self->port.context = self;
     self->port.write_frame = portWriteFrame;
+    self->port.configure = portConfigure;
     self->interface_count = registration->interface_count;
 
     for(i=0; i<self->interface_count; i++) {
+        snprintf(self->interface_names[i], REGISTER_INTERFACE_NAME_SIZE, "%s", registration->interface_names[i]);
         self->can_fds[i] = openCanSocket(registration->interface_names[i]);
         if (self->can_fds[i] < 0) {
             SocketCanAdapter_Close(self);
@@ -106,6 +112,37 @@ static bool portWriteFrame(void *context, uint8_t interface_index, const FrameMe
     }
 
     return writeClassicFrame(self->can_fds[interface_index], frame);
+}
+
+static bool portConfigure(void *context, uint8_t interface_index, uint8_t op, uint32_t bitrate)
+{
+    SocketCanAdapter *self = context;
+    const char *interface_name;
+
+    if (interface_index >= self->interface_count) {
+        return false;
+    }
+
+    interface_name = self->interface_names[interface_index];
+
+    if (op == IFCONFIG_OP_UP) {
+        return CanNetlink_SetLink(interface_name, true);
+    }
+    if (op == IFCONFIG_OP_DOWN) {
+        return CanNetlink_SetLink(interface_name, false);
+    }
+    if (op != IFCONFIG_OP_SET_BITRATE) {
+        return false;
+    }
+
+    if (!CanNetlink_SetLink(interface_name, false)) {
+        return false;
+    }
+    if (!CanNetlink_SetBitrate(interface_name, bitrate)) {
+        return false;
+    }
+
+    return CanNetlink_SetLink(interface_name, true);
 }
 
 static bool writeClassicFrame(int32_t can_fd, const FrameMessage *frame)
