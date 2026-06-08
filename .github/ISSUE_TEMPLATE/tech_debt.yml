@@ -1,0 +1,51 @@
+name: Tech-debt / refactor
+description: An internal cleanup, refactor, or known limitation to pay down.
+title: "<short description of the debt>"
+labels: ["type:tech-debt"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - "area:protocol"
+        - "area:hub"
+        - "area:agent"
+        - "area:client"
+        - "area:transport"
+        - "area:platform"
+        - "area:packaging"
+        - "area:ci"
+        - "area:docs"
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current state
+      description: How it works today and why that's a problem.
+    validations:
+      required: true
+  - type: textarea
+    id: desired
+    attributes:
+      label: Desired state
+      description: What it should look like instead.
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Why it matters / risk
+      description: What breaks or gets harder if left unpaid.
+    validations:
+      required: true
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Tasks
+      value: |
+        - [ ]
+    validations:
+      required: false

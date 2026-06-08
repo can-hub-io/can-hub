@@ -1,0 +1,70 @@
+name: Bug report
+description: Something behaves incorrectly.
+title: "<short summary of the bug>"
+labels: ["type:bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - "area:protocol"
+        - "area:hub"
+        - "area:agent"
+        - "area:client"
+        - "area:transport"
+        - "area:platform"
+        - "area:packaging"
+        - "area:ci"
+        - "area:docs"
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What's wrong, in one or two sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Binary, transport, arch, kernel, build (release/debug/static).
+      value: |
+        - Binary:
+        - Transport:
+        - Arch / kernel:
+        - Build:
+    validations:
+      required: true
