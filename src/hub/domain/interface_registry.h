@@ -37,6 +37,11 @@ bool InterfaceRegistry_RegisterAgent(
     RegisterAckMessage *ack
 );
 void InterfaceRegistry_RemovePeer(InterfaceRegistry *self, uint32_t agent_peer_id);
+bool InterfaceRegistry_CollidingPeer(
+    const InterfaceRegistry *self,
+    const RegisterMessage *registration,
+    uint32_t *agent_peer_id
+);
 const InterfaceEntry *InterfaceRegistry_FindById(const InterfaceRegistry *self, uint32_t interface_id);
 const InterfaceEntry *InterfaceRegistry_FindByAgentChannel(
     const InterfaceRegistry *self,
