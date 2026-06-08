@@ -250,3 +250,46 @@ add_unit_test(test_broker
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
 target_link_libraries(test_broker PRIVATE port_mocks)
+
+add_unit_test(test_ascii_framer
+    SOURCES
+        socketcand/test_ascii_framer.cpp
+        ${ROOT_SRC_DIR}/socketcand/domain/ascii_framer.c
+)
+
+add_unit_test(test_socketcand_codec
+    SOURCES
+        socketcand/test_socketcand_codec.cpp
+        ${ROOT_SRC_DIR}/socketcand/domain/socketcand_codec.c
+)
+
+add_unit_test(test_interface_catalogue
+    SOURCES
+        socketcand/test_interface_catalogue.cpp
+        ${ROOT_SRC_DIR}/socketcand/domain/interface_catalogue.c
+)
+
+add_unit_test(test_beacon_xml
+    SOURCES
+        socketcand/test_beacon_xml.cpp
+        ${ROOT_SRC_DIR}/socketcand/domain/beacon_xml.c
+        ${ROOT_SRC_DIR}/socketcand/domain/interface_catalogue.c
+)
+
+add_unit_test(test_socketcand_bridge
+    SOURCES
+        socketcand/test_socketcand_bridge.cpp
+        ${ROOT_SRC_DIR}/socketcand/socketcand_bridge.c
+        ${ROOT_SRC_DIR}/socketcand/domain/ascii_framer.c
+        ${ROOT_SRC_DIR}/socketcand/domain/socketcand_codec.c
+        ${ROOT_SRC_DIR}/socketcand/domain/interface_catalogue.c
+        ${ROOT_SRC_DIR}/socketcand/domain/connection_table.c
+        ${ROOT_SRC_DIR}/socketcand/domain/beacon_xml.c
+        ${ROOT_SRC_DIR}/protocol/frame_message.c
+        ${ROOT_SRC_DIR}/protocol/hello_message.c
+        ${ROOT_SRC_DIR}/protocol/list_message.c
+        ${ROOT_SRC_DIR}/protocol/open_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+target_link_libraries(test_socketcand_bridge PRIVATE port_mocks)

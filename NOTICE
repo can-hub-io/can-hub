@@ -17,6 +17,15 @@ Third-party components (fetched at build time, not vendored):
   distributions must link GnuTLS dynamically or otherwise comply with the
   LGPL (see TODO: OpenSSL backend evaluation).
 
+Interoperability:
+
+- socketcand protocol (https://github.com/linux-can/socketcand) — the
+  `can-hub-client socketcand` bridge is a clean-room implementation from the
+  public protocol specification; no socketcand source is used. socketcand is
+  dual-licensed GPL-2.0-only OR BSD-3-Clause (Copyright 2002-2009 Volkswagen
+  Group Electronic Research); any future borrowed code would be taken under the
+  BSD-3-Clause terms.
+
 Test-only components:
 
 - CEST (https://github.com/cegonse/cest) — MIT License. Vendored under
