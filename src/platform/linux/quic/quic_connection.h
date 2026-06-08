@@ -66,3 +66,4 @@ ngtcp2_ssize QuicConnection_WriteStream(
     size_t *consumed
 );
 ngtcp2_ssize QuicConnection_WritePacket(QuicConnection *self, uint8_t *packet_buffer, size_t packet_buffer_size);
+ngtcp2_ssize QuicConnection_WriteConnectionClose(QuicConnection *self, uint8_t *packet_buffer, size_t packet_buffer_size);
