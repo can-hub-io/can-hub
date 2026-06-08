@@ -3,7 +3,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <signal.h>
+#include <unistd.h>
+
 #include <sys/epoll.h>
+#include <sys/signalfd.h>
 
 #include "agent/agent_app.h"
 #include "platform/linux/clock/clock.h"
@@ -32,6 +36,8 @@ static SocketCanAdapter can_adapter;
 static RegisterMessage registration;
 static uint8_t transport_scheme;
 static EpollRegistry poll_registry;
+static int32_t signal_fd = -1;
+static bool should_shutdown;
 static const char *state_directory_override;
 static char state_directory[TLS_IDENTITY_PATH_MAX];
 static char identity_certificate_path[TLS_IDENTITY_PATH_MAX];
@@ -43,6 +49,7 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text);
 static bool prepareSecurityMaterial(const char *host, const char *port_text);
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *transport_events);
 static TransportPort *transportPort(void);
+static bool setupSignalFd(void);
 static bool registerStaticPollFds(void);
 static void syncStreamRegistration(void);
 static void dispatchEvent(const struct epoll_event *event, const CanEvents *can_events);
@@ -97,13 +104,13 @@ int main(int argc, char **argv)
 
     AgentApp_Init(&app, transportPort(), SocketCanAdapter_Port(&can_adapter), &registration);
 
-    if (!EpollRegistry_Open(&poll_registry) || !registerStaticPollFds()) {
+    if (!setupSignalFd() || !EpollRegistry_Open(&poll_registry) || !registerStaticPollFds()) {
         return 1;
     }
 
     fprintf(stderr, "can-hub-agent %s connecting to %s:%s\n", Version_String(), host, port_text);
 
-    for (;;) {
+    while (!should_shutdown) {
         syncStreamRegistration();
         event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, TICK_PERIOD_MS);
 
@@ -113,6 +120,11 @@ int main(int argc, char **argv)
 
         AgentApp_Tick(&app, Clock_RealtimeUs());
     }
+
+    transportPort()->disconnect(transportPort()->context);
+    fprintf(stderr, "can-hub-agent shutting down\n");
+
+    return 0;
 }
 
 /* ---------- private ---------- */
@@ -212,10 +224,30 @@ static TransportPort *transportPort(void)
     return TcpClientTransport_Port(&tcp_transport);
 }
 
+static bool setupSignalFd(void)
+{
+    sigset_t mask;
+
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGTERM);
+    if (sigprocmask(SIG_BLOCK, &mask, NULL) != 0) {
+        return false;
+    }
+
+    signal_fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
+
+    return signal_fd >= 0;
+}
+
 static bool registerStaticPollFds(void)
 {
     int32_t fd;
     uint8_t interface_index;
+
+    if (!EpollRegistry_AddStatic(&poll_registry, signal_fd, (uint32_t)signal_fd)) {
+        return false;
+    }
 
     if (transport_scheme == kCONNECT_SCHEME_QUIC) {
         fd = QuicClientTransport_UdpFd(&quic_transport);
@@ -263,7 +295,14 @@ static void syncStreamRegistration(void)
 static void dispatchEvent(const struct epoll_event *event, const CanEvents *can_events)
 {
     int32_t event_fd = (int32_t)event->data.u32;
+    struct signalfd_siginfo signal_info;
     uint8_t interface_index;
+
+    if (event_fd == signal_fd) {
+        (void)read(signal_fd, &signal_info, sizeof(signal_info));
+        should_shutdown = true;
+        return;
+    }
 
     if (transport_scheme == kCONNECT_SCHEME_QUIC) {
         if (event_fd == QuicClientTransport_UdpFd(&quic_transport)) {

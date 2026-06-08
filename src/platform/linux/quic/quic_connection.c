@@ -292,6 +292,26 @@ ngtcp2_ssize QuicConnection_WritePacket(QuicConnection *self, uint8_t *packet_bu
     return QuicConnection_WriteStream(self, packet_buffer, packet_buffer_size, NO_STREAM, NULL, 0, &ignored);
 }
 
+ngtcp2_ssize QuicConnection_WriteConnectionClose(QuicConnection *self, uint8_t *packet_buffer, size_t packet_buffer_size)
+{
+    ngtcp2_path_storage path_storage;
+    ngtcp2_pkt_info packet_info;
+    ngtcp2_ccerr connection_close_error;
+
+    ngtcp2_path_storage_zero(&path_storage);
+    ngtcp2_ccerr_default(&connection_close_error);
+
+    return ngtcp2_conn_write_connection_close(
+        self->connection,
+        &path_storage.path,
+        &packet_info,
+        packet_buffer,
+        packet_buffer_size,
+        &connection_close_error,
+        Clock_MonotonicNs()
+    );
+}
+
 /* ---------- private ---------- */
 
 static ngtcp2_conn *getConnection(ngtcp2_crypto_conn_ref *connection_ref)
