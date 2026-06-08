@@ -66,6 +66,30 @@ void InterfaceRegistry_RemovePeer(InterfaceRegistry *self, uint32_t agent_peer_i
     }
 }
 
+bool InterfaceRegistry_CollidingPeer(
+    const InterfaceRegistry *self,
+    const RegisterMessage *registration,
+    uint32_t *agent_peer_id
+)
+{
+    uint32_t i;
+    uint8_t name_index;
+
+    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
+        if (!self->entries[i].in_use) {
+            continue;
+        }
+        for(name_index=0; name_index<registration->interface_count; name_index++) {
+            if (namesMatch(&self->entries[i], registration->agent_name, registration->interface_names[name_index])) {
+                *agent_peer_id = self->entries[i].agent_peer_id;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 const InterfaceEntry *InterfaceRegistry_FindById(const InterfaceRegistry *self, uint32_t interface_id)
 {
     uint32_t i;

@@ -161,6 +161,44 @@ describe("broker", []() {
         });
     });
 
+    describe("agent ghost displacement", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            events = Broker_Events(&broker);
+        });
+
+        it("displaces a ghost agent when the same fingerprint reconnects", []() {
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+            HubTransportPortMock_Reset(&transport);
+            registerAgentWithFingerprint(AGENT_PEER + 1, TRUCK_FINGERPRINT);
+
+            expect(registerAckStatus()).toBe(REGISTER_STATUS_OK);
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)AGENT_PEER);
+        });
+
+        it("rejects a same-name reconnect with a different fingerprint", []() {
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+            HubTransportPortMock_Reset(&transport);
+            registerAgentWithFingerprint(AGENT_PEER + 1, OTHER_FINGERPRINT);
+
+            expect(registerAckStatus()).toBe(1);
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)(AGENT_PEER + 1));
+        });
+
+        it("does not displace when neither peer carries a fingerprint", []() {
+            registerAgentWithFingerprint(AGENT_PEER, NULL);
+            HubTransportPortMock_Reset(&transport);
+            registerAgentWithFingerprint(AGENT_PEER + 1, NULL);
+
+            expect(registerAckStatus()).toBe(1);
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)(AGENT_PEER + 1));
+        });
+    });
+
     describe("agent identity pinning", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
