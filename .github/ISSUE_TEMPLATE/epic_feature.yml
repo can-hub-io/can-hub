@@ -1,0 +1,73 @@
+name: Epic / Feature
+description: A user-facing capability or epic of work.
+title: "<concise capability title>"
+labels: ["type:feature"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the system does this touch?
+      multiple: true
+      options:
+        - "area:protocol"
+        - "area:hub"
+        - "area:agent"
+        - "area:client"
+        - "area:transport"
+        - "area:platform"
+        - "area:packaging"
+        - "area:ci"
+        - "area:docs"
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One-line description of the capability.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context / motivation
+      description: Why now? What problem or need does this address?
+    validations:
+      required: true
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Tasks
+      description: Checklist of the concrete work.
+      value: |
+        - [ ]
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable behaviour that proves it's done.
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: design
+    attributes:
+      label: Design references
+      description: Point at the relevant design/protocol sections.
+      value: |
+        doc/design.md §
+        doc/protocol.md §
+    validations:
+      required: false
+  - type: textarea
+    id: nongoals
+    attributes:
+      label: Non-goals / out of scope
+      value: |
+        -
+    validations:
+      required: false
