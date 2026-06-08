@@ -1,0 +1,32 @@
+[Unit]
+Description=can-hub CAN-over-network hub
+Documentation=https://github.com/jamofer/can-hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=can-hub
+Group=can-hub
+ExecStart=/usr/bin/can-hub --state-dir /var/lib/can-hub
+Restart=on-failure
+RestartSec=2
+StateDirectory=can-hub
+RuntimeDirectory=can-hub
+RuntimeDirectoryMode=0755
+
+# The hub is network-only: QUIC/TLS/TCP on 7227-7228 (unprivileged) plus the
+# unix admin socket. It never touches CAN, so it keeps no capabilities.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+
+[Install]
+WantedBy=multi-user.target

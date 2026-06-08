@@ -1,0 +1,31 @@
+[Unit]
+Description=can-hub agent (SocketCAN exporter)
+Documentation=https://github.com/jamofer/can-hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=can-hub
+Group=can-hub
+EnvironmentFile=/etc/can-hub/agent.conf
+ExecStart=/usr/bin/can-hub-agent --connect ${HUB_URL} --state-dir /var/lib/can-hub-agent $AGENT_ARGS $INTERFACES
+Restart=on-failure
+RestartSec=2
+StateDirectory=can-hub-agent
+
+# The agent opens raw SocketCAN sockets (PF_CAN/SOCK_RAW): CAP_NET_RAW only,
+# nothing else. AF_CAN is added to the address-family allowlist.
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_RAW
+AmbientCapabilities=CAP_NET_RAW
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_CAN
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+
+[Install]
+WantedBy=multi-user.target

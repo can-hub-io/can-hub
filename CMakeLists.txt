@@ -156,3 +156,8 @@ target_link_libraries(can-hub-client PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_
 add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES})
 
 install(TARGETS can-hub can-hub-agent can-hub-cli RUNTIME DESTINATION bin)
+
+option(CAN_HUB_PACKAGING "Generate per-binary Debian packages with CPack" OFF)
+if(CAN_HUB_PACKAGING)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/packaging/cpack-deb.cmake)
+endif()

@@ -3,6 +3,8 @@
 #   make release [ARCH=x86_64|armhf|arm64]   Optimized build (-O2).
 #   make debug   [ARCH=...]                  Debug build (-O0 -g).
 #   make install [ARCH=...] [PREFIX=...]     Install release binaries.
+#   make deb     [ARCH=...]                  Per-binary .deb packages
+#                                            (can-hub/cli/client; not the agent).
 #   make static  [ARCH=armv7|arm64|x86_64]   Fully static edge binaries
 #                                            (agent/client/cli, musl, docker).
 #   make test                                Build + run host unit tests (CEST).
@@ -16,10 +18,11 @@ PREFIX ?= /usr/local
 _TOOLCHAIN := $(abspath cmake/toolchain-$(ARCH).cmake)
 _BUILD_RELEASE := build/$(ARCH)/release
 _BUILD_DEBUG := build/$(ARCH)/debug
+_BUILD_DEB := build/$(ARCH)/package
 _BUILD_TEST := build/test
 _CEST_RUNNER := test/vendor/cest-runner_linux_x86_64
 
-.PHONY: release debug install static test clean
+.PHONY: release debug install deb static test clean
 
 release:
 	$(CMAKE) -B $(_BUILD_RELEASE) \
@@ -39,6 +42,19 @@ debug:
 
 install: release
 	$(CMAKE) --install $(_BUILD_RELEASE)
+
+# Per-binary .deb packages (can-hub, can-hub-agent, can-hub-cli, can-hub-client),
+# each its own package via CPack components. Separate build tree so the cached
+# packaging options never leak into a plain release build. Output in $(_BUILD_DEB).
+deb:
+	$(CMAKE) -B $(_BUILD_DEB) \
+	         -G $(GENERATOR) \
+	         -DCMAKE_BUILD_TYPE=Release \
+	         -DCMAKE_TOOLCHAIN_FILE=$(_TOOLCHAIN) \
+	         -DCMAKE_INSTALL_PREFIX=/usr \
+	         -DCAN_HUB_PACKAGING=ON
+	$(CMAKE) --build $(_BUILD_DEB)
+	cd $(_BUILD_DEB) && cpack -G DEB
 
 # Fully static edge binaries; ARCH=armv7|arm64|x86_64 (pins live in the Dockerfile).
 static:

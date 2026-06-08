@@ -8,6 +8,20 @@ permissions:
   contents: write
 
 jobs:
+  deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgnutls28-dev
+      - name: build packages
+        run: make deb
+      - name: publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/x86_64/package/*.deb
+          generate_release_notes: true
+
   static-assets:
     runs-on: ubuntu-latest
     strategy:
