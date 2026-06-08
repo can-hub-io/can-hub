@@ -200,16 +200,7 @@ bool QuicConnection_HandleExpiry(QuicConnection *self)
 
 uint64_t QuicConnection_NextExpiryNs(const QuicConnection *self)
 {
-    uint64_t expiry = ngtcp2_conn_get_expiry(self->connection);
-
-    if (expiry == UINT64_MAX) {
-        return UINT64_MAX;
-    }
-    if (expiry <= Clock_MonotonicNs()) {
-        return Clock_MonotonicNs() + 1;
-    }
-
-    return expiry;
+    return ngtcp2_conn_get_expiry(self->connection);
 }
 
 bool QuicConnection_OpenControlStream(QuicConnection *self, int64_t *stream_id)
