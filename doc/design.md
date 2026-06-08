@@ -114,9 +114,18 @@ A web panel (peers, interfaces, metrics, kick, ACLs) shares the admin plane with
 
 ## Stories
 
-- E0 — spikes: ngtcp2 datagram proof of concept (vcan over QUIC), latency/CPU baseline against socketcand and cannelloni. Done.
-- E1 — protocol: binary wire format spec (doc/protocol.md) + encode/decode module with unit tests. Done.
-- E2 — agent: SocketCAN capture/injection, QUIC client, registration, reconnect with backoff. Done.
-- E3 — hub: QUIC server, registry, relay routing, SQLite persistence, unix socket admin, CLI. Done.
-- E4 — hardening/security: TOFU identities, mTLS, TLS-over-TCP, admin plane, backpressure/eviction, metrics. Done.
-- E5 — P2P phase 2: endpoint exchange, hole punch, path migration, relay fallback.
+Delivered:
+
+- Spikes — ngtcp2 datagram proof of concept (vcan over QUIC), latency/CPU baseline against socketcand and cannelloni.
+- Protocol — binary wire format spec (doc/protocol.md) + encode/decode module with unit tests.
+- Agent — SocketCAN capture/injection, QUIC client, registration, reconnect with backoff.
+- Hub — QUIC server, registry, relay routing, SQLite persistence, unix-socket admin, CLI.
+- Hardening & security — TOFU identities, mTLS, TLS-over-TCP, admin plane, backpressure/eviction, metrics.
+- Authorization & control — client ACLs, SUBSCRIBE id-mask filters, interface configuration (bitrate/link), socketcand shim.
+
+Pending work is tracked as GitHub issues, grouped by milestone (priority order — 0 users today, so adoption first, freeze last):
+
+- **Adoption & product** — cannelloni-replacement `attach`, namespaced interface names, bus-to-bus bridge rules, cansend syntax gaps, error-frame export.
+- **Reach** — microcontroller agent (lwIP + bxCAN), R-UDP transport, web admin panel.
+- **Protocol v1 freeze** — version negotiation, timestamp encoding decision, reconnect-matrix verification, then freeze (deprioritized while there are no users to break compat with).
+- **Backlog** — P2P phase 2 and deferred epics/polish.
