@@ -1,0 +1,19 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove)
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
+        ;;
+    purge)
+        if [ -d /run/systemd/system ]; then
+            systemctl disable can-hub-agent.service >/dev/null 2>&1 || true
+            systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
+        rm -rf /var/lib/can-hub-agent
+        ;;
+esac
+
+exit 0

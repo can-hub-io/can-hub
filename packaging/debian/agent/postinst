@@ -1,0 +1,19 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        if ! getent passwd can-hub >/dev/null 2>&1; then
+            adduser --system --group --no-create-home \
+                    --home /var/lib/can-hub --gecos "can-hub service" can-hub
+        fi
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
+        ;;
+esac
+
+# Not enabled or started: the agent needs /etc/can-hub/agent.conf configured
+# first (HUB_URL, INTERFACES), then: systemctl enable --now can-hub-agent
+
+exit 0
