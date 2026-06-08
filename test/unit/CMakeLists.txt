@@ -257,11 +257,24 @@ add_unit_test(test_mirror_app
         ${ROOT_SRC_DIR}/mirror/mirror_app.c
         ${ROOT_SRC_DIR}/protocol/frame_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c
+        ${ROOT_SRC_DIR}/protocol/interface_name.c
+        ${ROOT_SRC_DIR}/protocol/list_message.c
         ${ROOT_SRC_DIR}/protocol/open_message.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/register_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
 target_link_libraries(test_mirror_app PRIVATE port_mocks)
+
+add_unit_test(test_interface_name
+    SOURCES
+        protocol/test_interface_name.cpp
+        ${ROOT_SRC_DIR}/protocol/interface_name.c
+        ${ROOT_SRC_DIR}/protocol/list_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/register_message.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
 
 add_unit_test(test_ascii_framer
     SOURCES

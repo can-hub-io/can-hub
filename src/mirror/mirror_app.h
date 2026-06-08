@@ -7,9 +7,11 @@
 #include "agent/ports/transport_events.h"
 #include "agent/ports/transport_port.h"
 #include "protocol/frame_message.h"
+#include "protocol/interface_name.h"
 
 typedef enum tmirror_state_e {
-    kMIRROR_OPENING = 0,
+    kMIRROR_RESOLVING = 0,
+    kMIRROR_OPENING,
     kMIRROR_PUMPING,
     kMIRROR_FAILED,
     kMIRROR_MAX,
@@ -19,13 +21,15 @@ typedef struct {
     TransportPort *hub;
     CanPort *can;
     uint32_t interface_id;
+    char interface_name[INTERFACE_NAME_NAMESPACED_SIZE];
+    uint16_t list_offset;
     uint8_t channel;
     uint8_t state;
     bool can_write;
     bool pending_write;
 } MirrorApp;
 
-void MirrorApp_Init(MirrorApp *self, TransportPort *hub, CanPort *can, uint32_t interface_id);
+void MirrorApp_Init(MirrorApp *self, TransportPort *hub, CanPort *can, uint32_t interface_id, const char *interface_name);
 TransportEvents MirrorApp_TransportEvents(MirrorApp *self);
 void MirrorApp_OnCanFrame(MirrorApp *self, const FrameMessage *frame);
 uint8_t MirrorApp_State(const MirrorApp *self);
