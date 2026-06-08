@@ -124,6 +124,12 @@ set(CLIENT_SOURCES
     src/platform/linux/tcp/tcp_client_transport.c
 )
 
+set(CLIENT_ATTACH_SOURCES
+    src/mirror/mirror_app.c
+    src/platform/linux/socketcan/socketcan_adapter.c
+    src/platform/linux/socketcan/can_netlink.c
+)
+
 set(CLIENT_TLS_SOURCES
     src/platform/linux/shared/pin_store.c
     src/platform/linux/shared/pinned_server_verifier.c
@@ -151,7 +157,7 @@ set(SOCKETCAND_SOURCES
     src/platform/linux/socketcand/beacon_udp.c
 )
 
-add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES} ${CLIENT_TLS_SOURCES} ${SOCKETCAND_SOURCES})
+add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES} ${CLIENT_ATTACH_SOURCES} ${CLIENT_TLS_SOURCES} ${SOCKETCAND_SOURCES})
 target_link_libraries(can-hub-client PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls ${GNUTLS_STATIC_EXTRA_LIBRARIES})
 add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES})
 

@@ -14,15 +14,18 @@
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/hub_defaults.h"
 #include "platform/linux/shared/tls_identity.h"
+#include "platform/linux/socketcan/socketcan_adapter.h"
 #include "platform/linux/socketcand/socketcand_server.h"
 #include "platform/linux/tcp/tcp_client_transport.h"
 #include "platform/linux/tls/tls_client_transport.h"
+#include "mirror/mirror_app.h"
 #include "protocol/error_message.h"
 #include "protocol/frame_message.h"
 #include "protocol/hello_message.h"
 #include "protocol/list_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
+#include "protocol/register_message.h"
 #include "protocol/subscribe_message.h"
 #include "socketcand/socketcand_app.h"
 
@@ -42,12 +45,14 @@
 #define SC_TAG_HUB_QUIC_TIMER 0xE0000002u
 #define SC_TAG_SC_LISTEN 0xE0000003u
 #define SC_TAG_SC_SLOT_BASE 0xE0000010u
+#define ATTACH_TAG_CAN 0xE0000020u
 
 typedef enum tclient_command_e {
     kCLIENT_COMMAND_LIST = 0,
     kCLIENT_COMMAND_DUMP,
     kCLIENT_COMMAND_SEND,
     kCLIENT_COMMAND_SOCKETCAND,
+    kCLIENT_COMMAND_ATTACH,
     kCLIENT_COMMAND_MAX,
 } TCLIENT_COMMAND;
 
@@ -74,12 +79,19 @@ static char socketcand_port_text[CONNECT_URL_PORT_TEXT_MAX] = SOCKETCAND_DEFAULT
 static bool beacon_enabled = true;
 static SocketcandApp socketcand_app;
 static SocketcandServer socketcand_server;
+static char attach_interface_name[REGISTER_INTERFACE_NAME_SIZE];
+static MirrorApp mirror_app;
+static SocketCanAdapter mirror_can_adapter;
 
 static bool parseArguments(int argc, char **argv, char *host, char *port_text);
 static bool parseSocketcandListen(const char *value);
 static int32_t runSocketcandServer(const char *host, const char *port_text);
 static int32_t runSocketcandLoop(void);
-static void syncSocketcandHubStream(EpollRegistry *poll_registry);
+static int32_t runAttach(const char *host, const char *port_text);
+static int32_t runAttachLoop(void);
+static void drainCanFrames(void);
+static void dispatchAttachEvent(const struct epoll_event *event);
+static void syncHubStream(EpollRegistry *poll_registry);
 static uint32_t socketcandSlotMask(uint8_t slot);
 static void dispatchSocketcandEvent(const struct epoll_event *event);
 static void handleSocketcandSlotEvent(uint8_t slot, const struct epoll_event *event);
@@ -135,6 +147,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "       | send <interface-id> <can-id>#<hex-payload>   (cansend syntax, e.g. 123#DEADBEEF)\n");
         fprintf(stderr, "       | socketcand [--listen [<bind-ip>:]<port>] [--no-beacon]\n");
         fprintf(stderr, "                                           local socketcand server (default 127.0.0.1:" SOCKETCAND_DEFAULT_PORT_TEXT ")\n");
+        fprintf(stderr, "       | attach <interface-id> <vcan>   mirror a remote bus into a local pre-created vcan (bidirectional)\n");
         fprintf(stderr, "       %s --show-identity [--state-dir <path>]   print this client's TLS fingerprint\n", argv[0]);
         fprintf(stderr, "       default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
         return 1;
@@ -142,6 +155,9 @@ int main(int argc, char **argv)
 
     if (command == kCLIENT_COMMAND_SOCKETCAND) {
         return runSocketcandServer(host, port_text);
+    }
+    if (command == kCLIENT_COMMAND_ATTACH) {
+        return runAttach(host, port_text);
     }
 
     if (!initTransport(host, port_text, &events)) {
@@ -193,6 +209,10 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
                 if (!parseFrameSpec(argv[++i], &frame_to_send)) {
                     return false;
                 }
+            } else if (strcmp(command_name, "attach") == 0 && i + 2 < argc) {
+                command = kCLIENT_COMMAND_ATTACH;
+                target_interface_id = (uint32_t)strtoul(argv[++i], NULL, 10);
+                snprintf(attach_interface_name, sizeof(attach_interface_name), "%s", argv[++i]);
             } else {
                 return false;
             }
@@ -685,7 +705,7 @@ static int32_t runSocketcandServer(const char *host, const char *port_text)
     return runSocketcandLoop();
 }
 
-static void syncSocketcandHubStream(EpollRegistry *poll_registry)
+static void syncHubStream(EpollRegistry *poll_registry)
 {
     int32_t current_fd;
     uint32_t wanted_mask = EPOLLIN;
@@ -798,7 +818,7 @@ static int32_t runSocketcandLoop(void)
     }
 
     for (;;) {
-        syncSocketcandHubStream(&poll_registry);
+        syncHubStream(&poll_registry);
         for(slot=0; slot<SOCKETCAND_SERVER_SLOTS_MAX; slot++) {
             EpollRegistry_SyncSlot(
                 &poll_registry,
@@ -814,5 +834,94 @@ static int32_t runSocketcandLoop(void)
             dispatchSocketcandEvent(&events[i]);
         }
         SocketcandApp_Tick(&socketcand_app, Clock_RealtimeUs());
+    }
+}
+
+static int32_t runAttach(const char *host, const char *port_text)
+{
+    TransportEvents events = MirrorApp_TransportEvents(&mirror_app);
+    RegisterMessage registration;
+
+    memset(&registration, 0, sizeof(registration));
+    registration.interface_count = 1;
+    snprintf(registration.interface_names[0], REGISTER_INTERFACE_NAME_SIZE, "%s", attach_interface_name);
+
+    if (!initTransport(host, port_text, &events)) {
+        fprintf(stderr, "could not initialize transport\n");
+        return 1;
+    }
+    if (!SocketCanAdapter_Open(&mirror_can_adapter, &registration, false)) {
+        fprintf(stderr, "could not open vcan %s (does it exist?)\n", attach_interface_name);
+        return 1;
+    }
+
+    MirrorApp_Init(&mirror_app, active_port, SocketCanAdapter_Port(&mirror_can_adapter), target_interface_id);
+
+    if (!active_port->connect(active_port->context)) {
+        fprintf(stderr, "could not connect to %s\n", host);
+        return 1;
+    }
+
+    fprintf(stderr, "mirroring interface %u to %s, ctrl-c to stop\n", target_interface_id, attach_interface_name);
+
+    return runAttachLoop();
+}
+
+static int32_t runAttachLoop(void)
+{
+    struct epoll_event events[MAX_EPOLL_EVENTS];
+    EpollRegistry poll_registry;
+    int32_t event_count;
+    int32_t i;
+
+    if (!EpollRegistry_Open(&poll_registry)) {
+        return 1;
+    }
+    if (connect_scheme == kCONNECT_SCHEME_QUIC) {
+        EpollRegistry_AddStatic(&poll_registry, QuicClientTransport_UdpFd(&quic_transport), SC_TAG_HUB_QUIC_UDP);
+        EpollRegistry_AddStatic(&poll_registry, QuicClientTransport_TimerFd(&quic_transport), SC_TAG_HUB_QUIC_TIMER);
+    }
+    EpollRegistry_AddStatic(&poll_registry, SocketCanAdapter_Fd(&mirror_can_adapter, 0), ATTACH_TAG_CAN);
+
+    while (MirrorApp_State(&mirror_app) != kMIRROR_FAILED) {
+        syncHubStream(&poll_registry);
+        event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
+        for(i=0; i<event_count; i++) {
+            dispatchAttachEvent(&events[i]);
+        }
+    }
+
+    fprintf(stderr, "connection lost\n");
+
+    return 1;
+}
+
+static void drainCanFrames(void)
+{
+    FrameMessage frame;
+
+    while (SocketCanAdapter_ReadFrame(&mirror_can_adapter, 0, &frame)) {
+        MirrorApp_OnCanFrame(&mirror_app, &frame);
+    }
+}
+
+static void dispatchAttachEvent(const struct epoll_event *event)
+{
+    uint32_t tag = event->data.u32;
+
+    if (tag == ATTACH_TAG_CAN) {
+        drainCanFrames();
+        return;
+    }
+    if (tag == SC_TAG_HUB_QUIC_UDP) {
+        QuicClientTransport_OnUdpReadable(&quic_transport);
+        return;
+    }
+    if (tag == SC_TAG_HUB_QUIC_TIMER) {
+        QuicClientTransport_OnTimer(&quic_transport);
+        return;
+    }
+    if (tag == SC_TAG_HUB_STREAM) {
+        handleHubStreamEvent(event);
     }
 }
