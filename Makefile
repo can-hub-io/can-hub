@@ -7,6 +7,8 @@
 #                                            (can-hub/cli/client; not the agent).
 #   make static  [ARCH=armv7|arm64|x86_64]   Fully static edge binaries
 #                                            (agent/client/cli, musl, docker).
+#   make deb-debug [ARCH=armv7|arm64|x86_64] Static debug agent .deb (-O0 -g,
+#                                            unstripped, musl, docker).
 #   make test                                Build + run host unit tests (CEST).
 #   make clean                               Remove build trees.
 
@@ -22,7 +24,7 @@ _BUILD_DEB := build/$(ARCH)/package
 _BUILD_TEST := build/test
 _CEST_RUNNER := test/vendor/cest-runner_linux_x86_64
 
-.PHONY: release debug install deb static test clean
+.PHONY: release debug install deb static deb-debug test clean
 
 release:
 	$(CMAKE) -B $(_BUILD_RELEASE) \
@@ -59,6 +61,12 @@ deb:
 # Fully static edge binaries; ARCH=armv7|arm64|x86_64 (pins live in the Dockerfile).
 static:
 	docker build -f docker/static.Dockerfile --build-arg ARCH=$(ARCH) --output dist/$(ARCH) .
+
+# Static debug agent .deb only (-O0 -g, unstripped). Reuses the static build's
+# cached toolchain/gnutls layers; ARCH=armv7|arm64|x86_64. Same package name as
+# the release agent, so `dpkg -i` reinstalls over an existing install.
+deb-debug:
+	docker build -f docker/static-debug.Dockerfile --build-arg ARCH=$(ARCH) --output dist/$(ARCH)-debug .
 
 test:
 	$(CMAKE) -B $(_BUILD_TEST) test/ \

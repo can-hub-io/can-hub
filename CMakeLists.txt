@@ -14,7 +14,10 @@ add_compile_options(-Wall -Wextra)
 option(CAN_HUB_STATIC "Fully static binaries against a static GnuTLS stack" OFF)
 if(CAN_HUB_STATIC)
     add_compile_options(-ffunction-sections -fdata-sections)
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static -Wl,--gc-sections")
+    # 64K segment alignment so the static binaries load on kernels with any page
+    # size (4K/16K/64K). Default 4K-aligned PT_LOAD segments fail to map and
+    # SIGSEGV before main on 16K-page kernels (e.g. Raspberry Pi OS arm64 on Pi 5).
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static -Wl,--gc-sections -Wl,-z,max-page-size=0x10000")
     set(GNUTLS_STATIC_EXTRA_LIBRARIES hogweed nettle gmp atomic)
 endif()
 
