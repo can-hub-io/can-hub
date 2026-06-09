@@ -1,0 +1,31 @@
+[Unit]
+Description=can-hub socketcand bridge (exposes hub interfaces as a local socketcand server)
+Documentation=https://github.com/jamofer/can-hub
+After=can-hub.service
+Wants=can-hub.service
+
+[Service]
+Type=simple
+User=can-hub
+Group=can-hub
+EnvironmentFile=-/etc/can-hub/socketcand.conf
+ExecStart=/usr/bin/can-hub-client --connect unix:///run/can-hub/hub.sock socketcand $SOCKETCAND_ARGS
+Restart=on-failure
+RestartSec=2
+
+# Bridges the hub (unix socket) to a local socketcand TCP server + UDP beacon.
+# No CAN access: it never touches a vcan, frames travel through the hub. So no
+# capabilities; only the unix socket and the loopback TCP/UDP families.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+
+[Install]
+WantedBy=multi-user.target

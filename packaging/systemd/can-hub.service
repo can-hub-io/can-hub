@@ -8,15 +8,16 @@ Wants=network-online.target
 Type=simple
 User=can-hub
 Group=can-hub
-ExecStart=/usr/bin/can-hub --state-dir /var/lib/can-hub
+EnvironmentFile=/etc/can-hub/hub.conf
+ExecStart=/usr/bin/can-hub --state-dir /var/lib/can-hub $HUB_LISTEN_ARGS
 Restart=on-failure
 RestartSec=2
 StateDirectory=can-hub
 RuntimeDirectory=can-hub
 RuntimeDirectoryMode=0755
 
-# The hub is network-only: QUIC/TLS/TCP on 7227-7228 (unprivileged) plus the
-# unix admin socket. It never touches CAN, so it keeps no capabilities.
+# The hub listens on QUIC (udp/0.0.0.0:7227, unprivileged) plus the unix socket
+# (wire + admin). It never touches CAN, so it keeps no capabilities.
 NoNewPrivileges=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
