@@ -25,17 +25,20 @@ RUN case "$ARCH" in \
             echo "TOOLCHAIN_URL=$BOOTLIN/armv7-eabihf/tarballs/armv7-eabihf--musl--$BOOTLIN_RELEASE.tar.xz" >> /etc/static-build.env; \
             echo "TOOLCHAIN_SHA256=2f3a34458c3a8b961bd09f89669130fcdc4c1dbc6e31ada720527e4ad3741c11" >> /etc/static-build.env; \
             echo "CROSS_TRIPLET=arm-buildroot-linux-musleabihf" >> /etc/static-build.env; \
-            echo "PROCESSOR=arm" >> /etc/static-build.env;; \
+            echo "PROCESSOR=arm" >> /etc/static-build.env; \
+            echo "DEB_ARCH=armhf" >> /etc/static-build.env;; \
         arm64) \
             echo "TOOLCHAIN_URL=$BOOTLIN/aarch64/tarballs/aarch64--musl--$BOOTLIN_RELEASE.tar.xz" >> /etc/static-build.env; \
             echo "TOOLCHAIN_SHA256=defba831ffa1175236f137069333e21ed46d4d19feb5080a90cf248b6fc2cb08" >> /etc/static-build.env; \
             echo "CROSS_TRIPLET=aarch64-buildroot-linux-musl" >> /etc/static-build.env; \
-            echo "PROCESSOR=aarch64" >> /etc/static-build.env;; \
+            echo "PROCESSOR=aarch64" >> /etc/static-build.env; \
+            echo "DEB_ARCH=arm64" >> /etc/static-build.env;; \
         x86_64) \
             echo "TOOLCHAIN_URL=$BOOTLIN/x86-64/tarballs/x86-64--musl--$BOOTLIN_RELEASE.tar.xz" >> /etc/static-build.env; \
             echo "TOOLCHAIN_SHA256=09fca3aa89540f1b01b5f4210d488cbeb00f522044c53e9989b1dd8a38076912" >> /etc/static-build.env; \
             echo "CROSS_TRIPLET=x86_64-buildroot-linux-musl" >> /etc/static-build.env; \
-            echo "PROCESSOR=x86_64" >> /etc/static-build.env;; \
+            echo "PROCESSOR=x86_64" >> /etc/static-build.env; \
+            echo "DEB_ARCH=amd64" >> /etc/static-build.env;; \
         *) echo "unsupported ARCH '$ARCH' (armv7, arm64, x86_64)" >&2; exit 1;; \
     esac
 
@@ -97,6 +100,9 @@ RUN . /etc/static-build.env \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_TOOLCHAIN_FILE=/src/cmake/toolchain-musl-static.cmake \
         -DCAN_HUB_STATIC=ON \
+        -DCAN_HUB_PACKAGING=ON \
+        -DCAN_HUB_DEB_STATIC=ON \
+        -DCAN_HUB_DEB_ARCH=$DEB_ARCH \
     && cmake --build /build --target can-hub can-hub-agent can-hub-client can-hub-cli \
     && $CROSS_TRIPLET-strip /build/can-hub /build/can-hub-agent /build/can-hub-client /build/can-hub-cli \
     && file /build/can-hub /build/can-hub-agent /build/can-hub-client /build/can-hub-cli \
@@ -104,10 +110,14 @@ RUN . /etc/static-build.env \
     && file /build/can-hub | grep -q "statically linked" \
     && file /build/can-hub-agent | grep -q "statically linked" \
     && file /build/can-hub-client | grep -q "statically linked" \
-    && file /build/can-hub-cli | grep -q "statically linked"
+    && file /build/can-hub-cli | grep -q "statically linked" \
+    && mkdir /out \
+    && ( cd /build && cpack -G DEB -B /out ) \
+    && ls -la /out/*.deb
 
 FROM scratch AS artifact
 COPY --from=build /build/can-hub /can-hub
 COPY --from=build /build/can-hub-agent /can-hub-agent
 COPY --from=build /build/can-hub-client /can-hub-client
 COPY --from=build /build/can-hub-cli /can-hub-cli
+COPY --from=build /out/*.deb /
