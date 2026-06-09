@@ -10,6 +10,7 @@
 #define LOCAL_CID_LIST_MAX 32
 #define MAX_DATAGRAM_FRAME_SIZE 1350
 #define IDLE_TIMEOUT (30 * NGTCP2_SECONDS)
+#define KEEP_ALIVE_TIMEOUT (10 * NGTCP2_SECONDS)
 #define HANDSHAKE_TIMEOUT (10 * NGTCP2_SECONDS)
 #define INITIAL_MAX_DATA (1024 * 1024)
 #define INITIAL_MAX_STREAM_DATA (64 * 1024)
@@ -101,6 +102,7 @@ bool QuicConnection_Open(QuicConnection *self, gnutls_session_t session, const n
     }
 
     ngtcp2_conn_set_tls_native_handle(self->connection, session);
+    ngtcp2_conn_set_keep_alive_timeout(self->connection, KEEP_ALIVE_TIMEOUT);
 
     return true;
 }
