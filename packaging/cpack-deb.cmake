@@ -55,7 +55,16 @@ set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Javier Moragon <jamofer@gmail.com>")
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/jamofer/can-hub")
 set(CPACK_DEBIAN_PACKAGE_SECTION "net")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
-set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+# Static debs (CAN_HUB_DEB_STATIC, built in docker/static.Dockerfile) carry
+# musl binaries with zero runtime deps, so shlibdeps is off and there are no
+# Depends; the target architecture is fixed explicitly (it is a cross build).
+# The native build keeps shlibdeps, which pins libc6/gnutls to the build host.
+if(CAN_HUB_DEB_STATIC)
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
+    set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "${CAN_HUB_DEB_ARCH}")
+else()
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+endif()
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 
 set(CPACK_DEBIAN_HUB_PACKAGE_NAME "can-hub")
