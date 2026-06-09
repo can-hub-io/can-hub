@@ -92,7 +92,7 @@ describe("socketcand_codec", []() {
         expect(strcmp(out, "< frame 123 23.424242 1A220344 >") == 0).toBe(true);
     });
 
-    it("renders an empty extended frame without a data field", []() {
+    it("renders an empty extended frame with an empty data field", []() {
         FrameMessage frame;
         char out[128];
 
@@ -102,6 +102,6 @@ describe("socketcand_codec", []() {
         frame.payload_length = 0;
         SocketcandCodec_RenderFrame(out, sizeof(out), &frame);
 
-        expect(strcmp(out, "< frame 1ABCDEF 5.000007 >") == 0).toBe(true);
+        expect(strcmp(out, "< frame 1ABCDEF 5.000007  >") == 0).toBe(true);
     });
 });
