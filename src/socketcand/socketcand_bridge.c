@@ -336,9 +336,13 @@ static bool dispatchCommand(SocketcandBridge *self, SocketcandConnection *connec
         case kSOCKETCAND_COMMAND_OPEN:
             return openBus(self, connection, command->bus);
         case kSOCKETCAND_COMMAND_RAWMODE:
+            length = SocketcandCodec_RenderOk(ascii, sizeof(ascii));
+            sendAscii(self, connection->connection_id, ascii, length);
             connection->mode = kSOCKETCAND_MODE_RAW;
             return true;
         case kSOCKETCAND_COMMAND_BCMMODE:
+            length = SocketcandCodec_RenderOk(ascii, sizeof(ascii));
+            sendAscii(self, connection->connection_id, ascii, length);
             connection->mode = kSOCKETCAND_MODE_BCM;
             return true;
         case kSOCKETCAND_COMMAND_SEND:
