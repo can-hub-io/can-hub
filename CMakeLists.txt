@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
-project(can_hub VERSION 0.1.1 LANGUAGES C)
+project(can_hub VERSION 0.1.2 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+
+add_compile_definitions(CAN_HUB_VERSION="${PROJECT_VERSION}")
 
 set(CMAKE_C_FLAGS_RELEASE "-O2")
 set(CMAKE_C_FLAGS_DEBUG "-O0 -g")
