@@ -18,6 +18,9 @@
 #include "platform/linux/socketcan/socketcan_adapter.h"
 #include "platform/linux/tcp/tcp_client_transport.h"
 #include "platform/linux/tls/tls_client_transport.h"
+#include "protocol/error_message.h"
+#include "protocol/message_header.h"
+#include "protocol/register_message.h"
 #include "version.h"
 
 #define MAX_EPOLL_EVENTS 16
@@ -44,8 +47,15 @@ static char identity_certificate_path[TLS_IDENTITY_PATH_MAX];
 static char identity_key_path[TLS_IDENTITY_PATH_MAX];
 static char known_hubs_path[KNOWN_HUBS_PATH_MAX];
 static char pin_key[PIN_KEY_MAX];
+static TransportEvents agent_core_events;
+static uint32_t hub_connect_count;
 
 static bool parseArguments(int argc, char **argv, char *host, char *port_text);
+static TransportEvents loggingTransportEvents(void);
+static void loggingOnConnected(void *context);
+static void loggingOnDisconnected(void *context, uint64_t now_us);
+static void loggingOnControl(void *context, const uint8_t *data, size_t size, uint64_t now_us);
+static const char *registerStatusText(uint8_t status);
 static bool prepareSecurityMaterial(const char *host, const char *port_text);
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *transport_events);
 static TransportPort *transportPort(void);
@@ -95,7 +105,8 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    transport_events = AgentApp_TransportEvents(&app);
+    agent_core_events = AgentApp_TransportEvents(&app);
+    transport_events = loggingTransportEvents();
     can_events = AgentApp_CanEvents(&app);
     if (!initTransport(host, port_text, &transport_events)) {
         fprintf(stderr, "could not initialize transport\n");
@@ -128,6 +139,70 @@ int main(int argc, char **argv)
 }
 
 /* ---------- private ---------- */
+
+static TransportEvents loggingTransportEvents(void)
+{
+    TransportEvents events = agent_core_events;
+
+    events.on_connected = loggingOnConnected;
+    events.on_disconnected = loggingOnDisconnected;
+    events.on_control = loggingOnControl;
+
+    return events;
+}
+
+static void loggingOnConnected(void *context)
+{
+    hub_connect_count++;
+    if (hub_connect_count == 1) {
+        fprintf(stderr, "can-hub-agent connected to hub\n");
+    } else {
+        fprintf(stderr, "can-hub-agent reconnected to hub (session #%u)\n", hub_connect_count);
+    }
+
+    agent_core_events.on_connected(context);
+}
+
+static void loggingOnDisconnected(void *context, uint64_t now_us)
+{
+    fprintf(stderr, "can-hub-agent lost hub connection, reconnecting\n");
+
+    agent_core_events.on_disconnected(context, now_us);
+}
+
+static void loggingOnControl(void *context, const uint8_t *data, size_t size, uint64_t now_us)
+{
+    MessageHeader header;
+    RegisterAckMessage ack;
+    ErrorMessage error;
+
+    if (MessageHeader_Decode(&header, data, size) && size >= (size_t)MESSAGE_HEADER_SIZE + header.length) {
+        if (header.type == kMESSAGE_TYPE_REGISTER_ACK
+            && RegisterAckMessage_Decode(&ack, data + MESSAGE_HEADER_SIZE, header.length)
+            && ack.status != REGISTER_STATUS_OK) {
+            fprintf(stderr, "can-hub-agent registration rejected: %s\n", registerStatusText(ack.status));
+        } else if (header.type == kMESSAGE_TYPE_ERROR
+                   && ErrorMessage_Decode(&error, data + MESSAGE_HEADER_SIZE, header.length)) {
+            fprintf(stderr, "can-hub-agent hub error: %.*s\n", (int)ERROR_DETAIL_SIZE, error.detail);
+        }
+    }
+
+    agent_core_events.on_control(context, data, size, now_us);
+}
+
+static const char *registerStatusText(uint8_t status)
+{
+    switch (status) {
+        case REGISTER_STATUS_REJECTED:
+            return "name/interface collision or hub registry full";
+        case REGISTER_STATUS_IDENTITY_MISMATCH:
+            return "agent name pinned to a different fingerprint";
+        case REGISTER_STATUS_UNKNOWN_AGENT:
+            return "fingerprint not in the hub allowlist";
+        default:
+            return "unknown reason";
+    }
+}
 
 static bool parseArguments(int argc, char **argv, char *host, char *port_text)
 {
