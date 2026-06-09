@@ -154,17 +154,15 @@ size_t SocketcandCodec_RenderFrame(char *out, size_t out_size, const FrameMessag
     if (!append(out, out_size, &position, number, number_length)) {
         return 0;
     }
-    if (frame->payload_length > 0) {
-        if (!append(out, out_size, &position, " ", 1)) {
+    if (!append(out, out_size, &position, " ", 1)) {
+        return 0;
+    }
+    for(i=0; i<frame->payload_length; i++) {
+        char byte_text[2];
+        byte_text[0] = "0123456789ABCDEF"[(frame->payload[i] >> 4) & 0x0F];
+        byte_text[1] = "0123456789ABCDEF"[frame->payload[i] & 0x0F];
+        if (!append(out, out_size, &position, byte_text, 2)) {
             return 0;
-        }
-        for(i=0; i<frame->payload_length; i++) {
-            char byte_text[2];
-            byte_text[0] = "0123456789ABCDEF"[(frame->payload[i] >> 4) & 0x0F];
-            byte_text[1] = "0123456789ABCDEF"[frame->payload[i] & 0x0F];
-            if (!append(out, out_size, &position, byte_text, 2)) {
-                return 0;
-            }
         }
     }
     if (!append(out, out_size, &position, " >", 2)) {

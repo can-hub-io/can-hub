@@ -122,6 +122,17 @@ describe("socketcand_bridge", []() {
         expect(strstr(SocketcandServerPortMock_Written(&server, 1), "< frame 123 1.000000 DEAD >") != nullptr).toBe(true);
     });
 
+    it("acks rawmode with < ok > before delivering frames", []() {
+        bringUpReady();
+        server_events.on_client_connected(server_events.context, 1);
+        clientBytes(1, "< open truck42/can0 >");
+        feedOpenAck(OPEN_STATUS_OK, 5);
+        SocketcandServerPortMock_Reset(&server);
+        clientBytes(1, "< rawmode >");
+
+        expect(strstr(SocketcandServerPortMock_Written(&server, 1), "< ok >") != nullptr).toBe(true);
+    });
+
     it("forwards a client send to the hub when writable", []() {
         MessageHeader header;
         FrameMessage frame;
