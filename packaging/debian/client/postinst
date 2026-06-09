@@ -1,0 +1,17 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
+        ;;
+esac
+
+# Not enabled or started: the socketcand bridge exposes every hub interface the
+# client may read over a local socketcand server. It needs a reachable hub
+# (the can-hub package) and is enabled deliberately:
+#   systemctl enable --now can-hub-socketcand
+
+exit 0
