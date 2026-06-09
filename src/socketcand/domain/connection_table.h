@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "socketcand/domain/ascii_framer.h"
+#include "socketcand/domain/socketcand_codec.h"
 
 /*
  * Per-connection state for the socketcand server. One entry per accepted ASCII
@@ -40,6 +41,8 @@ typedef struct {
     uint8_t channel;
     bool channel_valid;
     bool can_write;
+    bool reattaching;
+    char bus[SOCKETCAND_BUS_NAME_SIZE];
 } SocketcandConnection;
 
 typedef struct {
