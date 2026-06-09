@@ -266,15 +266,22 @@ static void sendHelloAndRegister(Agent *self)
 static void handleRegisterAck(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us)
 {
     RegisterAckMessage ack;
-    bool ack_accepted;
 
     if (self->state != kAGENT_STATE_REGISTERING) {
         return;
     }
 
-    ack_accepted = RegisterAckMessage_Decode(&ack, payload, header->length)
-                   && ChannelMap_AssignFromAck(&self->channel_map, &ack);
-    if (!ack_accepted) {
+    if (!RegisterAckMessage_Decode(&ack, payload, header->length)) {
+        self->transport->disconnect(self->transport->context);
+        Agent_OnDisconnected(self, now_us);
+        return;
+    }
+    if (ack.status != REGISTER_STATUS_OK) {
+        self->transport->disconnect(self->transport->context);
+        Agent_OnDisconnected(self, now_us);
+        return;
+    }
+    if (!ChannelMap_AssignFromAck(&self->channel_map, &ack)) {
         self->transport->disconnect(self->transport->context);
         Agent_OnDisconnected(self, now_us);
         return;
