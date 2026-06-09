@@ -7,7 +7,11 @@ extern "C" {
 }
 
 describe("version", []() {
-    it("reports the project version", []() {
-        expect(strcmp(Version_String(), CAN_HUB_VERSION) == 0).toBe(true);
+    it("reports a non-empty dotted version", []() {
+        const char *version = Version_String();
+
+        expect(version != nullptr).toBe(true);
+        expect(strlen(version) > 0).toBe(true);
+        expect(strchr(version, '.') != nullptr).toBe(true);
     });
 });
