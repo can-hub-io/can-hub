@@ -24,7 +24,9 @@ _BUILD_DEB := build/$(ARCH)/package
 _BUILD_TEST := build/test
 _CEST_RUNNER := test/vendor/cest-runner_linux_x86_64
 
-.PHONY: release debug install deb static deb-debug test clean
+.PHONY: release debug install deb static deb-debug test e2e e2e-image clean
+
+_E2E_IMAGE := can-hub-bench
 
 release:
 	$(CMAKE) -B $(_BUILD_RELEASE) \
@@ -79,6 +81,18 @@ test:
 	# ASLR of kernels >= 6.5 (intermittent SIGSEGV inside ASan's handler).
 	# Disabling ASLR for the runner process keeps ASan fully functional.
 	setarch -R $(_CEST_RUNNER) $(_BUILD_TEST)
+
+# End-to-end bench (Robot Framework). One privileged container: vcan + per-Server
+# network namespaces + netem. Needs the release binaries and the host modules.
+e2e-image:
+	docker build -f test/e2e/docker/Dockerfile -t $(_E2E_IMAGE) test/e2e/docker
+
+e2e: release e2e-image
+	docker run --rm --privileged \
+	    -v /lib/modules:/lib/modules:ro \
+	    -v $(abspath .):/work \
+	    $(_E2E_IMAGE) \
+	    robot --outputdir /work/build/e2e tests
 
 clean:
 	rm -rf build/
