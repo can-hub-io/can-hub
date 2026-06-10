@@ -169,6 +169,11 @@ void TlsServerTransport_OnSlotWritable(TlsServerTransport *self, uint8_t slot)
 
     if (!TlsChannel_Flush(&peer->channel)) {
         closePeer(self, peer, true);
+        return;
+    }
+
+    if (self->events.on_peer_writable != NULL) {
+        self->events.on_peer_writable(self->events.context, peer->peer_id);
     }
 }
 

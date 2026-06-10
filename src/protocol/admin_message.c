@@ -44,6 +44,8 @@
 #define CLIENT_ENTRY_CHANNEL_OFFSET 8
 #define CLIENT_ENTRY_AGENT_NAME_OFFSET 12
 #define CLIENT_ENTRY_INTERFACE_NAME_OFFSET 140
+#define CLIENT_ENTRY_FRAMES_FORWARDED_OFFSET 156
+#define CLIENT_ENTRY_FRAMES_DROPPED_OFFSET 160
 
 #define ACL_AGENT_NAME_OFFSET 0
 #define ACL_INTERFACE_NAME_OFFSET 128
@@ -1014,6 +1016,8 @@ static void writeClientEntry(uint8_t *destination, const AdminClientsReplyEntry 
     destination[CLIENT_ENTRY_CHANNEL_OFFSET] = entry->channel;
     memcpy(destination + CLIENT_ENTRY_AGENT_NAME_OFFSET, entry->agent_name, strlen(entry->agent_name));
     memcpy(destination + CLIENT_ENTRY_INTERFACE_NAME_OFFSET, entry->interface_name, strlen(entry->interface_name));
+    Wire_WriteU32(destination + CLIENT_ENTRY_FRAMES_FORWARDED_OFFSET, entry->frames_forwarded);
+    Wire_WriteU32(destination + CLIENT_ENTRY_FRAMES_DROPPED_OFFSET, entry->frames_dropped);
 }
 
 static void readClientEntry(const uint8_t *source, AdminClientsReplyEntry *entry)
@@ -1025,6 +1029,8 @@ static void readClientEntry(const uint8_t *source, AdminClientsReplyEntry *entry
     entry->agent_name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';
     memcpy(entry->interface_name, source + CLIENT_ENTRY_INTERFACE_NAME_OFFSET, REGISTER_INTERFACE_NAME_SIZE);
     entry->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] = '\0';
+    entry->frames_forwarded = Wire_ReadU32(source + CLIENT_ENTRY_FRAMES_FORWARDED_OFFSET);
+    entry->frames_dropped = Wire_ReadU32(source + CLIENT_ENTRY_FRAMES_DROPPED_OFFSET);
 }
 
 static void writeInterfaceEntry(uint8_t *destination, const AdminInterfacesReplyEntry *entry)

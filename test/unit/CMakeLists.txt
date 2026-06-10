@@ -198,6 +198,7 @@ add_unit_test(test_admin_views
         ${ROOT_SRC_DIR}/hub/domain/admin_views.c
         ${ROOT_SRC_DIR}/hub/domain/hub_peer.c
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
+        ${ROOT_SRC_DIR}/hub/domain/egress_queue.c
         ${ROOT_SRC_DIR}/hub/domain/interface_registry.c
         ${ROOT_SRC_DIR}/hub/domain/peer_directory.c
         ${ROOT_SRC_DIR}/protocol/list_message.c
@@ -213,6 +214,12 @@ add_unit_test(test_hub_peer
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
 )
 
+add_unit_test(test_egress_queue
+    SOURCES
+        hub/domain/test_egress_queue.cpp
+        ${ROOT_SRC_DIR}/hub/domain/egress_queue.c
+)
+
 add_unit_test(test_frame_routes
     SOURCES
         hub/domain/test_frame_routes.cpp
@@ -220,6 +227,7 @@ add_unit_test(test_frame_routes
         ${ROOT_SRC_DIR}/hub/domain/interface_registry.c
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
         ${ROOT_SRC_DIR}/hub/domain/hub_peer.c
+        ${ROOT_SRC_DIR}/hub/domain/egress_queue.c
         ${ROOT_SRC_DIR}/hub/domain/peer_directory.c
         ${ROOT_SRC_DIR}/protocol/list_message.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
@@ -232,6 +240,7 @@ add_unit_test(test_broker
         hub/test_broker.cpp
         ${ROOT_SRC_DIR}/hub/broker.c
         ${ROOT_SRC_DIR}/hub/domain/admin_views.c
+        ${ROOT_SRC_DIR}/hub/domain/egress_queue.c
         ${ROOT_SRC_DIR}/hub/domain/frame_routes.c
         ${ROOT_SRC_DIR}/protocol/error_message.c
         ${ROOT_SRC_DIR}/hub/domain/hub_peer.c

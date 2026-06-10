@@ -1023,7 +1023,7 @@ describe("broker", []() {
             client_channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, 0);
         });
 
-        it("counts forwarded and dropped frames per peer", []() {
+        it("queues a refused frame and drains it when the peer is writable", []() {
             FrameMessage frame = { 0x123, 1000, 0, 1, 0, 0, { 0x55 } };
             AdminPeersMessage request = { 0 };
             AdminPeersReplyMessage reply;
@@ -1040,7 +1040,37 @@ describe("broker", []() {
 
             expect(reply.entries[1].peer_id).toBe((uint32_t)CLIENT_PEER);
             expect(reply.entries[1].frames_forwarded).toBe((uint32_t)1);
-            expect(reply.entries[1].frames_dropped).toBe((uint32_t)1);
+            expect(reply.entries[1].frames_dropped).toBe((uint32_t)0);
+
+            transport.frame_result = true;
+            events.on_peer_writable(events.context, CLIENT_PEER);
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            lastReply(&reply, AdminPeersReplyMessage_Decode);
+
+            expect(reply.entries[1].frames_forwarded).toBe((uint32_t)2);
+            expect(reply.entries[1].frames_dropped).toBe((uint32_t)0);
+        });
+
+        it("counts per-channel drops when a channel overflows", []() {
+            FrameMessage frame = { 0x123, 1000, 0, 1, 0, 0, { 0x55 } };
+            AdminClientsMessage request = { 0, "truck42" };
+            AdminClientsReplyMessage reply;
+            uint8_t frame_encoded[128];
+            uint8_t encoded[256];
+            size_t frame_size = FrameMessage_Encode(&frame, frame_encoded, sizeof(frame_encoded));
+            size_t encoded_size = AdminClientsMessage_Encode(&request, encoded, sizeof(encoded));
+            int i;
+
+            transport.frame_result = false;
+            for(i=0; i<EGRESS_QUEUE_CHANNEL_CAP + 5; i++) {
+                events.on_peer_frame(events.context, AGENT_PEER, frame_encoded, frame_size);
+            }
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            lastReply(&reply, AdminClientsReplyMessage_Decode);
+
+            expect(reply.entries[0].peer_id).toBe((uint32_t)CLIENT_PEER);
+            expect(reply.entries[0].frames_forwarded).toBe((uint32_t)0);
+            expect(reply.entries[0].frames_dropped).toBe((uint32_t)5);
         });
 
         it("aggregates frame totals in the status reply", []() {
@@ -1063,7 +1093,7 @@ describe("broker", []() {
 
             expect(reply.frames_received).toBe((uint64_t)3);
             expect(reply.frames_forwarded).toBe((uint64_t)1);
-            expect(reply.frames_dropped).toBe((uint64_t)1);
+            expect(reply.frames_dropped).toBe((uint64_t)0);
             expect(reply.frames_unroutable).toBe((uint64_t)1);
         });
 
