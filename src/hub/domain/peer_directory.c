@@ -19,6 +19,7 @@ HubPeer *PeerDirectory_Allocate(PeerDirectory *self, uint32_t peer_id)
             self->peers[i].in_use = true;
             self->peers[i].peer_id = peer_id;
             ClientSession_Reset(&self->peers[i].session);
+            EgressQueue_Reset(&self->peers[i].egress);
             return &self->peers[i];
         }
     }

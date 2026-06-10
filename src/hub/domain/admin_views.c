@@ -13,7 +13,9 @@ static bool appendClientRow(
     uint32_t interface_id,
     uint8_t channel,
     const char *agent_name,
-    const char *interface_name
+    const char *interface_name,
+    uint32_t frames_forwarded,
+    uint32_t frames_dropped
 );
 
 /* ---------- public ---------- */
@@ -86,7 +88,7 @@ void AdminViews_Clients(
             if (filtered) {
                 continue;
             }
-            if (!appendClientRow(reply, &skipped, offset, peer->peer_id, 0, ADMIN_CLIENT_NO_CHANNEL, "", "")) {
+            if (!appendClientRow(reply, &skipped, offset, peer->peer_id, 0, ADMIN_CLIENT_NO_CHANNEL, "", "", 0, 0)) {
                 return;
             }
             continue;
@@ -112,7 +114,9 @@ void AdminViews_Clients(
                     binding->interface_id,
                     binding->channel,
                     interface_entry->agent_name,
-                    interface_entry->interface_name
+                    interface_entry->interface_name,
+                    binding->frames_forwarded,
+                    binding->frames_dropped
                 )) {
                 return;
             }
@@ -211,7 +215,9 @@ static bool appendClientRow(
     uint32_t interface_id,
     uint8_t channel,
     const char *agent_name,
-    const char *interface_name
+    const char *interface_name,
+    uint32_t frames_forwarded,
+    uint32_t frames_dropped
 )
 {
     AdminClientsReplyEntry *entry;
@@ -232,6 +238,8 @@ static bool appendClientRow(
     entry->channel = channel;
     strncpy(entry->agent_name, agent_name, REGISTER_AGENT_NAME_SIZE - 1);
     strncpy(entry->interface_name, interface_name, REGISTER_INTERFACE_NAME_SIZE - 1);
+    entry->frames_forwarded = frames_forwarded;
+    entry->frames_dropped = frames_dropped;
 
     return true;
 }

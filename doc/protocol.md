@@ -310,11 +310,11 @@ ADMIN_INTERFACES_REPLY (total 8 + count * 160)
      +16  agent_name char[128]
      +144 interface_name char[16]
 
-ADMIN_CLIENTS_REPLY (total 8 + count * 156)
+ADMIN_CLIENTS_REPLY (total 8 + count * 164)
 @4   count u8          (0-16 entries in this reply)
 @5   flags u8          (bit 0: more entries beyond offset + count)
 @6   reserved u16
-@8   entries, each 156 bytes, one per open channel; a client with no open
+@8   entries, each 164 bytes, one per open channel; a client with no open
      channels yields one entry with channel 0xFF and empty names (only when
      the filter is empty):
      +0   peer_id u32
@@ -323,6 +323,8 @@ ADMIN_CLIENTS_REPLY (total 8 + count * 156)
      +9   reserved u8[3]
      +12  agent_name char[128]
      +140 interface_name char[16]
+     +156 frames_forwarded u32  (this channel, hub -> client)
+     +160 frames_dropped u32    (this channel, dropped at the hub egress)
 ```
 
 Limits: agent name <= 127 chars, interface name 1-15 chars (Linux IFNAMSIZ), <= 16 interfaces per agent, error detail <= 63 chars.

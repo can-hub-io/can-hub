@@ -33,6 +33,7 @@ static void onPeerConnected(void *context, uint32_t peer_id, const char *fingerp
 static void onPeerDisconnected(void *context, uint32_t peer_id, uint64_t now_us);
 static void onPeerControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size, uint64_t now_us);
 static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
+static void onPeerWritable(void *context, uint32_t peer_id);
 static void handleHello(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleList(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
@@ -67,6 +68,10 @@ static void detachAgent(Broker *self, uint32_t agent_peer_id);
 static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size);
 static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char *detail);
 static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id, const uint8_t *data, size_t size, uint8_t route_flags);
+static void enqueueFrame(Broker *self, HubPeer *peer, uint8_t channel, const uint8_t *data, size_t size);
+static void drainPeer(Broker *self, HubPeer *peer);
+static void countForwarded(Broker *self, HubPeer *peer, uint8_t channel);
+static void countDropped(Broker *self, HubPeer *peer, uint8_t channel);
 static uint8_t injectionToken(Broker *self, const HubPeer *sender);
 static bool clientCanRead(Broker *self, const HubPeer *peer, const InterfaceEntry *entry);
 static bool clientCanWrite(Broker *self, const HubPeer *peer, const InterfaceEntry *entry);
@@ -125,6 +130,7 @@ HubTransportEvents Broker_Events(Broker *self)
         .on_peer_disconnected = onPeerDisconnected,
         .on_peer_control = onPeerControl,
         .on_peer_frame = onPeerFrame,
+        .on_peer_writable = onPeerWritable,
     };
 
     return events;
@@ -137,8 +143,14 @@ void Broker_Tick(Broker *self, uint64_t now_us)
 
     for(i=0; i<PEER_DIRECTORY_MAX; i++) {
         peer = PeerDirectory_At(&self->directory, i);
-        if (peer != NULL && peer->role == kHUB_PEER_ROLE_UNKNOWN) {
+        if (peer == NULL) {
+            continue;
+        }
+        if (peer->role == kHUB_PEER_ROLE_UNKNOWN) {
             tickHelloDeadline(self, peer, now_us);
+        }
+        if (EgressQueue_HasPending(&peer->egress)) {
+            drainPeer(self, peer);
         }
     }
 }
@@ -271,6 +283,16 @@ static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
             continue;
         }
         forwardFrame(self, &routes[i], frame.can_id, data, size, forwarded_route_flags);
+    }
+}
+
+static void onPeerWritable(void *context, uint32_t peer_id)
+{
+    Broker *self = context;
+    HubPeer *peer = PeerDirectory_Find(&self->directory, peer_id);
+
+    if (peer != NULL) {
+        drainPeer(self, peer);
     }
 }
 
@@ -1041,7 +1063,6 @@ static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id,
 {
     uint8_t forwarded[FRAME_BUFFER_SIZE];
     HubPeer *destination;
-    bool sent;
 
     destination = PeerDirectory_Find(&self->directory, route->peer_id);
     if (destination != NULL
@@ -1054,18 +1075,82 @@ static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id,
     forwarded[FRAME_CHANNEL_OFFSET] = route->channel;
     forwarded[FRAME_ROUTE_FLAGS_OFFSET] = route_flags;
 
-    sent = self->transport->send_frame(self->transport->context, route->peer_id, forwarded, size);
-    if (sent) {
-        self->metrics.frames_forwarded++;
-    } else {
-        self->metrics.frames_dropped++;
+    if (destination == NULL) {
+        if (self->transport->send_frame(self->transport->context, route->peer_id, forwarded, size)) {
+            self->metrics.frames_forwarded++;
+        } else {
+            self->metrics.frames_dropped++;
+        }
+        return;
     }
 
-    if (destination != NULL) {
-        if (sent) {
-            destination->frames_forwarded++;
-        } else {
-            destination->frames_dropped++;
+    if (EgressQueue_ChannelPending(&destination->egress, route->channel)) {
+        enqueueFrame(self, destination, route->channel, forwarded, size);
+        return;
+    }
+
+    if (self->transport->send_frame(self->transport->context, route->peer_id, forwarded, size)) {
+        countForwarded(self, destination, route->channel);
+        return;
+    }
+
+    enqueueFrame(self, destination, route->channel, forwarded, size);
+}
+
+static void enqueueFrame(Broker *self, HubPeer *peer, uint8_t channel, const uint8_t *data, size_t size)
+{
+    uint8_t evicted_channel = 0;
+    TEGRESS_PUSH_RESULT result;
+
+    result = EgressQueue_Push(&peer->egress, channel, data, (uint16_t)size, &evicted_channel);
+    if (result != kEGRESS_PUSH_QUEUED) {
+        countDropped(self, peer, evicted_channel);
+    }
+}
+
+static void drainPeer(Broker *self, HubPeer *peer)
+{
+    const uint8_t *front;
+    uint16_t size;
+    uint8_t channel;
+
+    while (EgressQueue_NextPendingChannel(&peer->egress, &channel)) {
+        front = EgressQueue_FrontOfChannel(&peer->egress, channel, &size);
+        if (front == NULL) {
+            continue;
+        }
+        if (!self->transport->send_frame(self->transport->context, peer->peer_id, front, size)) {
+            return;
+        }
+        EgressQueue_PopChannel(&peer->egress, channel);
+        countForwarded(self, peer, channel);
+    }
+}
+
+static void countForwarded(Broker *self, HubPeer *peer, uint8_t channel)
+{
+    ChannelBinding *binding;
+
+    self->metrics.frames_forwarded++;
+    peer->frames_forwarded++;
+    if (peer->role == kHUB_PEER_ROLE_CLIENT) {
+        binding = ClientSession_BindingForChannel(&peer->session, channel);
+        if (binding != NULL) {
+            binding->frames_forwarded++;
+        }
+    }
+}
+
+static void countDropped(Broker *self, HubPeer *peer, uint8_t channel)
+{
+    ChannelBinding *binding;
+
+    self->metrics.frames_dropped++;
+    peer->frames_dropped++;
+    if (peer->role == kHUB_PEER_ROLE_CLIENT) {
+        binding = ClientSession_BindingForChannel(&peer->session, channel);
+        if (binding != NULL) {
+            binding->frames_dropped++;
         }
     }
 }

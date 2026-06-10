@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "hub/domain/client_session.h"
+#include "hub/domain/egress_queue.h"
 #include "hub/ports/identity_store_port.h"
 #include "protocol/admin_message.h"
 #include "protocol/register_message.h"
@@ -34,6 +35,7 @@ typedef struct {
     char fingerprint_hex[IDENTITY_FINGERPRINT_HEX_SIZE];
     char agent_name[REGISTER_AGENT_NAME_SIZE];
     ClientSession session;
+    EgressQueue egress;
 } HubPeer;
 
 bool HubPeer_AdoptRole(HubPeer *self, uint8_t wire_role);

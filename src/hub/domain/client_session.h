@@ -18,6 +18,8 @@ typedef struct {
     uint32_t interface_id;
     uint8_t channel;
     uint8_t filter_count;
+    uint32_t frames_forwarded;
+    uint32_t frames_dropped;
     CanFilter filters[SUBSCRIBE_FILTERS_MAX];
 } ChannelBinding;
 
@@ -41,4 +43,5 @@ void ClientSession_CloseChannel(ClientSession *self, uint8_t channel);
 bool ClientSession_InterfaceForChannel(const ClientSession *self, uint8_t channel, uint32_t *interface_id);
 bool ClientSession_ChannelForInterface(const ClientSession *self, uint32_t interface_id, uint8_t *channel);
 const ChannelBinding *ClientSession_BindingForInterface(const ClientSession *self, uint32_t interface_id);
+ChannelBinding *ClientSession_BindingForChannel(ClientSession *self, uint8_t channel);
 void ClientSession_RemoveInterface(ClientSession *self, uint32_t interface_id);

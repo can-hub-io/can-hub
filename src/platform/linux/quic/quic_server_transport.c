@@ -33,6 +33,7 @@ static QuicServerPeer *acceptPeer(
 );
 static void makePeerPath(QuicServerTransport *self, QuicServerPeer *peer, ngtcp2_path *path);
 static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *datagram, size_t datagram_size);
+static void notifyWritable(QuicServerTransport *self, QuicServerPeer *peer);
 static void sendPacketToPeer(void *context, const uint8_t *packet, size_t size);
 static void sendToPeer(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *packet, size_t size);
 static void rearmTimer(QuicServerTransport *self);
@@ -155,6 +156,7 @@ void QuicServerTransport_OnUdpReadable(QuicServerTransport *self)
             continue;
         }
         flushPeer(self, peer, NULL, 0);
+        notifyWritable(self, peer);
     }
 
     rearmTimer(self);
@@ -194,6 +196,7 @@ void QuicServerTransport_OnTimer(QuicServerTransport *self)
             continue;
         }
         flushPeer(self, peer, NULL, 0);
+        notifyWritable(self, peer);
     }
 
     rearmTimer(self);
@@ -391,6 +394,15 @@ static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer, const uin
     rearmTimer(self);
 
     return accepted;
+}
+
+static void notifyWritable(QuicServerTransport *self, QuicServerPeer *peer)
+{
+    if (self->events.on_peer_writable == NULL || !peer->connected || peer->close_pending) {
+        return;
+    }
+
+    self->events.on_peer_writable(self->events.context, peer->peer_id);
 }
 
 static void sendPacketToPeer(void *context, const uint8_t *packet, size_t size)
