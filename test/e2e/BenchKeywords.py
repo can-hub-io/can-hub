@@ -103,8 +103,13 @@ class BenchKeywords:
 
     @keyword("Install Python Package On ${server}")
     def install_python_package_on(self, server, path):
+        staging = "/tmp/python-package-staging"
+        server.exec("rm", "-rf", staging)
+        server.exec("cp", "-r", path, staging)
+        server.exec("rm", "-rf", f"{staging}/build", f"{staging}/dist")
+        server.exec("sh", "-c", f"rm -rf {staging}/*.egg-info")
         server.exec("python3", "-m", "pip", "install", "--quiet",
-                    "--break-system-packages", "--no-build-isolation", path)
+                    "--break-system-packages", "--no-build-isolation", staging)
 
     @keyword("Run Python ${script} On ${server}")
     def run_python_on(self, script, server, *args):
@@ -114,6 +119,10 @@ class BenchKeywords:
     def start_python_on(self, script, server, *args):
         return server.exec("env", _canhub_library(), "python3", script, *args,
                            background=True, log_name="pycan")
+
+    @keyword("Fingerprint Of ${path} On ${server}")
+    def fingerprint_of(self, path, server):
+        return server.exec("python3", "-m", "canhub", "fingerprint", path).stdout.strip()
 
     @keyword("Run Binary ${name} On ${server}")
     def run_binary_on(self, name, server, *args):
