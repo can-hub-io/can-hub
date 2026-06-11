@@ -16,6 +16,7 @@ uint8_t FrameRoutes_FromAgent(
     HubPeer *peer;
     uint8_t route_count = 0;
     uint8_t peer_index;
+    uint8_t binding_iterator;
 
     entry = InterfaceRegistry_FindByAgentChannel(registry, agent_peer_id, agent_channel);
     if (entry == NULL) {
@@ -27,18 +28,17 @@ uint8_t FrameRoutes_FromAgent(
         if (peer == NULL || peer->role != kHUB_PEER_ROLE_CLIENT) {
             continue;
         }
-        binding = ClientSession_BindingForInterface(&peer->session, entry->interface_id);
-        if (binding == NULL) {
-            continue;
-        }
-        if (route_count == routes_max) {
-            return route_count;
-        }
+        binding_iterator = 0;
+        while ((binding = ClientSession_NextBindingForInterface(&peer->session, entry->interface_id, &binding_iterator)) != NULL) {
+            if (route_count == routes_max) {
+                return route_count;
+            }
 
-        routes[route_count].peer_id = peer->peer_id;
-        routes[route_count].channel = binding->channel;
-        routes[route_count].suppress_echo = binding->suppress_echo;
-        route_count++;
+            routes[route_count].peer_id = peer->peer_id;
+            routes[route_count].channel = binding->channel;
+            routes[route_count].suppress_echo = binding->suppress_echo;
+            route_count++;
+        }
     }
 
     return route_count;

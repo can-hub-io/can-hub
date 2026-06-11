@@ -18,6 +18,7 @@ Client Lists The Registered Interface
 
 Send By Namespaced Name Reaches The Bus
     ${candump}=    Start Candump On ${LOCAL_SERVER}
+    Sleep    0.3s    reason=let candump bind its socket before the one-shot send
     ${result}=    Send Frame On ${LOCAL_SERVER}    truck42/vcan0    123#DEADBEEF    connect=${CONNECT}
     Should Be True    ${result.ok}
     Candump ${candump} Should Capture 123#DEADBEEF
