@@ -143,7 +143,7 @@ static void printUsage(FILE *stream, const char *program)
     fprintf(
         stream,
         "usage: %s --connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>"
-        " [--name <agent-name>] [--state-dir <path>] <can-if> [...]\n"
+        " --name <agent-name> [--state-dir <path>] <can-if> [...]\n"
         "       %s --show-identity [--state-dir <path>]   print this agent's"
         " TLS fingerprint for the hub allowlist\n",
         program,
@@ -244,7 +244,7 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
         }
     }
 
-    if (connect_url == NULL || registration.interface_count == 0) {
+    if (connect_url == NULL || agent_name[0] == '\0' || registration.interface_count == 0) {
         return false;
     }
 
