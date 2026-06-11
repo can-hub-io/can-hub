@@ -1,0 +1,4 @@
+canhub/libcanhub.so
+dist/
+build/
+*.egg-info/
