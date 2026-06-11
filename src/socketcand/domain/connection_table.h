@@ -11,7 +11,10 @@
  * client. Each entry owns its inbound AsciiFramer and tracks the socketcand
  * mode plus the hub binding (interface_id + session channel) once a bus is
  * opened. Channel is unique per connection (one hub OPEN per connection), so a
- * delivered frame's channel resolves to exactly one connection. Freestanding.
+ * delivered frame's channel resolves to exactly one connection. OPEN_ACK only
+ * carries interface_id, so concurrent opens of the same interface are matched
+ * FIFO by open_seq: the control stream is ordered, so the oldest outstanding
+ * OPEN owns the next ACK. Freestanding.
  */
 
 #define SOCKETCAND_CONNECTIONS_MAX 32
@@ -38,6 +41,7 @@ typedef struct {
     uint8_t mode;
     uint8_t open_state;
     uint32_t interface_id;
+    uint32_t open_seq;
     uint8_t channel;
     bool channel_valid;
     bool can_write;
@@ -47,6 +51,7 @@ typedef struct {
 
 typedef struct {
     SocketcandConnection connections[SOCKETCAND_CONNECTIONS_MAX];
+    uint32_t next_open_seq;
 } ConnectionTable;
 
 void ConnectionTable_Reset(ConnectionTable *self);
@@ -54,4 +59,5 @@ SocketcandConnection *ConnectionTable_Add(ConnectionTable *self, uint32_t connec
 SocketcandConnection *ConnectionTable_Find(ConnectionTable *self, uint32_t connection_id);
 SocketcandConnection *ConnectionTable_FindByChannel(ConnectionTable *self, uint8_t channel);
 SocketcandConnection *ConnectionTable_FindPendingOpen(ConnectionTable *self, uint32_t interface_id);
+uint32_t ConnectionTable_NextOpenSeq(ConnectionTable *self);
 void ConnectionTable_Remove(ConnectionTable *self, uint32_t connection_id);

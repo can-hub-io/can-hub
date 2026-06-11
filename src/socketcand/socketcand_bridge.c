@@ -297,6 +297,7 @@ static void handleOpenAck(SocketcandBridge *self, const OpenAckMessage *ack)
 
     if (connection->open_state == kSOCKETCAND_OPEN_PENDING_WRITE && ack->status == OPEN_STATUS_WRITE_DENIED) {
         connection->open_state = kSOCKETCAND_OPEN_PENDING_READ;
+        connection->open_seq = ConnectionTable_NextOpenSeq(&self->connections);
         sendOpen(self, connection->interface_id, OPEN_FLAGS_READ_ONLY);
         return;
     }
@@ -379,6 +380,7 @@ static bool openBus(SocketcandBridge *self, SocketcandConnection *connection, co
 
     connection->interface_id = interface_id;
     connection->open_state = kSOCKETCAND_OPEN_PENDING_WRITE;
+    connection->open_seq = ConnectionTable_NextOpenSeq(&self->connections);
     copyString(connection->bus, sizeof(connection->bus), bus);
     sendOpen(self, interface_id, OPEN_FLAGS_READ_WRITE);
 
@@ -492,6 +494,7 @@ static void reattachRenewedInterfaces(SocketcandBridge *self)
 
         connection->interface_id = new_interface_id;
         connection->open_state = kSOCKETCAND_OPEN_PENDING_WRITE;
+        connection->open_seq = ConnectionTable_NextOpenSeq(&self->connections);
         connection->reattaching = true;
         connection->channel_valid = false;
         sendOpen(self, new_interface_id, OPEN_FLAGS_READ_WRITE);

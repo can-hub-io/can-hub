@@ -225,6 +225,41 @@ describe("socketcand_bridge", []() {
         expect(strstr(SocketcandServerPortMock_Written(&server, 1), "write not permitted") != nullptr).toBe(true);
     });
 
+    it("matches concurrent opens of the same interface FIFO by ack order", []() {
+        bringUpReady();
+        server_events.on_client_connected(server_events.context, 1);
+        server_events.on_client_connected(server_events.context, 2);
+        clientBytes(1, "< open truck42/can0 >");
+        clientBytes(2, "< open truck42/can0 >");
+
+        feedOpenAck(OPEN_STATUS_WRITE_DENIED, 0);
+        feedOpenAck(OPEN_STATUS_WRITE_DENIED, 0);
+        feedOpenAck(OPEN_STATUS_OK, 5);
+        feedOpenAck(OPEN_STATUS_OK, 6);
+
+        expect(SocketcandServerPortMock_Closed(&server, 1)).toBe(false);
+        expect(SocketcandServerPortMock_Closed(&server, 2)).toBe(false);
+        expect(strstr(SocketcandServerPortMock_Written(&server, 1), "< ok >") != nullptr).toBe(true);
+        expect(strstr(SocketcandServerPortMock_Written(&server, 2), "< ok >") != nullptr).toBe(true);
+    });
+
+    it("binds each concurrent open to its own channel", []() {
+        bringUpReady();
+        server_events.on_client_connected(server_events.context, 1);
+        server_events.on_client_connected(server_events.context, 2);
+        clientBytes(1, "< open truck42/can0 >");
+        clientBytes(2, "< open truck42/can0 >");
+        feedOpenAck(OPEN_STATUS_OK, 5);
+        feedOpenAck(OPEN_STATUS_OK, 6);
+        clientBytes(1, "< rawmode >");
+        clientBytes(2, "< rawmode >");
+
+        feedFrameOnChannel(5);
+
+        expect(strstr(SocketcandServerPortMock_Written(&server, 1), "< frame 123 1.000000 DEAD >") != nullptr).toBe(true);
+        expect(strstr(SocketcandServerPortMock_Written(&server, 2), "< frame") == nullptr).toBe(true);
+    });
+
     it("closes the client when the bus is unknown", []() {
         bringUpReady();
         server_events.on_client_connected(server_events.context, 1);
