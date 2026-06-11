@@ -38,7 +38,7 @@
 #define ADMIN_CLIENTS_BODY_SIZE 132
 #define ADMIN_CLIENTS_REPLY_FIXED_FIELDS_SIZE 4
 #define ADMIN_CLIENTS_REPLY_ENTRIES_MAX 16
-#define ADMIN_CLIENTS_REPLY_ENTRY_SIZE 156
+#define ADMIN_CLIENTS_REPLY_ENTRY_SIZE 164
 #define ADMIN_INTERFACES_BODY_SIZE 4
 #define ADMIN_INTERFACES_REPLY_FIXED_FIELDS_SIZE 4
 #define ADMIN_INTERFACES_REPLY_ENTRIES_MAX 16
@@ -151,6 +151,8 @@ typedef struct {
     uint8_t channel;
     char agent_name[REGISTER_AGENT_NAME_SIZE];
     char interface_name[REGISTER_INTERFACE_NAME_SIZE];
+    uint32_t frames_forwarded;
+    uint32_t frames_dropped;
 } AdminClientsReplyEntry;
 
 typedef struct {

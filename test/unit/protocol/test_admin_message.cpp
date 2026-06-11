@@ -437,8 +437,8 @@ describe("admin_interfaces_message", []() {
 describe("admin_clients_message", []() {
     it("round-trips client channel entries including the no-channel sentinel", []() {
         AdminClientsReplyMessage reply = { 2, 0, {
-            { 0x40000003, 7, 0, "truck42", "can0" },
-            { 0x40000004, 0, ADMIN_CLIENT_NO_CHANNEL, "", "" },
+            { 0x40000003, 7, 0, "truck42", "can0", 1500, 7 },
+            { 0x40000004, 0, ADMIN_CLIENT_NO_CHANNEL, "", "", 0, 0 },
         } };
         AdminClientsReplyMessage decoded;
         uint8_t buffer[512];
@@ -457,6 +457,8 @@ describe("admin_clients_message", []() {
         expect(decoded.entries[0].channel).toBe(0);
         expect((const char *)decoded.entries[0].agent_name).toBe("truck42");
         expect((const char *)decoded.entries[0].interface_name).toBe("can0");
+        expect(decoded.entries[0].frames_forwarded).toBe((uint32_t)1500);
+        expect(decoded.entries[0].frames_dropped).toBe((uint32_t)7);
         expect(decoded.entries[1].channel).toBe(ADMIN_CLIENT_NO_CHANNEL);
         expect((const char *)decoded.entries[1].agent_name).toBe("");
     });

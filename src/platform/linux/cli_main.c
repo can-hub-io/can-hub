@@ -762,9 +762,9 @@ static void handleClientsReply(const uint8_t *payload, uint16_t payload_length)
 
     if (!page_header_printed) {
         if (command == kCLI_COMMAND_AGENTS_SHOW) {
-            printf("%s%-12s %-8s %s\n", indent, "peer-id", "channel", "interface");
+            printf("%s%-12s %-8s %-16s %-10s %s\n", indent, "peer-id", "channel", "interface", "forwarded", "dropped");
         } else {
-            printf("%-12s %-8s %-13s %-32s %s\n", "peer-id", "channel", "interface-id", "agent", "interface");
+            printf("%-12s %-8s %-13s %-32s %-16s %-10s %s\n", "peer-id", "channel", "interface-id", "agent", "interface", "forwarded", "dropped");
         }
         page_header_printed = true;
     }
@@ -902,17 +902,27 @@ static void printClientRow(const AdminClientsReplyEntry *entry, const char *inde
     }
 
     if (command == kCLI_COMMAND_AGENTS_SHOW) {
-        printf("%s0x%08X   %-8s %s\n", indent, entry->peer_id, channel_text, textOrDash(entry->interface_name));
+        printf(
+            "%s0x%08X   %-8s %-16s %-10u %u\n",
+            indent,
+            entry->peer_id,
+            channel_text,
+            textOrDash(entry->interface_name),
+            entry->frames_forwarded,
+            entry->frames_dropped
+        );
         return;
     }
 
     printf(
-        "0x%08X   %-8s %-13s %-32s %s\n",
+        "0x%08X   %-8s %-13s %-32s %-16s %-10u %u\n",
         entry->peer_id,
         channel_text,
         interface_id_text,
         textOrDash(entry->agent_name),
-        textOrDash(entry->interface_name)
+        textOrDash(entry->interface_name),
+        entry->frames_forwarded,
+        entry->frames_dropped
     );
 }
 
