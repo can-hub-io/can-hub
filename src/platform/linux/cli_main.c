@@ -6,6 +6,7 @@
 
 #include <sys/epoll.h>
 
+#include "platform/linux/shared/cli_meta.h"
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/hub_defaults.h"
@@ -66,6 +67,7 @@ static uint16_t page_offset;
 static bool page_header_printed;
 static int32_t exit_code = -1;
 
+static void printUsage(FILE *stream, const char *program);
 static bool parseArguments(int argc, char **argv, char *host, char *port_text);
 static bool mapCommand(const char *words[], uint8_t word_count);
 static bool parsePeerId(const char *text);
@@ -109,26 +111,12 @@ int main(int argc, char **argv)
         .on_frame = onFrame,
     };
 
+    if (CliMeta_HandleVersionAndHelp(argc, argv, "can-hub-cli", printUsage)) {
+        return 0;
+    }
+
     if (!parseArguments(argc, argv, host, port_text)) {
-        fprintf(stderr, "usage: %s [--connect unix://<path>] <command>\n", argv[0]);
-        fprintf(stderr, "commands:\n");
-        fprintf(stderr, "  status                 hub counters\n");
-        fprintf(stderr, "  peers                  every live connection\n");
-        fprintf(stderr, "  peers kick <peer-id>   disconnect any peer (id as printed, 0x... or decimal)\n");
-        fprintf(stderr, "  agents                 live agents\n");
-        fprintf(stderr, "  agents show <name>     agent detail: interfaces and clients\n");
-        fprintf(stderr, "  agents kick <name>     disconnect an agent\n");
-        fprintf(stderr, "  clients                open client channels\n");
-        fprintf(stderr, "  interfaces             interface catalogue\n");
-        fprintf(stderr, "  interface set <agent>/<iface> bitrate <bps>   reconfigure a bus bitrate\n");
-        fprintf(stderr, "  interface up|down <agent>/<iface>             bring a bus up or down\n");
-        fprintf(stderr, "  pins                   pinned TOFU identities\n");
-        fprintf(stderr, "  pins add <name> <fp>   allow an agent (its --show-identity fingerprint)\n");
-        fprintf(stderr, "  pins delete <name>     drop a pin so the agent can re-pin\n");
-        fprintf(stderr, "  acl                    client read/write grants\n");
-        fprintf(stderr, "  acl add <fp|*> <agent|*>/<iface|*> none|ro|rw   grant (* = baseline)\n");
-        fprintf(stderr, "  acl delete <fp|*> <agent|*>/<iface|*>          drop a grant\n");
-        fprintf(stderr, "default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
+        printUsage(stderr, argv[0]);
         return 1;
     }
 
@@ -145,6 +133,29 @@ int main(int argc, char **argv)
 }
 
 /* ---------- private: arguments ---------- */
+
+static void printUsage(FILE *stream, const char *program)
+{
+    fprintf(stream, "usage: %s [--connect unix://<path>] <command>\n", program);
+    fprintf(stream, "commands:\n");
+    fprintf(stream, "  status                 hub counters\n");
+    fprintf(stream, "  peers                  every live connection\n");
+    fprintf(stream, "  peers kick <peer-id>   disconnect any peer (id as printed, 0x... or decimal)\n");
+    fprintf(stream, "  agents                 live agents\n");
+    fprintf(stream, "  agents show <name>     agent detail: interfaces and clients\n");
+    fprintf(stream, "  agents kick <name>     disconnect an agent\n");
+    fprintf(stream, "  clients                open client channels\n");
+    fprintf(stream, "  interfaces             interface catalogue\n");
+    fprintf(stream, "  interface set <agent>/<iface> bitrate <bps>   reconfigure a bus bitrate\n");
+    fprintf(stream, "  interface up|down <agent>/<iface>             bring a bus up or down\n");
+    fprintf(stream, "  pins                   pinned TOFU identities\n");
+    fprintf(stream, "  pins add <name> <fp>   allow an agent (its --show-identity fingerprint)\n");
+    fprintf(stream, "  pins delete <name>     drop a pin so the agent can re-pin\n");
+    fprintf(stream, "  acl                    client read/write grants\n");
+    fprintf(stream, "  acl add <fp|*> <agent|*>/<iface|*> none|ro|rw   grant (* = baseline)\n");
+    fprintf(stream, "  acl delete <fp|*> <agent|*>/<iface|*>          drop a grant\n");
+    fprintf(stream, "default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
+}
 
 static bool parseArguments(int argc, char **argv, char *host, char *port_text)
 {
