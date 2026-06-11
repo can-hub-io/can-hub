@@ -24,7 +24,18 @@ _BUILD_DEB := build/$(ARCH)/package
 _BUILD_TEST := build/test
 _CEST_RUNNER := test/vendor/cest-runner_linux_x86_64
 
-.PHONY: release debug install deb static deb-debug test e2e e2e-image clean
+.PHONY: release debug install deb static deb-debug test e2e e2e-image windows clean
+
+_BUILD_WINDOWS := build/mingw-x86_64/release
+
+# libcanhub + canhub-dump for x86_64 Windows (tcp/tls; QUIC pending). Needs
+# an llvm-mingw or mingw-w64 toolchain in PATH or CAN_HUB_MINGW_ROOT.
+windows:
+	$(CMAKE) -B $(_BUILD_WINDOWS) \
+	         -G $(GENERATOR) \
+	         -DCMAKE_BUILD_TYPE=Release \
+	         -DCMAKE_TOOLCHAIN_FILE=$(abspath cmake/toolchain-mingw-x86_64.cmake)
+	$(CMAKE) --build $(_BUILD_WINDOWS)
 
 _E2E_IMAGE := can-hub-bench
 

@@ -61,7 +61,7 @@ typedef struct {
 typedef struct {
     uint32_t interface_id;
     char agent[CANHUB_AGENT_NAME_MAX];
-    char interface[CANHUB_INTERFACE_NAME_MAX];
+    char interface_name[CANHUB_INTERFACE_NAME_MAX];
 } CanHubInterfaceInfo;
 
 typedef struct {
@@ -91,7 +91,7 @@ CANHUB_API int32_t canhub_list(
     size_t interfaces_max,
     int32_t timeout_ms
 );
-CANHUB_API int32_t canhub_open(CanHubSession *session, const char *interface, uint32_t flags, int32_t timeout_ms);
+CANHUB_API int32_t canhub_open(CanHubSession *session, const char *interface_name, uint32_t flags, int32_t timeout_ms);
 CANHUB_API int32_t canhub_set_filters(CanHubSession *session, const CanHubFilter *filters, uint8_t filter_count);
 CANHUB_API int32_t canhub_recv(CanHubSession *session, CanHubFrame *frame, int32_t timeout_ms);
 CANHUB_API int32_t canhub_send(CanHubSession *session, const CanHubFrame *frame);
