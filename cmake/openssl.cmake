@@ -29,9 +29,12 @@ if(NOT EXISTS "${CAN_HUB_OPENSSL_PREFIX}/lib/libssl.a")
 
     if(CMAKE_C_COMPILER MATCHES "gcc$")
         string(REGEX REPLACE "gcc$" "" _openssl_cross_prefix "${CMAKE_C_COMPILER}")
-        set(_openssl_compiler_arguments --cross-compile-prefix=${_openssl_cross_prefix})
+        set(_openssl_compiler_arguments --cross-compile-prefix=${_openssl_cross_prefix} CC=gcc)
     else()
         set(_openssl_compiler_arguments CC=${CMAKE_C_COMPILER})
+    endif()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        list(APPEND _openssl_compiler_arguments RC=windres)
     endif()
     execute_process(
         COMMAND ./Configure ${_openssl_target}
