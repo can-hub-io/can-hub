@@ -14,6 +14,7 @@ from robot.api.deco import keyword, library
 from lib import (
     AgentConfig, CanAgent, CanClient, CanCli, CanHub, ClientConfig, HubConfig,
 )
+from lib.rows import parse_candump
 
 CONSUME_SCRIPT = "/work/test/e2e/scripts/consume.py"
 
@@ -98,6 +99,31 @@ class BenchKeywords:
                 return
             time.sleep(0.1)
         raise AssertionError("no client channel opened on the hub")
+
+    @keyword("Start Candump On ${server}")
+    def start_candump_on(self, server, interface="vcan0"):
+        return server.candump(interface)
+
+    @keyword("Candump ${process} Should Capture ${can_id}#${data}")
+    def candump_should_capture(self, process, can_id, data, timeout=5):
+        want = (can_id.upper(), data.upper())
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            for frame in parse_candump(process.read_log()):
+                if (frame.can_id, frame.data) == want:
+                    return
+            time.sleep(0.1)
+        raise AssertionError(
+            f"candump did not capture {can_id}#{data}\n{process.read_log()}"
+        )
+
+    @keyword("Client ${client} Should Not Receive ${can_id}#${data}")
+    def client_should_not_receive(self, client, can_id, data, settle=1.0):
+        time.sleep(float(settle))
+        want = (can_id.upper(), data.upper())
+        for frame in client.dumped_frames():
+            if (frame.can_id, frame.data) == want:
+                raise AssertionError(f"client received filtered-out frame {can_id}#{data}")
 
     @keyword("Client ${client} Should Receive ${can_id}#${data}")
     def client_should_receive(self, client, can_id, data, timeout=5):

@@ -19,13 +19,12 @@
 #include "platform/linux/socketcand/socketcand_server.h"
 #include "platform/linux/tcp/tcp_client_transport.h"
 #include "platform/linux/tls/tls_client_transport.h"
+#include "client/client.h"
 #include "mirror/mirror_app.h"
 #include "protocol/error_message.h"
 #include "protocol/frame_message.h"
-#include "protocol/hello_message.h"
 #include "protocol/interface_name.h"
 #include "protocol/list_message.h"
-#include "protocol/message_header.h"
 #include "protocol/open_message.h"
 #include "protocol/register_message.h"
 #include "protocol/subscribe_message.h"
@@ -62,13 +61,13 @@ static TcpClientTransport transport;
 static TlsClientTransport tls_transport;
 static QuicClientTransport quic_transport;
 static TransportPort *active_port;
+static Client client;
 static uint8_t command;
 static uint8_t connect_scheme;
 static uint8_t open_flags;
 static uint32_t target_interface_id;
 static char target_interface_text[INTERFACE_NAME_NAMESPACED_SIZE];
-static bool resolving;
-static uint16_t resolve_offset;
+static bool target_is_namespaced;
 static FrameMessage frame_to_send;
 static CanFilter dump_filters[SUBSCRIBE_FILTERS_MAX];
 static uint8_t dump_filter_count;
@@ -107,22 +106,20 @@ static void buildBeaconUrl(char *out, size_t out_size);
 static bool parseFrameSpec(const char *text, FrameMessage *frame);
 static bool parseFilterSpec(const char *text, CanFilter *filter);
 static bool parseHexPayload(const char *text, FrameMessage *frame);
-static void sendFrameAndQuit(uint8_t channel);
-static void sendDumpFilters(uint8_t channel);
-static void sendListPage(uint16_t offset);
-static void sendOpenInterface(uint32_t interface_id);
-static void resolveAndOpen(const uint8_t *body, uint16_t length);
+static void sendFrameAndQuit(void);
+static void startClientCommand(void);
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *events);
 static bool prepareSecurityMaterial(const char *host, const char *port_text);
 static int32_t showIdentity(void);
 static bool initTlsTransport(const char *host, const char *port_text, const TransportEvents *events);
 static bool initQuicTransport(const char *host, const char *port_text, const TransportEvents *events);
 static int32_t runQuicEventLoop(void);
-static void onConnected(void *context);
-static void onDisconnected(void *context, uint64_t now_us);
-static void onControl(void *context, const uint8_t *data, size_t size, uint64_t now_us);
-static void onFrame(void *context, const uint8_t *data, size_t size);
-static void printListReply(const uint8_t *payload, uint16_t payload_length);
+static void clientOnListReply(void *context, const ListReplyMessage *reply);
+static void clientOnOpenResult(void *context, uint8_t status, uint8_t channel, uint32_t interface_id);
+static void clientOnFrame(void *context, const FrameMessage *frame);
+static void clientOnError(void *context, uint16_t code, const char *detail);
+static void clientOnDisconnected(void *context);
+static void printListReply(const ListReplyMessage *reply);
 static void printFrame(const FrameMessage *frame);
 static int32_t runEventLoop(void);
 
@@ -131,12 +128,14 @@ int main(int argc, char **argv)
     char host[CONNECT_URL_HOST_MAX];
     char port_text[CONNECT_URL_PORT_TEXT_MAX];
     int32_t i;
-    TransportEvents events = {
-        .context = &transport,
-        .on_connected = onConnected,
-        .on_disconnected = onDisconnected,
-        .on_control = onControl,
-        .on_frame = onFrame,
+    TransportEvents events = Client_TransportEvents(&client);
+    ClientEvents client_events = {
+        .context = NULL,
+        .on_list_reply = clientOnListReply,
+        .on_open_result = clientOnOpenResult,
+        .on_frame = clientOnFrame,
+        .on_error = clientOnError,
+        .on_disconnected = clientOnDisconnected,
     };
 
     if (CliMeta_HandleVersionAndHelp(argc, argv, "can-hub-client", printUsage)) {
@@ -170,6 +169,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "could not initialize transport\n");
         return 1;
     }
+    Client_Init(&client, active_port, &client_events);
+    startClientCommand();
     if (!active_port->connect(active_port->context)) {
         fprintf(stderr, "could not connect to %s\n", host);
         return 1;
@@ -249,7 +250,7 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
 
     if (command == kCLIENT_COMMAND_DUMP || command == kCLIENT_COMMAND_SEND) {
         if (InterfaceName_IsNamespaced(target_interface_text)) {
-            resolving = true;
+            target_is_namespaced = true;
         } else {
             target_interface_id = (uint32_t)strtoul(target_interface_text, NULL, 10);
         }
@@ -341,15 +342,10 @@ static bool parseHexPayload(const char *text, FrameMessage *frame)
     return true;
 }
 
-static void sendFrameAndQuit(uint8_t channel)
+static void sendFrameAndQuit(void)
 {
-    uint8_t encoded[MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD];
-    size_t encoded_size;
-
-    frame_to_send.channel = channel;
     frame_to_send.timestamp_us = Clock_RealtimeUs();
-    encoded_size = FrameMessage_Encode(&frame_to_send, encoded, sizeof(encoded));
-    if (encoded_size == 0 || !active_port->send_frame(active_port->context, encoded, encoded_size)) {
+    if (!Client_SendFrame(&client, &frame_to_send)) {
         fprintf(stderr, "could not send the frame\n");
         exit_code = 1;
         return;
@@ -358,63 +354,21 @@ static void sendFrameAndQuit(uint8_t channel)
     exit_code = 0;
 }
 
-static void sendDumpFilters(uint8_t channel)
+static void startClientCommand(void)
 {
-    SubscribeMessage subscribe;
-    uint8_t encoded[MESSAGE_HEADER_SIZE + SUBSCRIBE_FIXED_FIELDS_SIZE + SUBSCRIBE_FILTERS_MAX * CAN_FILTER_SIZE];
-    size_t encoded_size;
-
-    subscribe.channel = channel;
-    subscribe.filter_count = dump_filter_count;
-    memcpy(subscribe.filters, dump_filters, (size_t)dump_filter_count * sizeof(*dump_filters));
-    encoded_size = SubscribeMessage_Encode(&subscribe, encoded, sizeof(encoded));
-    active_port->send_control(active_port->context, encoded, encoded_size);
-}
-
-static void sendListPage(uint16_t offset)
-{
-    ListMessage list = { offset };
-    uint8_t encoded[64];
-    size_t encoded_size = ListMessage_Encode(&list, encoded, sizeof(encoded));
-
-    active_port->send_control(active_port->context, encoded, encoded_size);
-}
-
-static void sendOpenInterface(uint32_t interface_id)
-{
-    OpenMessage open = { interface_id, open_flags };
-    uint8_t encoded[64];
-    size_t encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
-
-    active_port->send_control(active_port->context, encoded, encoded_size);
-}
-
-static void resolveAndOpen(const uint8_t *body, uint16_t length)
-{
-    ListReplyMessage reply;
-    uint32_t interface_id;
-
-    if (!ListReplyMessage_Decode(&reply, body, length)) {
-        fprintf(stderr, "malformed list reply\n");
-        exit_code = 1;
+    if (command == kCLIENT_COMMAND_LIST) {
+        Client_RequestList(&client, 0);
         return;
     }
 
-    if (InterfaceName_Find(&reply, target_interface_text, &interface_id)) {
-        resolving = false;
-        target_interface_id = interface_id;
-        sendOpenInterface(interface_id);
+    if (dump_filter_count > 0) {
+        Client_SetFilters(&client, dump_filters, dump_filter_count);
+    }
+    if (target_is_namespaced) {
+        Client_OpenByName(&client, target_interface_text, open_flags);
         return;
     }
-
-    if ((reply.flags & LIST_REPLY_FLAG_MORE) != 0 && reply.count > 0) {
-        resolve_offset = (uint16_t)(resolve_offset + reply.count);
-        sendListPage(resolve_offset);
-        return;
-    }
-
-    fprintf(stderr, "interface %s not found\n", target_interface_text);
-    exit_code = 1;
+    Client_OpenById(&client, target_interface_id, open_flags);
 }
 
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *events)
@@ -508,115 +462,72 @@ static bool initQuicTransport(const char *host, const char *port_text, const Tra
     return QuicClientTransport_Init(&quic_transport, host, port_text, events, &security_config);
 }
 
-static void onConnected(void *context)
+static void clientOnListReply(void *context, const ListReplyMessage *reply)
 {
-    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0 };
-    uint8_t encoded[64];
-    size_t encoded_size;
-
     (void)context;
 
-    encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
-    active_port->send_control(active_port->context, encoded, encoded_size);
+    printListReply(reply);
+    exit_code = 0;
+}
 
-    if (command == kCLIENT_COMMAND_LIST || resolving) {
-        sendListPage(resolve_offset);
+static void clientOnOpenResult(void *context, uint8_t status, uint8_t channel, uint32_t interface_id)
+{
+    (void)context;
+
+    if (status != OPEN_STATUS_OK) {
+        fprintf(stderr, "open rejected for interface %u\n", interface_id);
+        exit_code = 1;
+        return;
+    }
+    if (command == kCLIENT_COMMAND_SEND) {
+        sendFrameAndQuit();
         return;
     }
 
-    sendOpenInterface(target_interface_id);
+    fprintf(stderr, "dumping interface %u (channel %u), ctrl-c to stop\n", interface_id, channel);
 }
 
-static void onDisconnected(void *context, uint64_t now_us)
+static void clientOnFrame(void *context, const FrameMessage *frame)
 {
     (void)context;
-    (void)now_us;
+
+    printFrame(frame);
+}
+
+static void clientOnError(void *context, uint16_t code, const char *detail)
+{
+    (void)context;
+
+    if (code == CLIENT_ERROR_INTERFACE_NOT_FOUND) {
+        fprintf(stderr, "interface %s not found\n", detail);
+    } else if (code == CLIENT_ERROR_MALFORMED_REPLY) {
+        fprintf(stderr, "%s\n", detail);
+    } else {
+        fprintf(stderr, "hub error %u: %.*s\n", code, (int)ERROR_DETAIL_SIZE, detail);
+    }
+
+    exit_code = 1;
+}
+
+static void clientOnDisconnected(void *context)
+{
+    (void)context;
 
     fprintf(stderr, "connection lost\n");
     exit_code = 1;
 }
 
-static void onControl(void *context, const uint8_t *data, size_t size, uint64_t now_us)
+static void printListReply(const ListReplyMessage *reply)
 {
-    MessageHeader header;
-    OpenAckMessage ack;
-    ErrorMessage error;
-
-    (void)context;
-    (void)now_us;
-
-    if (!MessageHeader_Decode(&header, data, size)) {
-        return;
-    }
-
-    if (header.type == kMESSAGE_TYPE_ERROR) {
-        if (ErrorMessage_Decode(&error, data + MESSAGE_HEADER_SIZE, header.length)) {
-            fprintf(stderr, "hub error %u: %s\n", error.code, error.detail);
-        }
-        exit_code = 1;
-        return;
-    }
-    if (header.type == kMESSAGE_TYPE_LIST_REPLY) {
-        if (resolving) {
-            resolveAndOpen(data + MESSAGE_HEADER_SIZE, header.length);
-            return;
-        }
-        printListReply(data + MESSAGE_HEADER_SIZE, header.length);
-        exit_code = 0;
-        return;
-    }
-    if (header.type == kMESSAGE_TYPE_OPEN_ACK) {
-        OpenAckMessage_Decode(&ack, data + MESSAGE_HEADER_SIZE, header.length);
-        if (ack.status != OPEN_STATUS_OK) {
-            fprintf(stderr, "open rejected for interface %u\n", ack.interface_id);
-            exit_code = 1;
-            return;
-        }
-        if (command == kCLIENT_COMMAND_SEND) {
-            sendFrameAndQuit(ack.channel);
-            return;
-        }
-        if (dump_filter_count > 0) {
-            sendDumpFilters(ack.channel);
-        }
-        fprintf(stderr, "dumping interface %u (channel %u), ctrl-c to stop\n", ack.interface_id, ack.channel);
-    }
-}
-
-static void onFrame(void *context, const uint8_t *data, size_t size)
-{
-    MessageHeader header;
-    FrameMessage frame;
-
-    (void)context;
-
-    if (!MessageHeader_Decode(&header, data, size)) {
-        return;
-    }
-    if (!FrameMessage_Decode(&frame, data + MESSAGE_HEADER_SIZE, header.length)) {
-        return;
-    }
-
-    printFrame(&frame);
-}
-
-static void printListReply(const uint8_t *payload, uint16_t payload_length)
-{
-    ListReplyMessage reply;
     uint8_t i;
 
-    if (!ListReplyMessage_Decode(&reply, payload, payload_length)) {
-        fprintf(stderr, "malformed list reply\n");
-        return;
-    }
-
     printf("%-10s %-32s %s\n", "id", "agent", "interface");
-    for(i=0; i<reply.count; i++) {
+    for(i=0; i<reply->count; i++) {
         printf(
             "%-10u %-32s %s\n",
-            reply.entries[i].interface_id,
-            reply.entries[i].agent_name,
-            reply.entries[i].interface_name
+            reply->entries[i].interface_id,
+            reply->entries[i].agent_name,
+            reply->entries[i].interface_name
         );
     }
 }
