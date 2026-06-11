@@ -18,6 +18,7 @@ static void printFrame(const CanHubFrame *frame);
 int main(int argc, char **argv)
 {
     CanHubSession *session;
+    CanHubConnectConfig config = { 0 };
     int32_t result;
 
     if (argc < 3) {
@@ -25,7 +26,11 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    session = canhub_connect(argv[1], NULL, -1);
+    config.struct_size = sizeof(config);
+    config.url = argv[1];
+    config.connect_timeout_ms = -1;
+
+    session = canhub_connect(&config);
     if (session == NULL) {
         fprintf(stderr, "could not connect to %s\n", argv[1]);
         return 1;

@@ -123,6 +123,7 @@ static bool startLoopbackPair(void)
     SSL *client_session;
     int sockets[2];
 
+    memset(&config, 0, sizeof(config));
     config.certificate_path = client_certificate;
     config.key_path = client_key;
     config.pin_store_path = PIN_STORE_PATH;

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "python-can-hub"
+version = "0.1.6"
+description = "python-can backend for can-hub: remote CAN interfaces over unix/tcp/tls/quic"
+readme = "README.md"
+license = { text = "AGPL-3.0-only" }
+requires-python = ">=3.9"
+dependencies = ["python-can>=4.0"]
+
+[project.urls]
+Homepage = "https://github.com/jamofer/can-hub"
+
+[project.entry-points."can.interface"]
+canhub = "canhub.bus:CanHubBus"
+
+[tool.setuptools]
+packages = ["canhub"]
+
+[tool.setuptools.package-data]
+canhub = ["libcanhub.so"]

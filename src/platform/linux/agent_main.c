@@ -78,6 +78,8 @@ int main(int argc, char **argv)
     int32_t event_count;
     int32_t i;
 
+    signal(SIGPIPE, SIG_IGN);
+
     if (CliMeta_HandleVersionAndHelp(argc, argv, "can-hub-agent", printUsage)) {
         return 0;
     }
@@ -285,6 +287,7 @@ static bool initTransport(const char *host, const char *port_text, const Transpo
         quic_security_config.key_path = identity_key_path;
         quic_security_config.pin_store_path = known_hubs_path;
         quic_security_config.pin_key = pin_key;
+        quic_security_config.pinned_fingerprint = NULL;
         return QuicClientTransport_Init(&quic_transport, host, port_text, transport_events, &quic_security_config);
     }
     if (transport_scheme == kCONNECT_SCHEME_TLS) {
@@ -292,6 +295,7 @@ static bool initTransport(const char *host, const char *port_text, const Transpo
         tls_security_config.key_path = identity_key_path;
         tls_security_config.pin_store_path = known_hubs_path;
         tls_security_config.pin_key = pin_key;
+        tls_security_config.pinned_fingerprint = NULL;
         return TlsClientTransport_Init(&tls_transport, host, port_text, transport_events, &tls_security_config);
     }
 
