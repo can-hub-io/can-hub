@@ -10,6 +10,7 @@
 
 #include "platform/linux/clock/clock.h"
 #include "platform/linux/quic/quic_client_transport.h"
+#include "platform/linux/shared/cli_meta.h"
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/hub_defaults.h"
@@ -87,6 +88,7 @@ static char attach_interface_name[REGISTER_INTERFACE_NAME_SIZE];
 static MirrorApp mirror_app;
 static SocketCanAdapter mirror_can_adapter;
 
+static void printUsage(FILE *stream, const char *program);
 static bool parseArguments(int argc, char **argv, char *host, char *port_text);
 static bool parseSocketcandListen(const char *value);
 static int32_t runSocketcandServer(const char *host, const char *port_text);
@@ -137,6 +139,10 @@ int main(int argc, char **argv)
         .on_frame = onFrame,
     };
 
+    if (CliMeta_HandleVersionAndHelp(argc, argv, "can-hub-client", printUsage)) {
+        return 0;
+    }
+
     for(i=1; i<argc; i++) {
         if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
             state_directory_override = argv[i + 1];
@@ -149,15 +155,7 @@ int main(int argc, char **argv)
     }
 
     if (!parseArguments(argc, argv, host, port_text)) {
-        fprintf(stderr, "usage: %s [--connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>|unix://<path>]\n", argv[0]);
-        fprintf(stderr, "       [--state-dir <path>] list | dump [--no-echo] <interface> [<id>[:<mask>] ...]\n");
-        fprintf(stderr, "       | send <interface> <can-id>#<hex-payload>   (cansend syntax, e.g. 123#DEADBEEF)\n");
-        fprintf(stderr, "       | socketcand [--listen [<bind-ip>:]<port>] [--no-beacon]\n");
-        fprintf(stderr, "                                           local socketcand server (default 127.0.0.1:" SOCKETCAND_DEFAULT_PORT_TEXT ")\n");
-        fprintf(stderr, "       | attach <interface> <vcan>   mirror a remote bus into a local pre-created vcan (bidirectional)\n");
-        fprintf(stderr, "       <interface> is the numeric id (from list) or the namespaced name agent/iface\n");
-        fprintf(stderr, "       %s --show-identity [--state-dir <path>]   print this client's TLS fingerprint\n", argv[0]);
-        fprintf(stderr, "       default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
+        printUsage(stderr, argv[0]);
         return 1;
     }
 
@@ -181,6 +179,19 @@ int main(int argc, char **argv)
 }
 
 /* ---------- private ---------- */
+
+static void printUsage(FILE *stream, const char *program)
+{
+    fprintf(stream, "usage: %s [--connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>|unix://<path>]\n", program);
+    fprintf(stream, "       [--state-dir <path>] list | dump [--no-echo] <interface> [<id>[:<mask>] ...]\n");
+    fprintf(stream, "       | send <interface> <can-id>#<hex-payload>   (cansend syntax, e.g. 123#DEADBEEF)\n");
+    fprintf(stream, "       | socketcand [--listen [<bind-ip>:]<port>] [--no-beacon]\n");
+    fprintf(stream, "                                           local socketcand server (default 127.0.0.1:" SOCKETCAND_DEFAULT_PORT_TEXT ")\n");
+    fprintf(stream, "       | attach <interface> <vcan>   mirror a remote bus into a local pre-created vcan (bidirectional)\n");
+    fprintf(stream, "       <interface> is the numeric id (from list) or the namespaced name agent/iface\n");
+    fprintf(stream, "       %s --show-identity [--state-dir <path>]   print this client's TLS fingerprint\n", program);
+    fprintf(stream, "       default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
+}
 
 static bool parseArguments(int argc, char **argv, char *host, char *port_text)
 {
