@@ -121,7 +121,7 @@ void TlsClientTransport_OnWritable(TlsClientTransport *self)
 static bool portConnect(void *context)
 {
     TlsClientTransport *self = context;
-    gnutls_session_t session;
+    SSL *ssl;
     int32_t connected_fd;
 
     if (TlsChannel_IsBound(&self->channel)) {
@@ -131,12 +131,12 @@ static bool portConnect(void *context)
     if (!connectTcp(self, &connected_fd)) {
         return false;
     }
-    if (!TlsClientSecurity_NewSession(&self->security, self->host, &session)) {
+    if (!TlsClientSecurity_NewSession(&self->security, self->host, &ssl)) {
         close(connected_fd);
         return false;
     }
 
-    TlsChannel_Bind(&self->channel, connected_fd, session);
+    TlsChannel_Bind(&self->channel, connected_fd, ssl);
     self->connecting = true;
     self->announced = false;
 

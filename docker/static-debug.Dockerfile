@@ -1,5 +1,5 @@
 # Debug variant of static.Dockerfile: agent only, -O0 -g, not stripped.
-# Same musl + source-built GnuTLS static stack, so layers 1-96 are byte-for-byte
+# Same musl + source-built OpenSSL static stack, so the dependency layers are byte-for-byte
 # identical to static.Dockerfile and reuse its docker layer cache.
 #
 #   docker build -f docker/static-debug.Dockerfile --build-arg ARCH=arm64 --output dist/arm64-debug .
@@ -9,7 +9,7 @@
 FROM debian:bookworm-slim AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates cmake curl file gcc g++ git m4 make ninja-build pkg-config xz-utils \
+        ca-certificates cmake curl file gcc g++ git m4 make ninja-build perl pkg-config xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
 ARG ARCH=armv7
@@ -50,43 +50,22 @@ ENV STAGING=/opt/staging
 ENV PKG_CONFIG_PATH=$STAGING/lib/pkgconfig
 ENV PKG_CONFIG_LIBDIR=$STAGING/lib/pkgconfig
 
-ARG GMP_VERSION=6.3.0
-ARG GMP_SHA256=a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898
+ARG OPENSSL_VERSION=3.5.7
+ARG OPENSSL_SHA256=a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8
 RUN . /etc/static-build.env \
-    && curl -fsSL -o /tmp/gmp.tar.xz "https://ftp.gnu.org/gnu/gmp/gmp-$GMP_VERSION.tar.xz" \
-    && echo "$GMP_SHA256  /tmp/gmp.tar.xz" | sha256sum -c \
-    && mkdir /tmp/gmp && tar -xf /tmp/gmp.tar.xz --strip-components=1 -C /tmp/gmp \
-    && cd /tmp/gmp \
-    && ./configure --host=$CROSS_TRIPLET --prefix=$STAGING --disable-shared --enable-static CFLAGS="-O2 -ffunction-sections -fdata-sections" \
-    && make -j"$(nproc)" && make install \
-    && rm -rf /tmp/gmp /tmp/gmp.tar.xz
-
-ARG NETTLE_VERSION=3.10.2
-ARG NETTLE_SHA256=fe9ff51cb1f2abb5e65a6b8c10a92da0ab5ab6eaf26e7fc2b675c45f1fb519b5
-RUN . /etc/static-build.env \
-    && curl -fsSL -o /tmp/nettle.tar.gz "https://ftp.gnu.org/gnu/nettle/nettle-$NETTLE_VERSION.tar.gz" \
-    && echo "$NETTLE_SHA256  /tmp/nettle.tar.gz" | sha256sum -c \
-    && mkdir /tmp/nettle && tar -xf /tmp/nettle.tar.gz --strip-components=1 -C /tmp/nettle \
-    && cd /tmp/nettle \
-    && ./configure --host=$CROSS_TRIPLET --prefix=$STAGING --disable-shared --enable-static CFLAGS="-O2 -ffunction-sections -fdata-sections" \
-        --disable-documentation CPPFLAGS="-I$STAGING/include" LDFLAGS="-L$STAGING/lib" \
-    && make -j"$(nproc)" && make install \
-    && rm -rf /tmp/nettle /tmp/nettle.tar.gz
-
-ARG GNUTLS_VERSION=3.8.13
-ARG GNUTLS_SHA256=ffed8ec1bf09c2426d4f14aae377de4753b53e537d685e604e99a8b16ca9c97e
-RUN . /etc/static-build.env \
-    && curl -fsSL -o /tmp/gnutls.tar.xz "https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-$GNUTLS_VERSION.tar.xz" \
-    && echo "$GNUTLS_SHA256  /tmp/gnutls.tar.xz" | sha256sum -c \
-    && mkdir /tmp/gnutls && tar -xf /tmp/gnutls.tar.xz --strip-components=1 -C /tmp/gnutls \
-    && cd /tmp/gnutls \
-    && ./configure --host=$CROSS_TRIPLET --prefix=$STAGING --disable-shared --enable-static CFLAGS="-O2 -ffunction-sections -fdata-sections" \
-        --with-included-libtasn1 --with-included-unistring --without-p11-kit --without-idn \
-        --without-brotli --without-zstd --without-zlib --without-tpm --without-tpm2 \
-        --disable-doc --disable-tools --disable-tests --disable-cxx --disable-guile \
-        CPPFLAGS="-I$STAGING/include" LDFLAGS="-L$STAGING/lib" \
-    && make -j"$(nproc)" && make install \
-    && rm -rf /tmp/gnutls /tmp/gnutls.tar.xz
+    && case "$PROCESSOR" in \
+        x86_64) OPENSSL_TARGET=linux-x86_64;; \
+        aarch64) OPENSSL_TARGET=linux-aarch64;; \
+        arm) OPENSSL_TARGET=linux-armv4;; \
+    esac \
+    && curl -fsSL -o /tmp/openssl.tar.gz "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VERSION/openssl-$OPENSSL_VERSION.tar.gz" \
+    && echo "$OPENSSL_SHA256  /tmp/openssl.tar.gz" | sha256sum -c \
+    && mkdir /tmp/openssl && tar -xf /tmp/openssl.tar.gz --strip-components=1 -C /tmp/openssl \
+    && cd /tmp/openssl \
+    && ./Configure "$OPENSSL_TARGET" --cross-compile-prefix=$CROSS_TRIPLET- --prefix=$STAGING --libdir=lib \
+        no-shared no-apps no-docs no-tests -O2 -ffunction-sections -fdata-sections \
+    && make -j"$(nproc)" && make install_sw \
+    && rm -rf /tmp/openssl /tmp/openssl.tar.gz
 
 COPY . /src
 ENV CAN_HUB_SYSROOT=/opt/staging

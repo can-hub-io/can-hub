@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: install dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libgnutls28-dev
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libssl-dev perl
       - name: cache build trees
         uses: actions/cache@v4
         with:
@@ -35,7 +35,7 @@ jobs:
         run: |
           sudo dpkg --add-architecture armhf
           sudo apt-get update
-          sudo apt-get install -y ninja-build gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libgnutls28-dev:armhf
+          sudo apt-get install -y ninja-build gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf perl
       - name: cache build tree
         uses: actions/cache@v4
         with:

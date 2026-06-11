@@ -150,7 +150,7 @@ static bool portConnect(void *context)
     }
 
     QuicUdpEndpoint_MakePath(&self->udp, &path);
-    if (!QuicConnection_Open(&self->connection, self->security.session, &path)) {
+    if (!QuicConnection_Open(&self->connection, self->security.tls_context, &path)) {
         QuicClientSecurity_Free(&self->security);
         return false;
     }

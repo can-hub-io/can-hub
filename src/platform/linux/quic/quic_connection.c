@@ -4,7 +4,7 @@
 
 #include <string.h>
 
-#include <gnutls/crypto.h>
+#include <openssl/rand.h>
 
 #define NO_STREAM (-1)
 #define LOCAL_CID_LIST_MAX 32
@@ -70,7 +70,7 @@ ngtcp2_crypto_conn_ref *QuicConnection_Ref(QuicConnection *self)
     return &self->connection_ref;
 }
 
-bool QuicConnection_Open(QuicConnection *self, gnutls_session_t session, const ngtcp2_path *path)
+bool QuicConnection_Open(QuicConnection *self, ngtcp2_crypto_ossl_ctx *tls_context, const ngtcp2_path *path)
 {
     ngtcp2_callbacks callbacks;
     ngtcp2_settings settings;
@@ -101,7 +101,7 @@ bool QuicConnection_Open(QuicConnection *self, gnutls_session_t session, const n
         return false;
     }
 
-    ngtcp2_conn_set_tls_native_handle(self->connection, session);
+    ngtcp2_conn_set_tls_native_handle(self->connection, tls_context);
     ngtcp2_conn_set_keep_alive_timeout(self->connection, KEEP_ALIVE_TIMEOUT);
 
     return true;
@@ -109,7 +109,7 @@ bool QuicConnection_Open(QuicConnection *self, gnutls_session_t session, const n
 
 bool QuicConnection_OpenServer(
     QuicConnection *self,
-    gnutls_session_t session,
+    ngtcp2_crypto_ossl_ctx *tls_context,
     const ngtcp2_path *path,
     const ngtcp2_pkt_hd *initial_header
 )
@@ -143,7 +143,7 @@ bool QuicConnection_OpenServer(
         return false;
     }
 
-    ngtcp2_conn_set_tls_native_handle(self->connection, session);
+    ngtcp2_conn_set_tls_native_handle(self->connection, tls_context);
 
     return true;
 }
@@ -370,7 +370,7 @@ static void buildParams(ngtcp2_transport_params *params)
 
 static void randomCid(ngtcp2_cid *cid)
 {
-    gnutls_rnd(GNUTLS_RND_RANDOM, cid->data, QUIC_CONNECTION_CID_LENGTH);
+    RAND_bytes(cid->data, QUIC_CONNECTION_CID_LENGTH);
     cid->datalen = QUIC_CONNECTION_CID_LENGTH;
 }
 
@@ -378,7 +378,7 @@ static void randCallback(uint8_t *destination, size_t destination_length, const 
 {
     (void)rand_context;
 
-    gnutls_rnd(GNUTLS_RND_RANDOM, destination, destination_length);
+    RAND_bytes(destination, (int)destination_length);
 }
 
 static int getNewConnectionIdCallback(
@@ -392,12 +392,12 @@ static int getNewConnectionIdCallback(
     (void)connection;
     (void)user_data;
 
-    if (gnutls_rnd(GNUTLS_RND_RANDOM, cid->data, cid_length) != 0) {
+    if (RAND_bytes(cid->data, (int)cid_length) != 1) {
         return NGTCP2_ERR_CALLBACK_FAILURE;
     }
     cid->datalen = cid_length;
 
-    if (gnutls_rnd(GNUTLS_RND_RANDOM, token, NGTCP2_STATELESS_RESET_TOKENLEN) != 0) {
+    if (RAND_bytes(token, NGTCP2_STATELESS_RESET_TOKENLEN) != 1) {
         return NGTCP2_ERR_CALLBACK_FAILURE;
     }
 

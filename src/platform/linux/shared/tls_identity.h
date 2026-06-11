@@ -4,8 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <gnutls/gnutls.h>
-
 /*
  * Self-signed TLS identity for zero-config TOFU: an ED25519 keypair and
  * certificate generated on first start and reused afterwards. The state
@@ -23,5 +21,5 @@ bool TlsIdentity_LoadOrCreate(
     char *certificate_path,
     char *key_path
 );
-bool TlsIdentity_FingerprintOfDer(const gnutls_datum_t *certificate_der, char *fingerprint_hex);
+bool TlsIdentity_FingerprintOfDer(const uint8_t *certificate_der, size_t der_size, char *fingerprint_hex);
 bool TlsIdentity_FingerprintOfFile(const char *certificate_path, char *fingerprint_hex);

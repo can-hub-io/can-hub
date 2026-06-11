@@ -2,23 +2,25 @@
 
 #include <stdbool.h>
 
-#include <gnutls/gnutls.h>
 #include <ngtcp2/ngtcp2_crypto.h>
+#include <ngtcp2/ngtcp2_crypto_ossl.h>
+#include <openssl/ssl.h>
 
 /*
- * TLS side of the QUIC server: certificate credentials shared by every
- * connection, one GnuTLS session per accepted peer. Certificate and key
- * come from files; auto-generation and TOFU pinning land in the hardening
- * epic.
+ * TLS side of the QUIC server: one OpenSSL context shared by every
+ * connection, one session per accepted peer wired to ngtcp2 through the
+ * crypto-ossl backend. Client certificates are required (mTLS); the peer
+ * fingerprint is the identity the broker pins at REGISTER.
  */
 typedef struct {
-    gnutls_certificate_credentials_t credentials;
+    SSL_CTX *context;
 } QuicServerSecurity;
 
 bool QuicServerSecurity_Init(QuicServerSecurity *self, const char *certificate_file, const char *key_file);
 bool QuicServerSecurity_NewSession(
     QuicServerSecurity *self,
-    gnutls_session_t *session,
+    SSL **ssl,
+    ngtcp2_crypto_ossl_ctx **tls_context,
     ngtcp2_crypto_conn_ref *connection_ref
 );
-void QuicServerSecurity_FreeSession(gnutls_session_t session);
+void QuicServerSecurity_FreeSession(SSL *ssl, ngtcp2_crypto_ossl_ctx *tls_context);

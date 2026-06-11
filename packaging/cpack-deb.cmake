@@ -58,7 +58,7 @@ set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 # Static debs (CAN_HUB_DEB_STATIC, built in docker/static.Dockerfile) carry
 # musl binaries with zero runtime deps, so shlibdeps is off and there are no
 # Depends; the target architecture is fixed explicitly (it is a cross build).
-# The native build keeps shlibdeps, which pins libc6/gnutls to the build host.
+# The native build keeps shlibdeps, which pins libc6 to the build host.
 if(CAN_HUB_DEB_STATIC)
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
     set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "${CAN_HUB_DEB_ARCH}")
