@@ -10,9 +10,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         iptables \
         can-utils \
         kmod \
-        libgnutls30 \
         python3 \
         python3-pip \
+        python3-setuptools \
+        python3-wheel \
         iputils-ping \
     && pip3 install --no-cache-dir --break-system-packages \
         robotframework \

@@ -1,3 +1,4 @@
+#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -93,6 +94,8 @@ int main(int argc, char **argv)
     struct epoll_event events[MAX_EPOLL_EVENTS];
     int32_t event_count;
     int32_t i;
+
+    signal(SIGPIPE, SIG_IGN);
 
     if (CliMeta_HandleVersionAndHelp(argc, argv, "can-hub", printUsage)) {
         return 0;

@@ -17,6 +17,7 @@ typedef struct {
     const char *key_path;
     const char *pin_store_path;
     const char *pin_key;
+    const char *pinned_fingerprint;
 } TlsClientSecurityConfig;
 
 typedef struct {

@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -137,6 +138,8 @@ int main(int argc, char **argv)
         .on_error = clientOnError,
         .on_disconnected = clientOnDisconnected,
     };
+
+    signal(SIGPIPE, SIG_IGN);
 
     if (CliMeta_HandleVersionAndHelp(argc, argv, "can-hub-client", printUsage)) {
         return 0;
@@ -442,6 +445,7 @@ static bool initTlsTransport(const char *host, const char *port_text, const Tran
     security_config.key_path = identity_key_path;
     security_config.pin_store_path = known_hubs_path;
     security_config.pin_key = pin_key;
+    security_config.pinned_fingerprint = NULL;
 
     return TlsClientTransport_Init(&tls_transport, host, port_text, events, &security_config);
 }
@@ -458,6 +462,7 @@ static bool initQuicTransport(const char *host, const char *port_text, const Tra
     security_config.key_path = identity_key_path;
     security_config.pin_store_path = known_hubs_path;
     security_config.pin_key = pin_key;
+    security_config.pinned_fingerprint = NULL;
 
     return QuicClientTransport_Init(&quic_transport, host, port_text, events, &security_config);
 }

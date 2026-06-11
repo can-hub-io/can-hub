@@ -119,6 +119,15 @@ It opens read-only when the client lacks a write ACL on a bus (receive still
 works); `--listen [<bind-ip>:]<port>` moves the server off the loopback default
 and `--no-beacon` silences discovery.
 
+For python there is a native backend ([python-can-hub](python/README.md)) on
+top of `libcanhub` — no bridge process, all transports including QUIC, mTLS
+and ACLs carried into python:
+
+```python
+bus = can.Bus(interface="canhub", channel="truck42/can0",
+              url="quic://hub.example.com:7227")
+```
+
 Or mirror a remote bus straight into a local `vcan`, so `candump`, SavvyCAN,
 Wireshark and python-can work against the remote bus with zero changes. The
 `vcan` must already exist (no `CAP_NET_ADMIN` needed); the mirror is
