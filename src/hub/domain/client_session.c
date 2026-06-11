@@ -139,6 +139,11 @@ const ChannelBinding *ClientSession_BindingForInterface(const ClientSession *sel
     return NULL;
 }
 
+ChannelBinding *ClientSession_BindingForChannel(ClientSession *self, uint8_t channel)
+{
+    return findByChannel(self, channel);
+}
+
 void ClientSession_RemoveInterface(ClientSession *self, uint32_t interface_id)
 {
     uint8_t i;
