@@ -3,6 +3,7 @@ project(can_hub VERSION 0.1.6 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_compile_definitions(CAN_HUB_VERSION="${PROJECT_VERSION}")
 
@@ -170,7 +171,34 @@ add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES}
 target_link_libraries(can-hub-client PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls ${GNUTLS_STATIC_EXTRA_LIBRARIES})
 add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES})
 
+set(LIBCANHUB_SOURCES
+    src/platform/linux/libcanhub/canhub.c
+    ${CLIENT_SOURCES}
+    ${CLIENT_TLS_SOURCES}
+)
+
+add_library(canhub STATIC ${COMMON_SOURCES} ${LIBCANHUB_SOURCES})
+target_include_directories(canhub PUBLIC include)
+target_link_libraries(canhub PUBLIC ngtcp2_static ngtcp2_crypto_gnutls_static gnutls ${GNUTLS_STATIC_EXTRA_LIBRARIES})
+
+if(NOT CAN_HUB_STATIC)
+    add_library(canhub_shared SHARED ${COMMON_SOURCES} ${LIBCANHUB_SOURCES})
+    target_include_directories(canhub_shared PUBLIC include)
+    target_link_libraries(canhub_shared PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls ${GNUTLS_STATIC_EXTRA_LIBRARIES})
+    set_target_properties(canhub_shared PROPERTIES
+        OUTPUT_NAME canhub
+        C_VISIBILITY_PRESET hidden
+        SOVERSION 0
+    )
+    install(TARGETS canhub_shared LIBRARY DESTINATION lib)
+endif()
+
+add_executable(canhub-dump examples/canhub_dump.c)
+target_link_libraries(canhub-dump PRIVATE canhub)
+
 install(TARGETS can-hub can-hub-agent can-hub-cli RUNTIME DESTINATION bin)
+install(TARGETS canhub ARCHIVE DESTINATION lib)
+install(FILES include/canhub.h DESTINATION include)
 
 option(CAN_HUB_PACKAGING "Generate per-binary Debian packages with CPack" OFF)
 if(CAN_HUB_PACKAGING)

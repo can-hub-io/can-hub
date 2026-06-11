@@ -14,6 +14,7 @@ from robot.api.deco import keyword, library
 from lib import (
     AgentConfig, CanAgent, CanClient, CanCli, CanHub, ClientConfig, HubConfig,
 )
+from lib.binaries import binary
 from lib.rows import parse_candump
 
 CONSUME_SCRIPT = "/work/test/e2e/scripts/consume.py"
@@ -99,6 +100,23 @@ class BenchKeywords:
                 return
             time.sleep(0.1)
         raise AssertionError("no client channel opened on the hub")
+
+    @keyword("Run Binary ${name} On ${server}")
+    def run_binary_on(self, name, server, *args):
+        return server.exec(binary(name), *args, check=False)
+
+    @keyword("Start Binary ${name} On ${server}")
+    def start_binary_on(self, name, server, *args):
+        return server.exec(binary(name), *args, background=True, log_name=name)
+
+    @keyword("Log Of ${process} Should Contain ${text}")
+    def log_should_contain(self, process, text, timeout=5):
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            if text in process.read_log():
+                return
+            time.sleep(0.1)
+        raise AssertionError(f"log does not contain {text}\n{process.read_log()}")
 
     @keyword("Start Candump On ${server}")
     def start_candump_on(self, server, interface="vcan0"):
