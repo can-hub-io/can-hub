@@ -10,6 +10,6 @@ make release
 cp build/x86_64/release/libcanhub.so python/canhub/libcanhub.so
 
 cd python
-rm -rf dist build ./*.egg-info
+rm -rf build ./*.egg-info
 python3 -m pip wheel . --no-deps -w dist
 ls -la dist/

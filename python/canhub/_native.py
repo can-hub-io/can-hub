@@ -6,6 +6,7 @@ variable, the copy bundled inside this package, the system library path.
 
 import ctypes
 import os
+import sys
 from ctypes import POINTER, Structure, c_char, c_char_p, c_int32, c_size_t, c_uint8, c_uint32, c_uint64, c_void_p
 
 FRAME_PAYLOAD_MAX = 64
@@ -77,14 +78,18 @@ class CanHubConnectConfig(Structure):
 
 
 def _load_library():
+    bundled_name = "libcanhub.dll" if sys.platform == "win32" else "libcanhub.so"
+
     override = os.environ.get("CANHUB_LIBRARY")
     if override:
         return ctypes.CDLL(override)
 
-    bundled = os.path.join(os.path.dirname(__file__), "libcanhub.so")
+    bundled = os.path.join(os.path.dirname(__file__), bundled_name)
     if os.path.exists(bundled):
         return ctypes.CDLL(bundled)
 
+    if sys.platform == "win32":
+        return ctypes.CDLL("libcanhub.dll")
     return ctypes.CDLL("libcanhub.so.0")
 
 

@@ -71,6 +71,8 @@ jobs:
           key: mingw-x86_64-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
       - name: windows build
         run: PATH="$HOME/llvm-mingw/bin:$PATH" make windows
+      - name: win_amd64 wheel
+        run: PATH="$HOME/llvm-mingw/bin:$PATH" ./scripts/build-python-wheel-windows.sh
       - uses: actions/upload-artifact@v4
         with:
           name: libcanhub-windows-x86_64
@@ -78,6 +80,7 @@ jobs:
             build/mingw-x86_64/release/libcanhub.dll
             build/mingw-x86_64/release/libcanhub.a
             build/mingw-x86_64/release/canhub-dump.exe
+            python/dist/*.whl
           retention-days: 7
 
   static:

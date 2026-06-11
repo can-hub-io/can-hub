@@ -21,4 +21,4 @@ canhub = "canhub.bus:CanHubBus"
 packages = ["canhub"]
 
 [tool.setuptools.package-data]
-canhub = ["libcanhub.so"]
+canhub = ["libcanhub.so", "libcanhub.dll"]

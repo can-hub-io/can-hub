@@ -129,7 +129,8 @@ bus = can.Bus(interface="canhub", channel="truck42/can0",
 ```
 
 `libcanhub` also cross-builds for Windows (`make windows`, llvm-mingw or
-mingw-w64 toolchain): tcp/tls transports today, QUIC pending.
+mingw-w64 toolchain) with all transports including QUIC;
+`scripts/build-python-wheel-windows.sh` produces the win_amd64 wheel.
 
 Or mirror a remote bus straight into a local `vcan`, so `candump`, SavvyCAN,
 Wireshark and python-can work against the remote bus with zero changes. The

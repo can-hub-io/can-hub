@@ -28,6 +28,18 @@ endif()
 
 include_directories(src)
 
+include(FetchContent)
+set(ENABLE_GNUTLS OFF CACHE BOOL "" FORCE)
+set(ENABLE_OPENSSL ON CACHE BOOL "" FORCE)
+set(ENABLE_SHARED_LIB OFF CACHE BOOL "" FORCE)
+set(ENABLE_STATIC_LIB ON CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(ngtcp2
+    GIT_REPOSITORY https://github.com/ngtcp2/ngtcp2.git
+    GIT_TAG v1.23.0
+)
+FetchContent_MakeAvailable(ngtcp2)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(LIBCANHUB_WINDOWS_SOURCES
         src/protocol/wire.c
@@ -49,6 +61,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/platform/linux/shared/tls_defaults.c
         src/platform/linux/tls/tls_channel.c
         src/platform/linux/tls/tls_client_security.c
+        src/platform/linux/quic/quic_client_security.c
+        src/platform/linux/quic/quic_connection.c
+        src/platform/linux/quic/quic_control_channel.c
+        src/platform/linux/quic/quic_egress.c
+        src/platform/windows/quic/quic_udp_endpoint.c
+        src/platform/windows/quic/quic_client_transport.c
         src/platform/windows/tcp/tcp_channel.c
         src/platform/windows/tcp/tcp_client_transport.c
         src/platform/windows/tls/tls_client_transport.c
@@ -59,11 +77,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 
     add_library(canhub STATIC ${LIBCANHUB_WINDOWS_SOURCES})
     target_include_directories(canhub PUBLIC include)
-    target_link_libraries(canhub PUBLIC OpenSSL::SSL OpenSSL::Crypto ${CAN_HUB_WINDOWS_LIBRARIES})
+    target_link_libraries(canhub PUBLIC ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto ${CAN_HUB_WINDOWS_LIBRARIES})
 
     add_library(canhub_shared SHARED ${LIBCANHUB_WINDOWS_SOURCES})
     target_include_directories(canhub_shared PUBLIC include)
-    target_link_libraries(canhub_shared PRIVATE OpenSSL::SSL OpenSSL::Crypto ${CAN_HUB_WINDOWS_LIBRARIES})
+    target_link_libraries(canhub_shared PRIVATE ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto ${CAN_HUB_WINDOWS_LIBRARIES})
     set_target_properties(canhub_shared PROPERTIES OUTPUT_NAME canhub C_VISIBILITY_PRESET hidden)
 
     add_executable(canhub-dump examples/canhub_dump.c)
@@ -88,18 +106,6 @@ set(COMMON_SOURCES
     src/protocol/ifconfig_message.c
     src/protocol/interface_name.c
 )
-
-include(FetchContent)
-set(ENABLE_GNUTLS OFF CACHE BOOL "" FORCE)
-set(ENABLE_OPENSSL ON CACHE BOOL "" FORCE)
-set(ENABLE_SHARED_LIB OFF CACHE BOOL "" FORCE)
-set(ENABLE_STATIC_LIB ON CACHE BOOL "" FORCE)
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(ngtcp2
-    GIT_REPOSITORY https://github.com/ngtcp2/ngtcp2.git
-    GIT_TAG v1.23.0
-)
-FetchContent_MakeAvailable(ngtcp2)
 
 FetchContent_Declare(sqlite3
     URL https://sqlite.org/2026/sqlite-amalgamation-3530200.zip
