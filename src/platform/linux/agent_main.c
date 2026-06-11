@@ -12,6 +12,7 @@
 #include "agent/agent_app.h"
 #include "platform/linux/clock/clock.h"
 #include "platform/linux/quic/quic_client_transport.h"
+#include "platform/linux/shared/cli_meta.h"
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/tls_identity.h"
@@ -50,6 +51,7 @@ static char pin_key[PIN_KEY_MAX];
 static TransportEvents agent_core_events;
 static uint32_t hub_connect_count;
 
+static void printUsage(FILE *stream, const char *program);
 static bool parseArguments(int argc, char **argv, char *host, char *port_text);
 static TransportEvents loggingTransportEvents(void);
 static void loggingOnConnected(void *context);
@@ -76,6 +78,10 @@ int main(int argc, char **argv)
     int32_t event_count;
     int32_t i;
 
+    if (CliMeta_HandleVersionAndHelp(argc, argv, "can-hub-agent", printUsage)) {
+        return 0;
+    }
+
     for(i=1; i<argc; i++) {
         if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
             state_directory_override = argv[++i];
@@ -88,15 +94,7 @@ int main(int argc, char **argv)
     }
 
     if (!parseArguments(argc, argv, host, port_text)) {
-        fprintf(
-            stderr,
-            "usage: %s --connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>"
-            " [--name <agent-name>] [--state-dir <path>] <can-if> [...]\n"
-            "       %s --show-identity [--state-dir <path>]   print this agent's"
-            " TLS fingerprint for the hub allowlist\n",
-            argv[0],
-            argv[0]
-        );
+        printUsage(stderr, argv[0]);
         return 1;
     }
 
@@ -139,6 +137,19 @@ int main(int argc, char **argv)
 }
 
 /* ---------- private ---------- */
+
+static void printUsage(FILE *stream, const char *program)
+{
+    fprintf(
+        stream,
+        "usage: %s --connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>"
+        " [--name <agent-name>] [--state-dir <path>] <can-if> [...]\n"
+        "       %s --show-identity [--state-dir <path>]   print this agent's"
+        " TLS fingerprint for the hub allowlist\n",
+        program,
+        program
+    );
+}
 
 static TransportEvents loggingTransportEvents(void)
 {

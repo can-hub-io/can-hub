@@ -12,6 +12,7 @@
 #include "platform/linux/quic/quic_server_transport.h"
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
+#include "platform/linux/shared/cli_meta.h"
 #include "platform/linux/shared/hub_defaults.h"
 #include "platform/linux/shared/tls_identity.h"
 #include "platform/linux/sqlite/identity_database.h"
@@ -69,6 +70,7 @@ static char identity_key_path[TLS_IDENTITY_PATH_MAX];
 static IdentityDatabase identity_database;
 static bool database_open;
 
+static void printUsage(FILE *stream, const char *program);
 static bool parseArguments(int argc, char **argv);
 static bool loadIdentity(const char *state_directory_override);
 static IdentityStorePort *identityStore(void);
@@ -92,19 +94,12 @@ int main(int argc, char **argv)
     int32_t event_count;
     int32_t i;
 
+    if (CliMeta_HandleVersionAndHelp(argc, argv, "can-hub", printUsage)) {
+        return 0;
+    }
+
     if (!parseArguments(argc, argv)) {
-        fprintf(
-            stderr,
-            "usage: %s [--listen tls://[<bind-ip>:]<port>] [--listen quic://[<bind-ip>:]<port>]\n"
-            "       [--listen tcp://[<bind-ip>:]<port>] [--listen unix://<path>]\n"
-            "       [--cert <pem> --key <pem>] [--state-dir <path>] [--require-known-agents]\n"
-            "       defaults: tls://0.0.0.0:" HUB_DEFAULT_PORT_TEXT ", quic://0.0.0.0:" HUB_DEFAULT_PORT_TEXT
-            ", tcp://127.0.0.1:" HUB_DEFAULT_PLAIN_TCP_PORT_TEXT ", unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n"
-            "       bind-ip defaults to 0.0.0.0 (tcp: 127.0.0.1); explicit --listen replaces the network\n"
-            "       defaults; --require-known-agents rejects agents whose fingerprint is not pinned;"
-            " TLS identity auto-generated\n",
-            argv[0]
-        );
+        printUsage(stderr, argv[0]);
         return 1;
     }
 
@@ -152,6 +147,22 @@ int main(int argc, char **argv)
 }
 
 /* ---------- private ---------- */
+
+static void printUsage(FILE *stream, const char *program)
+{
+    fprintf(
+        stream,
+        "usage: %s [--listen tls://[<bind-ip>:]<port>] [--listen quic://[<bind-ip>:]<port>]\n"
+        "       [--listen tcp://[<bind-ip>:]<port>] [--listen unix://<path>]\n"
+        "       [--cert <pem> --key <pem>] [--state-dir <path>] [--require-known-agents]\n"
+        "       defaults: tls://0.0.0.0:" HUB_DEFAULT_PORT_TEXT ", quic://0.0.0.0:" HUB_DEFAULT_PORT_TEXT
+        ", tcp://127.0.0.1:" HUB_DEFAULT_PLAIN_TCP_PORT_TEXT ", unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n"
+        "       bind-ip defaults to 0.0.0.0 (tcp: 127.0.0.1); explicit --listen replaces the network\n"
+        "       defaults; --require-known-agents rejects agents whose fingerprint is not pinned;"
+        " TLS identity auto-generated\n",
+        program
+    );
+}
 
 static bool parseArguments(int argc, char **argv)
 {
