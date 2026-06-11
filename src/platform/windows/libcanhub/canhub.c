@@ -1,49 +1,35 @@
 #include "canhub.h"
 
-#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <sys/epoll.h>
-
-#include <unistd.h>
+#include <winsock2.h>
 
 #include "client/client.h"
 #include "protocol/open_message.h"
 #include "platform/linux/clock/clock.h"
-#include "platform/linux/quic/quic_client_transport.h"
 #include "platform/linux/shared/connect_url.h"
-#include "platform/linux/shared/epoll_registry.h"
-#include "platform/linux/shared/hub_defaults.h"
 #include "platform/linux/shared/tls_identity.h"
-#include "platform/linux/tcp/tcp_client_transport.h"
-#include "platform/linux/tls/tls_client_transport.h"
+#include "platform/windows/tcp/tcp_client_transport.h"
+#include "platform/windows/tls/tls_client_transport.h"
 
 #define IDENTITY_NAME "client"
 #define KNOWN_HUBS_FILE "known_hubs"
 #define KNOWN_HUBS_PATH_MAX (TLS_IDENTITY_PATH_MAX + sizeof(KNOWN_HUBS_FILE))
 #define PIN_KEY_MAX (CONNECT_URL_HOST_MAX + CONNECT_URL_PORT_TEXT_MAX)
 
-#define MAX_EPOLL_EVENTS 8
 #define PUMP_SLICE_MS 50
 #define DEFAULT_OPERATION_TIMEOUT_MS 5000
 #define LAST_ERROR_SIZE 256
 #define FRAME_RING_SIZE 512
 
-#define STREAM_SLOT 0
-#define TAG_STREAM 1
-#define TAG_QUIC_UDP 2
-#define TAG_QUIC_TIMER 3
-
 struct CanHubSession {
     Client client;
     TcpClientTransport tcp_transport;
     TlsClientTransport tls_transport;
-    QuicClientTransport quic_transport;
     TransportPort *port;
-    EpollRegistry poll_registry;
     uint8_t scheme;
     bool disconnected;
     char state_directory[TLS_IDENTITY_PATH_MAX];
@@ -66,14 +52,15 @@ struct CanHubSession {
     uint16_t ring_count;
 };
 
-static void ignoreSigpipeIfUnhandled(void);
+static bool startWinsock(void);
 static bool initTransport(CanHubSession *self, const char *host, const char *port_text, const TransportEvents *events);
 static bool prepareSecurityMaterial(CanHubSession *self, const CanHubConnectConfig *config, const char *host, const char *port_text);
 static bool prepareIdentity(CanHubSession *self, const CanHubConnectConfig *config);
 static bool waitForConnection(CanHubSession *self, int32_t timeout_ms);
 static void pumpOnce(CanHubSession *self, int32_t timeout_ms);
-static void dispatchEvent(CanHubSession *self, const struct epoll_event *event);
-static void syncStreamSlot(CanHubSession *self);
+static int32_t streamSocket(CanHubSession *self);
+static bool streamWantsWrite(CanHubSession *self);
+static void dispatchStream(CanHubSession *self, bool readable, bool writable);
 static uint64_t deadlineFrom(int32_t timeout_ms);
 static int32_t remainingMs(uint64_t deadline_us);
 static int32_t effectiveTimeout(int32_t timeout_ms);
@@ -105,19 +92,23 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
     if (config == NULL || config->struct_size != sizeof(*config)) {
         return NULL;
     }
-
-    ignoreSigpipeIfUnhandled();
+    if (config->url == NULL) {
+        return NULL;
+    }
+    if (!startWinsock()) {
+        return NULL;
+    }
 
     self = calloc(1, sizeof(*self));
     if (self == NULL) {
         return NULL;
     }
 
-    if (config->url == NULL) {
-        self->scheme = kCONNECT_SCHEME_UNIX;
-        snprintf(host, sizeof(host), "%s", HUB_DEFAULT_UNIX_SOCKET_PATH);
-        port_text[0] = '\0';
-    } else if (!ConnectUrl_Parse(config->url, &self->scheme, host, port_text)) {
+    if (!ConnectUrl_Parse(config->url, &self->scheme, host, port_text)) {
+        free(self);
+        return NULL;
+    }
+    if (self->scheme == kCONNECT_SCHEME_UNIX || self->scheme == kCONNECT_SCHEME_QUIC) {
         free(self);
         return NULL;
     }
@@ -131,7 +122,7 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
 
     transport_events = Client_TransportEvents(&self->client);
 
-    if (self->scheme == kCONNECT_SCHEME_TLS || self->scheme == kCONNECT_SCHEME_QUIC) {
+    if (self->scheme == kCONNECT_SCHEME_TLS) {
         if (!prepareSecurityMaterial(self, config, host, port_text)) {
             free(self);
             return NULL;
@@ -143,15 +134,6 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
     }
 
     Client_Init(&self->client, self->port, &client_events);
-
-    if (!EpollRegistry_Open(&self->poll_registry)) {
-        free(self);
-        return NULL;
-    }
-    if (self->scheme == kCONNECT_SCHEME_QUIC) {
-        EpollRegistry_AddStatic(&self->poll_registry, QuicClientTransport_UdpFd(&self->quic_transport), TAG_QUIC_UDP);
-        EpollRegistry_AddStatic(&self->poll_registry, QuicClientTransport_TimerFd(&self->quic_transport), TAG_QUIC_TIMER);
-    }
 
     if (!self->port->connect(self->port->context)) {
         canhub_close(self);
@@ -173,9 +155,6 @@ void canhub_close(CanHubSession *session)
 
     if (session->port != NULL) {
         session->port->disconnect(session->port->context);
-    }
-    if (session->poll_registry.epoll_fd >= 0) {
-        close(session->poll_registry.epoll_fd);
     }
 
     free(session);
@@ -360,32 +339,21 @@ int32_t canhub_send(CanHubSession *session, const CanHubFrame *frame)
 
 /* ---------- private ---------- */
 
-static void ignoreSigpipeIfUnhandled(void)
+static bool startWinsock(void)
 {
-    struct sigaction current;
+    static bool started;
+    WSADATA wsa_data;
 
-    if (sigaction(SIGPIPE, NULL, &current) == 0 && current.sa_handler == SIG_DFL) {
-        signal(SIGPIPE, SIG_IGN);
+    if (!started) {
+        started = WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0;
     }
+
+    return started;
 }
 
 static bool initTransport(CanHubSession *self, const char *host, const char *port_text, const TransportEvents *events)
 {
     TlsClientSecurityConfig tls_config;
-    QuicClientSecurityConfig quic_config;
-
-    if (self->scheme == kCONNECT_SCHEME_QUIC) {
-        quic_config.certificate_path = self->identity_certificate_path;
-        quic_config.key_path = self->identity_key_path;
-        quic_config.pin_store_path = self->known_hubs_path;
-        quic_config.pin_key = self->pin_key;
-        quic_config.pinned_fingerprint = (self->hub_fingerprint[0] != '\0') ? self->hub_fingerprint : NULL;
-        if (!QuicClientTransport_Init(&self->quic_transport, host, port_text, events, &quic_config)) {
-            return false;
-        }
-        self->port = QuicClientTransport_Port(&self->quic_transport);
-        return true;
-    }
 
     if (self->scheme == kCONNECT_SCHEME_TLS) {
         tls_config.certificate_path = self->identity_certificate_path;
@@ -400,11 +368,7 @@ static bool initTransport(CanHubSession *self, const char *host, const char *por
         return true;
     }
 
-    if (self->scheme == kCONNECT_SCHEME_UNIX) {
-        if (!TcpClientTransport_InitUnix(&self->tcp_transport, host, events)) {
-            return false;
-        }
-    } else if (!TcpClientTransport_Init(&self->tcp_transport, host, port_text, events)) {
+    if (!TcpClientTransport_Init(&self->tcp_transport, host, port_text, events)) {
         return false;
     }
     self->port = TcpClientTransport_Port(&self->tcp_transport);
@@ -464,35 +428,53 @@ static bool waitForConnection(CanHubSession *self, int32_t timeout_ms)
 
 static void pumpOnce(CanHubSession *self, int32_t timeout_ms)
 {
-    struct epoll_event events[MAX_EPOLL_EVENTS];
-    int32_t event_count;
-    int32_t i;
+    WSAPOLLFD poll_descriptor;
+    int32_t current_socket = streamSocket(self);
+    int result;
 
-    syncStreamSlot(self);
-    event_count = EpollRegistry_Wait(&self->poll_registry, events, MAX_EPOLL_EVENTS, timeout_ms);
-    for(i=0; i<event_count; i++) {
-        dispatchEvent(self, &events[i]);
+    if (current_socket == TCP_CHANNEL_NO_SOCKET) {
+        return;
     }
+
+    poll_descriptor.fd = (SOCKET)current_socket;
+    poll_descriptor.events = POLLRDNORM;
+    if (streamWantsWrite(self)) {
+        poll_descriptor.events |= POLLWRNORM;
+    }
+    poll_descriptor.revents = 0;
+
+    result = WSAPoll(&poll_descriptor, 1, timeout_ms);
+    if (result <= 0) {
+        return;
+    }
+
+    dispatchStream(
+        self,
+        (poll_descriptor.revents & (POLLRDNORM | POLLHUP | POLLERR)) != 0,
+        (poll_descriptor.revents & POLLWRNORM) != 0
+    );
 }
 
-static void dispatchEvent(CanHubSession *self, const struct epoll_event *event)
+static int32_t streamSocket(CanHubSession *self)
 {
-    uint32_t tag = event->data.u32;
-    bool writable = (event->events & EPOLLOUT) != 0;
-    bool readable = (event->events & EPOLLIN) != 0;
-
-    if (tag == TAG_QUIC_UDP) {
-        QuicClientTransport_OnUdpReadable(&self->quic_transport);
-        return;
-    }
-    if (tag == TAG_QUIC_TIMER) {
-        QuicClientTransport_OnTimer(&self->quic_transport);
-        return;
-    }
-    if (tag != TAG_STREAM) {
-        return;
+    if (self->scheme == kCONNECT_SCHEME_TLS) {
+        return TlsClientTransport_Fd(&self->tls_transport);
     }
 
+    return TcpClientTransport_Fd(&self->tcp_transport);
+}
+
+static bool streamWantsWrite(CanHubSession *self)
+{
+    if (self->scheme == kCONNECT_SCHEME_TLS) {
+        return TlsClientTransport_WantsWritable(&self->tls_transport);
+    }
+
+    return TcpClientTransport_WantsWritable(&self->tcp_transport);
+}
+
+static void dispatchStream(CanHubSession *self, bool readable, bool writable)
+{
     if (self->scheme == kCONNECT_SCHEME_TLS) {
         if (writable) {
             TlsClientTransport_OnWritable(&self->tls_transport);
@@ -502,34 +484,13 @@ static void dispatchEvent(CanHubSession *self, const struct epoll_event *event)
         }
         return;
     }
+
     if (writable) {
         TcpClientTransport_OnWritable(&self->tcp_transport);
     }
     if (readable) {
         TcpClientTransport_OnReadable(&self->tcp_transport);
     }
-}
-
-static void syncStreamSlot(CanHubSession *self)
-{
-    int32_t current_fd;
-    uint32_t wanted_mask = EPOLLIN;
-
-    if (self->scheme == kCONNECT_SCHEME_QUIC) {
-        return;
-    }
-    if (self->scheme == kCONNECT_SCHEME_TLS) {
-        current_fd = TlsClientTransport_Fd(&self->tls_transport);
-        if (TlsClientTransport_WantsWritable(&self->tls_transport)) {
-            wanted_mask |= EPOLLOUT;
-        }
-    } else {
-        current_fd = TcpClientTransport_Fd(&self->tcp_transport);
-        if (TcpClientTransport_WantsWritable(&self->tcp_transport)) {
-            wanted_mask |= EPOLLOUT;
-        }
-    }
-    EpollRegistry_SyncSlot(&self->poll_registry, STREAM_SLOT, current_fd, wanted_mask, TAG_STREAM);
 }
 
 static uint64_t deadlineFrom(int32_t timeout_ms)

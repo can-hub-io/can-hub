@@ -7,7 +7,9 @@ set(CAN_HUB_OPENSSL_SHA256 a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24a
 set(CAN_HUB_OPENSSL_URL "https://github.com/openssl/openssl/releases/download/openssl-${CAN_HUB_OPENSSL_VERSION}/openssl-${CAN_HUB_OPENSSL_VERSION}.tar.gz")
 set(CAN_HUB_OPENSSL_PREFIX "${CMAKE_BINARY_DIR}/openssl")
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(_openssl_target mingw64)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
     set(_openssl_target linux-x86_64)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
     set(_openssl_target linux-aarch64)
@@ -25,9 +27,15 @@ if(NOT EXISTS "${CAN_HUB_OPENSSL_PREFIX}/lib/libssl.a")
     file(DOWNLOAD "${CAN_HUB_OPENSSL_URL}" "${_openssl_tarball}" EXPECTED_HASH SHA256=${CAN_HUB_OPENSSL_SHA256})
     file(ARCHIVE_EXTRACT INPUT "${_openssl_tarball}" DESTINATION "${CMAKE_BINARY_DIR}")
 
+    if(CMAKE_C_COMPILER MATCHES "gcc$")
+        string(REGEX REPLACE "gcc$" "" _openssl_cross_prefix "${CMAKE_C_COMPILER}")
+        set(_openssl_compiler_arguments --cross-compile-prefix=${_openssl_cross_prefix})
+    else()
+        set(_openssl_compiler_arguments CC=${CMAKE_C_COMPILER})
+    endif()
     execute_process(
-        COMMAND ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER}
-                ./Configure ${_openssl_target}
+        COMMAND ./Configure ${_openssl_target}
+                ${_openssl_compiler_arguments}
                 --prefix=${CAN_HUB_OPENSSL_PREFIX} --libdir=lib
                 no-shared no-apps no-docs no-tests -fPIC
         WORKING_DIRECTORY "${_openssl_source}"

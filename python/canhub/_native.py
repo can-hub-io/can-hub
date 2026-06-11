@@ -53,7 +53,7 @@ class CanHubInterfaceInfo(Structure):
     _fields_ = [
         ("interface_id", c_uint32),
         ("agent", c_char * AGENT_NAME_MAX),
-        ("interface", c_char * INTERFACE_NAME_MAX),
+        ("interface_name", c_char * INTERFACE_NAME_MAX),
     ]
 
 
