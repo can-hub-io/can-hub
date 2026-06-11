@@ -57,19 +57,29 @@ SocketcandConnection *ConnectionTable_FindByChannel(ConnectionTable *self, uint8
 
 SocketcandConnection *ConnectionTable_FindPendingOpen(ConnectionTable *self, uint32_t interface_id)
 {
+    SocketcandConnection *oldest = NULL;
     uint8_t i;
 
     for(i=0; i<SOCKETCAND_CONNECTIONS_MAX; i++) {
         if (!self->connections[i].in_use || self->connections[i].interface_id != interface_id) {
             continue;
         }
-        if (self->connections[i].open_state == kSOCKETCAND_OPEN_PENDING_WRITE
-            || self->connections[i].open_state == kSOCKETCAND_OPEN_PENDING_READ) {
-            return &self->connections[i];
+        if (self->connections[i].open_state != kSOCKETCAND_OPEN_PENDING_WRITE
+            && self->connections[i].open_state != kSOCKETCAND_OPEN_PENDING_READ) {
+            continue;
+        }
+        if (oldest == NULL || self->connections[i].open_seq < oldest->open_seq) {
+            oldest = &self->connections[i];
         }
     }
 
-    return NULL;
+    return oldest;
+}
+
+uint32_t ConnectionTable_NextOpenSeq(ConnectionTable *self)
+{
+    self->next_open_seq++;
+    return self->next_open_seq;
 }
 
 void ConnectionTable_Remove(ConnectionTable *self, uint32_t connection_id)
