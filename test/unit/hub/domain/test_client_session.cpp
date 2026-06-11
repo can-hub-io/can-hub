@@ -56,6 +56,40 @@ describe("client_session", []() {
         expect(interface_found).toBe(false);
     });
 
+    it("iterates every binding of an interface", []() {
+        uint8_t first_channel = 0;
+        uint8_t second_channel = 0;
+        uint8_t other_channel = 0;
+        uint8_t iterator = 0;
+        const ChannelBinding *first_binding;
+        const ChannelBinding *second_binding;
+        const ChannelBinding *end_binding;
+
+        ClientSession_OpenInterface(&session, 7, false, false, &first_channel);
+        ClientSession_OpenInterface(&session, 9, false, false, &other_channel);
+        ClientSession_OpenInterface(&session, 7, false, false, &second_channel);
+
+        first_binding = ClientSession_NextBindingForInterface(&session, 7, &iterator);
+        second_binding = ClientSession_NextBindingForInterface(&session, 7, &iterator);
+        end_binding = ClientSession_NextBindingForInterface(&session, 7, &iterator);
+
+        expect(first_binding->channel).toBe(first_channel);
+        expect(second_binding->channel).toBe(second_channel);
+        expect(end_binding == NULL).toBe(true);
+    });
+
+    it("iterates nothing for an interface that is not open", []() {
+        uint8_t channel = 0;
+        uint8_t iterator = 0;
+        const ChannelBinding *binding;
+
+        ClientSession_OpenInterface(&session, 7, false, false, &channel);
+
+        binding = ClientSession_NextBindingForInterface(&session, 9, &iterator);
+
+        expect(binding == NULL).toBe(true);
+    });
+
     it("removes every binding of an interface", []() {
         uint8_t channel = 0;
         bool channel_found;

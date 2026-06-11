@@ -42,6 +42,10 @@ bool ClientSession_ChannelAccepts(const ClientSession *self, uint8_t channel, ui
 void ClientSession_CloseChannel(ClientSession *self, uint8_t channel);
 bool ClientSession_InterfaceForChannel(const ClientSession *self, uint8_t channel, uint32_t *interface_id);
 bool ClientSession_ChannelForInterface(const ClientSession *self, uint32_t interface_id, uint8_t *channel);
-const ChannelBinding *ClientSession_BindingForInterface(const ClientSession *self, uint32_t interface_id);
+const ChannelBinding *ClientSession_NextBindingForInterface(
+    const ClientSession *self,
+    uint32_t interface_id,
+    uint8_t *iterator
+);
 ChannelBinding *ClientSession_BindingForChannel(ClientSession *self, uint8_t channel);
 void ClientSession_RemoveInterface(ClientSession *self, uint32_t interface_id);

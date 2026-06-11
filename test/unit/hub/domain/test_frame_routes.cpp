@@ -39,6 +39,41 @@ describe("frame_routes", []() {
         expect(routes[0].channel).toBe(client_channel);
     });
 
+    it("routes an agent frame to every binding of a client that opened the interface twice", []() {
+        HubPeer *client = PeerDirectory_Find(&directory, 200);
+        const InterfaceEntry *entry = InterfaceRegistry_FindByAgentChannel(&registry, 100, 1);
+        FrameRoute routes[FRAME_ROUTES_MAX];
+        uint8_t first_channel = 0;
+        uint8_t second_channel = 0;
+        uint8_t route_count;
+
+        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, &first_channel);
+        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, &second_channel);
+
+        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX);
+
+        expect(route_count).toBe(2);
+        expect(routes[0].peer_id).toBe((uint32_t)200);
+        expect(routes[0].channel).toBe(first_channel);
+        expect(routes[1].peer_id).toBe((uint32_t)200);
+        expect(routes[1].channel).toBe(second_channel);
+    });
+
+    it("caps routes at the buffer capacity across bindings", []() {
+        HubPeer *client = PeerDirectory_Find(&directory, 200);
+        const InterfaceEntry *entry = InterfaceRegistry_FindByAgentChannel(&registry, 100, 1);
+        FrameRoute routes[FRAME_ROUTES_MAX];
+        uint8_t channel = 0;
+        uint8_t route_count;
+
+        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, &channel);
+        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, &channel);
+
+        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, 1);
+
+        expect(route_count).toBe(1);
+    });
+
     it("routes nothing when no client opened the interface", []() {
         FrameRoute routes[FRAME_ROUTES_MAX];
         uint8_t route_count;

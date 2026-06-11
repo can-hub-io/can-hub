@@ -126,16 +126,22 @@ bool ClientSession_ChannelForInterface(const ClientSession *self, uint32_t inter
     return false;
 }
 
-const ChannelBinding *ClientSession_BindingForInterface(const ClientSession *self, uint32_t interface_id)
+const ChannelBinding *ClientSession_NextBindingForInterface(
+    const ClientSession *self,
+    uint32_t interface_id,
+    uint8_t *iterator
+)
 {
     uint8_t i;
 
-    for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
+    for(i=*iterator; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
         if (self->bindings[i].in_use && self->bindings[i].interface_id == interface_id) {
+            *iterator = (uint8_t)(i + 1);
             return &self->bindings[i];
         }
     }
 
+    *iterator = CLIENT_SESSION_BINDINGS_MAX;
     return NULL;
 }
 
