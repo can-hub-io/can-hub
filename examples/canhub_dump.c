@@ -65,7 +65,7 @@ static int32_t runList(CanHubSession *session)
     }
 
     for(i=0; i<count; i++) {
-        printf("%u %s/%s\n", interfaces[i].interface_id, interfaces[i].agent, interfaces[i].interface);
+        printf("%u %s/%s\n", interfaces[i].interface_id, interfaces[i].agent, interfaces[i].interface_name);
     }
 
     return 0;
