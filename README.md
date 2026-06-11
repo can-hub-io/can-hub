@@ -128,6 +128,9 @@ bus = can.Bus(interface="canhub", channel="truck42/can0",
               url="quic://hub.example.com:7227")
 ```
 
+`libcanhub` also cross-builds for Windows (`make windows`, llvm-mingw or
+mingw-w64 toolchain): tcp/tls transports today, QUIC pending.
+
 Or mirror a remote bus straight into a local `vcan`, so `candump`, SavvyCAN,
 Wireshark and python-can work against the remote bus with zero changes. The
 `vcan` must already exist (no `CAP_NET_ADMIN` needed); the mirror is

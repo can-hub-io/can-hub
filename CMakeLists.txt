@@ -28,6 +28,50 @@ endif()
 
 include_directories(src)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(LIBCANHUB_WINDOWS_SOURCES
+        src/protocol/wire.c
+        src/protocol/message_header.c
+        src/protocol/frame_message.c
+        src/protocol/hello_message.c
+        src/protocol/error_message.c
+        src/protocol/list_message.c
+        src/protocol/open_message.c
+        src/protocol/register_message.c
+        src/protocol/subscribe_message.c
+        src/protocol/interface_name.c
+        src/client/client.c
+        src/platform/windows/clock/clock.c
+        src/platform/linux/shared/connect_url.c
+        src/platform/linux/shared/message_framer.c
+        src/platform/linux/shared/pin_store.c
+        src/platform/linux/shared/pinned_server_verifier.c
+        src/platform/linux/shared/tls_defaults.c
+        src/platform/linux/tls/tls_channel.c
+        src/platform/linux/tls/tls_client_security.c
+        src/platform/windows/tcp/tcp_channel.c
+        src/platform/windows/tcp/tcp_client_transport.c
+        src/platform/windows/tls/tls_client_transport.c
+        src/platform/windows/shared/tls_identity.c
+        src/platform/windows/libcanhub/canhub.c
+    )
+    set(CAN_HUB_WINDOWS_LIBRARIES ws2_32 crypt32 bcrypt)
+
+    add_library(canhub STATIC ${LIBCANHUB_WINDOWS_SOURCES})
+    target_include_directories(canhub PUBLIC include)
+    target_link_libraries(canhub PUBLIC OpenSSL::SSL OpenSSL::Crypto ${CAN_HUB_WINDOWS_LIBRARIES})
+
+    add_library(canhub_shared SHARED ${LIBCANHUB_WINDOWS_SOURCES})
+    target_include_directories(canhub_shared PUBLIC include)
+    target_link_libraries(canhub_shared PRIVATE OpenSSL::SSL OpenSSL::Crypto ${CAN_HUB_WINDOWS_LIBRARIES})
+    set_target_properties(canhub_shared PROPERTIES OUTPUT_NAME canhub C_VISIBILITY_PRESET hidden)
+
+    add_executable(canhub-dump examples/canhub_dump.c)
+    target_link_libraries(canhub-dump PRIVATE canhub)
+
+    return()
+endif()
+
 set(COMMON_SOURCES
     src/version.c
     src/platform/linux/shared/cli_meta.c

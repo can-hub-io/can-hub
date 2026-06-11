@@ -49,6 +49,37 @@ jobs:
           path: build/armhf/release/can-hub*
           retention-days: 7
 
+  windows-libcanhub:
+    runs-on: ubuntu-latest
+    env:
+      LLVM_MINGW_VERSION: "20260602"
+      LLVM_MINGW_SHA256: 9d191203f9768ead60662d3ae53cdf28e0a28b1e6d44b7f329b9202cb2add337
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build perl
+      - name: install llvm-mingw
+        run: |
+          curl -fsSL -o /tmp/llvm-mingw.tar.xz "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/llvm-mingw-$LLVM_MINGW_VERSION-ucrt-ubuntu-22.04-x86_64.tar.xz"
+          echo "$LLVM_MINGW_SHA256  /tmp/llvm-mingw.tar.xz" | sha256sum -c
+          mkdir -p "$HOME/llvm-mingw"
+          tar -xf /tmp/llvm-mingw.tar.xz --strip-components=1 -C "$HOME/llvm-mingw"
+      - name: cache build tree
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: mingw-x86_64-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
+      - name: windows build
+        run: PATH="$HOME/llvm-mingw/bin:$PATH" make windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libcanhub-windows-x86_64
+          path: |
+            build/mingw-x86_64/release/libcanhub.dll
+            build/mingw-x86_64/release/libcanhub.a
+            build/mingw-x86_64/release/canhub-dump.exe
+          retention-days: 7
+
   static:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
