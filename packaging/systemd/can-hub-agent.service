@@ -8,8 +8,9 @@ Wants=network-online.target
 Type=simple
 User=can-hub
 Group=can-hub
+Environment=AGENT_NAME=%H
 EnvironmentFile=/etc/can-hub/agent.conf
-ExecStart=/usr/bin/can-hub-agent --connect ${HUB_URL} --state-dir /var/lib/can-hub-agent $AGENT_ARGS $INTERFACES
+ExecStart=/usr/bin/can-hub-agent --connect ${HUB_URL} --name ${AGENT_NAME} --state-dir /var/lib/can-hub-agent $AGENT_ARGS $INTERFACES
 Restart=on-failure
 RestartSec=2
 StateDirectory=can-hub-agent
