@@ -1,7 +1,10 @@
 from setuptools import setup
 from setuptools.dist import Distribution
 
-from wheel.bdist_wheel import bdist_wheel
+try:
+    from setuptools.command.bdist_wheel import bdist_wheel
+except ImportError:
+    from wheel.bdist_wheel import bdist_wheel
 
 
 class BinaryDistribution(Distribution):

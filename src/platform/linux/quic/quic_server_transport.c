@@ -458,8 +458,8 @@ static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool n
     bool was_connected = peer->connected;
     uint32_t peer_id = peer->peer_id;
 
-    QuicConnection_Close(&peer->connection);
     QuicServerSecurity_FreeSession(peer->ssl, peer->tls_context);
+    QuicConnection_Close(&peer->connection);
     peer->ssl = NULL;
     peer->tls_context = NULL;
     QuicControlChannel_Reset(&peer->control);

@@ -1,4 +1,4 @@
-#include "platform/linux/quic/quic_client_transport.h"
+#include "platform/windows/quic/quic_client_transport.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -68,16 +68,16 @@ int32_t QuicClientTransport_UdpFd(const QuicClientTransport *self)
     return self->udp.udp_fd;
 }
 
-int32_t QuicClientTransport_TimerFd(const QuicClientTransport *self)
+uint64_t QuicClientTransport_TimerExpiryNs(const QuicClientTransport *self)
 {
-    return self->udp.timer_fd;
+    return QuicUdpEndpoint_TimerExpiryNs(&self->udp);
 }
 
 void QuicClientTransport_OnUdpReadable(QuicClientTransport *self)
 {
     uint8_t buffer[UDP_PACKET_BUFFER_SIZE];
     ngtcp2_path path;
-    ssize_t bytes_received;
+    int bytes_received;
 
     if (!QuicConnection_IsOpen(&self->connection)) {
         return;
