@@ -12,6 +12,7 @@
 #include "platform/linux/clock/clock.h"
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/tls_identity.h"
+#include "platform/windows/quic/quic_client_transport.h"
 #include "platform/windows/tcp/tcp_client_transport.h"
 #include "platform/windows/tls/tls_client_transport.h"
 
@@ -29,6 +30,7 @@ struct CanHubSession {
     Client client;
     TcpClientTransport tcp_transport;
     TlsClientTransport tls_transport;
+    QuicClientTransport quic_transport;
     TransportPort *port;
     uint8_t scheme;
     bool disconnected;
@@ -58,6 +60,7 @@ static bool prepareSecurityMaterial(CanHubSession *self, const CanHubConnectConf
 static bool prepareIdentity(CanHubSession *self, const CanHubConnectConfig *config);
 static bool waitForConnection(CanHubSession *self, int32_t timeout_ms);
 static void pumpOnce(CanHubSession *self, int32_t timeout_ms);
+static void pumpQuic(CanHubSession *self, int32_t timeout_ms);
 static int32_t streamSocket(CanHubSession *self);
 static bool streamWantsWrite(CanHubSession *self);
 static void dispatchStream(CanHubSession *self, bool readable, bool writable);
@@ -108,7 +111,7 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
         free(self);
         return NULL;
     }
-    if (self->scheme == kCONNECT_SCHEME_UNIX || self->scheme == kCONNECT_SCHEME_QUIC) {
+    if (self->scheme == kCONNECT_SCHEME_UNIX) {
         free(self);
         return NULL;
     }
@@ -122,7 +125,7 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
 
     transport_events = Client_TransportEvents(&self->client);
 
-    if (self->scheme == kCONNECT_SCHEME_TLS) {
+    if (self->scheme == kCONNECT_SCHEME_TLS || self->scheme == kCONNECT_SCHEME_QUIC) {
         if (!prepareSecurityMaterial(self, config, host, port_text)) {
             free(self);
             return NULL;
@@ -354,6 +357,20 @@ static bool startWinsock(void)
 static bool initTransport(CanHubSession *self, const char *host, const char *port_text, const TransportEvents *events)
 {
     TlsClientSecurityConfig tls_config;
+    QuicClientSecurityConfig quic_config;
+
+    if (self->scheme == kCONNECT_SCHEME_QUIC) {
+        quic_config.certificate_path = self->identity_certificate_path;
+        quic_config.key_path = self->identity_key_path;
+        quic_config.pin_store_path = self->known_hubs_path;
+        quic_config.pin_key = self->pin_key;
+        quic_config.pinned_fingerprint = (self->hub_fingerprint[0] != '\0') ? self->hub_fingerprint : NULL;
+        if (!QuicClientTransport_Init(&self->quic_transport, host, port_text, events, &quic_config)) {
+            return false;
+        }
+        self->port = QuicClientTransport_Port(&self->quic_transport);
+        return true;
+    }
 
     if (self->scheme == kCONNECT_SCHEME_TLS) {
         tls_config.certificate_path = self->identity_certificate_path;
@@ -429,9 +446,15 @@ static bool waitForConnection(CanHubSession *self, int32_t timeout_ms)
 static void pumpOnce(CanHubSession *self, int32_t timeout_ms)
 {
     WSAPOLLFD poll_descriptor;
-    int32_t current_socket = streamSocket(self);
+    int32_t current_socket;
     int result;
 
+    if (self->scheme == kCONNECT_SCHEME_QUIC) {
+        pumpQuic(self, timeout_ms);
+        return;
+    }
+
+    current_socket = streamSocket(self);
     if (current_socket == TCP_CHANNEL_NO_SOCKET) {
         return;
     }
@@ -453,6 +476,41 @@ static void pumpOnce(CanHubSession *self, int32_t timeout_ms)
         (poll_descriptor.revents & (POLLRDNORM | POLLHUP | POLLERR)) != 0,
         (poll_descriptor.revents & POLLWRNORM) != 0
     );
+}
+
+static void pumpQuic(CanHubSession *self, int32_t timeout_ms)
+{
+    WSAPOLLFD poll_descriptor;
+    uint64_t expiry_ns = QuicClientTransport_TimerExpiryNs(&self->quic_transport);
+    uint64_t now_ns = Clock_MonotonicNs();
+    int32_t wait_ms = timeout_ms;
+    int32_t timer_ms;
+    int result;
+
+    if (expiry_ns != UINT64_MAX) {
+        if (expiry_ns <= now_ns) {
+            QuicClientTransport_OnTimer(&self->quic_transport);
+            return;
+        }
+        timer_ms = (int32_t)((expiry_ns - now_ns) / 1000000) + 1;
+        if (timer_ms < wait_ms) {
+            wait_ms = timer_ms;
+        }
+    }
+
+    poll_descriptor.fd = (SOCKET)QuicClientTransport_UdpFd(&self->quic_transport);
+    poll_descriptor.events = POLLRDNORM;
+    poll_descriptor.revents = 0;
+
+    result = WSAPoll(&poll_descriptor, 1, wait_ms);
+    if (result > 0 && (poll_descriptor.revents & (POLLRDNORM | POLLERR)) != 0) {
+        QuicClientTransport_OnUdpReadable(&self->quic_transport);
+    }
+
+    expiry_ns = QuicClientTransport_TimerExpiryNs(&self->quic_transport);
+    if (expiry_ns != UINT64_MAX && Clock_MonotonicNs() >= expiry_ns) {
+        QuicClientTransport_OnTimer(&self->quic_transport);
+    }
 }
 
 static int32_t streamSocket(CanHubSession *self)
