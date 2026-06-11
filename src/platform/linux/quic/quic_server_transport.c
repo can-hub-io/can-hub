@@ -349,14 +349,15 @@ static QuicServerPeer *acceptPeer(
     peer->remote_address_length = address_length;
     peer->peer_id = self->next_peer_id++;
 
-    if (!QuicServerSecurity_NewSession(&self->security, &peer->session, QuicConnection_Ref(&peer->connection))) {
+    if (!QuicServerSecurity_NewSession(&self->security, &peer->ssl, &peer->tls_context, QuicConnection_Ref(&peer->connection))) {
         return NULL;
     }
 
     makePeerPath(self, peer, &path);
-    if (!QuicConnection_OpenServer(&peer->connection, peer->session, &path, &initial_header)) {
-        QuicServerSecurity_FreeSession(peer->session);
-        peer->session = NULL;
+    if (!QuicConnection_OpenServer(&peer->connection, peer->tls_context, &path, &initial_header)) {
+        QuicServerSecurity_FreeSession(peer->ssl, peer->tls_context);
+        peer->ssl = NULL;
+        peer->tls_context = NULL;
         return NULL;
     }
 
@@ -458,8 +459,9 @@ static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool n
     uint32_t peer_id = peer->peer_id;
 
     QuicConnection_Close(&peer->connection);
-    QuicServerSecurity_FreeSession(peer->session);
-    peer->session = NULL;
+    QuicServerSecurity_FreeSession(peer->ssl, peer->tls_context);
+    peer->ssl = NULL;
+    peer->tls_context = NULL;
     QuicControlChannel_Reset(&peer->control);
     peer->connected = false;
     peer->close_pending = false;
@@ -473,15 +475,19 @@ static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool n
 
 static void capturePeerFingerprint(QuicServerPeer *peer)
 {
-    const gnutls_datum_t *certificates;
-    unsigned int certificate_count;
+    X509 *certificate = SSL_get0_peer_certificate(peer->ssl);
+    uint8_t *der = NULL;
+    int der_size;
 
-    certificates = gnutls_certificate_get_peers(peer->session, &certificate_count);
-    if (certificates == NULL || certificate_count == 0) {
+    if (certificate == NULL) {
         return;
     }
 
-    TlsIdentity_FingerprintOfDer(&certificates[0], peer->fingerprint_hex);
+    der_size = i2d_X509(certificate, &der);
+    if (der_size > 0) {
+        TlsIdentity_FingerprintOfDer(der, (size_t)der_size, peer->fingerprint_hex);
+        OPENSSL_free(der);
+    }
 }
 
 static void dispatchControlMessages(QuicServerTransport *self, QuicServerPeer *peer)

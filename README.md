@@ -50,13 +50,13 @@ make release            # -O2 into build/x86_64/release
 make test               # unit tests (CEST)
 ```
 
-Requirements: cmake >= 3.16, ninja, gcc, GnuTLS development headers
-(`libgnutls28-dev` on Debian/Ubuntu). The first configure needs network:
+Requirements: cmake >= 3.16, ninja, gcc, perl (OpenSSL 3.5 is built from
+source once per build tree). The first configure needs network:
 ngtcp2 and the SQLite amalgamation are fetched and built statically.
 
 ### Debian packages
 
-`make deb` builds one `.deb` per binary (CPack components, dynamic GnuTLS):
+`make deb` builds one `.deb` per binary (CPack components, static OpenSSL):
 
 ```sh
 make deb                 # build/x86_64/package/*.deb

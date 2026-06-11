@@ -2,11 +2,13 @@
 
 #include <string.h>
 
+#include <openssl/x509.h>
+
 #include "platform/linux/shared/tls_identity.h"
 
 #define READ_CHUNK_SIZE 2048
 
-static bool isRetryResult(ssize_t result);
+static bool handleSslError(TlsChannel *self, int32_t error);
 
 /* ---------- public ---------- */
 
@@ -17,19 +19,19 @@ void TlsChannel_Reset(TlsChannel *self)
     MessageFramer_Reset(&self->framer);
 }
 
-void TlsChannel_Bind(TlsChannel *self, int32_t fd, gnutls_session_t session)
+void TlsChannel_Bind(TlsChannel *self, int32_t fd, SSL *ssl)
 {
     TlsChannel_Reset(self);
     self->fd = fd;
-    self->session = session;
+    self->ssl = ssl;
     self->state = kTLS_CHANNEL_STATE_HANDSHAKING;
-    gnutls_transport_set_int(session, fd);
+    SSL_set_fd(ssl, fd);
 }
 
 void TlsChannel_Close(TlsChannel *self)
 {
-    if (self->session != NULL) {
-        gnutls_deinit(self->session);
+    if (self->ssl != NULL) {
+        SSL_free(self->ssl);
     }
 
     TlsChannel_Reset(self);
@@ -53,37 +55,33 @@ bool TlsChannel_Pump(TlsChannel *self)
         return true;
     }
 
-    result = gnutls_handshake(self->session);
-    if (result == 0) {
+    result = SSL_do_handshake(self->ssl);
+    if (result == 1) {
         self->state = kTLS_CHANNEL_STATE_ESTABLISHED;
-        return true;
-    }
-    if (isRetryResult(result)) {
+        self->want_write = false;
         return true;
     }
 
-    return false;
+    return handleSslError(self, SSL_get_error(self->ssl, result));
 }
 
 bool TlsChannel_Receive(TlsChannel *self)
 {
     uint8_t chunk[READ_CHUNK_SIZE];
-    ssize_t bytes_received;
+    size_t bytes_received;
+    int32_t result;
 
     if (self->state != kTLS_CHANNEL_STATE_ESTABLISHED) {
         return true;
     }
 
     for (;;) {
-        bytes_received = gnutls_record_recv(self->session, chunk, sizeof(chunk));
-        if (isRetryResult(bytes_received)) {
-            return true;
-        }
-        if (bytes_received <= 0) {
-            return false;
+        result = SSL_read_ex(self->ssl, chunk, sizeof(chunk), &bytes_received);
+        if (result != 1) {
+            return handleSslError(self, SSL_get_error(self->ssl, result));
         }
 
-        if (!MessageFramer_Push(&self->framer, chunk, (size_t)bytes_received)) {
+        if (!MessageFramer_Push(&self->framer, chunk, bytes_received)) {
             return false;
         }
     }
@@ -108,30 +106,23 @@ bool TlsChannel_Queue(TlsChannel *self, const uint8_t *data, size_t size)
 
 bool TlsChannel_Flush(TlsChannel *self)
 {
-    ssize_t bytes_sent;
+    size_t bytes_sent;
+    int32_t result;
 
     if (self->state != kTLS_CHANNEL_STATE_ESTABLISHED) {
         return true;
     }
 
     while (self->tx_used > 0) {
-        if (self->record_pending) {
-            bytes_sent = gnutls_record_send(self->session, NULL, 0);
-        } else {
-            bytes_sent = gnutls_record_send(self->session, self->tx_backlog, self->tx_used);
-        }
-        if (isRetryResult(bytes_sent)) {
-            self->record_pending = true;
-            return true;
-        }
-        if (bytes_sent <= 0) {
-            return false;
+        result = SSL_write_ex(self->ssl, self->tx_backlog, self->tx_used, &bytes_sent);
+        if (result != 1) {
+            return handleSslError(self, SSL_get_error(self->ssl, result));
         }
 
-        self->record_pending = false;
-        memmove(self->tx_backlog, self->tx_backlog + bytes_sent, self->tx_used - (size_t)bytes_sent);
-        self->tx_used -= (size_t)bytes_sent;
+        memmove(self->tx_backlog, self->tx_backlog + bytes_sent, self->tx_used - bytes_sent);
+        self->tx_used -= bytes_sent;
     }
+    self->want_write = false;
 
     return true;
 }
@@ -139,28 +130,44 @@ bool TlsChannel_Flush(TlsChannel *self)
 bool TlsChannel_WantsWrite(const TlsChannel *self)
 {
     if (self->state == kTLS_CHANNEL_STATE_HANDSHAKING) {
-        return gnutls_record_get_direction(self->session) == 1;
+        return self->want_write;
     }
 
-    return self->tx_used > 0;
+    return self->tx_used > 0 || self->want_write;
 }
 
 bool TlsChannel_PeerFingerprint(const TlsChannel *self, char *fingerprint_hex)
 {
-    const gnutls_datum_t *certificates;
-    unsigned int certificate_count;
+    X509 *certificate = SSL_get0_peer_certificate(self->ssl);
+    uint8_t *der = NULL;
+    int der_size;
+    bool computed = false;
 
-    certificates = gnutls_certificate_get_peers(self->session, &certificate_count);
-    if (certificates == NULL || certificate_count == 0) {
+    if (certificate == NULL) {
         return false;
     }
 
-    return TlsIdentity_FingerprintOfDer(&certificates[0], fingerprint_hex);
+    der_size = i2d_X509(certificate, &der);
+    if (der_size > 0) {
+        computed = TlsIdentity_FingerprintOfDer(der, (size_t)der_size, fingerprint_hex);
+        OPENSSL_free(der);
+    }
+
+    return computed;
 }
 
 /* ---------- private ---------- */
 
-static bool isRetryResult(ssize_t result)
+static bool handleSslError(TlsChannel *self, int32_t error)
 {
-    return result == GNUTLS_E_AGAIN || result == GNUTLS_E_INTERRUPTED;
+    if (error == SSL_ERROR_WANT_READ) {
+        self->want_write = false;
+        return true;
+    }
+    if (error == SSL_ERROR_WANT_WRITE) {
+        self->want_write = true;
+        return true;
+    }
+
+    return false;
 }

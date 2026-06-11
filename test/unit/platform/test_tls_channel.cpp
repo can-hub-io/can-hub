@@ -119,8 +119,8 @@ describe("tls_channel", []() {
 static bool startLoopbackPair(void)
 {
     TlsClientSecurityConfig config;
-    gnutls_session_t server_session;
-    gnutls_session_t client_session;
+    SSL *server_session;
+    SSL *client_session;
     int sockets[2];
 
     config.certificate_path = client_certificate;

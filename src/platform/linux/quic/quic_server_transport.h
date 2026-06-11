@@ -4,7 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <gnutls/gnutls.h>
+#include <openssl/ssl.h>
+#include <ngtcp2/ngtcp2_crypto_ossl.h>
 
 #include <sys/socket.h>
 
@@ -29,7 +30,8 @@ typedef struct QuicServerTransport QuicServerTransport;
 typedef struct {
     QuicServerTransport *transport;
     QuicConnection connection;
-    gnutls_session_t session;
+    SSL *ssl;
+    ngtcp2_crypto_ossl_ctx *tls_context;
     QuicControlChannel control;
     ngtcp2_cid original_dcid;
     char fingerprint_hex[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
