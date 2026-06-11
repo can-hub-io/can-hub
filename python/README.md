@@ -34,6 +34,19 @@ statically; the only runtime dependency is glibc.
 ## Building from source
 
 ```sh
-./scripts/build-python-wheel.sh        # builds libcanhub + the wheel (host arch)
+./scripts/build-python-wheel.sh        # host arch, glibc-tagged (local dev)
 pip install python/dist/*.whl
 ```
+
+Distributable manylinux wheels are built per architecture in a manylinux
+container and repaired by auditwheel (needs docker, plus QEMU binfmt for the
+cross arches):
+
+```sh
+./scripts/build-python-wheel.sh x86_64   # python/dist/x86_64/*.whl
+./scripts/build-python-wheel.sh aarch64
+./scripts/build-python-wheel.sh armv7l
+```
+
+The release workflow builds all three and publishes them to PyPI on a `v*`
+tag.

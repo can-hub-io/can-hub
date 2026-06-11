@@ -52,3 +52,39 @@ jobs:
           files: |
             dist/can-hub-${{ github.ref_name }}-linux-${{ matrix.arch }}-static.tar.gz
             dist/${{ matrix.arch }}/*.deb
+
+  python-wheels:
+    needs: create-release
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64, armv7l]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - name: build manylinux wheel
+        run: ./scripts/build-python-wheel.sh ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.arch }}
+          path: python/dist/${{ matrix.arch }}/*.whl
+      - name: publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: python/dist/${{ matrix.arch }}/*.whl
+
+  pypi-publish:
+    needs: python-wheels
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
