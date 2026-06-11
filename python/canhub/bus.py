@@ -8,6 +8,13 @@ from can import BusABC, CanInitializationError, CanOperationError, Message
 from . import _native as native
 
 DEFAULT_TIMEOUT_MS = 5000
+FINGERPRINT_HEX_LENGTH = 64
+
+
+def _is_fingerprint(text: str) -> bool:
+    if len(text) != FINGERPRINT_HEX_LENGTH:
+        return False
+    return all(character in "0123456789abcdef" for character in text.lower())
 
 
 class CanHubBus(BusABC):
@@ -16,6 +23,13 @@ class CanHubBus(BusABC):
     :param channel: namespaced interface name ``agent/iface`` or numeric id.
     :param url: hub url (``quic://host:port``, ``tls://``, ``tcp://``,
         ``unix:///path``); ``None`` connects to the local hub unix socket.
+    :param identity_cert: path to the client certificate (PEM). Together
+        with ``identity_key`` it injects an explicit identity (the
+        fingerprint the hub ACLs refer to) instead of the state dir one.
+    :param identity_key: path to the client private key (PEM).
+    :param hub_fingerprint: expected hub fingerprint (64 hex). When given,
+        the connection is rejected unless the hub presents exactly this
+        certificate — no TOFU, no pin store on disk.
     :param state_dir: directory holding the client TLS identity and the
         TOFU pin store (tls/quic only); ``None`` uses the can-hub default.
     :param receive_own_messages: also receive the frames this bus sends.
@@ -25,6 +39,9 @@ class CanHubBus(BusABC):
         self,
         channel: str,
         url: Optional[str] = None,
+        identity_cert: Optional[str] = None,
+        identity_key: Optional[str] = None,
+        hub_fingerprint: Optional[str] = None,
         state_dir: Optional[str] = None,
         receive_own_messages: bool = False,
         **kwargs,
@@ -32,9 +49,24 @@ class CanHubBus(BusABC):
         self._session = None
         self._writable = False
 
-        encoded_url = url.encode() if url else None
-        encoded_state_dir = state_dir.encode() if state_dir else None
-        self._session = native.lib.canhub_connect(encoded_url, encoded_state_dir, DEFAULT_TIMEOUT_MS)
+        if hub_fingerprint is not None:
+            hub_fingerprint = str(hub_fingerprint)
+            if not _is_fingerprint(hub_fingerprint):
+                raise CanInitializationError(
+                    "hub_fingerprint must be 64 hex characters (it may have been "
+                    "mangled by python-can config value casting; pass it as a string)"
+                )
+
+        config = native.CanHubConnectConfig()
+        config.struct_size = ctypes.sizeof(config)
+        config.url = url.encode() if url else None
+        config.state_directory = state_dir.encode() if state_dir else None
+        config.certificate_path = identity_cert.encode() if identity_cert else None
+        config.key_path = identity_key.encode() if identity_key else None
+        config.hub_fingerprint = hub_fingerprint.encode() if hub_fingerprint else None
+        config.connect_timeout_ms = DEFAULT_TIMEOUT_MS
+
+        self._session = native.lib.canhub_connect(ctypes.byref(config))
         if not self._session:
             raise CanInitializationError(f"could not connect to {url or 'the local can-hub socket'}")
 

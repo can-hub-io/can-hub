@@ -19,8 +19,21 @@ void PinnedServerVerifier_Attach(
     const char *pin_key
 )
 {
+    memset(self, 0, sizeof(*self));
     snprintf(self->pin_store_path, sizeof(self->pin_store_path), "%s", pin_store_path);
     snprintf(self->pin_key, sizeof(self->pin_key), "%s", pin_key);
+    SSL_CTX_set_cert_verify_callback(context, verifyPinnedServer, self);
+    SSL_CTX_set_verify(context, SSL_VERIFY_PEER, NULL);
+}
+
+void PinnedServerVerifier_AttachFixed(
+    PinnedServerVerifier *self,
+    SSL_CTX *context,
+    const char *expected_fingerprint
+)
+{
+    memset(self, 0, sizeof(*self));
+    snprintf(self->expected_fingerprint, sizeof(self->expected_fingerprint), "%s", expected_fingerprint);
     SSL_CTX_set_cert_verify_callback(context, verifyPinnedServer, self);
     SSL_CTX_set_verify(context, SSL_VERIFY_PEER, NULL);
 }
@@ -35,6 +48,14 @@ static int verifyPinnedServer(X509_STORE_CTX *store_context, void *argument)
 
     if (!peerFingerprint(store_context, fingerprint)) {
         return 0;
+    }
+
+    if (self->expected_fingerprint[0] != '\0') {
+        if (strcmp(self->expected_fingerprint, fingerprint) != 0) {
+            fprintf(stderr, "hub fingerprint %s does not match the expected one, rejecting connection\n", fingerprint);
+            return 0;
+        }
+        return 1;
     }
 
     if (!PinStore_Lookup(self->pin_store_path, self->pin_key, pinned)) {

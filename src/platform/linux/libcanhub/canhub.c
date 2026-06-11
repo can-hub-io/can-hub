@@ -1,5 +1,6 @@
 #include "canhub.h"
 
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,6 +51,7 @@ struct CanHubSession {
     char identity_key_path[TLS_IDENTITY_PATH_MAX];
     char known_hubs_path[KNOWN_HUBS_PATH_MAX];
     char pin_key[PIN_KEY_MAX];
+    char hub_fingerprint[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
     char last_error[LAST_ERROR_SIZE];
     CanHubInterfaceInfo *list_out;
     size_t list_max;
@@ -64,8 +66,10 @@ struct CanHubSession {
     uint16_t ring_count;
 };
 
+static void ignoreSigpipeIfUnhandled(void);
 static bool initTransport(CanHubSession *self, const char *host, const char *port_text, const TransportEvents *events);
-static bool prepareSecurityMaterial(CanHubSession *self, const char *state_directory, const char *host, const char *port_text);
+static bool prepareSecurityMaterial(CanHubSession *self, const CanHubConnectConfig *config, const char *host, const char *port_text);
+static bool prepareIdentity(CanHubSession *self, const CanHubConnectConfig *config);
 static bool waitForConnection(CanHubSession *self, int32_t timeout_ms);
 static void pumpOnce(CanHubSession *self, int32_t timeout_ms);
 static void dispatchEvent(CanHubSession *self, const struct epoll_event *event);
@@ -90,7 +94,7 @@ uint32_t canhub_api_version(void)
     return CANHUB_API_VERSION;
 }
 
-CanHubSession *canhub_connect(const char *url, const char *state_directory, int32_t timeout_ms)
+CanHubSession *canhub_connect(const CanHubConnectConfig *config)
 {
     CanHubSession *self;
     char host[CONNECT_URL_HOST_MAX];
@@ -98,16 +102,22 @@ CanHubSession *canhub_connect(const char *url, const char *state_directory, int3
     TransportEvents transport_events;
     ClientEvents client_events;
 
+    if (config == NULL || config->struct_size != sizeof(*config)) {
+        return NULL;
+    }
+
+    ignoreSigpipeIfUnhandled();
+
     self = calloc(1, sizeof(*self));
     if (self == NULL) {
         return NULL;
     }
 
-    if (url == NULL) {
+    if (config->url == NULL) {
         self->scheme = kCONNECT_SCHEME_UNIX;
         snprintf(host, sizeof(host), "%s", HUB_DEFAULT_UNIX_SOCKET_PATH);
         port_text[0] = '\0';
-    } else if (!ConnectUrl_Parse(url, &self->scheme, host, port_text)) {
+    } else if (!ConnectUrl_Parse(config->url, &self->scheme, host, port_text)) {
         free(self);
         return NULL;
     }
@@ -122,7 +132,7 @@ CanHubSession *canhub_connect(const char *url, const char *state_directory, int3
     transport_events = Client_TransportEvents(&self->client);
 
     if (self->scheme == kCONNECT_SCHEME_TLS || self->scheme == kCONNECT_SCHEME_QUIC) {
-        if (!prepareSecurityMaterial(self, state_directory, host, port_text)) {
+        if (!prepareSecurityMaterial(self, config, host, port_text)) {
             free(self);
             return NULL;
         }
@@ -147,7 +157,7 @@ CanHubSession *canhub_connect(const char *url, const char *state_directory, int3
         canhub_close(self);
         return NULL;
     }
-    if (!waitForConnection(self, timeout_ms)) {
+    if (!waitForConnection(self, config->connect_timeout_ms)) {
         canhub_close(self);
         return NULL;
     }
@@ -350,6 +360,15 @@ int32_t canhub_send(CanHubSession *session, const CanHubFrame *frame)
 
 /* ---------- private ---------- */
 
+static void ignoreSigpipeIfUnhandled(void)
+{
+    struct sigaction current;
+
+    if (sigaction(SIGPIPE, NULL, &current) == 0 && current.sa_handler == SIG_DFL) {
+        signal(SIGPIPE, SIG_IGN);
+    }
+}
+
 static bool initTransport(CanHubSession *self, const char *host, const char *port_text, const TransportEvents *events)
 {
     TlsClientSecurityConfig tls_config;
@@ -360,6 +379,7 @@ static bool initTransport(CanHubSession *self, const char *host, const char *por
         quic_config.key_path = self->identity_key_path;
         quic_config.pin_store_path = self->known_hubs_path;
         quic_config.pin_key = self->pin_key;
+        quic_config.pinned_fingerprint = (self->hub_fingerprint[0] != '\0') ? self->hub_fingerprint : NULL;
         if (!QuicClientTransport_Init(&self->quic_transport, host, port_text, events, &quic_config)) {
             return false;
         }
@@ -372,6 +392,7 @@ static bool initTransport(CanHubSession *self, const char *host, const char *por
         tls_config.key_path = self->identity_key_path;
         tls_config.pin_store_path = self->known_hubs_path;
         tls_config.pin_key = self->pin_key;
+        tls_config.pinned_fingerprint = (self->hub_fingerprint[0] != '\0') ? self->hub_fingerprint : NULL;
         if (!TlsClientTransport_Init(&self->tls_transport, host, port_text, events, &tls_config)) {
             return false;
         }
@@ -391,19 +412,40 @@ static bool initTransport(CanHubSession *self, const char *host, const char *por
     return true;
 }
 
-static bool prepareSecurityMaterial(CanHubSession *self, const char *state_directory, const char *host, const char *port_text)
+static bool prepareSecurityMaterial(CanHubSession *self, const CanHubConnectConfig *config, const char *host, const char *port_text)
 {
-    if (!TlsIdentity_ResolveStateDirectory(state_directory, self->state_directory)) {
-        return false;
-    }
-    if (!TlsIdentity_LoadOrCreate(self->state_directory, IDENTITY_NAME, self->identity_certificate_path, self->identity_key_path)) {
+    if (!prepareIdentity(self, config)) {
         return false;
     }
 
+    if (config->hub_fingerprint != NULL) {
+        snprintf(self->hub_fingerprint, sizeof(self->hub_fingerprint), "%s", config->hub_fingerprint);
+        return true;
+    }
+
+    if (self->state_directory[0] == '\0'
+        && !TlsIdentity_ResolveStateDirectory(config->state_directory, self->state_directory)) {
+        return false;
+    }
     snprintf(self->known_hubs_path, sizeof(self->known_hubs_path), "%s/%s", self->state_directory, KNOWN_HUBS_FILE);
     snprintf(self->pin_key, sizeof(self->pin_key), "%s:%s", host, port_text);
 
     return true;
+}
+
+static bool prepareIdentity(CanHubSession *self, const CanHubConnectConfig *config)
+{
+    if (config->certificate_path != NULL && config->key_path != NULL) {
+        snprintf(self->identity_certificate_path, sizeof(self->identity_certificate_path), "%s", config->certificate_path);
+        snprintf(self->identity_key_path, sizeof(self->identity_key_path), "%s", config->key_path);
+        return true;
+    }
+
+    if (!TlsIdentity_ResolveStateDirectory(config->state_directory, self->state_directory)) {
+        return false;
+    }
+
+    return TlsIdentity_LoadOrCreate(self->state_directory, IDENTITY_NAME, self->identity_certificate_path, self->identity_key_path);
 }
 
 static bool waitForConnection(CanHubSession *self, int32_t timeout_ms)

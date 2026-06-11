@@ -8,7 +8,9 @@ Suite Teardown    Teardown Bench    ${BENCH}
 
 *** Variables ***
 ${CONNECT}        tcp://127.0.0.1:7228
+${TLS_CONNECT}    tls://127.0.0.1:7227
 ${PROBE}          /work/test/e2e/scripts/pycan_probe.py
+${WRONG_FINGERPRINT}    deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
 
 *** Test Cases ***
 Python Bus Receives Frames From The Bus
@@ -28,6 +30,27 @@ Python Bus Refuses Unknown Interfaces
     Should Not Be True    ${result.ok}
     Should Contain    ${result.stderr}    not found
 
+Python Bus Connects Over TLS With The Expected Hub Fingerprint
+    ${fingerprint}=    Fingerprint Of ${HUB.config.state_dir}/hub.crt On ${LOCAL_SERVER}
+    ${candump}=    Start Candump On ${LOCAL_SERVER}
+    ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${TLS_CONNECT}    truck42/vcan0    send    1B0    BEBE
+    ...    --state-dir    /tmp/pycan-identity    --hub-fingerprint    ${fingerprint}
+    Should Be True    ${result.ok}
+    Candump ${candump} Should Capture 1B0#BEBE
+
+Python Bus Rejects A Hub With The Wrong Fingerprint
+    ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${TLS_CONNECT}    truck42/vcan0    send    1B0    BEBE
+    ...    --state-dir    /tmp/pycan-identity    --hub-fingerprint    ${WRONG_FINGERPRINT}
+    Should Not Be True    ${result.ok}
+    Should Contain    ${result.stderr}    could not connect
+
+Python Bus Uses An Explicitly Injected Identity
+    ${candump}=    Start Candump On ${LOCAL_SERVER}
+    ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${TLS_CONNECT}    truck42/vcan0    send    1C0    CACA
+    ...    --cert    /tmp/pycan-identity/client.crt    --key    /tmp/pycan-identity/client.key
+    Should Be True    ${result.ok}
+    Candump ${candump} Should Capture 1C0#CACA
+
 *** Keywords ***
 Start Bus Hub Agent And Package
     Setup Bench    ${BENCH}
@@ -39,3 +62,4 @@ Start Bus Hub Agent And Package
     ${agent_cfg}=    Agent Configuration    ${CONNECT}    truck42    vcan0
     ${agent}=    Start CAN Agent On ${LOCAL_SERVER} With ${agent_cfg}
     Wait Until Agent ${agent} Registered On ${hub}
+    Run CLI On Hub ${hub}    acl    add    *    */*    rw

@@ -29,7 +29,9 @@ bool QuicClientSecurity_Init(
         QuicClientSecurity_Free(self);
         return false;
     }
-    if (config != NULL && config->pin_store_path != NULL && config->pin_key != NULL) {
+    if (config != NULL && config->pinned_fingerprint != NULL) {
+        PinnedServerVerifier_AttachFixed(&self->verifier, self->context, config->pinned_fingerprint);
+    } else if (config != NULL && config->pin_store_path != NULL && config->pin_key != NULL) {
         PinnedServerVerifier_Attach(&self->verifier, self->context, config->pin_store_path, config->pin_key);
     }
 

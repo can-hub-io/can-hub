@@ -64,6 +64,18 @@ class CanHubFilter(Structure):
     ]
 
 
+class CanHubConnectConfig(Structure):
+    _fields_ = [
+        ("struct_size", c_uint32),
+        ("url", c_char_p),
+        ("state_directory", c_char_p),
+        ("certificate_path", c_char_p),
+        ("key_path", c_char_p),
+        ("hub_fingerprint", c_char_p),
+        ("connect_timeout_ms", c_int32),
+    ]
+
+
 def _load_library():
     override = os.environ.get("CANHUB_LIBRARY")
     if override:
@@ -82,7 +94,7 @@ lib.canhub_api_version.restype = c_uint32
 lib.canhub_api_version.argtypes = []
 
 lib.canhub_connect.restype = c_void_p
-lib.canhub_connect.argtypes = [c_char_p, c_char_p, c_int32]
+lib.canhub_connect.argtypes = [POINTER(CanHubConnectConfig)]
 
 lib.canhub_close.restype = None
 lib.canhub_close.argtypes = [c_void_p]

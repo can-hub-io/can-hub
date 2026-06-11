@@ -69,9 +69,19 @@ typedef struct {
     uint32_t can_mask;
 } CanHubFilter;
 
+typedef struct {
+    uint32_t struct_size;
+    const char *url;
+    const char *state_directory;
+    const char *certificate_path;
+    const char *key_path;
+    const char *hub_fingerprint;
+    int32_t connect_timeout_ms;
+} CanHubConnectConfig;
+
 CANHUB_API uint32_t canhub_api_version(void);
 
-CANHUB_API CanHubSession *canhub_connect(const char *url, const char *state_directory, int32_t timeout_ms);
+CANHUB_API CanHubSession *canhub_connect(const CanHubConnectConfig *config);
 CANHUB_API void canhub_close(CanHubSession *session);
 CANHUB_API const char *canhub_last_error(const CanHubSession *session);
 
