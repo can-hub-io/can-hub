@@ -104,7 +104,10 @@ class Bench:
 
     def _reset(self) -> None:
         for spec in self.specs:
+            run(["bash", "-c",
+                 f"ip netns pids {spec.name} 2>/dev/null | xargs -r kill -9"], check=False)
             run(["ip", "netns", "del", spec.name], check=False)
+            run(["ip", "link", "del", f"{spec.name}h"], check=False)
         run(["ip", "link", "del", BRIDGE], check=False)
         self._write_hosts([])
 

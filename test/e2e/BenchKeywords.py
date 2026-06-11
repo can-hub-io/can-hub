@@ -6,6 +6,7 @@ Keywords return Can* instances so tests read like:
     ${agent}=   Start CAN Agent On ${LOCAL_SERVER} With ${config}
 """
 
+import json
 import time
 
 from robot.api.deco import keyword, library
@@ -13,6 +14,8 @@ from robot.api.deco import keyword, library
 from lib import (
     AgentConfig, CanAgent, CanClient, CanCli, CanHub, ClientConfig, HubConfig,
 )
+
+CONSUME_SCRIPT = "/work/test/e2e/scripts/consume.py"
 
 
 @library(scope="GLOBAL")
@@ -108,6 +111,47 @@ class BenchKeywords:
         raise AssertionError(
             f"client did not receive {can_id}#{data}\n{client.process.read_log()}"
         )
+
+    # ---------- fairness / backpressure ----------
+
+    @keyword("Limit Egress On ${server} To ${rate}")
+    def limit_egress_on(self, server, rate):
+        server.exec("tc", "qdisc", "replace", "dev", "eth0", "root", "tbf",
+                    "rate", rate, "burst", "16kb", "latency", "50ms", check=False)
+
+    @keyword("Flood ${interface} On ${server}")
+    def flood_on(self, interface, server, gap_ms=0.05, count=120000, can_id="200"):
+        return server.cangen(interface, float(gap_ms), int(count), can_id=can_id)
+
+    @keyword("Start Draining ${channels} On ${server}")
+    def start_draining(self, channels, server, seconds=10, host="127.0.0.1", port="29536"):
+        names = channels if isinstance(channels, list) else [channels]
+        return server.exec("python3", CONSUME_SCRIPT, host, str(port), str(seconds),
+                           *names, background=True, log_name="consume")
+
+    @keyword("Wait Until ${count} Channels Open On ${hub}")
+    def wait_until_channels_open(self, count, hub, timeout=8):
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            if len([r for r in hub.clients() if r.channel != "-"]) >= int(count):
+                return
+            time.sleep(0.1)
+        raise AssertionError(f"fewer than {count} channels opened on the hub")
+
+    @keyword("Send ${count} Frames On ${server} ${interface}")
+    def send_frames_on(self, count, server, interface, gap=0.1, can_id="123"):
+        for i in range(int(count)):
+            server.exec("cansend", interface, f"{can_id}#{i:016X}")
+            time.sleep(float(gap))
+
+    @keyword("Channel Drops On ${hub}")
+    def channel_drops_on(self, hub):
+        return {r.interface: r.dropped for r in hub.clients() if r.channel != "-"}
+
+    @keyword("Drain Result Of ${process}")
+    def drain_result_of(self, process):
+        process.wait(timeout=30)
+        return json.loads(process.read_log().strip().splitlines()[-1])
 
 
 def _normalise(kwargs: dict) -> dict:
