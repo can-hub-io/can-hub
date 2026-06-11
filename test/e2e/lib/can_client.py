@@ -40,7 +40,7 @@ class CanClient:
         if connect:
             argv += ["--connect", connect]
         argv += ["send", interface, frame]
-        return server.exec(*argv)
+        return server.exec(*argv, check=False)
 
     def dumped_frames(self):
         return parse_client_dump(self.process.read_log())

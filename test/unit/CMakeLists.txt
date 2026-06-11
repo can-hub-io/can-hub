@@ -260,6 +260,23 @@ add_unit_test(test_broker
 )
 target_link_libraries(test_broker PRIVATE port_mocks)
 
+add_unit_test(test_client
+    SOURCES
+        client/test_client.cpp
+        ${ROOT_SRC_DIR}/client/client.c
+        ${ROOT_SRC_DIR}/protocol/error_message.c
+        ${ROOT_SRC_DIR}/protocol/frame_message.c
+        ${ROOT_SRC_DIR}/protocol/hello_message.c
+        ${ROOT_SRC_DIR}/protocol/interface_name.c
+        ${ROOT_SRC_DIR}/protocol/list_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/open_message.c
+        ${ROOT_SRC_DIR}/protocol/register_message.c
+        ${ROOT_SRC_DIR}/protocol/subscribe_message.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+target_link_libraries(test_client PRIVATE port_mocks)
+
 add_unit_test(test_mirror_app
     SOURCES
         mirror/test_mirror_app.cpp
