@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <gnutls/gnutls.h>
+#include <openssl/ssl.h>
 
 #include "platform/linux/shared/message_framer.h"
 
@@ -12,11 +12,11 @@
 #define TLS_CHANNEL_NO_SOCKET (-1)
 
 /*
- * One TLS-protected TCP stream carrying protocol messages: a GnuTLS session
- * driven over a nonblocking fd, RX reassembly via the framer, TX backlog so
- * partial record writes never corrupt the stream. The owner creates the
- * session (credentials, verification) and binds it together with the fd;
- * Pump drives the handshake until IsEstablished. Closing deinits the
+ * One TLS-protected TCP stream carrying protocol messages: an OpenSSL
+ * session driven over a nonblocking fd, RX reassembly via the framer, TX
+ * backlog so partial record writes never corrupt the stream. The owner
+ * creates the session (context, verification) and binds it together with
+ * the fd; Pump drives the handshake until IsEstablished. Closing frees the
  * session, the fd stays owned by the caller.
  */
 typedef enum ttls_channel_state_e {
@@ -28,16 +28,16 @@ typedef enum ttls_channel_state_e {
 
 typedef struct {
     int32_t fd;
-    gnutls_session_t session;
+    SSL *ssl;
     uint8_t state;
-    bool record_pending;
+    bool want_write;
     MessageFramer framer;
     uint8_t tx_backlog[TLS_CHANNEL_TX_BACKLOG_SIZE];
     size_t tx_used;
 } TlsChannel;
 
 void TlsChannel_Reset(TlsChannel *self);
-void TlsChannel_Bind(TlsChannel *self, int32_t fd, gnutls_session_t session);
+void TlsChannel_Bind(TlsChannel *self, int32_t fd, SSL *ssl);
 void TlsChannel_Close(TlsChannel *self);
 bool TlsChannel_IsBound(const TlsChannel *self);
 bool TlsChannel_IsEstablished(const TlsChannel *self);

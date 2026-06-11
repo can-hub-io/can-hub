@@ -11,6 +11,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_compile_options(-Wall -Wextra -Wno-unused-parameter)
 
+find_package(OpenSSL REQUIRED)
+
 include(FetchContent)
 FetchContent_Declare(sqlite3
     URL https://sqlite.org/2026/sqlite-amalgamation-3530200.zip

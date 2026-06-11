@@ -27,7 +27,7 @@ Run a single test: build with `make test` (or `cmake --build build/test`), then 
 
 New tests are registered in `test/unit/CMakeLists.txt` with `add_unit_test(<name> SOURCES <test.cpp> <real_src.c ...>)` — each test links the real sources it exercises (no production library target). Mocks for ports live in `test/mocks/`.
 
-ngtcp2 v1.23.0 (GnuTLS backend, static) and the SQLite amalgamation (sha256-pinned zip from sqlite.org) are pulled via FetchContent; first configure needs network. The test project (test/CMakeLists.txt) fetches SQLite separately.
+ngtcp2 v1.23.0 (crypto-ossl backend, static) and the SQLite amalgamation (sha256-pinned zip from sqlite.org) are pulled via FetchContent, and a pinned OpenSSL 3.5 is built once per build tree at configure time (cmake/openssl.cmake; distros still ship < 3.5); first configure needs network. The test project (test/CMakeLists.txt) fetches SQLite separately.
 
 ## Architecture
 
@@ -39,7 +39,7 @@ Layout is context-first: one directory per bounded context (`src/agent/`, `src/h
 - `src/agent/` — device-side core: `agent.c` + `agent_app.c` wiring, `domain/` (`channel_map`, `reconnect_backoff`, `echo_correlator`), `ports/` (`TransportPort`/`TransportEvents`, `CanPort`/`CanEvents`). Events pushed in, time injected (`Agent_Tick(now_us)`).
 - `src/hub/` — hub-side core: `broker.c` + `hub_app.c` wiring, `domain/` (`interface_registry`, `frame_routes`, `client_session`, `peer_directory`, `hub_peer`, `admin_views`), `ports/` (`HubTransportPort`/`HubTransportEvents`, `IdentityStorePort`).
 - Ports are contracts owned by the core, both directions: outbound Port structs of function pointers the core calls, inbound Events structs the core implements.
-- `src/platform/linux/` — adapters (epoll, ngtcp2 QUIC, GnuTLS TLS-over-TCP, SocketCAN, plain TCP) and the concrete `*_main.c` entry points. Deliberately concrete. `shared/` holds main-loop helpers (`connect_url`, `epoll_registry`, `message_framer`, `tls_identity`, `pin_store`, `pinned_server_verifier`); `quic/quic_egress.c` is the egress pump shared by client and server QUIC transports; `tls/tls_channel.c` is the nonblocking GnuTLS record pump shared by the TLS client and server.
+- `src/platform/linux/` — adapters (epoll, ngtcp2 QUIC, OpenSSL TLS-over-TCP, SocketCAN, plain TCP) and the concrete `*_main.c` entry points. Deliberately concrete. `shared/` holds main-loop helpers (`connect_url`, `epoll_registry`, `message_framer`, `tls_identity`, `pin_store`, `pinned_server_verifier`); `quic/quic_egress.c` is the egress pump shared by client and server QUIC transports; `tls/tls_channel.c` is the nonblocking OpenSSL record pump shared by the TLS client and server.
 
 Two planes on the wire: control (reliable QUIC stream / the TCP connection) and data (QUIC datagrams, latest-wins; over TCP shares the stream). Identity is the TLS fingerprint — never sent per message. Data plane demultiplexes by connection-scoped u8 **channel** (assigned by REGISTER_ACK / OPEN), not by global interface id. Adding a transport must not touch the domain.
 

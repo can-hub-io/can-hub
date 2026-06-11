@@ -1,69 +1,82 @@
 #include "platform/linux/quic/quic_server_security.h"
 
-#include <ngtcp2/ngtcp2_crypto_gnutls.h>
+#include "platform/linux/shared/tls_defaults.h"
 
-#define ALPN_PROTOCOL "canhub/0"
-
-#define TLS_PRIORITY \
-    "NORMAL:-VERS-ALL:+VERS-TLS1.3:-CIPHER-ALL:+AES-128-GCM:+AES-256-GCM:" \
-    "+CHACHA20-POLY1305:%DISABLE_TLS13_COMPAT_MODE"
+static bool cryptoBackendReady(void);
 
 /* ---------- public ---------- */
 
 bool QuicServerSecurity_Init(QuicServerSecurity *self, const char *certificate_file, const char *key_file)
 {
-    int result;
-
-    if (gnutls_certificate_allocate_credentials(&self->credentials) != 0) {
+    if (!cryptoBackendReady()) {
         return false;
     }
 
-    result = gnutls_certificate_set_x509_key_file(
-        self->credentials,
-        certificate_file,
-        key_file,
-        GNUTLS_X509_FMT_PEM
-    );
-    if (result != 0) {
-        gnutls_certificate_free_credentials(self->credentials);
-        self->credentials = NULL;
+    self->context = TlsDefaults_NewContext(TLS_server_method());
+    if (self->context == NULL) {
         return false;
     }
+
+    if (!TlsDefaults_LoadIdentity(self->context, certificate_file, key_file)) {
+        SSL_CTX_free(self->context);
+        self->context = NULL;
+        return false;
+    }
+    TlsDefaults_ConfigureServerContext(self->context);
 
     return true;
 }
 
 bool QuicServerSecurity_NewSession(
     QuicServerSecurity *self,
-    gnutls_session_t *session,
+    SSL **ssl,
+    ngtcp2_crypto_ossl_ctx **tls_context,
     ngtcp2_crypto_conn_ref *connection_ref
 )
 {
-    static const gnutls_datum_t alpn = { (unsigned char *)ALPN_PROTOCOL, sizeof(ALPN_PROTOCOL) - 1 };
-
-    if (gnutls_init(session, GNUTLS_SERVER) != 0) {
+    *tls_context = NULL;
+    *ssl = SSL_new(self->context);
+    if (*ssl == NULL) {
         return false;
     }
 
-    gnutls_priority_set_direct(*session, TLS_PRIORITY, NULL);
-    gnutls_credentials_set(*session, GNUTLS_CRD_CERTIFICATE, self->credentials);
-    gnutls_alpn_set_protocols(*session, &alpn, 1, GNUTLS_ALPN_MANDATORY);
-    gnutls_certificate_server_set_request(*session, GNUTLS_CERT_REQUIRE);
-
-    if (ngtcp2_crypto_gnutls_configure_server_session(*session) != 0) {
-        gnutls_deinit(*session);
-        *session = NULL;
+    if (ngtcp2_crypto_ossl_ctx_new(tls_context, *ssl) != 0) {
+        SSL_free(*ssl);
+        *ssl = NULL;
+        return false;
+    }
+    if (ngtcp2_crypto_ossl_configure_server_session(*ssl) != 0) {
+        QuicServerSecurity_FreeSession(*ssl, *tls_context);
+        *ssl = NULL;
+        *tls_context = NULL;
         return false;
     }
 
-    gnutls_session_set_ptr(*session, connection_ref);
+    SSL_set_app_data(*ssl, connection_ref);
+    TlsDefaults_ConfigureServerSession(*ssl);
 
     return true;
 }
 
-void QuicServerSecurity_FreeSession(gnutls_session_t session)
+void QuicServerSecurity_FreeSession(SSL *ssl, ngtcp2_crypto_ossl_ctx *tls_context)
 {
-    if (session != NULL) {
-        gnutls_deinit(session);
+    if (tls_context != NULL) {
+        ngtcp2_crypto_ossl_ctx_del(tls_context);
     }
+    if (ssl != NULL) {
+        SSL_free(ssl);
+    }
+}
+
+/* ---------- private ---------- */
+
+static bool cryptoBackendReady(void)
+{
+    static bool initialized;
+
+    if (!initialized) {
+        initialized = ngtcp2_crypto_ossl_init() == 0;
+    }
+
+    return initialized;
 }
