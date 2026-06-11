@@ -14,7 +14,7 @@ from robot.api.deco import keyword, library
 from lib import (
     AgentConfig, CanAgent, CanClient, CanCli, CanHub, ClientConfig, HubConfig,
 )
-from lib.binaries import binary
+from lib.binaries import BIN_DIR, binary
 from lib.rows import parse_candump
 
 CONSUME_SCRIPT = "/work/test/e2e/scripts/consume.py"
@@ -100,6 +100,20 @@ class BenchKeywords:
                 return
             time.sleep(0.1)
         raise AssertionError("no client channel opened on the hub")
+
+    @keyword("Install Python Package On ${server}")
+    def install_python_package_on(self, server, path):
+        server.exec("python3", "-m", "pip", "install", "--quiet",
+                    "--break-system-packages", "--no-build-isolation", path)
+
+    @keyword("Run Python ${script} On ${server}")
+    def run_python_on(self, script, server, *args):
+        return server.exec("env", _canhub_library(), "python3", script, *args, check=False)
+
+    @keyword("Start Python ${script} On ${server}")
+    def start_python_on(self, script, server, *args):
+        return server.exec("env", _canhub_library(), "python3", script, *args,
+                           background=True, log_name="pycan")
 
     @keyword("Run Binary ${name} On ${server}")
     def run_binary_on(self, name, server, *args):
@@ -207,3 +221,7 @@ def _normalise(kwargs: dict) -> dict:
         else:
             out[key] = value
     return out
+
+
+def _canhub_library() -> str:
+    return f"CANHUB_LIBRARY={BIN_DIR}/libcanhub.so"
