@@ -2,15 +2,17 @@
 
 #include <stdbool.h>
 
-#include <gnutls/gnutls.h>
 #include <ngtcp2/ngtcp2_crypto.h>
+#include <ngtcp2/ngtcp2_crypto_ossl.h>
+#include <openssl/ssl.h>
 
 #include "platform/linux/shared/pinned_server_verifier.h"
 
 /*
- * TLS side of a QUIC client connection: GnuTLS session + credentials wired
- * to ngtcp2. Presents the agent identity certificate (mTLS) and verifies
- * the server against the TOFU pin store through PinnedServerVerifier.
+ * TLS side of a QUIC client connection: OpenSSL session wired to ngtcp2
+ * through the crypto-ossl backend. Presents the agent identity certificate
+ * (mTLS) and verifies the server against the TOFU pin store through
+ * PinnedServerVerifier.
  */
 
 typedef struct {
@@ -21,8 +23,9 @@ typedef struct {
 } QuicClientSecurityConfig;
 
 typedef struct {
-    gnutls_session_t session;
-    gnutls_certificate_credentials_t credentials;
+    SSL_CTX *context;
+    SSL *ssl;
+    ngtcp2_crypto_ossl_ctx *tls_context;
     PinnedServerVerifier verifier;
 } QuicClientSecurity;
 

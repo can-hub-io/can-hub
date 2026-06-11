@@ -12,14 +12,18 @@ set(CMAKE_C_FLAGS_DEBUG "-O0 -g")
 
 add_compile_options(-Wall -Wextra)
 
-option(CAN_HUB_STATIC "Fully static binaries against a static GnuTLS stack" OFF)
+option(CAN_HUB_STATIC "Fully static binaries against a static OpenSSL stack" OFF)
 if(CAN_HUB_STATIC)
     add_compile_options(-ffunction-sections -fdata-sections)
     # 64K segment alignment so the static binaries load on kernels with any page
     # size (4K/16K/64K). Default 4K-aligned PT_LOAD segments fail to map and
     # SIGSEGV before main on 16K-page kernels (e.g. Raspberry Pi OS arm64 on Pi 5).
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static -Wl,--gc-sections -Wl,-z,max-page-size=0x10000")
-    set(GNUTLS_STATIC_EXTRA_LIBRARIES hogweed nettle gmp atomic)
+    set(OPENSSL_ROOT_DIR "$ENV{CAN_HUB_SYSROOT}")
+    set(OPENSSL_USE_STATIC_LIBS TRUE)
+    find_package(OpenSSL REQUIRED)
+else()
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/openssl.cmake)
 endif()
 
 include_directories(src)
@@ -42,8 +46,8 @@ set(COMMON_SOURCES
 )
 
 include(FetchContent)
-set(ENABLE_GNUTLS ON CACHE BOOL "" FORCE)
-set(ENABLE_OPENSSL OFF CACHE BOOL "" FORCE)
+set(ENABLE_GNUTLS OFF CACHE BOOL "" FORCE)
+set(ENABLE_OPENSSL ON CACHE BOOL "" FORCE)
 set(ENABLE_SHARED_LIB OFF CACHE BOOL "" FORCE)
 set(ENABLE_STATIC_LIB ON CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
@@ -74,6 +78,7 @@ set(AGENT_SOURCES
     src/platform/linux/shared/epoll_registry.c
     src/platform/linux/shared/pin_store.c
     src/platform/linux/shared/pinned_server_verifier.c
+    src/platform/linux/shared/tls_defaults.c
     src/platform/linux/shared/tls_identity.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/socketcan/socketcan_adapter.c
@@ -105,6 +110,7 @@ set(HUB_SOURCES
     src/platform/linux/shared/connect_url.c
     src/platform/linux/shared/epoll_registry.c
     src/platform/linux/shared/pin_store.c
+    src/platform/linux/shared/tls_defaults.c
     src/platform/linux/shared/tls_identity.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/tcp/tcp_channel.c
@@ -121,9 +127,9 @@ set(HUB_SOURCES
 )
 
 add_executable(can-hub src/platform/linux/hub_main.c ${COMMON_SOURCES} ${HUB_SOURCES})
-target_link_libraries(can-hub PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls sqlite3 ${GNUTLS_STATIC_EXTRA_LIBRARIES})
+target_link_libraries(can-hub PRIVATE ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto sqlite3)
 add_executable(can-hub-agent src/platform/linux/agent_main.c ${COMMON_SOURCES} ${AGENT_SOURCES})
-target_link_libraries(can-hub-agent PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls ${GNUTLS_STATIC_EXTRA_LIBRARIES})
+target_link_libraries(can-hub-agent PRIVATE ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto)
 set(CLIENT_SOURCES
     src/client/client.c
     src/platform/linux/clock/clock.c
@@ -143,6 +149,7 @@ set(CLIENT_ATTACH_SOURCES
 set(CLIENT_TLS_SOURCES
     src/platform/linux/shared/pin_store.c
     src/platform/linux/shared/pinned_server_verifier.c
+    src/platform/linux/shared/tls_defaults.c
     src/platform/linux/shared/tls_identity.c
     src/platform/linux/tls/tls_channel.c
     src/platform/linux/tls/tls_client_security.c
@@ -168,7 +175,7 @@ set(SOCKETCAND_SOURCES
 )
 
 add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES} ${CLIENT_ATTACH_SOURCES} ${CLIENT_TLS_SOURCES} ${SOCKETCAND_SOURCES})
-target_link_libraries(can-hub-client PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls ${GNUTLS_STATIC_EXTRA_LIBRARIES})
+target_link_libraries(can-hub-client PRIVATE ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto)
 add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES})
 
 set(LIBCANHUB_SOURCES
@@ -179,12 +186,12 @@ set(LIBCANHUB_SOURCES
 
 add_library(canhub STATIC ${COMMON_SOURCES} ${LIBCANHUB_SOURCES})
 target_include_directories(canhub PUBLIC include)
-target_link_libraries(canhub PUBLIC ngtcp2_static ngtcp2_crypto_gnutls_static gnutls ${GNUTLS_STATIC_EXTRA_LIBRARIES})
+target_link_libraries(canhub PUBLIC ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto)
 
 if(NOT CAN_HUB_STATIC)
     add_library(canhub_shared SHARED ${COMMON_SOURCES} ${LIBCANHUB_SOURCES})
     target_include_directories(canhub_shared PUBLIC include)
-    target_link_libraries(canhub_shared PRIVATE ngtcp2_static ngtcp2_crypto_gnutls_static gnutls ${GNUTLS_STATIC_EXTRA_LIBRARIES})
+    target_link_libraries(canhub_shared PRIVATE ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto)
     set_target_properties(canhub_shared PROPERTIES
         OUTPUT_NAME canhub
         C_VISIBILITY_PRESET hidden

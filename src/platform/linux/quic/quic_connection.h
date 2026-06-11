@@ -4,9 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <gnutls/gnutls.h>
 #include <ngtcp2/ngtcp2.h>
 #include <ngtcp2/ngtcp2_crypto.h>
+#include <ngtcp2/ngtcp2_crypto_ossl.h>
 
 /*
  * Thin wrapper around one ngtcp2 connection (client or server side): owns
@@ -33,10 +33,10 @@ typedef struct {
 
 void QuicConnection_Bind(QuicConnection *self, const QuicConnectionEvents *events);
 ngtcp2_crypto_conn_ref *QuicConnection_Ref(QuicConnection *self);
-bool QuicConnection_Open(QuicConnection *self, gnutls_session_t session, const ngtcp2_path *path);
+bool QuicConnection_Open(QuicConnection *self, ngtcp2_crypto_ossl_ctx *tls_context, const ngtcp2_path *path);
 bool QuicConnection_OpenServer(
     QuicConnection *self,
-    gnutls_session_t session,
+    ngtcp2_crypto_ossl_ctx *tls_context,
     const ngtcp2_path *path,
     const ngtcp2_pkt_hd *initial_header
 );

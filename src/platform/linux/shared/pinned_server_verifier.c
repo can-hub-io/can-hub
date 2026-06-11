@@ -3,99 +3,68 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <openssl/x509.h>
+
 #include "platform/linux/shared/tls_identity.h"
 
-#define VERIFIERS_MAX 8
-
-static PinnedServerVerifier *registered_verifiers[VERIFIERS_MAX];
-
-static PinnedServerVerifier *findBySession(gnutls_session_t session);
-static int verifyPinnedServer(gnutls_session_t session);
+static int verifyPinnedServer(X509_STORE_CTX *store_context, void *argument);
+static bool peerFingerprint(X509_STORE_CTX *store_context, char *fingerprint_hex);
 
 /* ---------- public ---------- */
 
 void PinnedServerVerifier_Attach(
     PinnedServerVerifier *self,
-    gnutls_session_t session,
-    gnutls_certificate_credentials_t credentials,
+    SSL_CTX *context,
     const char *pin_store_path,
     const char *pin_key
 )
 {
-    uint8_t i;
-
-    self->session = session;
     snprintf(self->pin_store_path, sizeof(self->pin_store_path), "%s", pin_store_path);
     snprintf(self->pin_key, sizeof(self->pin_key), "%s", pin_key);
-    gnutls_certificate_set_verify_function(credentials, verifyPinnedServer);
-
-    for(i=0; i<VERIFIERS_MAX; i++) {
-        if (registered_verifiers[i] == self) {
-            return;
-        }
-    }
-    for(i=0; i<VERIFIERS_MAX; i++) {
-        if (registered_verifiers[i] == NULL) {
-            registered_verifiers[i] = self;
-            return;
-        }
-    }
-}
-
-void PinnedServerVerifier_Detach(PinnedServerVerifier *self)
-{
-    uint8_t i;
-
-    for(i=0; i<VERIFIERS_MAX; i++) {
-        if (registered_verifiers[i] == self) {
-            registered_verifiers[i] = NULL;
-        }
-    }
+    SSL_CTX_set_cert_verify_callback(context, verifyPinnedServer, self);
+    SSL_CTX_set_verify(context, SSL_VERIFY_PEER, NULL);
 }
 
 /* ---------- private ---------- */
 
-static PinnedServerVerifier *findBySession(gnutls_session_t session)
+static int verifyPinnedServer(X509_STORE_CTX *store_context, void *argument)
 {
-    uint8_t i;
-
-    for(i=0; i<VERIFIERS_MAX; i++) {
-        if (registered_verifiers[i] != NULL && registered_verifiers[i]->session == session) {
-            return registered_verifiers[i];
-        }
-    }
-
-    return NULL;
-}
-
-static int verifyPinnedServer(gnutls_session_t session)
-{
-    PinnedServerVerifier *self = findBySession(session);
-    const gnutls_datum_t *certificates;
-    unsigned int certificate_count;
+    PinnedServerVerifier *self = argument;
     char fingerprint[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
     char pinned[PIN_STORE_FINGERPRINT_HEX_SIZE];
 
-    if (self == NULL) {
-        return GNUTLS_E_CERTIFICATE_ERROR;
-    }
-
-    certificates = gnutls_certificate_get_peers(session, &certificate_count);
-    if (certificates == NULL || certificate_count == 0) {
-        return GNUTLS_E_CERTIFICATE_ERROR;
-    }
-    if (!TlsIdentity_FingerprintOfDer(&certificates[0], fingerprint)) {
-        return GNUTLS_E_CERTIFICATE_ERROR;
+    if (!peerFingerprint(store_context, fingerprint)) {
+        return 0;
     }
 
     if (!PinStore_Lookup(self->pin_store_path, self->pin_key, pinned)) {
         fprintf(stderr, "pinning hub %s fingerprint %s\n", self->pin_key, fingerprint);
-        return PinStore_Append(self->pin_store_path, self->pin_key, fingerprint) ? 0 : GNUTLS_E_CERTIFICATE_ERROR;
+        return PinStore_Append(self->pin_store_path, self->pin_key, fingerprint) ? 1 : 0;
     }
     if (strcmp(pinned, fingerprint) != 0) {
         fprintf(stderr, "hub %s fingerprint changed, rejecting connection\n", self->pin_key);
-        return GNUTLS_E_CERTIFICATE_ERROR;
+        return 0;
     }
 
-    return 0;
+    return 1;
+}
+
+static bool peerFingerprint(X509_STORE_CTX *store_context, char *fingerprint_hex)
+{
+    X509 *certificate = X509_STORE_CTX_get0_cert(store_context);
+    uint8_t *der = NULL;
+    int der_size;
+    bool computed = false;
+
+    if (certificate == NULL) {
+        return false;
+    }
+
+    der_size = i2d_X509(certificate, &der);
+    if (der_size > 0) {
+        computed = TlsIdentity_FingerprintOfDer(der, (size_t)der_size, fingerprint_hex);
+        OPENSSL_free(der);
+    }
+
+    return computed;
 }

@@ -8,8 +8,9 @@
 
 #include <sys/stat.h>
 
-#include <gnutls/crypto.h>
-#include <gnutls/x509.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
 
 #define SYSTEM_STATE_DIRECTORY "/var/lib/can-hub"
 #define USER_STATE_SUBDIRECTORY "/.local/state/can-hub"
@@ -19,21 +20,17 @@
 #define CERTIFICATE_LIFETIME_SECONDS (20L * 365 * 24 * 3600)
 #define CERTIFICATE_BACKDATE_SECONDS 86400
 #define CERTIFICATE_SERIAL 1
-#define PEM_BUFFER_SIZE 8192
+#define CERTIFICATE_X509_VERSION_3 2
 #define FINGERPRINT_SIZE 32
 
 static bool directoryUsable(const char *directory);
 static bool makeDirectoryPath(const char *directory);
 static bool filesExist(const char *first_path, const char *second_path);
 static bool generateIdentity(const char *certificate_path, const char *key_path, const char *common_name);
-static bool buildSelfSignedCertificate(
-    gnutls_x509_crt_t certificate,
-    gnutls_x509_privkey_t key,
-    const char *common_name
-);
-static bool exportPrivateKeyPem(gnutls_x509_privkey_t key, const char *path);
-static bool exportCertificatePem(gnutls_x509_crt_t certificate, const char *path);
-static bool writeFileWithMode(const char *path, const uint8_t *data, size_t size, mode_t mode);
+static X509 *buildSelfSignedCertificate(EVP_PKEY *key, const char *common_name);
+static bool exportPrivateKeyPem(EVP_PKEY *key, const char *path);
+static bool exportCertificatePem(X509 *certificate, const char *path);
+static bool writePemWithMode(const char *path, BIO *pem, mode_t mode);
 
 /* ---------- public ---------- */
 
@@ -77,12 +74,16 @@ bool TlsIdentity_LoadOrCreate(
     return generateIdentity(certificate_path, key_path, name);
 }
 
-bool TlsIdentity_FingerprintOfDer(const gnutls_datum_t *certificate_der, char *fingerprint_hex)
+bool TlsIdentity_FingerprintOfDer(const uint8_t *certificate_der, size_t der_size, char *fingerprint_hex)
 {
     uint8_t fingerprint[FINGERPRINT_SIZE];
+    unsigned int fingerprint_size = 0;
     size_t i;
 
-    if (gnutls_hash_fast(GNUTLS_DIG_SHA256, certificate_der->data, certificate_der->size, fingerprint) != 0) {
+    if (!EVP_Digest(certificate_der, der_size, fingerprint, &fingerprint_size, EVP_sha256(), NULL)) {
+        return false;
+    }
+    if (fingerprint_size != FINGERPRINT_SIZE) {
         return false;
     }
 
@@ -95,20 +96,28 @@ bool TlsIdentity_FingerprintOfDer(const gnutls_datum_t *certificate_der, char *f
 
 bool TlsIdentity_FingerprintOfFile(const char *certificate_path, char *fingerprint_hex)
 {
-    gnutls_datum_t certificate_pem;
-    gnutls_datum_t certificate_der;
+    FILE *file;
+    X509 *certificate;
+    uint8_t *der = NULL;
+    int der_size;
     bool computed = false;
 
-    if (gnutls_load_file(certificate_path, &certificate_pem) != 0) {
+    file = fopen(certificate_path, "r");
+    if (file == NULL) {
+        return false;
+    }
+    certificate = PEM_read_X509(file, NULL, NULL, NULL);
+    fclose(file);
+    if (certificate == NULL) {
         return false;
     }
 
-    if (gnutls_pem_base64_decode2("CERTIFICATE", &certificate_pem, &certificate_der) == 0) {
-        computed = TlsIdentity_FingerprintOfDer(&certificate_der, fingerprint_hex);
-        gnutls_free(certificate_der.data);
+    der_size = i2d_X509(certificate, &der);
+    if (der_size > 0) {
+        computed = TlsIdentity_FingerprintOfDer(der, (size_t)der_size, fingerprint_hex);
+        OPENSSL_free(der);
     }
-
-    gnutls_free(certificate_pem.data);
+    X509_free(certificate);
 
     return computed;
 }
@@ -144,107 +153,108 @@ static bool filesExist(const char *first_path, const char *second_path)
 
 static bool generateIdentity(const char *certificate_path, const char *key_path, const char *common_name)
 {
-    gnutls_x509_privkey_t key = NULL;
-    gnutls_x509_crt_t certificate = NULL;
+    EVP_PKEY *key;
+    X509 *certificate;
     bool generated = false;
 
-    if (gnutls_x509_privkey_init(&key) != 0) {
-        return false;
-    }
-    if (gnutls_x509_crt_init(&certificate) != 0) {
-        gnutls_x509_privkey_deinit(key);
+    key = EVP_PKEY_Q_keygen(NULL, NULL, "ED25519");
+    if (key == NULL) {
         return false;
     }
 
-    if (buildSelfSignedCertificate(certificate, key, common_name)) {
+    certificate = buildSelfSignedCertificate(key, common_name);
+    if (certificate != NULL) {
         generated = exportPrivateKeyPem(key, key_path) && exportCertificatePem(certificate, certificate_path);
+        X509_free(certificate);
     }
-
-    gnutls_x509_crt_deinit(certificate);
-    gnutls_x509_privkey_deinit(key);
+    EVP_PKEY_free(key);
 
     return generated;
 }
 
-static bool buildSelfSignedCertificate(
-    gnutls_x509_crt_t certificate,
-    gnutls_x509_privkey_t key,
-    const char *common_name
-)
+static X509 *buildSelfSignedCertificate(EVP_PKEY *key, const char *common_name)
 {
-    uint8_t serial = CERTIFICATE_SERIAL;
-    time_t now = time(NULL);
-    int32_t set_name_result;
+    X509 *certificate = X509_new();
+    X509_NAME *name;
+    bool built = false;
 
-    if (gnutls_x509_privkey_generate(key, GNUTLS_PK_EDDSA_ED25519, 0, 0) != 0) {
-        return false;
-    }
-    if (gnutls_x509_crt_set_version(certificate, 3) != 0) {
-        return false;
-    }
-    if (gnutls_x509_crt_set_serial(certificate, &serial, sizeof(serial)) != 0) {
-        return false;
-    }
-    if (gnutls_x509_crt_set_activation_time(certificate, now - CERTIFICATE_BACKDATE_SECONDS) != 0) {
-        return false;
-    }
-    if (gnutls_x509_crt_set_expiration_time(certificate, now + CERTIFICATE_LIFETIME_SECONDS) != 0) {
-        return false;
+    if (certificate == NULL) {
+        return NULL;
     }
 
-    set_name_result = gnutls_x509_crt_set_dn_by_oid(
-        certificate,
-        GNUTLS_OID_X520_COMMON_NAME,
-        0,
-        common_name,
-        strlen(common_name)
-    );
-    if (set_name_result != 0) {
-        return false;
-    }
-    if (gnutls_x509_crt_set_key(certificate, key) != 0) {
-        return false;
+    if (X509_set_version(certificate, CERTIFICATE_X509_VERSION_3) == 1
+        && ASN1_INTEGER_set(X509_get_serialNumber(certificate), CERTIFICATE_SERIAL) == 1
+        && X509_gmtime_adj(X509_getm_notBefore(certificate), -CERTIFICATE_BACKDATE_SECONDS) != NULL
+        && X509_gmtime_adj(X509_getm_notAfter(certificate), CERTIFICATE_LIFETIME_SECONDS) != NULL
+        && X509_set_pubkey(certificate, key) == 1) {
+        name = X509_get_subject_name(certificate);
+        built = X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (const unsigned char *)common_name, -1, -1, 0) == 1
+            && X509_set_issuer_name(certificate, name) == 1
+            && X509_sign(certificate, key, NULL) > 0;
     }
 
-    return gnutls_x509_crt_sign2(certificate, certificate, key, GNUTLS_DIG_SHA512, 0) == 0;
+    if (!built) {
+        X509_free(certificate);
+        return NULL;
+    }
+
+    return certificate;
 }
 
-static bool exportPrivateKeyPem(gnutls_x509_privkey_t key, const char *path)
+static bool exportPrivateKeyPem(EVP_PKEY *key, const char *path)
 {
-    uint8_t pem[PEM_BUFFER_SIZE];
-    size_t pem_size = sizeof(pem);
+    BIO *pem = BIO_new(BIO_s_mem());
+    bool written = false;
 
-    if (gnutls_x509_privkey_export_pkcs8(key, GNUTLS_X509_FMT_PEM, NULL, GNUTLS_PKCS_PLAIN, pem, &pem_size) != 0) {
+    if (pem == NULL) {
         return false;
     }
 
-    return writeFileWithMode(path, pem, pem_size, PRIVATE_KEY_FILE_MODE);
+    if (PEM_write_bio_PKCS8PrivateKey(pem, key, NULL, NULL, 0, NULL, NULL) == 1) {
+        written = writePemWithMode(path, pem, PRIVATE_KEY_FILE_MODE);
+    }
+    BIO_free(pem);
+
+    return written;
 }
 
-static bool exportCertificatePem(gnutls_x509_crt_t certificate, const char *path)
+static bool exportCertificatePem(X509 *certificate, const char *path)
 {
-    uint8_t pem[PEM_BUFFER_SIZE];
-    size_t pem_size = sizeof(pem);
+    BIO *pem = BIO_new(BIO_s_mem());
+    bool written = false;
 
-    if (gnutls_x509_crt_export(certificate, GNUTLS_X509_FMT_PEM, pem, &pem_size) != 0) {
+    if (pem == NULL) {
         return false;
     }
 
-    return writeFileWithMode(path, pem, pem_size, CERTIFICATE_FILE_MODE);
+    if (PEM_write_bio_X509(pem, certificate) == 1) {
+        written = writePemWithMode(path, pem, CERTIFICATE_FILE_MODE);
+    }
+    BIO_free(pem);
+
+    return written;
 }
 
-static bool writeFileWithMode(const char *path, const uint8_t *data, size_t size, mode_t mode)
+static bool writePemWithMode(const char *path, BIO *pem, mode_t mode)
 {
-    FILE *file = fopen(path, "w");
+    FILE *file;
+    char *data = NULL;
+    long size;
     size_t written;
 
+    size = BIO_get_mem_data(pem, &data);
+    if (size <= 0) {
+        return false;
+    }
+
+    file = fopen(path, "w");
     if (file == NULL) {
         return false;
     }
 
-    written = fwrite(data, 1, size, file);
+    written = fwrite(data, 1, (size_t)size, file);
     fclose(file);
     chmod(path, mode);
 
-    return written == size;
+    return written == (size_t)size;
 }

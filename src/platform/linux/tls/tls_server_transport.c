@@ -104,7 +104,7 @@ bool TlsServerTransport_SlotWantsWritable(const TlsServerTransport *self, uint8_
 void TlsServerTransport_OnAcceptReady(TlsServerTransport *self)
 {
     TlsServerPeer *peer;
-    gnutls_session_t session;
+    SSL *ssl;
     int32_t peer_fd;
     int32_t nodelay = 1;
 
@@ -119,13 +119,13 @@ void TlsServerTransport_OnAcceptReady(TlsServerTransport *self)
             close(peer_fd);
             continue;
         }
-        if (!TlsServerSecurity_NewSession(&self->security, &session)) {
+        if (!TlsServerSecurity_NewSession(&self->security, &ssl)) {
             close(peer_fd);
             continue;
         }
 
         setsockopt(peer_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
-        TlsChannel_Bind(&peer->channel, peer_fd, session);
+        TlsChannel_Bind(&peer->channel, peer_fd, ssl);
         peer->peer_id = self->next_peer_id++;
         peer->announced = false;
         pumpHandshake(self, peer);
