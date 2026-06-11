@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -110,6 +111,8 @@ int main(int argc, char **argv)
         .on_control = onControl,
         .on_frame = onFrame,
     };
+
+    signal(SIGPIPE, SIG_IGN);
 
     if (CliMeta_HandleVersionAndHelp(argc, argv, "can-hub-cli", printUsage)) {
         return 0;
