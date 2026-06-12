@@ -35,3 +35,4 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # with the phases that need them.
 
 [dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

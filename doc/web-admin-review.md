@@ -59,11 +59,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Milestone 2 — api.rs split + router tests (one commit)
 
-- [ ] **Split `web/daemon/src/api.rs` (935 lines).** It mixes router, 15+
+- [x] **Split `web/daemon/src/api.rs` (935 lines).** It mixes router, 15+
   DTOs, auth middleware, error mapping and 30+ handlers. Target:
   `api/{mod,handlers,dtos,middleware,error}.rs`, public surface unchanged
   (`api::router`, `api::AppState`, `api::ApiError`).
-- [ ] **Add router-level tests (the security-critical layer has zero).**
+- [x] **Add router-level tests (the security-critical layer has zero).**
   Via `tower::ServiceExt::oneshot` with `AuthStore::open_in_memory()`:
   401 without session; 403 without permission; path→permission mapping per
   route family (views/kick/pins/acls/users); mutating request without
