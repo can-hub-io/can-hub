@@ -9,7 +9,7 @@ to socketcand and cannelloni.
 [can-hub-agent] --quic/tls/tcp--> [can-hub] <--quic/tls/tcp/unix-- [can-hub-client]
    truck42                          the hub                          anywhere
    can0, can1                                                        list / dump / send
-                                    [can-hub-cli]
+                                    [can-hub-cli] [can-hub-web]
                                     admin on the hub host
 ```
 
@@ -29,208 +29,62 @@ to socketcand and cannelloni.
   wire, nobody is lied to, and ordering is the bus ordering.
 - **Fleet-shaped, not link-shaped.** One hub, many agents, a queryable
   catalogue (`truck42/can0`), per-peer and per-interface traffic counters,
-  and an admin plane to inspect and kick.
+  and an admin plane with a CLI and a web panel.
 - **Freestanding core.** Everything outside `src/platform/` is C11 without
   POSIX, heap or syscalls — the agent core compiles for microcontrollers
   as-is.
 
-## Binaries
-
-| Binary | Role |
-|---|---|
-| `can-hub` | the hub: registry, frame relay, admin plane |
-| `can-hub-agent` | device daemon: exports local SocketCAN interfaces |
-| `can-hub-client` | consumer: `list`, `dump`, `send`, `socketcand`, `attach` |
-| `can-hub-cli` | hub administration over the local unix socket |
-
-## Build
-
-```sh
-make release            # -O2 into build/x86_64/release
-make test               # unit tests (CEST)
-```
-
-Requirements: cmake >= 3.16, ninja, gcc, perl (OpenSSL 3.5 is built from
-source once per build tree). The first configure needs network:
-ngtcp2 and the SQLite amalgamation are fetched and built statically.
-
-### Debian packages
-
-`make deb` builds one `.deb` per binary (CPack components, static OpenSSL):
-
-```sh
-make deb                 # build/x86_64/package/*.deb
-```
-
-- `can-hub` — hub daemon, installs `can-hub.service` (enabled and started on
-  install) under a dedicated `can-hub` system user.
-- `can-hub-agent` — SocketCAN exporter, `can-hub-agent.service` (runs with
-  `CAP_NET_RAW`); edit `/etc/can-hub/agent.conf` then
-  `systemctl enable --now can-hub-agent`.
-- `can-hub-cli`, `can-hub-client` — admin and consumer tools, no service.
-
-The fully static, service-less edge binaries come from `make static` instead.
-
 ## Quickstart
 
-On the hub host (defaults: quic://7227 UDP, tls://7227 TCP, plain
-tcp://7228 on loopback, and a local unix socket):
-
 ```sh
+# hub host (defaults: quic://7227 UDP, tls://7227 TCP, local unix socket)
 can-hub
-```
 
-On the device (TLS identity auto-generated, hub fingerprint pinned on first
-contact):
-
-```sh
+# device — identity auto-generated, hub pinned on first contact
 can-hub-agent --connect quic://hub.example.com:7227 --name truck42 can0 can1
+
+# anywhere
+can-hub-client --connect tls://hub.example.com:7227 list
+can-hub-client --connect tls://hub.example.com:7227 dump truck42/can0
+can-hub-client --connect tls://hub.example.com:7227 send truck42/can0 123#DEADBEEF
 ```
 
-From anywhere — `list` shows the catalogue, the `id` column feeds `dump`
-and `send`:
+No CAN hardware? The [quick start](doc/quick-start.md) runs the same thing
+against a `vcan` on one machine.
 
-```sh
-$ can-hub-client --connect tls://hub.example.com:7227 list
-id         agent                            interface
-1          truck42                          can0
-2          truck42                          can1
+## The pieces
 
-$ can-hub-client --connect tls://hub.example.com:7227 dump 1
-(1780847295.078524) 123 [4] DE AD BE EF
-
-$ can-hub-client --connect tls://hub.example.com:7227 send 1 123#DEADBEEF
-```
-
-Use remote buses with the existing SocketCAN ecosystem (python-can, Kayak,
-SavvyCAN) via the built-in socketcand server — it bridges every interface the
-client is allowed to read and announces them on the discovery beacon:
-
-```sh
-$ can-hub-client --connect tls://hub.example.com:7227 socketcand
-socketcand server on 127.0.0.1:29536, hub hub.example.com, beacon on
-
-# from a socketcand client, e.g. python-can:
-#   can.Bus(interface="socketcand", host="127.0.0.1", port=29536,
-#           channel="truck42/can0")
-```
-
-It opens read-only when the client lacks a write ACL on a bus (receive still
-works); `--listen [<bind-ip>:]<port>` moves the server off the loopback default
-and `--no-beacon` silences discovery.
-
-For python there is a native backend ([python-can-hub](python/README.md)) on
-top of `libcanhub` — no bridge process, all transports including QUIC, mTLS
-and ACLs carried into python:
-
-```python
-bus = can.Bus(interface="canhub", channel="truck42/can0",
-              url="quic://hub.example.com:7227")
-```
-
-`libcanhub` also cross-builds for Windows (`make windows`, llvm-mingw or
-mingw-w64 toolchain) with all transports including QUIC;
-`scripts/build-python-wheel-windows.sh` produces the win_amd64 wheel.
-
-Or mirror a remote bus straight into a local `vcan`, so `candump`, SavvyCAN,
-Wireshark and python-can work against the remote bus with zero changes. The
-`vcan` must already exist (no `CAP_NET_ADMIN` needed); the mirror is
-bidirectional:
-
-```sh
-$ ip link add vcan0 type vcan && ip link set vcan0 up    # once, as root
-$ can-hub-client --connect tls://hub.example.com:7227 attach 1 vcan0
-mirroring interface 1 to vcan0, ctrl-c to stop
-
-# now the whole SocketCAN toolbox sees the remote bus:
-$ candump vcan0
-$ cansend vcan0 123#DEADBEEF        # reaches the remote bus
-```
-
-It downgrades to read-only when the client lacks a write ACL (frames flow
-remote→local, local writes are refused at the hub).
-
-Administration, on the hub host:
-
-```sh
-can-hub-cli status
-can-hub-cli agents
-can-hub-cli agents show truck42
-can-hub-cli clients
-can-hub-cli peers kick 0x40000003
-can-hub-cli pins                     # the authorized agent fingerprints
-can-hub-cli pins add truck42 <fp>    # authorize an agent (see below)
-can-hub-cli pins delete truck42      # allow a re-keyed agent to pin again
-can-hub-cli acl                      # client read/write grants
-```
-
-## Locking down agents
-
-By default the hub trusts an agent the first time it connects (TOFU,
-zero-config). To accept only agents you have pre-authorized, start the hub
-with `--require-known-agents` and enrol each one SSH `authorized_keys`-style:
-
-```sh
-# on the device — print its fingerprint (public, safe to share; the private
-# key never leaves the device). Use the same --state-dir the agent runs with.
-can-hub-agent --show-identity
-9abfc913fddfe9bad4cab50ba024210d81dba02140103d5019923b29adf818e1
-
-# on the hub host — authorize it
-can-hub-cli pins add truck42 9abfc913fddfe9bad4cab50ba024210d81dba02140103d5019923b29adf818e1
-```
-
-An unknown fingerprint is rejected with no server state created. The agent
-retries on its own backoff, so authorizing it while it is trying is enough.
-Locking applies to the encrypted transports (quic/tls) that carry an
-identity; plain tcp carries none and binds to 127.0.0.1 by default — only
-expose it (`--listen tcp://0.0.0.0:7228`) on a trusted network or VPN.
-
-## Locking down clients
-
-By default any client may read every interface and none may inject frames.
-ACLs override that per client (TLS fingerprint) and per interface, with `*`
-wildcards on either side and three levels — `none` (no read, no write), `ro`
-(read only), `rw` (read and write):
-
-```sh
-# the client prints its fingerprint the same way an agent does
-can-hub-client --show-identity
-
-# on the hub host — grant, narrow, and inspect
-can-hub-cli acl add * */* rw                  # everyone read+write everywhere
-can-hub-cli acl add <fp> truck42/* ro         # this client: truck42 read-only
-can-hub-cli acl add <fp> truck42/can0 none    # ...except can0, fully denied
-can-hub-cli acl
-can-hub-cli acl delete <fp> truck42/can0
-```
-
-Resolution is most-specific-wins with the subject dominating: a rule naming
-the fingerprint always beats a `*` rule, then the narrower interface scope
-wins (`agent/can0` > `agent/*` > `*/*`). With no matching rule a client may
-read but not write. Clients on the plaintext transports (unix, plain tcp)
-carry no fingerprint, are network-trusted, and always get full access.
-
-No CAN hardware around? `sudo ip link add dev vcan0 type vcan && sudo ip
-link set up vcan0`, run the agent against `vcan0` and talk to it with
-`cansend`/`candump` on one side and `can-hub-client` on the other.
-
-## Transports
-
-| Listener | Default | Notes |
+| Binary | Role | Docs |
 |---|---|---|
-| quic:// | UDP 7227 | primary: streams + datagrams, mTLS |
-| tls:// | TCP 7227 | TCP twin of quic, same identity and pinning, mTLS |
-| tcp:// | TCP 7228 | plaintext, loopback by default; expose with an explicit bind for intranets/constrained devices |
-| unix:// | /run/can-hub/hub.sock | local consumers and all administration |
+| `can-hub` | the hub: registry, frame relay, admin plane | [doc/hub.md](doc/hub.md) |
+| `can-hub-agent` | device daemon: exports local SocketCAN interfaces | [doc/agent.md](doc/agent.md) |
+| `can-hub-client` | consumer: `list`, `dump`, `send`, `socketcand`, `attach` | [doc/client.md](doc/client.md) |
+| `can-hub-cli` | hub administration over the local unix socket | [doc/cli.md](doc/cli.md) |
+| `can-hub-web` | web admin panel: REST API + live telemetry | [doc/web.md](doc/web.md) |
 
-Plaintext transports carry no identity and skip pinning; the admin role is
-accepted only on the unix socket.
+And beyond the binaries:
 
-Listeners take an optional bind address (`--listen tcp://10.0.0.5:7228`,
-default 0.0.0.0), and explicit `--listen` flags replace the network
-defaults — so disabling a transport is listing the ones you want:
-`can-hub --listen tls://7227 --listen quic://7227` runs without plain TCP.
+- **socketcand bridge** — use remote buses from python-can, Kayak or
+  SavvyCAN with no can-hub awareness ([doc/client.md](doc/client.md)).
+- **`attach`** — mirror a remote bus into a local `vcan`, so `candump`,
+  Wireshark and friends work unmodified ([doc/client.md](doc/client.md)).
+- **python** — `pip install python-can-hub`, a native python-can backend
+  with all transports including QUIC ([python/README.md](python/README.md)).
+- **libcanhub** — embeddable C client library, Linux and Windows
+  ([doc/libcanhub.md](doc/libcanhub.md)).
+- **Security** — TOFU by default; agent allowlisting and per-client
+  read/write ACLs when you want them ([doc/security.md](doc/security.md)).
+
+## Install
+
+Releases ship static per-arch Debian packages and tarballs (x86_64, arm64,
+armv7) plus python wheels on PyPI — see
+[doc/installation.md](doc/installation.md). From source:
+
+```sh
+make release            # cmake+ninja+gcc; first configure needs network
+make test
+```
 
 ## Status
 
@@ -241,10 +95,10 @@ the WAN.
 
 ## Documentation
 
-- [doc/design.md](doc/design.md) — architecture and decisions
-- [doc/protocol.md](doc/protocol.md) — wire protocol (CC-BY-4.0,
-  independent implementations welcome)
-- [CONTRIBUTING.md](CONTRIBUTING.md) — style, tests, CLA
+Start at the [documentation index](doc/README.md). Architecture and
+decisions: [doc/design.md](doc/design.md). Wire protocol (CC-BY-4.0,
+independent implementations welcome): [doc/protocol.md](doc/protocol.md).
+Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

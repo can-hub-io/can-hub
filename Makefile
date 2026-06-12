@@ -3,8 +3,8 @@
 #   make release [ARCH=x86_64|armhf|arm64]   Optimized build (-O2).
 #   make debug   [ARCH=...]                  Debug build (-O0 -g).
 #   make install [ARCH=...] [PREFIX=...]     Install release binaries.
-#   make deb     [ARCH=...]                  Per-binary .deb packages
-#                                            (can-hub/cli/client; not the agent).
+#   make deb     [ARCH=...]                  .deb packages: can-hub (hub+cli),
+#                                            can-hub-agent, can-hub-client.
 #   make static  [ARCH=armv7|arm64|x86_64]   Fully static edge binaries
 #                                            (agent/client/cli, musl, docker).
 #   make deb-debug [ARCH=armv7|arm64|x86_64] Static debug agent .deb (-O0 -g,
@@ -28,8 +28,8 @@ _CEST_RUNNER := test/vendor/cest-runner_linux_x86_64
 
 _BUILD_WINDOWS := build/mingw-x86_64/release
 
-# libcanhub + canhub-dump for x86_64 Windows (tcp/tls; QUIC pending). Needs
-# an llvm-mingw or mingw-w64 toolchain in PATH or CAN_HUB_MINGW_ROOT.
+# libcanhub + canhub-dump for x86_64 Windows (tcp/tls/quic). Needs an
+# llvm-mingw or mingw-w64 toolchain in PATH or CAN_HUB_MINGW_ROOT.
 windows:
 	$(CMAKE) -B $(_BUILD_WINDOWS) \
 	         -G $(GENERATOR) \
