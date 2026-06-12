@@ -1,0 +1,54 @@
+# Web admin panel — build log
+
+Working checklist for epic #14 (`can-hub-web`). Living doc on branch `doc/web-admin-design`; not a replacement for the GitHub issues, just the execution tracker so the build runs without per-step interruptions. Remove or fold into docs before merge.
+
+Layout: `web/daemon` (Rust, axum) + `web/ui` (React + Vite).
+
+Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs decision.
+
+## Phase 1 — Foundations (#83)
+- [x] `web/daemon` Cargo crate scaffold (`can-hub-web`), bin + lib, runnable; deps deferred per phase (codecs are dependency-free)
+- [x] Admin protocol codecs in Rust: header + HELLO + 0x10–0x2B encode/decode, 23 unit tests green. pin/acl layouts taken from authoritative `src/protocol/admin_message.c` (absent from protocol.md)
+- [x] Unix-socket admin client: HELLO role admin, message framing, paginated-view aggregation (status/peers/agents/clients/interfaces/acl). Mock-tested. Reconnect/pooling deferred to runtime wiring (per-request connect for now)
+- [x] REST API surface: `/api/{status,peers,agents,clients,interfaces,acls}` + `/healthz`, camelCase DTOs, 502 on hub-unreachable. axum 0.8
+- [x] axum server skeleton: binds 127.0.0.1:8080, args `--connect/--listen/--assets`, graceful SIGINT/SIGTERM. Serves built SPA via tower-http ServeDir + index fallback (rust-embed packaging deferred to Phase 6)
+- [x] `web/ui` React + Vite scaffold (TS), `/api` dev proxy, status dashboard polling `/api/status`, `npm run build` green
+
+## Phase 2 — Read views + telemetry (#84)
+- [ ] REST read endpoints: status, peers, agents (+detail), clients, interfaces (aggregate paginated replies)
+- [ ] UI views/tables for each, auto-refresh
+- [ ] Telemetry: daemon poll loop over admin counters → deltas/rates
+- [ ] WebSocket fan-out to subscribed browsers (views.read gated), one poller for N clients
+- [ ] Live dashboard charts (frames/s, drops/s, per-interface throughput)
+
+## Phase 3 — Admin actions (#85)
+- [ ] REST mutating endpoints + UI: kick peer / kick agent
+- [ ] interface set bitrate / up / down
+- [ ] pins add / delete
+- [ ] acl add / delete (grant editor)
+
+## Phase 4 — Auth (#86)
+- [ ] `web.db` schema: users (argon2id), groups, membership, permission classes
+- [ ] login + server-side sessions (HttpOnly cookie, idle + absolute expiry)
+- [ ] permission middleware on every REST route + WS subscription
+- [ ] bootstrap: setup page on zero users + `--add-user` headless
+- [ ] user/group management UI (users.manage)
+
+## Phase 5 — Hardening + audit (#87)
+- [ ] CSRF token on mutating requests
+- [ ] login rate limiting
+- [ ] secure cookie flags
+- [ ] audit log of mutating operations (actor/target/timestamp)
+- [ ] reverse-proxy / TLS deployment docs
+
+## Phase 6 — Packaging + docs (#88)
+- [ ] deb package (React build + Rust binary)
+- [ ] systemd unit (After=can-hub.service, socket group)
+- [ ] user docs (install, bootstrap, TLS)
+- [x] update doc/design.md §Web admin with decided design
+
+## Notes / decisions log
+- 2026-06-12: backend Rust, frontend React+Vite, separate process, REST + WS telemetry daemon-side, users/groups in web.db. See doc/design.md §Web admin.
+- 2026-06-12: toolchain — distro rustc was 1.75; axum 0.8 needs >=1.80. Installed rustup stable (1.96). Build the daemon with `. ~/.cargo/env` so cargo resolves to ~/.cargo/bin.
+- 2026-06-12: **protocol.md gap** — pin/acl admin layouts (0x22, 0x24..0x29) are listed in the type table but have no payload-layout block. Rust codecs derived from authoritative `src/protocol/admin_message.c` (offsets body-relative). Worth backfilling protocol.md.
+- Phase 1 verified: 28 cargo tests green; daemon serves /healthz, /api/* (502 without a hub), and the built SPA with client-route fallback. Live-hub integration not exercised here (no running hub).

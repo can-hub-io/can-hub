@@ -1,0 +1,6 @@
+# Rust build artifacts
+daemon/target/
+
+# Node / Vite build artifacts
+ui/node_modules/
+ui/dist/

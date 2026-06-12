@@ -1,0 +1,26 @@
+[package]
+name = "can-hub-web"
+version = "0.1.0"
+edition = "2021"
+description = "Web admin panel daemon for can-hub: REST API + React UI over the hub admin socket"
+license = "AGPL-3.0-only"
+
+[[bin]]
+name = "can-hub-web"
+path = "src/main.rs"
+
+[lib]
+name = "can_hub_web"
+path = "src/lib.rs"
+
+[dependencies]
+axum = "0.8"
+serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "signal"] }
+tower-http = { version = "0.6.11", features = ["fs", "trace"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# The protocol codecs stay dependency-free; serde/rusqlite/argon2/tower land
+# with the phases that need them.
+
+[dev-dependencies]
