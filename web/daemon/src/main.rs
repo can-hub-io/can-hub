@@ -27,6 +27,7 @@ struct Options {
     db_path: String,
     add_user: Option<String>,
     secure_cookies: bool,
+    trusted_proxy: bool,
 }
 
 #[tokio::main]
@@ -74,6 +75,7 @@ async fn main() {
         auth: store,
         login_limiter: Arc::new(Mutex::new(LoginLimiter::default())),
         secure_cookies: options.secure_cookies,
+        trusted_proxy: options.trusted_proxy,
     };
     let app = api::router(state, options.assets_dir.map(std::path::PathBuf::from));
 
@@ -106,6 +108,7 @@ fn parse_options() -> Result<Options, String> {
     let mut db_path = DEFAULT_DB_PATH.to_string();
     let mut add_user = None;
     let mut secure_cookies = false;
+    let mut trusted_proxy = false;
     let mut args = std::env::args().skip(1);
 
     while let Some(arg) = args.next() {
@@ -128,6 +131,9 @@ fn parse_options() -> Result<Options, String> {
             "--secure-cookies" => {
                 secure_cookies = true;
             }
+            "--trusted-proxy" => {
+                trusted_proxy = true;
+            }
             "--version" => {
                 println!("can-hub-web {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
@@ -140,16 +146,17 @@ fn parse_options() -> Result<Options, String> {
         }
     }
 
-    Ok(Options { socket_path, listen, assets_dir, db_path, add_user, secure_cookies })
+    Ok(Options { socket_path, listen, assets_dir, db_path, add_user, secure_cookies, trusted_proxy })
 }
 
 fn print_usage() {
     eprintln!(
-        "usage: can-hub-web [--connect <hub.sock>] [--listen <host:port>] [--assets <dir>] [--db <web.db>] [--secure-cookies]\n\
+        "usage: can-hub-web [--connect <hub.sock>] [--listen <host:port>] [--assets <dir>] [--db <web.db>] [--secure-cookies] [--trusted-proxy]\n\
          \x20      can-hub-web --add-user <name> [--db <web.db>]   (password from CANHUB_WEB_PASSWORD or stdin)\n\
          defaults: --connect {DEFAULT_SOCKET_PATH} --listen {DEFAULT_LISTEN} --db {DEFAULT_DB_PATH}\n\
          --assets serves a built SPA (web/ui/dist); omit it in dev (Vite proxy)\n\
-         --secure-cookies marks the session cookie Secure (use behind a TLS reverse proxy)"
+         --secure-cookies marks the session cookie Secure (use behind a TLS reverse proxy)\n\
+         --trusted-proxy keys login rate limiting on X-Forwarded-For (only set behind a proxy you control)"
     );
 }
 

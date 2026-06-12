@@ -17,6 +17,10 @@ use super::Permission;
 const SESSION_IDLE_SECS: i64 = 12 * 3600;
 const SESSION_ABSOLUTE_SECS: i64 = 7 * 24 * 3600;
 
+/// Shortest password the store will accept. The UI validates too, but the
+/// store is the real boundary.
+pub const MIN_PASSWORD_LEN: usize = 8;
+
 #[derive(Debug)]
 pub enum StoreError {
     Db(rusqlite::Error),
@@ -140,6 +144,9 @@ impl AuthStore {
     pub fn create_user(&self, name: &str, password: &str, enabled: bool) -> Result<i64, StoreError> {
         if name.trim().is_empty() {
             return Err(StoreError::Conflict("empty user name"));
+        }
+        if password.len() < MIN_PASSWORD_LEN {
+            return Err(StoreError::Conflict("password too short"));
         }
         let hash = hash_password(password).map_err(StoreError::Hash)?;
         self.connection
@@ -314,12 +321,15 @@ impl AuthStore {
 
     /// Resolve a session token to its user id and CSRF token, enforcing idle
     /// and absolute expiry. A valid session has its `last_seen_at` refreshed;
-    /// an expired one is deleted and resolves to None.
+    /// an expired one is deleted and resolves to None. A session whose user has
+    /// been disabled resolves to None (the disable takes effect immediately).
     pub fn validate_session(&self, token: &str) -> Result<Option<SessionInfo>, StoreError> {
         let row: Option<(i64, i64, i64, String)> = self
             .connection
             .query_row(
-                "SELECT user_id, created_at, last_seen_at, csrf_token FROM sessions WHERE token = ?1",
+                "SELECT s.user_id, s.created_at, s.last_seen_at, s.csrf_token
+                 FROM sessions s JOIN users u ON u.id = s.user_id
+                 WHERE s.token = ?1 AND u.enabled != 0",
                 params![token],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
@@ -402,32 +412,32 @@ mod tests {
     fn create_and_verify_user() {
         let store = AuthStore::open_in_memory().unwrap();
         assert_eq!(store.user_count().unwrap(), 0);
-        let id = store.create_user("admin", "s3cret", true).unwrap();
+        let id = store.create_user("admin", "s3cret99", true).unwrap();
         assert_eq!(store.user_count().unwrap(), 1);
-        assert_eq!(store.verify_login("admin", "s3cret").unwrap(), Some(id));
+        assert_eq!(store.verify_login("admin", "s3cret99").unwrap(), Some(id));
         assert_eq!(store.verify_login("admin", "wrong").unwrap(), None);
-        assert_eq!(store.verify_login("ghost", "s3cret").unwrap(), None);
+        assert_eq!(store.verify_login("ghost", "s3cret99").unwrap(), None);
     }
 
     #[test]
     fn disabled_user_cannot_log_in() {
         let store = AuthStore::open_in_memory().unwrap();
-        let id = store.create_user("bob", "pw", true).unwrap();
+        let id = store.create_user("bob", "password1", true).unwrap();
         store.set_user_enabled(id, false).unwrap();
-        assert_eq!(store.verify_login("bob", "pw").unwrap(), None);
+        assert_eq!(store.verify_login("bob", "password1").unwrap(), None);
     }
 
     #[test]
     fn duplicate_user_name_conflicts() {
         let store = AuthStore::open_in_memory().unwrap();
-        store.create_user("dup", "pw", true).unwrap();
-        assert!(matches!(store.create_user("dup", "pw2", true), Err(StoreError::Conflict(_))));
+        store.create_user("dup", "password1", true).unwrap();
+        assert!(matches!(store.create_user("dup", "password2", true), Err(StoreError::Conflict(_))));
     }
 
     #[test]
     fn effective_permissions_union_across_groups() {
         let store = AuthStore::open_in_memory().unwrap();
-        let user = store.create_user("op", "pw", true).unwrap();
+        let user = store.create_user("op", "password1", true).unwrap();
         let viewers = store.create_group("viewers").unwrap();
         let kickers = store.create_group("kickers").unwrap();
         store.set_group_permissions(viewers, &[Permission::ViewsRead]).unwrap();
@@ -444,7 +454,7 @@ mod tests {
     #[test]
     fn removing_from_group_drops_permission() {
         let store = AuthStore::open_in_memory().unwrap();
-        let user = store.create_user("op", "pw", true).unwrap();
+        let user = store.create_user("op", "password1", true).unwrap();
         let group = store.create_group("g").unwrap();
         store.set_group_permissions(group, &[Permission::AclManage]).unwrap();
         store.add_user_to_group(user, group).unwrap();
@@ -456,7 +466,7 @@ mod tests {
     #[test]
     fn session_lifecycle() {
         let store = AuthStore::open_in_memory().unwrap();
-        let user = store.create_user("admin", "pw", true).unwrap();
+        let user = store.create_user("admin", "password1", true).unwrap();
         let tokens = store.create_session(user).unwrap();
         assert_eq!(tokens.session_token.len(), 64);
         assert_eq!(tokens.csrf_token.len(), 64);
@@ -477,11 +487,29 @@ mod tests {
     #[test]
     fn deleting_user_cascades_sessions_and_memberships() {
         let store = AuthStore::open_in_memory().unwrap();
-        let user = store.create_user("temp", "pw", true).unwrap();
+        let user = store.create_user("temp", "password1", true).unwrap();
         let group = store.create_group("g").unwrap();
         store.add_user_to_group(user, group).unwrap();
         let tokens = store.create_session(user).unwrap();
         store.delete_user(user).unwrap();
+        assert_eq!(store.validate_session(&tokens.session_token).unwrap(), None);
+    }
+
+    #[test]
+    fn short_password_is_rejected() {
+        let store = AuthStore::open_in_memory().unwrap();
+        assert!(matches!(store.create_user("a", "", true), Err(StoreError::Conflict(_))));
+        assert!(matches!(store.create_user("b", "short", true), Err(StoreError::Conflict(_))));
+        assert!(store.create_user("c", "longenough", true).is_ok());
+    }
+
+    #[test]
+    fn disabling_user_invalidates_session() {
+        let store = AuthStore::open_in_memory().unwrap();
+        let user = store.create_user("op", "password1", true).unwrap();
+        let tokens = store.create_session(user).unwrap();
+        assert!(store.validate_session(&tokens.session_token).unwrap().is_some());
+        store.set_user_enabled(user, false).unwrap();
         assert_eq!(store.validate_session(&tokens.session_token).unwrap(), None);
     }
 

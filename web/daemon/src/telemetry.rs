@@ -8,14 +8,12 @@
 //! the thin async shell around it.
 
 use std::collections::HashMap;
-use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tokio::sync::broadcast;
 
-use crate::admin_client::AdminClient;
 use crate::protocol::admin::{InterfaceEntry, Status};
 
 /// Cumulative hub counters lifted out of a `Status` sample.
@@ -170,8 +168,7 @@ async fn sample_hub(
     socket_path: Arc<str>,
 ) -> Result<(Status, Vec<InterfaceEntry>), crate::admin_client::AdminClientError> {
     tokio::task::spawn_blocking(move || {
-        let stream = UnixStream::connect(&*socket_path)?;
-        let mut client = AdminClient::connect(stream)?;
+        let mut client = crate::hub_socket::connect(&socket_path)?;
         let status = client.status()?;
         let interfaces = client.interfaces()?;
         Ok((status, interfaces))

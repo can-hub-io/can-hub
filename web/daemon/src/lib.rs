@@ -11,6 +11,7 @@ pub mod api;
 pub mod auth;
 #[cfg(feature = "embed-ui")]
 pub mod embedded;
+pub mod hub_socket;
 pub mod login_limiter;
 pub mod protocol;
 pub mod telemetry;

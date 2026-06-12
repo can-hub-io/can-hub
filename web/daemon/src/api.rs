@@ -17,7 +17,7 @@ use axum::http::header::{COOKIE, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{any, delete, get, post, put};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -35,6 +35,7 @@ use crate::telemetry::TelemetryFrame;
 
 const SESSION_COOKIE: &str = "canhub_session";
 const CSRF_HEADER: &str = "x-csrf-token";
+const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
 
 /// Shared handler state: the hub admin socket, the telemetry broadcast every
 /// WebSocket subscriber reads from, the auth store (web.db), the login rate
@@ -46,6 +47,10 @@ pub struct AppState {
     pub auth: Arc<Mutex<AuthStore>>,
     pub login_limiter: Arc<Mutex<LoginLimiter>>,
     pub secure_cookies: bool,
+    /// When set, the daemon sits behind a trusted reverse proxy and the
+    /// client address for rate limiting is read from `X-Forwarded-For`. Never
+    /// trust that header otherwise (it is client-controlled).
+    pub trusted_proxy: bool,
 }
 
 /// Build the router. When `assets_dir` is set, the built SPA is served from it
@@ -53,29 +58,40 @@ pub struct AppState {
 /// serving; dev uses the Vite proxy instead). Production packaging will embed
 /// the assets in the binary (rust-embed) rather than read them from disk.
 pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
-    let mut router = Router::new()
+    // Public: no session, no permission. Everything else is registered inside a
+    // permission group, so a route the developer forgets to classify simply has
+    // no home — it cannot fall through to a weaker default (fail-closed).
+    let public = Router::new()
         .route("/healthz", get(healthz))
-        // auth (public: login/logout/setup/state)
         .route("/api/auth/state", get(auth_state))
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
-        .route("/api/setup", post(setup))
-        // read views (views.read)
+        .route("/api/setup", post(setup));
+
+    let views = guarded(&state, Permission::ViewsRead, Router::new()
         .route("/api/status", get(status))
         .route("/api/peers", get(peers))
         .route("/api/agents", get(agents))
         .route("/api/clients", get(clients))
         .route("/api/interfaces", get(interfaces))
-        .route("/api/telemetry/ws", get(telemetry_ws))
-        // actions (per-class permissions)
-        .route("/api/acls", get(acls).post(acl_set))
-        .route("/api/acls/revoke", post(acl_revoke))
+        .route("/api/telemetry/ws", get(telemetry_ws)));
+
+    let peers_kick = guarded(&state, Permission::PeersKick, Router::new()
         .route("/api/peers/{id}/kick", post(kick_peer))
-        .route("/api/agents/{name}/kick", post(kick_agent))
+        .route("/api/agents/{name}/kick", post(kick_agent)));
+
+    let interfaces_config = guarded(&state, Permission::InterfacesConfig, Router::new()
+        .route("/api/interfaces/config", post(interface_config)));
+
+    let pins_manage = guarded(&state, Permission::PinsManage, Router::new()
         .route("/api/pins", get(pins).post(pin_add))
-        .route("/api/pins/{name}", delete(pin_delete))
-        .route("/api/interfaces/config", post(interface_config))
-        // user/group management + audit (users.manage)
+        .route("/api/pins/{name}", delete(pin_delete)));
+
+    let acl_manage = guarded(&state, Permission::AclManage, Router::new()
+        .route("/api/acls", get(acls).post(acl_set))
+        .route("/api/acls/revoke", post(acl_revoke)));
+
+    let users_manage = guarded(&state, Permission::UsersManage, Router::new()
         .route("/api/audit", get(list_audit_log))
         .route("/api/permissions", get(list_permissions))
         .route("/api/users", get(list_users).post(create_user))
@@ -85,8 +101,17 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
         .route("/api/users/{id}/groups/{group_id}", delete(remove_membership))
         .route("/api/groups", get(list_groups).post(create_group))
         .route("/api/groups/{id}", delete(delete_group))
-        .route("/api/groups/{id}/permissions", put(set_group_permissions))
-        .route_layer(middleware::from_fn_with_state(state.clone(), require_permission))
+        .route("/api/groups/{id}/permissions", put(set_group_permissions)));
+
+    let mut router = public
+        .merge(views)
+        .merge(peers_kick)
+        .merge(interfaces_config)
+        .merge(pins_manage)
+        .merge(acl_manage)
+        .merge(users_manage)
+        // Any unmatched /api/* path is a 404 JSON, never the SPA fallback.
+        .route("/api/{*rest}", any(api_not_found))
         .with_state(state);
 
     if let Some(dir) = assets_dir {
@@ -100,6 +125,17 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
     }
 
     router
+}
+
+/// Wrap a group of routes in the session/permission/CSRF/audit gate for one
+/// permission class. The middleware carries its own `(state, permission)` so
+/// each group enforces exactly the permission it was declared with.
+fn guarded(state: &AppState, permission: Permission, router: Router<AppState>) -> Router<AppState> {
+    router.route_layer(middleware::from_fn_with_state((state.clone(), permission), require_permission))
+}
+
+async fn api_not_found() -> Response {
+    (StatusCode::NOT_FOUND, Json(ErrorBody { error: "no such API route".into() })).into_response()
 }
 
 async fn healthz() -> &'static str {
@@ -213,12 +249,23 @@ async fn acl_revoke(State(state): State<AppState>, Json(body): Json<AclBody>) ->
     )
 }
 
+/// Classic CAN tops out at 1 Mbit/s; anything above is a typo or an attempt to
+/// wedge the interface, and 0 would silently mean "leave it unset".
+const MAX_CLASSIC_CAN_BITRATE: u32 = 1_000_000;
+
+fn checked_bitrate(op: IfconfigOp, bitrate: u32) -> Result<u32, ApiError> {
+    if op == IfconfigOp::SetBitrate && (bitrate == 0 || bitrate > MAX_CLASSIC_CAN_BITRATE) {
+        return Err(ApiError::BadRequest(format!("bitrate must be 1..={MAX_CLASSIC_CAN_BITRATE}, got {bitrate}")));
+    }
+    Ok(bitrate)
+}
+
 async fn interface_config(
     State(state): State<AppState>,
     Json(body): Json<InterfaceConfigBody>,
 ) -> ActionResponse {
     let op = parse_ifconfig_op(&body.op)?;
-    let bitrate = body.bitrate;
+    let bitrate = checked_bitrate(op, body.bitrate)?;
     action(
         with_admin(&state, move |client| {
             client.ifconfig(&body.agent_name, &body.interface_name, op, bitrate)
@@ -297,8 +344,7 @@ where
 {
     let socket_path = Arc::clone(&state.socket_path);
     let outcome = tokio::task::spawn_blocking(move || {
-        let stream = UnixStream::connect(&*socket_path)?;
-        let mut client = AdminClient::connect(stream)?;
+        let mut client = crate::hub_socket::connect(&socket_path)?;
         query(&mut client)
     })
     .await;
@@ -571,6 +617,21 @@ struct Credentials {
     password: String,
 }
 
+/// The rate-limiter key for the login client. Behind a trusted proxy the real
+/// client is the first `X-Forwarded-For` hop; otherwise the header is ignored
+/// (client-controlled) and the transport peer address is used.
+fn client_limiter_key(trusted_proxy: bool, headers: &HeaderMap, remote: SocketAddr) -> String {
+    if trusted_proxy {
+        if let Some(forwarded) = headers.get(FORWARDED_FOR_HEADER).and_then(|value| value.to_str().ok()) {
+            let first = forwarded.split(',').next().unwrap_or("").trim();
+            if !first.is_empty() {
+                return format!("ip:{first}");
+            }
+        }
+    }
+    format!("ip:{}", remote.ip())
+}
+
 async fn auth_state(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<AuthStateDto>, ApiError> {
     let needs_bootstrap = with_auth(&state, |store| store.user_count()).await? == 0;
     if let Some(token) = cookie_value(&headers, SESSION_COOKIE) {
@@ -599,25 +660,34 @@ async fn auth_state(State(state): State<AppState>, headers: HeaderMap) -> Result
 async fn login(
     State(state): State<AppState>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(body): Json<Credentials>,
 ) -> Result<Response, ApiError> {
-    let ip = remote.ip();
+    let Credentials { name, password } = body;
+    let client_key = client_limiter_key(state.trusted_proxy, &headers, remote);
+    let user_key = format!("user:{name}");
+    let now = std::time::Instant::now();
     {
         let mut limiter = state.login_limiter.lock().expect("limiter poisoned");
-        if !limiter.allowed(ip, std::time::Instant::now()) {
+        if !limiter.allowed(&client_key, now) || !limiter.allowed(&user_key, now) {
             return Ok((StatusCode::TOO_MANY_REQUESTS, Json(ErrorBody { error: "too many attempts".into() }))
                 .into_response());
         }
     }
 
-    let Credentials { name, password } = body;
     let verify_name = name.clone();
     let user_id = with_auth(&state, move |store| store.verify_login(&verify_name, &password)).await?;
     let Some(user_id) = user_id else {
-        state.login_limiter.lock().expect("limiter poisoned").record_failure(ip, std::time::Instant::now());
+        let mut limiter = state.login_limiter.lock().expect("limiter poisoned");
+        limiter.record_failure(&client_key, now);
+        limiter.record_failure(&user_key, now);
         return Ok((StatusCode::UNAUTHORIZED, Json(ErrorBody { error: "invalid credentials".into() })).into_response());
     };
-    state.login_limiter.lock().expect("limiter poisoned").record_success(ip);
+    {
+        let mut limiter = state.login_limiter.lock().expect("limiter poisoned");
+        limiter.record_success(&client_key);
+        limiter.record_success(&user_key);
+    }
 
     let tokens = with_auth(&state, move |store| store.create_session(user_id)).await?;
     let permissions = with_auth(&state, move |store| store.effective_permissions(user_id)).await?;
@@ -682,15 +752,15 @@ fn session_response(state: &AppState, token: &str, body: AuthStateDto) -> Respon
     response
 }
 
-/// Permission gate: public paths pass; everything else needs a valid session
-/// and the operation class for the path. Mutating requests additionally need a
-/// matching CSRF token, and are recorded in the audit log.
-async fn require_permission(State(state): State<AppState>, request: Request, next: Next) -> Response {
+/// Permission gate for one route group: requires a valid session whose user
+/// holds `required`. Mutating requests additionally need a matching CSRF token,
+/// and are recorded in the audit log.
+async fn require_permission(
+    State((state, required)): State<(AppState, Permission)>,
+    request: Request,
+    next: Next,
+) -> Response {
     let path = request.uri().path().to_string();
-    if is_public(&path) {
-        return next.run(request).await;
-    }
-
     let method = request.method().clone();
     let csrf_header = request.headers().get(CSRF_HEADER).and_then(|v| v.to_str().ok()).map(str::to_string);
     let token = cookie_value(request.headers(), SESSION_COOKIE);
@@ -705,7 +775,6 @@ async fn require_permission(State(state): State<AppState>, request: Request, nex
     };
     let user_id = session.user_id;
 
-    let required = required_permission(&path);
     match with_auth(&state, move |store| store.effective_permissions(user_id)).await {
         Ok(permissions) if permissions.contains(&required) => {}
         Ok(_) => return forbidden(),
@@ -739,31 +808,6 @@ async fn require_permission(State(state): State<AppState>, request: Request, nex
 
 fn is_mutating(method: &Method) -> bool {
     matches!(*method, Method::POST | Method::PUT | Method::DELETE | Method::PATCH)
-}
-
-fn is_public(path: &str) -> bool {
-    matches!(path, "/healthz" | "/api/auth/state" | "/api/login" | "/api/logout" | "/api/setup")
-        || !path.starts_with("/api/")
-}
-
-fn required_permission(path: &str) -> Permission {
-    if path == "/api/interfaces/config" {
-        Permission::InterfacesConfig
-    } else if path.starts_with("/api/pins") {
-        Permission::PinsManage
-    } else if path.starts_with("/api/acls") {
-        Permission::AclManage
-    } else if (path.starts_with("/api/peers/") || path.starts_with("/api/agents/")) && path.ends_with("/kick") {
-        Permission::PeersKick
-    } else if path.starts_with("/api/users")
-        || path.starts_with("/api/groups")
-        || path.starts_with("/api/audit")
-        || path == "/api/permissions"
-    {
-        Permission::UsersManage
-    } else {
-        Permission::ViewsRead
-    }
 }
 
 fn unauthorized() -> Response {
@@ -932,4 +976,62 @@ async fn set_group_permissions(
     }
     with_auth(&state, move |store| store.set_group_permissions(id, &permissions)).await?;
     Ok(Json(ActionResult { ok: true }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn remote() -> SocketAddr {
+        "203.0.113.7:54321".parse().unwrap()
+    }
+
+    fn headers_with_forwarded(value: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(FORWARDED_FOR_HEADER, HeaderValue::from_str(value).unwrap());
+        headers
+    }
+
+    fn test_state() -> AppState {
+        AppState {
+            socket_path: Arc::from("/tmp/canhub-test.sock"),
+            telemetry: crate::telemetry::channel(),
+            auth: Arc::new(Mutex::new(AuthStore::open_in_memory().unwrap())),
+            login_limiter: Arc::new(Mutex::new(LoginLimiter::default())),
+            secure_cookies: false,
+            trusted_proxy: false,
+        }
+    }
+
+    #[test]
+    fn router_builds_without_route_conflicts() {
+        let _ = router(test_state(), None);
+    }
+
+    #[test]
+    fn forwarded_for_ignored_without_trusted_proxy() {
+        let headers = headers_with_forwarded("10.0.0.1, 192.168.0.1");
+        assert_eq!(client_limiter_key(false, &headers, remote()), "ip:203.0.113.7");
+    }
+
+    #[test]
+    fn forwarded_for_used_behind_trusted_proxy() {
+        let headers = headers_with_forwarded("10.0.0.1, 192.168.0.1");
+        assert_eq!(client_limiter_key(true, &headers, remote()), "ip:10.0.0.1");
+    }
+
+    #[test]
+    fn trusted_proxy_without_header_falls_back_to_peer() {
+        assert_eq!(client_limiter_key(true, &HeaderMap::new(), remote()), "ip:203.0.113.7");
+    }
+
+    #[test]
+    fn bitrate_zero_or_huge_rejected_only_for_set_bitrate() {
+        assert!(checked_bitrate(IfconfigOp::SetBitrate, 0).is_err());
+        assert!(checked_bitrate(IfconfigOp::SetBitrate, 2_000_000).is_err());
+        assert!(checked_bitrate(IfconfigOp::SetBitrate, 250_000).is_ok());
+        // bitrate is ignored for link up/down, so 0 is fine there.
+        assert!(checked_bitrate(IfconfigOp::LinkUp, 0).is_ok());
+        assert!(checked_bitrate(IfconfigOp::LinkDown, 0).is_ok());
+    }
 }
