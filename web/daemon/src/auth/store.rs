@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rand::Rng;
 use rusqlite::{params, Connection, OptionalExtension};
+use sha2::{Digest, Sha256};
 
 use super::password::{hash_password, verify_password};
 use super::Permission;
@@ -142,25 +143,37 @@ impl AuthStore {
     }
 
     pub fn create_user(&self, name: &str, password: &str, enabled: bool) -> Result<i64, StoreError> {
-        if name.trim().is_empty() {
-            return Err(StoreError::Conflict("empty user name"));
+        insert_user(&self.connection, name, password, enabled)
+    }
+
+    /// Provision an admin atomically: create the user, ensure the `admins`
+    /// group holds every permission, and add the user to it — all in one
+    /// transaction so a mid-sequence failure leaves no half-built admin. When
+    /// `require_first` is set the call also asserts (inside the transaction)
+    /// that no users exist yet, for first-run bootstrap.
+    pub fn bootstrap_admin(&self, name: &str, password: &str, require_first: bool) -> Result<i64, StoreError> {
+        let transaction = self.connection.unchecked_transaction()?;
+        if require_first {
+            let count: i64 = transaction.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))?;
+            if count != 0 {
+                return Err(StoreError::Conflict("setup already completed"));
+            }
         }
-        if password.len() < MIN_PASSWORD_LEN {
-            return Err(StoreError::Conflict("password too short"));
+        let user_id = insert_user(&transaction, name, password, true)?;
+        let group_id = ensure_group_id(&transaction, "admins")?;
+        transaction.execute("DELETE FROM group_permissions WHERE group_id = ?1", params![group_id])?;
+        for permission in Permission::ALL {
+            transaction.execute(
+                "INSERT INTO group_permissions (group_id, permission) VALUES (?1, ?2)",
+                params![group_id, permission.as_str()],
+            )?;
         }
-        let hash = hash_password(password).map_err(StoreError::Hash)?;
-        self.connection
-            .execute(
-                "INSERT INTO users (name, password_hash, enabled, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![name, hash, enabled as i64, now()],
-            )
-            .map_err(|error| match error {
-                rusqlite::Error::SqliteFailure(e, _) if e.code == rusqlite::ErrorCode::ConstraintViolation => {
-                    StoreError::Conflict("user name already exists")
-                }
-                other => StoreError::Db(other),
-            })?;
-        Ok(self.connection.last_insert_rowid())
+        transaction.execute(
+            "INSERT OR IGNORE INTO user_groups (user_id, group_id) VALUES (?1, ?2)",
+            params![user_id, group_id],
+        )?;
+        transaction.commit()?;
+        Ok(user_id)
     }
 
     /// Verify credentials. Returns the user id on success; an unknown user, a
@@ -195,13 +208,36 @@ impl AuthStore {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    pub fn set_user_enabled(&self, user_id: i64, enabled: bool) -> Result<(), StoreError> {
-        self.connection.execute("UPDATE users SET enabled = ?1 WHERE id = ?2", params![enabled as i64, user_id])?;
+    /// Enable or disable a user. Disabling refuses to target the requesting
+    /// user or to remove the last enabled holder of `users.manage` (which would
+    /// lock everyone out of administration).
+    pub fn set_user_enabled(&self, actor_id: i64, user_id: i64, enabled: bool) -> Result<(), StoreError> {
+        if !enabled && actor_id == user_id {
+            return Err(StoreError::Conflict("cannot disable your own account"));
+        }
+        let transaction = self.connection.unchecked_transaction()?;
+        let before = users_manage_holder_count(&transaction)?;
+        transaction.execute("UPDATE users SET enabled = ?1 WHERE id = ?2", params![enabled as i64, user_id])?;
+        if !enabled && before > 0 && users_manage_holder_count(&transaction)? == 0 {
+            return Err(StoreError::Conflict("would disable the last users.manage account"));
+        }
+        transaction.commit()?;
         Ok(())
     }
 
-    pub fn delete_user(&self, user_id: i64) -> Result<(), StoreError> {
-        self.connection.execute("DELETE FROM users WHERE id = ?1", params![user_id])?;
+    /// Delete a user. Refuses to target the requesting user or to remove the
+    /// last enabled holder of `users.manage`.
+    pub fn delete_user(&self, actor_id: i64, user_id: i64) -> Result<(), StoreError> {
+        if actor_id == user_id {
+            return Err(StoreError::Conflict("cannot delete your own account"));
+        }
+        let transaction = self.connection.unchecked_transaction()?;
+        let before = users_manage_holder_count(&transaction)?;
+        transaction.execute("DELETE FROM users WHERE id = ?1", params![user_id])?;
+        if before > 0 && users_manage_holder_count(&transaction)? == 0 {
+            return Err(StoreError::Conflict("would remove the last users.manage account"));
+        }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -219,31 +255,35 @@ impl AuthStore {
         Ok(self.connection.last_insert_rowid())
     }
 
-    /// Get a group id by name, creating it if absent (idempotent bootstrap).
-    pub fn ensure_group(&self, name: &str) -> Result<i64, StoreError> {
-        let existing: Option<i64> = self
-            .connection
-            .query_row("SELECT id FROM groups WHERE name = ?1", params![name], |row| row.get(0))
-            .optional()?;
-        match existing {
-            Some(id) => Ok(id),
-            None => self.create_group(name),
-        }
-    }
-
+    /// Delete a group. Refuses the change if it would leave zero enabled users
+    /// holding `users.manage`.
     pub fn delete_group(&self, group_id: i64) -> Result<(), StoreError> {
-        self.connection.execute("DELETE FROM groups WHERE id = ?1", params![group_id])?;
+        let transaction = self.connection.unchecked_transaction()?;
+        let before = users_manage_holder_count(&transaction)?;
+        transaction.execute("DELETE FROM groups WHERE id = ?1", params![group_id])?;
+        if before > 0 && users_manage_holder_count(&transaction)? == 0 {
+            return Err(StoreError::Conflict("would remove the last users.manage account"));
+        }
+        transaction.commit()?;
         Ok(())
     }
 
+    /// Replace a group's permission set in one transaction. Refuses the change
+    /// if it would leave zero enabled users holding `users.manage`.
     pub fn set_group_permissions(&self, group_id: i64, permissions: &[Permission]) -> Result<(), StoreError> {
-        self.connection.execute("DELETE FROM group_permissions WHERE group_id = ?1", params![group_id])?;
+        let transaction = self.connection.unchecked_transaction()?;
+        let before = users_manage_holder_count(&transaction)?;
+        transaction.execute("DELETE FROM group_permissions WHERE group_id = ?1", params![group_id])?;
         for permission in permissions {
-            self.connection.execute(
+            transaction.execute(
                 "INSERT INTO group_permissions (group_id, permission) VALUES (?1, ?2)",
                 params![group_id, permission.as_str()],
             )?;
         }
+        if before > 0 && users_manage_holder_count(&transaction)? == 0 {
+            return Err(StoreError::Conflict("would remove the last users.manage account"));
+        }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -312,9 +352,11 @@ impl AuthStore {
         let session_token = random_token();
         let csrf_token = random_token();
         let now = now();
+        // Store only the hash of the session token: a stolen web.db then yields
+        // no usable cookie. The caller keeps the raw token for the cookie.
         self.connection.execute(
             "INSERT INTO sessions (token, user_id, created_at, last_seen_at, csrf_token) VALUES (?1, ?2, ?3, ?3, ?4)",
-            params![session_token, user_id, now, csrf_token],
+            params![hash_token(&session_token), user_id, now, csrf_token],
         )?;
         Ok(SessionTokens { session_token, csrf_token })
     }
@@ -324,13 +366,14 @@ impl AuthStore {
     /// an expired one is deleted and resolves to None. A session whose user has
     /// been disabled resolves to None (the disable takes effect immediately).
     pub fn validate_session(&self, token: &str) -> Result<Option<SessionInfo>, StoreError> {
+        let hashed = hash_token(token);
         let row: Option<(i64, i64, i64, String)> = self
             .connection
             .query_row(
                 "SELECT s.user_id, s.created_at, s.last_seen_at, s.csrf_token
                  FROM sessions s JOIN users u ON u.id = s.user_id
                  WHERE s.token = ?1 AND u.enabled != 0",
-                params![token],
+                params![hashed],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .optional()?;
@@ -342,12 +385,12 @@ impl AuthStore {
             self.delete_session(token)?;
             return Ok(None);
         }
-        self.connection.execute("UPDATE sessions SET last_seen_at = ?1 WHERE token = ?2", params![now, token])?;
+        self.connection.execute("UPDATE sessions SET last_seen_at = ?1 WHERE token = ?2", params![now, hashed])?;
         Ok(Some(SessionInfo { user_id, csrf_token }))
     }
 
     pub fn delete_session(&self, token: &str) -> Result<(), StoreError> {
-        self.connection.execute("DELETE FROM sessions WHERE token = ?1", params![token])?;
+        self.connection.execute("DELETE FROM sessions WHERE token = ?1", params![hash_token(token)])?;
         Ok(())
     }
 
@@ -393,6 +436,68 @@ fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
+/// Insert a user (validating name and password length) on any connection or
+/// transaction, returning the new row id.
+fn insert_user(connection: &Connection, name: &str, password: &str, enabled: bool) -> Result<i64, StoreError> {
+    if name.trim().is_empty() {
+        return Err(StoreError::Conflict("empty user name"));
+    }
+    if password.len() < MIN_PASSWORD_LEN {
+        return Err(StoreError::Conflict("password too short"));
+    }
+    let hash = hash_password(password).map_err(StoreError::Hash)?;
+    connection
+        .execute(
+            "INSERT INTO users (name, password_hash, enabled, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![name, hash, enabled as i64, now()],
+        )
+        .map_err(|error| match error {
+            rusqlite::Error::SqliteFailure(e, _) if e.code == rusqlite::ErrorCode::ConstraintViolation => {
+                StoreError::Conflict("user name already exists")
+            }
+            other => StoreError::Db(other),
+        })?;
+    Ok(connection.last_insert_rowid())
+}
+
+/// Group id by name, creating it if absent, on any connection or transaction.
+fn ensure_group_id(connection: &Connection, name: &str) -> Result<i64, StoreError> {
+    let existing: Option<i64> = connection
+        .query_row("SELECT id FROM groups WHERE name = ?1", params![name], |row| row.get(0))
+        .optional()?;
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+    connection.execute("INSERT INTO groups (name) VALUES (?1)", params![name])?;
+    Ok(connection.last_insert_rowid())
+}
+
+/// Number of enabled users with the `users.manage` permission through any of
+/// their groups — the population that must never reach zero (lockout).
+fn users_manage_holder_count(connection: &Connection) -> Result<i64, StoreError> {
+    let count: i64 = connection.query_row(
+        "SELECT COUNT(DISTINCT u.id)
+         FROM users u
+         JOIN user_groups ug ON ug.user_id = u.id
+         JOIN group_permissions gp ON gp.group_id = ug.group_id
+         WHERE u.enabled != 0 AND gp.permission = ?1",
+        params![Permission::UsersManage.as_str()],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+/// SHA-256 of a token, hex-encoded; what the sessions table stores so a leaked
+/// database does not hand over usable cookies.
+fn hash_token(token: &str) -> String {
+    let digest = Sha256::digest(token.as_bytes());
+    let mut hex = String::with_capacity(64);
+    for byte in digest {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    hex
+}
+
 /// 256 bits of randomness, hex-encoded, for an unguessable session token.
 fn random_token() -> String {
     let mut bytes = [0u8; 32];
@@ -423,7 +528,7 @@ mod tests {
     fn disabled_user_cannot_log_in() {
         let store = AuthStore::open_in_memory().unwrap();
         let id = store.create_user("bob", "password1", true).unwrap();
-        store.set_user_enabled(id, false).unwrap();
+        store.set_user_enabled(0, id, false).unwrap();
         assert_eq!(store.verify_login("bob", "password1").unwrap(), None);
     }
 
@@ -491,7 +596,7 @@ mod tests {
         let group = store.create_group("g").unwrap();
         store.add_user_to_group(user, group).unwrap();
         let tokens = store.create_session(user).unwrap();
-        store.delete_user(user).unwrap();
+        store.delete_user(0, user).unwrap();
         assert_eq!(store.validate_session(&tokens.session_token).unwrap(), None);
     }
 
@@ -509,8 +614,71 @@ mod tests {
         let user = store.create_user("op", "password1", true).unwrap();
         let tokens = store.create_session(user).unwrap();
         assert!(store.validate_session(&tokens.session_token).unwrap().is_some());
-        store.set_user_enabled(user, false).unwrap();
+        store.set_user_enabled(0, user, false).unwrap();
         assert_eq!(store.validate_session(&tokens.session_token).unwrap(), None);
+    }
+
+    #[test]
+    fn session_token_is_stored_hashed() {
+        let store = AuthStore::open_in_memory().unwrap();
+        let user = store.create_user("op", "password1", true).unwrap();
+        let tokens = store.create_session(user).unwrap();
+        let stored: String =
+            store.connection.query_row("SELECT token FROM sessions", [], |row| row.get(0)).unwrap();
+        assert_ne!(stored, tokens.session_token);
+        assert_eq!(stored, hash_token(&tokens.session_token));
+        // The raw token still validates (it is hashed on the way in).
+        assert!(store.validate_session(&tokens.session_token).unwrap().is_some());
+    }
+
+    fn admin_with_users_manage(store: &AuthStore, name: &str) -> i64 {
+        let user = store.create_user(name, "password1", true).unwrap();
+        let group = store.create_group(&format!("g-{name}")).unwrap();
+        store.set_group_permissions(group, &[Permission::UsersManage]).unwrap();
+        store.add_user_to_group(user, group).unwrap();
+        user
+    }
+
+    #[test]
+    fn cannot_delete_or_disable_self() {
+        let store = AuthStore::open_in_memory().unwrap();
+        let me = admin_with_users_manage(&store, "me");
+        assert!(matches!(store.delete_user(me, me), Err(StoreError::Conflict(_))));
+        assert!(matches!(store.set_user_enabled(me, me, false), Err(StoreError::Conflict(_))));
+    }
+
+    #[test]
+    fn cannot_remove_last_users_manage_holder() {
+        let store = AuthStore::open_in_memory().unwrap();
+        let admin = admin_with_users_manage(&store, "admin");
+        let other = store.create_user("other", "password1", true).unwrap();
+        // `other` (no users.manage) deleting the only admin would lock everyone out.
+        assert!(matches!(store.delete_user(other, admin), Err(StoreError::Conflict(_))));
+        assert!(matches!(store.set_user_enabled(other, admin, false), Err(StoreError::Conflict(_))));
+    }
+
+    #[test]
+    fn can_remove_admin_when_another_holder_exists() {
+        let store = AuthStore::open_in_memory().unwrap();
+        let first = admin_with_users_manage(&store, "first");
+        let second = admin_with_users_manage(&store, "second");
+        assert!(store.delete_user(second, first).is_ok());
+    }
+
+    #[test]
+    fn cannot_strip_users_manage_from_last_group() {
+        let store = AuthStore::open_in_memory().unwrap();
+        let admin = store.create_user("admin", "password1", true).unwrap();
+        let group = store.create_group("admins").unwrap();
+        store.set_group_permissions(group, &[Permission::UsersManage]).unwrap();
+        store.add_user_to_group(admin, group).unwrap();
+        // Removing users.manage from the only group that grants it is refused.
+        assert!(matches!(
+            store.set_group_permissions(group, &[Permission::ViewsRead]),
+            Err(StoreError::Conflict(_))
+        ));
+        // And deleting that group is refused too.
+        assert!(matches!(store.delete_group(group), Err(StoreError::Conflict(_))));
     }
 
     #[test]

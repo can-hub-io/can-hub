@@ -167,14 +167,19 @@ pub async fn run(
 async fn sample_hub(
     socket_path: Arc<str>,
 ) -> Result<(Status, Vec<InterfaceEntry>), crate::admin_client::AdminClientError> {
-    tokio::task::spawn_blocking(move || {
+    let joined = tokio::task::spawn_blocking(move || {
         let mut client = crate::hub_socket::connect(&socket_path)?;
         let status = client.status()?;
         let interfaces = client.interfaces()?;
         Ok((status, interfaces))
     })
-    .await
-    .expect("telemetry blocking task panicked")
+    .await;
+    // A panic in the blocking task must not kill the telemetry loop: surface it
+    // as an I/O error so the caller logs and keeps polling.
+    match joined {
+        Ok(result) => result,
+        Err(join) => Err(crate::admin_client::AdminClientError::Io(std::io::Error::other(join.to_string()))),
+    }
 }
 
 #[cfg(test)]

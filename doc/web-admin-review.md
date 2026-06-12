@@ -72,29 +72,29 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Milestone 3 — P1 hardening (one commit)
 
-- [ ] **Audit logins.** `/api/login`, `/api/setup`, `/api/logout` are public
+- [x] **Audit logins.** `/api/login`, `/api/setup`, `/api/logout` are public
   paths and skip the audit middleware (`web/daemon/src/api.rs:689`); failed
   and successful logins are exactly what an audit log is for. Fix: record
   from the handlers (actor = attempted user name, status 200/401/429).
-- [ ] **Security headers.** None today. Add a layer (tower-http
+- [x] **Security headers.** None today. Add a layer (tower-http
   `SetResponseHeaderLayer`, already a dependency) for `Content-Security-Policy`
   (self-only is enough for the SPA), `X-Frame-Options: DENY`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.
-- [ ] **Anti-lockout guards.** You can delete your own user, delete the
+- [x] **Anti-lockout guards.** You can delete your own user, delete the
   `admins` group, or untick `users.manage` from the last group holding it;
   recovery needs shell access. Fix in the store: refuse to delete/disable the
   requesting user and refuse any change that leaves zero enabled users with
   `users.manage` (requires passing the actor id into
   delete_user/set_user_enabled/set_group_permissions/delete_group paths).
-- [ ] **Telemetry loop dies on panic.** `sample_hub` `.expect()`s the
+- [x] **Telemetry loop dies on panic.** `sample_hub` `.expect()`s the
   JoinHandle (`web/daemon/src/telemetry.rs:180`); one panic in the blocking
   task kills telemetry until daemon restart. Fix: log and `continue`.
-- [ ] **Transactions.** `setup` (`api.rs:649`: create_user + ensure_group +
+- [x] **Transactions.** `setup` (`api.rs:649`: create_user + ensure_group +
   set_group_permissions + add_user_to_group), `run_add_user`
   (`main.rs:159`, same sequence) and `set_group_permissions`
   (`store.rs:232`: DELETE + INSERT loop) can be left half-applied on error.
   Wrap each in a rusqlite transaction.
-- [ ] **Hash session tokens at rest.** Sessions are stored as the raw cookie
+- [x] **Hash session tokens at rest.** Sessions are stored as the raw cookie
   token (`store.rs:304`); web.db theft = session hijack. Store
   SHA-256(token), look up by hash. While there: make the CSRF comparison
   (`api.rs:716`) constant-time.

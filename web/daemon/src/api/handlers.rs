@@ -9,17 +9,16 @@ use axum::extract::{ConnectInfo, Path, State};
 use axum::http::header::SET_COOKIE;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
 use tokio::sync::broadcast;
 
-use crate::auth::store::StoreError;
 use crate::auth::Permission;
 use crate::protocol::admin::{AclLevel, IfconfigOp};
 use crate::telemetry::TelemetryFrame;
 
 use super::dtos::*;
 use super::error::{ApiError, ErrorBody};
-use super::middleware::{client_limiter_key, cookie_value, SESSION_COOKIE};
+use super::middleware::{client_limiter_key, cookie_value, CurrentUser, SESSION_COOKIE};
 use super::{with_admin, with_auth, AppState};
 
 pub(crate) async fn healthz() -> &'static str {
@@ -235,20 +234,25 @@ pub(crate) async fn login(
     let client_key = client_limiter_key(state.trusted_proxy, &headers, remote);
     let user_key = format!("user:{name}");
     let now = std::time::Instant::now();
-    {
+    let blocked = {
         let mut limiter = state.login_limiter.lock().expect("limiter poisoned");
-        if !limiter.allowed(&client_key, now) || !limiter.allowed(&user_key, now) {
-            return Ok((StatusCode::TOO_MANY_REQUESTS, Json(ErrorBody { error: "too many attempts".into() }))
-                .into_response());
-        }
+        !limiter.allowed(&client_key, now) || !limiter.allowed(&user_key, now)
+    };
+    if blocked {
+        record_audit(&state, None, &name, "LOGIN", "/api/login", 429).await;
+        return Ok((StatusCode::TOO_MANY_REQUESTS, Json(ErrorBody { error: "too many attempts".into() }))
+            .into_response());
     }
 
     let verify_name = name.clone();
     let user_id = with_auth(&state, move |store| store.verify_login(&verify_name, &password)).await?;
     let Some(user_id) = user_id else {
-        let mut limiter = state.login_limiter.lock().expect("limiter poisoned");
-        limiter.record_failure(&client_key, now);
-        limiter.record_failure(&user_key, now);
+        {
+            let mut limiter = state.login_limiter.lock().expect("limiter poisoned");
+            limiter.record_failure(&client_key, now);
+            limiter.record_failure(&user_key, now);
+        }
+        record_audit(&state, None, &name, "LOGIN", "/api/login", 401).await;
         return Ok((StatusCode::UNAUTHORIZED, Json(ErrorBody { error: "invalid credentials".into() })).into_response());
     };
     {
@@ -256,6 +260,7 @@ pub(crate) async fn login(
         limiter.record_success(&client_key);
         limiter.record_success(&user_key);
     }
+    record_audit(&state, Some(user_id), &name, "LOGIN", "/api/login", 200).await;
 
     let tokens = with_auth(&state, move |store| store.create_session(user_id)).await?;
     let permissions = with_auth(&state, move |store| store.effective_permissions(user_id)).await?;
@@ -274,6 +279,16 @@ pub(crate) async fn login(
 
 pub(crate) async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, ApiError> {
     if let Some(token) = cookie_value(&headers, SESSION_COOKIE) {
+        let resolve = token.clone();
+        if let Ok(Some(session)) = with_auth(&state, move |store| store.validate_session(&resolve)).await {
+            let user_id = session.user_id;
+            let actor = with_auth(&state, move |store| store.user_name(user_id))
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| format!("#{user_id}"));
+            record_audit(&state, Some(user_id), &actor, "LOGOUT", "/api/logout", 200).await;
+        }
         with_auth(&state, move |store| store.delete_session(&token)).await?;
     }
     let cookie = format!("{SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0");
@@ -287,17 +302,8 @@ pub(crate) async fn logout(State(state): State<AppState>, headers: HeaderMap) ->
 pub(crate) async fn setup(State(state): State<AppState>, Json(body): Json<Credentials>) -> Result<Response, ApiError> {
     let Credentials { name, password } = body;
     let response_name = name.clone();
-    let user_id = with_auth(&state, move |store| {
-        if store.user_count()? != 0 {
-            return Err(StoreError::Conflict("setup already completed"));
-        }
-        let user_id = store.create_user(&name, &password, true)?;
-        let group_id = store.ensure_group("admins")?;
-        store.set_group_permissions(group_id, &Permission::ALL)?;
-        store.add_user_to_group(user_id, group_id)?;
-        Ok(user_id)
-    })
-    .await?;
+    let user_id = with_auth(&state, move |store| store.bootstrap_admin(&name, &password, true)).await?;
+    record_audit(&state, Some(user_id), &response_name, "SETUP", "/api/setup", 200).await;
     let tokens = with_auth(&state, move |store| store.create_session(user_id)).await?;
     Ok(session_response(
         &state,
@@ -310,6 +316,15 @@ pub(crate) async fn setup(State(state): State<AppState>, Json(body): Json<Creden
             csrf_token: Some(tokens.csrf_token),
         },
     ))
+}
+
+/// Fire-and-forget audit record for the public auth endpoints (the gate
+/// middleware audits everything else). A failure to record must not fail login.
+async fn record_audit(state: &AppState, actor_id: Option<i64>, actor: &str, action: &str, target: &str, status: u16) {
+    let actor = actor.to_string();
+    let action = action.to_string();
+    let target = target.to_string();
+    let _ = with_auth(state, move |store| store.record_audit(actor_id, &actor, &action, &target, status)).await;
 }
 
 fn session_response(state: &AppState, token: &str, body: AuthStateDto) -> Response {
@@ -355,17 +370,22 @@ pub(crate) async fn create_user(State(state): State<AppState>, Json(body): Json<
     Ok(Json(ActionResult { ok: true }))
 }
 
-pub(crate) async fn delete_user(State(state): State<AppState>, Path(id): Path<i64>) -> ActionResponse {
-    with_auth(&state, move |store| store.delete_user(id)).await?;
+pub(crate) async fn delete_user(
+    State(state): State<AppState>,
+    Extension(actor): Extension<CurrentUser>,
+    Path(id): Path<i64>,
+) -> ActionResponse {
+    with_auth(&state, move |store| store.delete_user(actor.0, id)).await?;
     Ok(Json(ActionResult { ok: true }))
 }
 
 pub(crate) async fn set_user_enabled(
     State(state): State<AppState>,
+    Extension(actor): Extension<CurrentUser>,
     Path(id): Path<i64>,
     Json(body): Json<EnabledBody>,
 ) -> ActionResponse {
-    with_auth(&state, move |store| store.set_user_enabled(id, body.enabled)).await?;
+    with_auth(&state, move |store| store.set_user_enabled(actor.0, id, body.enabled)).await?;
     Ok(Json(ActionResult { ok: true }))
 }
 

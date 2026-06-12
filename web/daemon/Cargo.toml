@@ -27,8 +27,9 @@ rust-embed = { version = "8", optional = true, features = ["mime-guess"] }
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
+sha2 = "0.10.9"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "signal", "time", "io-util"] }
-tower-http = { version = "0.6.11", features = ["fs", "trace"] }
+tower-http = { version = "0.6.11", features = ["fs", "set-header", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # The protocol codecs stay dependency-free; serde/rusqlite/argon2/tower land

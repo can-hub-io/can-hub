@@ -158,6 +158,17 @@ async fn unknown_api_route_is_404_not_spa() {
 }
 
 #[tokio::test]
+async fn responses_carry_security_headers() {
+    let response =
+        router(make_state(), None).oneshot(request(Method::GET, "/healthz", None, false)).await.unwrap();
+    let headers = response.headers();
+    assert_eq!(headers.get("x-frame-options").unwrap(), "DENY");
+    assert_eq!(headers.get("x-content-type-options").unwrap(), "nosniff");
+    assert_eq!(headers.get("referrer-policy").unwrap(), "no-referrer");
+    assert!(headers.get("content-security-policy").is_some());
+}
+
+#[tokio::test]
 async fn router_builds_without_route_conflicts() {
     let _ = router(make_state(), None);
 }

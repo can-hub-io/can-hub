@@ -10,7 +10,6 @@ use std::time::Duration;
 
 use can_hub_web::api::{self, AppState};
 use can_hub_web::auth::store::AuthStore;
-use can_hub_web::auth::Permission;
 use can_hub_web::login_limiter::LoginLimiter;
 use can_hub_web::telemetry;
 
@@ -184,13 +183,7 @@ fn run_add_user(store: &Mutex<AuthStore>, name: &str) {
     }
 
     let store = store.lock().unwrap();
-    let result = (|| {
-        let user_id = store.create_user(name, &password, true)?;
-        let group_id = store.ensure_group("admins")?;
-        store.set_group_permissions(group_id, &Permission::ALL)?;
-        store.add_user_to_group(user_id, group_id)?;
-        Ok::<(), can_hub_web::auth::store::StoreError>(())
-    })();
+    let result = store.bootstrap_admin(name, &password, false).map(|_| ());
 
     match result {
         Ok(()) => println!("created admin user '{name}'"),

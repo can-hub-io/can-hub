@@ -20,12 +20,17 @@ pub(crate) const SESSION_COOKIE: &str = "canhub_session";
 const CSRF_HEADER: &str = "x-csrf-token";
 const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
 
+/// The authenticated user id, injected into request extensions by the gate so
+/// handlers can enforce actor-aware rules (anti-lockout) without re-validating.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CurrentUser(pub i64);
+
 /// Permission gate for one route group: requires a valid session whose user
 /// holds `required`. Mutating requests additionally need a matching CSRF token,
 /// and are recorded in the audit log.
 pub(crate) async fn require_permission(
     State((state, required)): State<(AppState, Permission)>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Response {
     let path = request.uri().path().to_string();
@@ -50,11 +55,12 @@ pub(crate) async fn require_permission(
     }
 
     let mutating = is_mutating(&method);
-    if mutating && csrf_header.as_deref() != Some(session.csrf_token.as_str()) {
+    if mutating && !csrf_matches(csrf_header.as_deref(), &session.csrf_token) {
         return (StatusCode::FORBIDDEN, Json(ErrorBody { error: "missing or invalid CSRF token".into() }))
             .into_response();
     }
 
+    request.extensions_mut().insert(CurrentUser(user_id));
     let response = next.run(request).await;
 
     if mutating {
@@ -76,6 +82,26 @@ pub(crate) async fn require_permission(
 
 pub(crate) fn is_mutating(method: &Method) -> bool {
     matches!(*method, Method::POST | Method::PUT | Method::DELETE | Method::PATCH)
+}
+
+/// Compare the supplied CSRF token to the session's in constant time, so a
+/// timing side channel cannot leak the expected token byte by byte.
+fn csrf_matches(provided: Option<&str>, expected: &str) -> bool {
+    match provided {
+        Some(value) => constant_time_eq(value.as_bytes(), expected.as_bytes()),
+        None => false,
+    }
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut difference = 0u8;
+    for (left, right) in a.iter().zip(b) {
+        difference |= left ^ right;
+    }
+    difference == 0
 }
 
 pub(crate) fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {

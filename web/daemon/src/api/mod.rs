@@ -24,12 +24,13 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, delete, get, post, put};
 use axum::{Json, Router};
 use tokio::sync::broadcast;
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::admin_client::{AdminClient, AdminClientError};
 use crate::auth::store::{AuthStore, StoreError};
@@ -129,7 +130,23 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
         }
     }
 
+    with_security_headers(router)
+}
+
+/// Baseline response hardening for every route: a self-only CSP (inline styles
+/// allowed for the SPA's style props, but no remote or inline scripts), plus
+/// clickjacking, MIME-sniffing and referrer protections.
+fn with_security_headers(router: Router) -> Router {
+    const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+                       img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
     router
+        .layer(SetResponseHeaderLayer::overriding(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP)))
+        .layer(SetResponseHeaderLayer::overriding(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer")))
 }
 
 /// Wrap a group of routes in the session/permission/CSRF/audit gate for one
