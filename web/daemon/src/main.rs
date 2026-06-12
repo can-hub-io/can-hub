@@ -5,8 +5,12 @@
 //! embedded SPA assets and the WebSocket telemetry stream land in later phases.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use can_hub_web::api::{self, AppState};
+use can_hub_web::telemetry;
+
+const TELEMETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 const DEFAULT_SOCKET_PATH: &str = "/run/can-hub/hub.sock";
 const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
@@ -35,7 +39,15 @@ async fn main() {
         }
     };
 
-    let state = AppState { socket_path: Arc::from(options.socket_path.as_str()) };
+    let socket_path: Arc<str> = Arc::from(options.socket_path.as_str());
+    let telemetry_sender = telemetry::channel();
+    tokio::spawn(telemetry::run(
+        Arc::clone(&socket_path),
+        telemetry_sender.clone(),
+        TELEMETRY_INTERVAL,
+    ));
+
+    let state = AppState { socket_path, telemetry: telemetry_sender };
     let app = api::router(state, options.assets_dir.map(std::path::PathBuf::from));
 
     let listener = match tokio::net::TcpListener::bind(&options.listen).await {

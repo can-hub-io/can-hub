@@ -10,23 +10,28 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Serialize;
+use tokio::sync::broadcast;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::admin_client::{AdminClient, AdminClientError};
 use crate::protocol::admin::{
     AclEntry, AclLevel, AgentEntry, ClientEntry, InterfaceEntry, PeerEntry, Status,
 };
+use crate::telemetry::TelemetryFrame;
 
-/// Shared handler state: where the hub admin socket lives.
+/// Shared handler state: where the hub admin socket lives plus the telemetry
+/// broadcast every WebSocket subscriber reads from.
 #[derive(Clone)]
 pub struct AppState {
     pub socket_path: Arc<str>,
+    pub telemetry: broadcast::Sender<Arc<TelemetryFrame>>,
 }
 
 /// Build the router. When `assets_dir` is set, the built SPA is served from it
@@ -42,6 +47,7 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
         .route("/api/clients", get(clients))
         .route("/api/interfaces", get(interfaces))
         .route("/api/acls", get(acls))
+        .route("/api/telemetry/ws", get(telemetry_ws))
         .with_state(state);
 
     if let Some(dir) = assets_dir {
@@ -84,6 +90,30 @@ async fn interfaces(State(state): State<AppState>) -> Result<Json<Vec<InterfaceD
 async fn acls(State(state): State<AppState>) -> Result<Json<Vec<AclDto>>, ApiError> {
     let entries = with_admin(&state, |client| client.acl_list()).await?;
     Ok(Json(entries.into_iter().map(AclDto::from).collect()))
+}
+
+/// Telemetry WebSocket: subscribe to the shared broadcast and forward each
+/// frame as JSON. One poll loop fills the broadcast for every subscriber.
+/// (Permission gating — `views.read` — lands with auth in a later phase.)
+async fn telemetry_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+    let receiver = state.telemetry.subscribe();
+    ws.on_upgrade(move |socket| telemetry_stream(socket, receiver))
+}
+
+async fn telemetry_stream(mut socket: WebSocket, mut receiver: broadcast::Receiver<Arc<TelemetryFrame>>) {
+    loop {
+        match receiver.recv().await {
+            Ok(frame) => {
+                let Ok(json) = serde_json::to_string(&*frame) else { continue };
+                if socket.send(Message::Text(json.into())).await.is_err() {
+                    break;
+                }
+            }
+            // Slow subscriber fell behind: skip to the latest, do not disconnect.
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => break,
+        }
+    }
 }
 
 /// Open a short-lived admin session and run `query` on a blocking task.

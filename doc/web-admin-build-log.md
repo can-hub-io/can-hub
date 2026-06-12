@@ -15,11 +15,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs dec
 - [x] `web/ui` React + Vite scaffold (TS), `/api` dev proxy, status dashboard polling `/api/status`, `npm run build` green
 
 ## Phase 2 — Read views + telemetry (#84)
-- [ ] REST read endpoints: status, peers, agents (+detail), clients, interfaces (aggregate paginated replies)
-- [ ] UI views/tables for each, auto-refresh
-- [ ] Telemetry: daemon poll loop over admin counters → deltas/rates
-- [ ] WebSocket fan-out to subscribed browsers (views.read gated), one poller for N clients
-- [ ] Live dashboard charts (frames/s, drops/s, per-interface throughput)
+- [x] REST read endpoints: status, peers, agents, clients, interfaces, acls (done in Phase 1)
+- [x] UI views/tables for each, auto-refresh (2s polling); tabbed nav
+- [x] Telemetry: daemon poll loop over admin counters → deltas/rates (+ per-interface). Pure rate math unit-tested; full poll→broadcast pipe verified by integration test over a real unix socket
+- [x] WebSocket fan-out to subscribed browsers, one poller for N clients (broadcast). 101 handshake verified. views.read gating deferred to Phase 4 auth
+- [x] Live dashboard: status cards + live rate cards + per-interface throughput table via WS
 
 ## Phase 3 — Admin actions (#85)
 - [ ] REST mutating endpoints + UI: kick peer / kick agent
@@ -52,3 +52,4 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs dec
 - 2026-06-12: toolchain — distro rustc was 1.75; axum 0.8 needs >=1.80. Installed rustup stable (1.96). Build the daemon with `. ~/.cargo/env` so cargo resolves to ~/.cargo/bin.
 - 2026-06-12: **protocol.md gap** — pin/acl admin layouts (0x22, 0x24..0x29) are listed in the type table but have no payload-layout block. Rust codecs derived from authoritative `src/protocol/admin_message.c` (offsets body-relative). Worth backfilling protocol.md.
 - Phase 1 verified: 28 cargo tests green; daemon serves /healthz, /api/* (502 without a hub), and the built SPA with client-route fallback. Live-hub integration not exercised here (no running hub).
+- Phase 2 verified: 32 unit + 1 integration test (telemetry pipe over a real unix socket) green; WS upgrade returns 101; UI builds (tsc + vite). Telemetry interval 1s, broadcast capacity 16 (latest-wins for slow subscribers). Per-request admin connect still (pooling deferred).

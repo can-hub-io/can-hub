@@ -9,3 +9,4 @@
 pub mod admin_client;
 pub mod api;
 pub mod protocol;
+pub mod telemetry;
