@@ -4,6 +4,9 @@ Web admin panel for the hub (epic #14). A separate daemon — `web/daemon`
 (Rust, axum) — that consumes the hub admin plane over the unix socket and
 serves a REST API plus a React UI (`web/ui`). The hub binary is untouched.
 
+The REST API contract is specified in [`openapi.yaml`](openapi.yaml) (OpenAPI
+3.1) — the source of truth for clients and the web <-> can-hub end-to-end tests.
+
 ## Build
 
 Backend (needs a recent Rust toolchain — axum 0.8 requires rustc >= 1.80):

@@ -1,0 +1,940 @@
+openapi: 3.1.0
+info:
+  title: can-hub-web REST API
+  version: 0.1.0
+  description: >
+    REST API of the `can-hub-web` admin daemon. The daemon is a local admin
+    client of the hub unix socket and an HTTP server towards browsers; this is
+    the contract the React SPA and the end-to-end suite consume.
+
+    Authentication is a server-side session over an HttpOnly cookie
+    (`canhub_session`). Mutating requests (POST/PUT/DELETE/PATCH) additionally
+    require the session CSRF token in the `X-CSRF-Token` header; the token is
+    returned by `/api/auth/state`, `/api/login` and `/api/setup`. Each route
+    family is gated by an operation-class permission (see `Permission`).
+
+    This document is hand-maintained; it is the authoritative base for the
+    web <-> can-hub end-to-end tests. Keep it in sync with `web/daemon/src/api`.
+
+servers:
+  - url: http://127.0.0.1:8080
+    description: Default local bind (front with a TLS reverse proxy in production)
+
+tags:
+  - name: auth
+    description: Login, logout, bootstrap, session state, self-service password
+  - name: views
+    description: Read-only views mirroring the hub admin replies (views.read)
+  - name: actions
+    description: Mutating admin actions (per-class permissions)
+  - name: management
+    description: User/group/permission/audit management (users.manage)
+  - name: health
+    description: Liveness
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      security: []
+      responses:
+        '200':
+          description: Always "ok"
+          content:
+            text/plain:
+              schema: { type: string, example: ok }
+
+  /api/auth/state:
+    get:
+      tags: [auth]
+      summary: Current auth state
+      description: >
+        Public. Reports whether first-run bootstrap is needed, whether the
+        caller is authenticated, and (when authenticated) the user, effective
+        permissions and CSRF token. The UI calls this on load.
+      security: []
+      responses:
+        '200':
+          description: Auth state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthState' }
+
+  /api/login:
+    post:
+      tags: [auth]
+      summary: Log in
+      description: >
+        Public. On success sets the `canhub_session` cookie and returns the
+        auth state with a fresh CSRF token. Rate limited per client address and
+        per attempted user name.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '200':
+          description: Authenticated
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: canhub_session=<token>; HttpOnly; SameSite=Strict; Path=/
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthState' }
+        '401':
+          $ref: '#/components/responses/InvalidCredentials'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/logout:
+    post:
+      tags: [auth]
+      summary: Log out
+      description: Public. Deletes the current session and clears the cookie.
+      security: []
+      responses:
+        '200':
+          description: Logged out
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: Expires the session cookie (Max-Age=0)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionResult' }
+
+  /api/setup:
+    post:
+      tags: [auth]
+      summary: First-run bootstrap
+      description: >
+        Public, but only succeeds while there are zero users. Creates the first
+        admin (in an `admins` group holding every permission) and logs them in.
+        Returns 409 once setup has completed.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '200':
+          description: Bootstrap admin created and logged in
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthState' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/auth/password:
+    post:
+      tags: [auth]
+      summary: Change own password (self-service)
+      description: >
+        Any authenticated user. Confirms the current password, then sets the new
+        one and invalidates the user's other sessions (the current one is kept).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SelfPassword' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/status:
+    get:
+      tags: [views]
+      summary: Hub counters
+      description: 'Permission: views.read'
+      responses:
+        '200':
+          description: Hub status snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/peers:
+    get:
+      tags: [views]
+      summary: Live peer table
+      description: 'Permission: views.read. Aggregates the paginated hub reply.'
+      responses:
+        '200':
+          description: Peers
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Peer' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/agents:
+    get:
+      tags: [views]
+      summary: Registered agents
+      description: 'Permission: views.read'
+      responses:
+        '200':
+          description: Agents
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Agent' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/clients:
+    get:
+      tags: [views]
+      summary: Connected clients and their open channels
+      description: 'Permission: views.read'
+      responses:
+        '200':
+          description: Clients
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Client' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/interfaces:
+    get:
+      tags: [views]
+      summary: Interface catalogue with counters
+      description: 'Permission: views.read'
+      responses:
+        '200':
+          description: Interfaces
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Interface' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/telemetry/ws:
+    get:
+      tags: [views]
+      summary: Real-time telemetry (WebSocket)
+      description: >
+        Permission: views.read. Upgrades to a WebSocket. The server pushes one
+        `TelemetryFrame` JSON message per poll interval (~1 s). HTTP semantics
+        below describe the upgrade handshake only.
+      responses:
+        '101':
+          description: Switching Protocols (WebSocket). Frames match TelemetryFrame.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/peers/{id}/kick:
+    post:
+      tags: [actions]
+      summary: Disconnect a peer
+      description: 'Permission: peers.kick'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Peer id, decimal or 0x-prefixed hex.
+          schema: { type: string, example: '0x80000001' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/HubRejected' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/agents/{name}/kick:
+    post:
+      tags: [actions]
+      summary: Disconnect an agent by name
+      description: 'Permission: peers.kick'
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/HubRejected' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/interfaces/config:
+    post:
+      tags: [actions]
+      summary: Reconfigure an interface (bitrate / link up / link down)
+      description: >
+        Permission: interfaces.config. For op=bitrate, bitrate must be
+        1..=1000000 (classic CAN); 0 or out of range is rejected with 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InterfaceConfigBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/HubRejected' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/pins:
+    get:
+      tags: [actions]
+      summary: List pinned agent identities
+      description: 'Permission: pins.manage'
+      responses:
+        '200':
+          description: Pins
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Pin' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+    post:
+      tags: [actions]
+      summary: Authorize (pin) an agent fingerprint
+      description: 'Permission: pins.manage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PinAddBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/HubRejected' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/pins/{name}:
+    delete:
+      tags: [actions]
+      summary: Drop a pinned identity by agent name
+      description: 'Permission: pins.manage'
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/HubRejected' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/acls:
+    get:
+      tags: [actions]
+      summary: List client ACL grants
+      description: 'Permission: acl.manage'
+      responses:
+        '200':
+          description: ACL grants
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Acl' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+    post:
+      tags: [actions]
+      summary: Grant a client read/write on an interface
+      description: 'Permission: acl.manage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AclBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/HubRejected' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/acls/revoke:
+    post:
+      tags: [actions]
+      summary: Drop a client grant
+      description: 'Permission: acl.manage. The level field is ignored.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AclBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/HubRejected' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/audit:
+    get:
+      tags: [management]
+      summary: Recent audit log (newest first, up to 200)
+      description: 'Permission: users.manage'
+      responses:
+        '200':
+          description: Audit entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditEntry' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/permissions:
+    get:
+      tags: [management]
+      summary: All assignable permission names
+      description: 'Permission: users.manage'
+      responses:
+        '200':
+          description: Permission names
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Permission' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/users:
+    get:
+      tags: [management]
+      summary: List users
+      description: 'Permission: users.manage'
+      responses:
+        '200':
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ManagedUser' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [management]
+      summary: Create a user
+      description: 'Permission: users.manage. Password min length 8.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateUserBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/users/{id}:
+    delete:
+      tags: [management]
+      summary: Delete a user
+      description: >
+        Permission: users.manage. Refuses to delete the requesting user or the
+        last enabled holder of users.manage (409).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/users/{id}/enabled:
+    post:
+      tags: [management]
+      summary: Enable or disable a user
+      description: >
+        Permission: users.manage. Disabling refuses to target the requesting
+        user or the last enabled holder of users.manage (409).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EnabledBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/users/{id}/password:
+    post:
+      tags: [management]
+      summary: Reset a user's password (admin)
+      description: >
+        Permission: users.manage. Sets a new password and drops all of that
+        user's sessions, forcing re-login. Password min length 8.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/users/{id}/groups:
+    post:
+      tags: [management]
+      summary: Add a user to a group
+      description: 'Permission: users.manage'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MembershipBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/users/{id}/groups/{groupId}:
+    delete:
+      tags: [management]
+      summary: Remove a user from a group
+      description: 'Permission: users.manage'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+        - { name: groupId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/groups:
+    get:
+      tags: [management]
+      summary: List groups with their permissions
+      description: 'Permission: users.manage'
+      responses:
+        '200':
+          description: Groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ManagedGroup' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [management]
+      summary: Create a group
+      description: 'Permission: users.manage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NameBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/groups/{id}:
+    delete:
+      tags: [management]
+      summary: Delete a group
+      description: >
+        Permission: users.manage. Refuses the change if it would leave zero
+        enabled holders of users.manage (409).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/groups/{id}/permissions:
+    put:
+      tags: [management]
+      summary: Replace a group's permission set
+      description: >
+        Permission: users.manage. Refuses the change if it would leave zero
+        enabled holders of users.manage (409). Unknown permission name -> 400.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PermissionsBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: canhub_session
+    csrfToken:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+
+  responses:
+    Action:
+      description: Action accepted
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ActionResult' }
+    BadRequest:
+      description: Malformed or invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    Unauthorized:
+      description: No valid session
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    Forbidden:
+      description: Authenticated but missing the required permission, or bad/missing CSRF token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    Conflict:
+      description: Precondition violated (name taken, setup done, anti-lockout, no such user)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    TooManyRequests:
+      description: Login rate limit exceeded
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    InvalidCredentials:
+      description: Unknown user, wrong password, or disabled account
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    HubRejected:
+      description: The hub processed the request but returned a non-zero status
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    HubUnreachable:
+      description: The hub admin socket is unreachable or timed out
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+
+  schemas:
+    ErrorBody:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    Permission:
+      type: string
+      enum: [views.read, peers.kick, interfaces.config, pins.manage, acl.manage, users.manage]
+
+    AclLevel:
+      type: string
+      enum: [none, ro, rw]
+
+    IfconfigOp:
+      type: string
+      enum: [bitrate, up, down]
+
+    ActionResult:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+
+    AuthState:
+      type: object
+      required: [needsBootstrap, authenticated, user, permissions, csrfToken]
+      properties:
+        needsBootstrap: { type: boolean }
+        authenticated: { type: boolean }
+        user: { type: [string, 'null'] }
+        permissions:
+          type: array
+          items: { $ref: '#/components/schemas/Permission' }
+        csrfToken: { type: [string, 'null'] }
+
+    Credentials:
+      type: object
+      required: [name, password]
+      properties:
+        name: { type: string }
+        password: { type: string }
+
+    SelfPassword:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: { type: string }
+        newPassword: { type: string, minLength: 8 }
+
+    Status:
+      type: object
+      required:
+        [peerCount, agentCount, clientCount, interfaceCount,
+         framesReceived, framesForwarded, framesDropped, framesUnroutable]
+      properties:
+        peerCount: { type: integer, format: uint16 }
+        agentCount: { type: integer, format: uint16 }
+        clientCount: { type: integer, format: uint16 }
+        interfaceCount: { type: integer, format: uint16 }
+        framesReceived: { type: integer, format: uint64 }
+        framesForwarded: { type: integer, format: uint64 }
+        framesDropped: { type: integer, format: uint64 }
+        framesUnroutable: { type: integer, format: uint64 }
+
+    Peer:
+      type: object
+      required: [peerId, role, agentName, fingerprintHex, framesForwarded, framesDropped]
+      properties:
+        peerId: { type: integer, format: uint32 }
+        role: { type: string, enum: [agent, client, admin, unknown] }
+        agentName: { type: string }
+        fingerprintHex: { type: string }
+        framesForwarded: { type: integer, format: uint32 }
+        framesDropped: { type: integer, format: uint32 }
+
+    Agent:
+      type: object
+      required: [peerId, interfaceCount, agentName, fingerprintHex]
+      properties:
+        peerId: { type: integer, format: uint32 }
+        interfaceCount: { type: integer, format: uint8 }
+        agentName: { type: string }
+        fingerprintHex: { type: string }
+
+    Client:
+      type: object
+      required:
+        [peerId, interfaceId, channel, agentName, interfaceName, framesForwarded, framesDropped]
+      properties:
+        peerId: { type: integer, format: uint32 }
+        interfaceId: { type: integer, format: uint32 }
+        channel:
+          type: [integer, 'null']
+          format: uint8
+          description: Open data-plane channel, or null when the client holds none.
+        agentName: { type: string }
+        interfaceName: { type: string }
+        framesForwarded: { type: integer, format: uint32 }
+        framesDropped: { type: integer, format: uint32 }
+
+    Interface:
+      type: object
+      required: [interfaceId, subscriberCount, framesReceived, agentName, interfaceName]
+      properties:
+        interfaceId: { type: integer, format: uint32 }
+        subscriberCount: { type: integer, format: uint8 }
+        framesReceived: { type: integer, format: uint64 }
+        agentName: { type: string }
+        interfaceName: { type: string }
+
+    Acl:
+      type: object
+      required: [fingerprintHex, agentName, interfaceName, level]
+      properties:
+        fingerprintHex: { type: string }
+        agentName: { type: string }
+        interfaceName: { type: string }
+        level: { $ref: '#/components/schemas/AclLevel' }
+
+    Pin:
+      type: object
+      required: [agentName, fingerprintHex]
+      properties:
+        agentName: { type: string }
+        fingerprintHex: { type: string }
+
+    ManagedUser:
+      type: object
+      required: [id, name, enabled, groupIds]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        enabled: { type: boolean }
+        groupIds:
+          type: array
+          items: { type: integer, format: int64 }
+
+    ManagedGroup:
+      type: object
+      required: [id, name, permissions]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        permissions:
+          type: array
+          items: { $ref: '#/components/schemas/Permission' }
+
+    AuditEntry:
+      type: object
+      required: [at, actor, action, target, status]
+      properties:
+        at: { type: integer, format: int64, description: Unix epoch seconds }
+        actor: { type: string }
+        action: { type: string }
+        target: { type: string }
+        status: { type: integer, format: uint16, description: HTTP status the request produced }
+
+    PinAddBody:
+      type: object
+      required: [agentName, fingerprintHex]
+      properties:
+        agentName: { type: string }
+        fingerprintHex: { type: string, description: sha256 hex }
+
+    AclBody:
+      type: object
+      required: [fingerprintHex, agentName, interfaceName]
+      properties:
+        fingerprintHex: { type: string, description: subject fingerprint, or '*' }
+        agentName: { type: string, description: object agent, or '*' }
+        interfaceName: { type: string, description: object interface, or '*' }
+        level:
+          allOf: [{ $ref: '#/components/schemas/AclLevel' }]
+          description: Required for grant; ignored by revoke.
+
+    InterfaceConfigBody:
+      type: object
+      required: [agentName, interfaceName, op]
+      properties:
+        agentName: { type: string }
+        interfaceName: { type: string }
+        op: { $ref: '#/components/schemas/IfconfigOp' }
+        bitrate:
+          type: integer
+          format: uint32
+          description: Required for op=bitrate; 1..=1000000 (classic CAN).
+          minimum: 1
+          maximum: 1000000
+
+    CreateUserBody:
+      type: object
+      required: [name, password]
+      properties:
+        name: { type: string }
+        password: { type: string, minLength: 8 }
+        enabled: { type: boolean, default: true }
+
+    EnabledBody:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+
+    NameBody:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+
+    MembershipBody:
+      type: object
+      required: [groupId]
+      properties:
+        groupId: { type: integer, format: int64 }
+
+    PermissionsBody:
+      type: object
+      required: [permissions]
+      properties:
+        permissions:
+          type: array
+          items: { $ref: '#/components/schemas/Permission' }
+
+    PasswordBody:
+      type: object
+      required: [password]
+      properties:
+        password: { type: string, minLength: 8 }
+
+    TelemetryFrame:
+      type: object
+      description: One WebSocket telemetry message (absolute counters + rates since the last sample).
+      required: [received, forwarded, dropped, unroutable, rates, interfaces]
+      properties:
+        received: { type: integer, format: uint64 }
+        forwarded: { type: integer, format: uint64 }
+        dropped: { type: integer, format: uint64 }
+        unroutable: { type: integer, format: uint64 }
+        rates:
+          type: object
+          required: [receivedPerS, forwardedPerS, droppedPerS, unroutablePerS]
+          properties:
+            receivedPerS: { type: number, format: double }
+            forwardedPerS: { type: number, format: double }
+            droppedPerS: { type: number, format: double }
+            unroutablePerS: { type: number, format: double }
+        interfaces:
+          type: array
+          items:
+            type: object
+            required: [interfaceId, agentName, interfaceName, framesReceived, framesPerS]
+            properties:
+              interfaceId: { type: integer, format: uint32 }
+              agentName: { type: string }
+              interfaceName: { type: string }
+              framesReceived: { type: integer, format: uint64 }
+              framesPerS: { type: number, format: double }
+
+security:
+  - cookieAuth: []
+  - cookieAuth: []
+    csrfToken: []
