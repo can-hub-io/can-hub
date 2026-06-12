@@ -1,27 +1,37 @@
 import { api } from '../api'
 import { usePolling } from '../hooks'
+import { Badge } from './ui/badge'
+import { Table, Tbody, Td, Th, Thead, Tr } from './ui/table'
+
+function statusVariant(status: number): 'success' | 'warning' | 'destructive' {
+  if (status < 400) return 'success'
+  if (status < 500) return 'warning'
+  return 'destructive'
+}
 
 export function Audit() {
   const { data, error } = usePolling(api.listAudit, 5000)
-  if (error) return <p className="error">{error}</p>
-  if (!data) return <p>Loading…</p>
-  if (data.length === 0) return <p>No audited actions yet.</p>
+  if (error) return <p className="text-sm text-red-600">{error}</p>
+  if (!data) return <p className="text-gray-500">Loading…</p>
+  if (data.length === 0) return <p className="text-gray-500">No audited actions yet.</p>
   return (
-    <table>
-      <thead>
-        <tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th className="num">Status</th></tr>
-      </thead>
-      <tbody>
+    <Table>
+      <Thead>
+        <Tr className="hover:bg-transparent">
+          <Th>When</Th><Th>Actor</Th><Th>Action</Th><Th>Target</Th><Th className="text-right">Status</Th>
+        </Tr>
+      </Thead>
+      <Tbody>
         {data.map((entry, index) => (
-          <tr key={index}>
-            <td>{new Date(entry.at * 1000).toLocaleString()}</td>
-            <td>{entry.actor}</td>
-            <td>{entry.action}</td>
-            <td>{entry.target}</td>
-            <td className="num">{entry.status}</td>
-          </tr>
+          <Tr key={index}>
+            <Td className="whitespace-nowrap text-gray-500">{new Date(entry.at * 1000).toLocaleString()}</Td>
+            <Td className="font-medium text-gray-900">{entry.actor}</Td>
+            <Td className="font-mono text-xs">{entry.action}</Td>
+            <Td className="font-mono text-xs">{entry.target}</Td>
+            <Td className="text-right"><Badge variant={statusVariant(entry.status)}>{entry.status}</Badge></Td>
+          </Tr>
         ))}
-      </tbody>
-    </table>
+      </Tbody>
+    </Table>
   )
 }

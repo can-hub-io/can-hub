@@ -2,6 +2,12 @@ import { useState } from 'react'
 import { api, PERMISSION, type IfconfigOp } from '../api'
 import { useAction, usePolling } from '../hooks'
 import { can } from '../lib'
+import { Button } from './ui/button'
+import { Input } from './ui/input'
+import { Table, Tbody, Td, Th, Thead, Tr } from './ui/table'
+
+const selectClass =
+  'h-9 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40'
 
 export function Interfaces({ permissions }: { permissions: string[] }) {
   const { data, error, refresh } = usePolling(api.interfaces)
@@ -13,53 +19,54 @@ export function Interfaces({ permissions }: { permissions: string[] }) {
 
   const apply = () => {
     const iface = (data ?? []).find((i) => `${i.agentName}/${i.interfaceName}` === selected)
-    if (!iface) {
-      action.setError('select an interface')
-      return
-    }
+    if (!iface) return action.setError('select an interface')
     action.run(() => api.interfaceConfig(iface.agentName, iface.interfaceName, op, bitrate))
   }
 
   return (
-    <section>
-      {error && <p className="error">{error}</p>}
-      {action.error && <p className="error">{action.error}</p>}
+    <div className="space-y-4">
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {action.error && <p className="text-sm text-red-600">{action.error}</p>}
       {allowConfig && (
-        <div className="form">
-          <select value={selected} onChange={(e) => setSelected(e.target.value)}>
+        <div className="flex flex-wrap items-center gap-2">
+          <select className={selectClass} value={selected} onChange={(e) => setSelected(e.target.value)}>
             <option value="">interface…</option>
             {(data ?? []).map((i) => {
               const name = `${i.agentName}/${i.interfaceName}`
               return <option key={i.interfaceId} value={name}>{name}</option>
             })}
           </select>
-          <select value={op} onChange={(e) => setOp(e.target.value as IfconfigOp)}>
+          <select className={selectClass} value={op} onChange={(e) => setOp(e.target.value as IfconfigOp)}>
             <option value="bitrate">set bitrate</option>
             <option value="up">link up</option>
             <option value="down">link down</option>
           </select>
           {op === 'bitrate' && (
-            <input type="number" value={bitrate} onChange={(e) => setBitrate(Number(e.target.value))} style={{ width: 110 }} />
+            <Input type="number" className="w-32" value={bitrate} onChange={(e) => setBitrate(Number(e.target.value))} />
           )}
-          <button onClick={apply}>Apply</button>
+          <Button onClick={apply}>Apply</Button>
         </div>
       )}
 
-      <table>
-        <thead>
-          <tr><th>Interface</th><th className="num">Subscribers</th><th className="num">Frames</th></tr>
-        </thead>
-        <tbody>
+      <Table>
+        <Thead>
+          <Tr className="hover:bg-transparent">
+            <Th>Interface</Th><Th className="text-right">Subscribers</Th><Th className="text-right">Frames</Th>
+          </Tr>
+        </Thead>
+        <Tbody>
           {(data ?? []).map((i) => (
-            <tr key={i.interfaceId}>
-              <td>{i.agentName}/{i.interfaceName}</td>
-              <td className="num">{i.subscriberCount}</td>
-              <td className="num">{i.framesReceived.toLocaleString()}</td>
-            </tr>
+            <Tr key={i.interfaceId}>
+              <Td className="font-mono text-gray-800">{i.agentName}/{i.interfaceName}</Td>
+              <Td className="text-right tabular-nums">{i.subscriberCount}</Td>
+              <Td className="text-right tabular-nums">{i.framesReceived.toLocaleString()}</Td>
+            </Tr>
           ))}
-          {data && data.length === 0 && <tr><td colSpan={3}>None.</td></tr>}
-        </tbody>
-      </table>
-    </section>
+          {data && data.length === 0 && (
+            <Tr className="hover:bg-transparent"><Td className="text-gray-500" colSpan={3}>None.</Td></Tr>
+          )}
+        </Tbody>
+      </Table>
+    </div>
   )
 }

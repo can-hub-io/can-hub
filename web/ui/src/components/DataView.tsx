@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react'
 import { useAction, usePolling } from '../hooks'
+import { Table, Tbody, Td, Th, Thead, Tr } from './ui/table'
 
 export interface Column<T> {
   header: string
@@ -7,8 +8,6 @@ export interface Column<T> {
   num?: boolean
 }
 
-// A polled table. `actions`, when given, renders a trailing per-row cell and
-// receives `run` to execute a mutating action with inline error reporting.
 export function DataView<T>({ fetcher, columns, rowKey, actions }: {
   fetcher: () => Promise<T[]>
   columns: Column<T>[]
@@ -17,28 +16,30 @@ export function DataView<T>({ fetcher, columns, rowKey, actions }: {
 }) {
   const { data, error, refresh } = usePolling(fetcher)
   const action = useAction(refresh)
-  if (error) return <p className="error">{error}</p>
-  if (!data) return <p>Loading…</p>
-  if (data.length === 0) return <p>None.</p>
+  if (error) return <p className="text-sm text-red-600">{error}</p>
+  if (!data) return <p className="text-gray-500">Loading…</p>
+  if (data.length === 0) return <p className="text-gray-500">None.</p>
   return (
-    <section>
-      {action.error && <p className="error">{action.error}</p>}
-      <table>
-        <thead>
-          <tr>
-            {columns.map((c) => <th key={c.header} className={c.num ? 'num' : ''}>{c.header}</th>)}
-            {actions && <th></th>}
-          </tr>
-        </thead>
-        <tbody>
+    <div className="space-y-3">
+      {action.error && <p className="text-sm text-red-600">{action.error}</p>}
+      <Table>
+        <Thead>
+          <Tr className="hover:bg-transparent">
+            {columns.map((c) => <Th key={c.header} className={c.num ? 'text-right' : ''}>{c.header}</Th>)}
+            {actions && <Th className="text-right"></Th>}
+          </Tr>
+        </Thead>
+        <Tbody>
           {data.map((row) => (
-            <tr key={rowKey(row)}>
-              {columns.map((c) => <td key={c.header} className={c.num ? 'num' : ''}>{c.render(row)}</td>)}
-              {actions && <td className="num">{actions(row, action.run)}</td>}
-            </tr>
+            <Tr key={rowKey(row)}>
+              {columns.map((c) => (
+                <Td key={c.header} className={c.num ? 'text-right tabular-nums' : ''}>{c.render(row)}</Td>
+              ))}
+              {actions && <Td className="text-right"><div className="flex justify-end gap-2">{actions(row, action.run)}</div></Td>}
+            </Tr>
           ))}
-        </tbody>
-      </table>
-    </section>
+        </Tbody>
+      </Table>
+    </div>
   )
 }
