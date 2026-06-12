@@ -29,11 +29,13 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs dec
 - [x] admin client action methods unit-tested; endpoints map hub status→200/409, bad input→400, hub-down→502 (smoke verified)
 
 ## Phase 4 — Auth (#86)
-- [ ] `web.db` schema: users (argon2id), groups, membership, permission classes
-- [ ] login + server-side sessions (HttpOnly cookie, idle + absolute expiry)
+- [x] `web.db` schema + store: users (argon2id), groups, group_permissions, user_groups, sessions. 11 unit tests (in-memory SQLite): create/verify, disabled login, dup conflict, permission union, session lifecycle + expiry, cascade delete
+- [x] Permission classes (views.read/peers.kick/interfaces.config/pins.manage/acl.manage/users.manage); effective = union across groups
+- [x] server-side sessions: 256-bit token, idle (12h) + absolute (7d) expiry, last_seen refresh
+- [ ] HTTP login/logout + HttpOnly session cookie
 - [ ] permission middleware on every REST route + WS subscription
 - [ ] bootstrap: setup page on zero users + `--add-user` headless
-- [ ] user/group management UI (users.manage)
+- [ ] user/group management endpoints + UI (users.manage)
 
 ## Phase 5 — Hardening + audit (#87)
 - [ ] CSRF token on mutating requests
