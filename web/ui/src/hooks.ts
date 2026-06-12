@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api, telemetryUrl, type AuthState, type TelemetryFrame } from './api'
 
 // Current auth state (bootstrap needed / authenticated / permissions).
@@ -12,8 +12,14 @@ export function useAuth() {
     }
   }, [])
   useEffect(() => {
-    reload()
-  }, [reload])
+    let active = true
+    api.authState()
+      .then((next) => active && setState(next))
+      .catch(() => active && setState({ needsBootstrap: false, authenticated: false, user: null, permissions: [], csrfToken: null }))
+    return () => {
+      active = false
+    }
+  }, [])
   return { state, reload }
 }
 
@@ -22,14 +28,12 @@ export function usePolling<T>(fetcher: () => Promise<T>, intervalMs = 2000) {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [version, setVersion] = useState(0)
-  const fetcherRef = useRef(fetcher)
-  fetcherRef.current = fetcher
 
   useEffect(() => {
     let active = true
     const load = async () => {
       try {
-        const result = await fetcherRef.current()
+        const result = await fetcher()
         if (active) {
           setData(result)
           setError(null)
@@ -44,11 +48,30 @@ export function usePolling<T>(fetcher: () => Promise<T>, intervalMs = 2000) {
       active = false
       clearInterval(timer)
     }
-  }, [intervalMs, version])
+  }, [fetcher, intervalMs, version])
 
   // Trigger an immediate reload (e.g. after a mutating action).
-  const refresh = () => setVersion((v) => v + 1)
+  const refresh = useCallback(() => setVersion((v) => v + 1), [])
   return { data, error, refresh }
+}
+
+// Run a mutating action, surfacing failures as an inline error string instead
+// of an alert(). On success the supplied refresh runs.
+export function useAction(refresh: () => void) {
+  const [error, setError] = useState<string | null>(null)
+  const run = useCallback(
+    async (action: () => Promise<void>) => {
+      setError(null)
+      try {
+        await action()
+        refresh()
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause))
+      }
+    },
+    [refresh],
+  )
+  return { error, run, setError }
 }
 
 // Subscribe to the telemetry WebSocket, reconnecting if it drops. Returns the

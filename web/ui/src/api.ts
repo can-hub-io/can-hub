@@ -76,6 +76,17 @@ export interface AuditEntry {
 // CSRF token from the current session, echoed on mutating requests.
 let csrfToken: string | null = null
 
+// Called when any request comes back 401, so the app can drop to the login
+// screen (and stop the telemetry socket) the moment a session expires.
+let unauthorizedHandler: (() => void) | null = null
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  unauthorizedHandler = handler
+}
+
+function noteStatus(status: number) {
+  if (status === 401) unauthorizedHandler?.()
+}
+
 export interface ManagedUser {
   id: number
   name: string
@@ -114,6 +125,7 @@ export interface TelemetryFrame {
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(path)
   if (!response.ok) {
+    noteStatus(response.status)
     const detail = await response.json().catch(() => null)
     throw new Error(detail?.error ?? `request failed (${response.status})`)
   }
@@ -134,6 +146,7 @@ async function send(path: string, method: string, body?: unknown): Promise<void>
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (!response.ok) {
+    noteStatus(response.status)
     const detail = await response.json().catch(() => null)
     throw new Error(detail?.error ?? `request failed (${response.status})`)
   }
@@ -150,6 +163,7 @@ async function sendJson<T extends { csrfToken?: string | null }>(
     body: JSON.stringify(body),
   })
   if (!response.ok) {
+    noteStatus(response.status)
     const detail = await response.json().catch(() => null)
     throw new Error(detail?.error ?? `request failed (${response.status})`)
   }
@@ -190,7 +204,10 @@ export const api = {
   },
   login: (name: string, password: string) => sendJson<AuthState>('/api/login', 'POST', { name, password }),
   setup: (name: string, password: string) => sendJson<AuthState>('/api/setup', 'POST', { name, password }),
-  logout: () => send('/api/logout', 'POST'),
+  logout: async () => {
+    await send('/api/logout', 'POST')
+    csrfToken = null
+  },
   changeOwnPassword: (currentPassword: string, newPassword: string) =>
     send('/api/auth/password', 'POST', { currentPassword, newPassword }),
   listAudit: () => getJson<AuditEntry[]>('/api/audit'),

@@ -110,31 +110,31 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Milestone 5 — UI/UX (one commit)
 
-- [ ] **Hide actions the user cannot perform.** Kick buttons render with only
+- [x] **Hide actions the user cannot perform.** Kick buttons render with only
   `views.read`, the ifconfig form without `interfaces.config`; clicking
   yields a 403 alert. `AuthState.permissions` is already in the client: gate
   the action column / config form (App.tsx `Peers`/`Agents`/`Interfaces`).
-- [ ] **Session expiry leaves the app broken.** 401s render as tab errors and
+- [x] **Session expiry leaves the app broken.** 401s render as tab errors and
   the telemetry WS reconnects every 2 s forever. Fix: on 401 from any fetch,
   reload auth state so the login screen comes back (e.g. an `onUnauthorized`
   hook in `api.ts`).
-- [ ] **Replace `alert()` and confirm destructive actions.** `runAction`
+- [x] **Replace `alert()` and confirm destructive actions.** `runAction`
   (App.tsx:154) alerts on error; kick / delete user / delete group / delete
   pin / revoke ACL fire with no confirmation. Inline error area per section +
   a confirm step. Dependency-free.
-- [ ] **One-click TOFU enrollment.** Agents view already shows the
+- [x] **One-click TOFU enrollment.** Agents view already shows the
   fingerprint; join `/api/pins` to badge each agent pinned/unpinned and add a
   "Pin" button on unpinned agents (pins.manage) instead of copy-pasting into
   the Pins tab.
-- [ ] **Peers: transport column.** peer_id ranges encode the transport
+- [x] **Peers: transport column.** peer_id ranges encode the transport
   (tcp 0x1, unix 0x40000001, quic 0x80000001, tls 0xC0000001 — hub_main.c);
   decode UI-side.
-- [ ] **Clients ↔ ACL correlation.** Client entries carry no fingerprint;
+- [x] **Clients ↔ ACL correlation.** Client entries carry no fingerprint;
   join with `/api/peers` by `peerId` UI-side so a channel can be matched to
   its ACL subject.
-- [ ] **Split `App.tsx` (578 lines)** into one component per tab under
+- [x] **Split `App.tsx` (578 lines)** into one component per tab under
   `web/ui/src/components/`.
-- [ ] Minors: bootstrap form gets a password-confirmation field; login inputs
+- [x] Minors: bootstrap form gets a password-confirmation field; login inputs
   get `autocomplete="username"`/`"current-password"`; default tab must be a
   permitted one (App.tsx:90 — a user without views.read currently lands on a
   broken Dashboard); clear the module-level CSRF token on logout (api.ts);
