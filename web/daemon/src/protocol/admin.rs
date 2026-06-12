@@ -1,9 +1,8 @@
 //! Admin message family (0x10..=0x2B): request encoders and reply decoders.
 //!
-//! Only the layouts specified in `doc/protocol.md` are implemented here. The
-//! pin/ACL mutations (0x22, 0x24..=0x29) have no payload layout in the spec
-//! yet; their codecs are deferred until the layout is taken from the
-//! authoritative C codec in `src/protocol/` (see doc/web-admin-build-log.md).
+//! The layouts mirror the authoritative C codec in
+//! `src/protocol/admin_message.c`, including the pin/ACL mutations
+//! (0x22, 0x24..=0x29).
 
 use super::{
     read_fixed_str, read_u16, read_u32, read_u64, write_fixed_str, DecodeError, Header,

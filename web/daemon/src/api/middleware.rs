@@ -39,13 +39,11 @@ pub(crate) async fn require_permission(
     let csrf_header = request.headers().get(CSRF_HEADER).and_then(|v| v.to_str().ok()).map(str::to_string);
     let token = cookie_value(request.headers(), SESSION_COOKIE);
 
-    let session = match token {
-        Some(token) => match with_auth(&state, move |store| store.validate_session(&token)).await {
-            Ok(Some(session)) => session,
-            Ok(None) => return unauthorized(),
-            Err(error) => return error.into_response(),
-        },
-        None => return unauthorized(),
+    let Some(token) = token else { return unauthorized() };
+    let session = match with_auth(&state, move |store| store.validate_session(&token)).await {
+        Ok(Some(session)) => session,
+        Ok(None) => return unauthorized(),
+        Err(error) => return error.into_response(),
     };
     let user_id = session.user_id;
 

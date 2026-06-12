@@ -3,8 +3,8 @@
 //!
 //! Written over `std::io::{Read, Write}` so it is transport-agnostic and unit
 //! testable with an in-memory duplex; a real `std::os::unix::net::UnixStream`
-//! satisfies both traits directly. The async/axum integration wraps this in a
-//! later phase.
+//! satisfies both traits directly. The async layer drives it on a blocking
+//! task (see `hub_socket` and `api::with_admin`).
 
 use std::io::{self, Read, Write};
 

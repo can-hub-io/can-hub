@@ -1,8 +1,9 @@
 //! can-hub-web entry point.
 //!
-//! Phase 1 skeleton: parse the hub socket path and listen address, serve the
-//! REST API over axum, and shut down cleanly on SIGINT/SIGTERM. Auth, the
-//! embedded SPA assets and the WebSocket telemetry stream land in later phases.
+//! Parses the hub socket path, listen address and auth options, opens `web.db`,
+//! starts the telemetry poll loop, serves the REST API and embedded SPA over
+//! axum, and shuts down cleanly on SIGINT/SIGTERM. `--add-user` runs headless
+//! admin provisioning instead of serving.
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -14,6 +15,7 @@ use can_hub_web::login_limiter::LoginLimiter;
 use can_hub_web::telemetry;
 
 const TELEMETRY_INTERVAL: Duration = Duration::from_secs(1);
+const CLEANUP_INTERVAL: Duration = Duration::from_secs(3600);
 
 const DEFAULT_SOCKET_PATH: &str = "/run/can-hub/hub.sock";
 const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
@@ -59,6 +61,8 @@ async fn main() {
         run_add_user(&store, &name);
         return;
     }
+
+    tokio::spawn(purge_loop(Arc::clone(&store)));
 
     let socket_path: Arc<str> = Arc::from(options.socket_path.as_str());
     let telemetry_sender = telemetry::channel();
@@ -155,7 +159,8 @@ fn print_usage() {
          defaults: --connect {DEFAULT_SOCKET_PATH} --listen {DEFAULT_LISTEN} --db {DEFAULT_DB_PATH}\n\
          --assets serves a built SPA (web/ui/dist); omit it in dev (Vite proxy)\n\
          --secure-cookies marks the session cookie Secure (use behind a TLS reverse proxy)\n\
-         --trusted-proxy keys login rate limiting on X-Forwarded-For (only set behind a proxy you control)"
+         --trusted-proxy keys login rate limiting on X-Forwarded-For (only set behind a proxy you control)\n\
+         --version prints the version and exits"
     );
 }
 
@@ -166,6 +171,7 @@ fn run_add_user(store: &Mutex<AuthStore>, name: &str) {
     let password = match std::env::var("CANHUB_WEB_PASSWORD") {
         Ok(value) => value,
         Err(_) => {
+            eprintln!("(tip: set CANHUB_WEB_PASSWORD to avoid the password echoing on screen)");
             eprint!("password for {name}: ");
             use std::io::Write;
             let _ = std::io::stderr().flush();
@@ -190,6 +196,20 @@ fn run_add_user(store: &Mutex<AuthStore>, name: &str) {
         Err(error) => {
             eprintln!("failed to add user: {error:?}");
             std::process::exit(1);
+        }
+    }
+}
+
+/// Periodically drop expired sessions and trim the audit log.
+async fn purge_loop(store: Arc<Mutex<AuthStore>>) {
+    let mut ticker = tokio::time::interval(CLEANUP_INTERVAL);
+    loop {
+        ticker.tick().await;
+        let store = Arc::clone(&store);
+        let outcome =
+            tokio::task::spawn_blocking(move || store.lock().expect("auth mutex poisoned").purge_expired()).await;
+        if let Ok(Err(error)) = outcome {
+            tracing::warn!(?error, "session/audit cleanup failed");
         }
     }
 }

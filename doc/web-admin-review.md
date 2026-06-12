@@ -142,29 +142,29 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Milestone 6 — cleanup (one commit)
 
-- [ ] **Stale comments** (this codebase bans them): `main.rs:3` "Phase 1
+- [x] **Stale comments** (this codebase bans them): `main.rs:3` "Phase 1
   skeleton"; `api.rs:270` "permission gating … lands with auth in a later
   phase" (it landed); `api.rs:53` "Production packaging will embed" (it
   does); `protocol/admin.rs:4` "codecs are deferred" (they are implemented
   below).
-- [ ] **Guard-clause style** per CODE_STYLE (happy path first, flat):
+- [x] **Guard-clause style** per CODE_STYLE (happy path first, flat):
   `auth_state` (`api.rs:574`) nests two `if let`s — early-return the
   unauthenticated case; `require_permission` (`api.rs:688`) flattens its
   nested matches.
-- [ ] **`list_groups` N+1** (`store.rs:249`): re-prepares the permission
+- [x] **`list_groups` N+1** (`store.rs:249`): re-prepares the permission
   statement inside the loop; replace with one JOIN query.
-- [ ] **Store mutex held across argon2 (~100 ms).** `verify_login` hashes
+- [x] **Store mutex held across argon2 (~100 ms).** `verify_login` hashes
   under the global store lock, serializing every concurrent request's
   session validation. Fetch the hash under the lock, verify outside.
-- [ ] **Scaffold leftovers tracked in git**: `web/ui/src/assets/react.svg`,
+- [x] **Scaffold leftovers tracked in git**: `web/ui/src/assets/react.svg`,
   `vite.svg`, unused `hero.png` — delete.
-- [ ] **Cache headers in `embedded.rs`**: hashed `/assets/*` →
+- [x] **Cache headers in `embedded.rs`**: hashed `/assets/*` →
   `Cache-Control: public, max-age=31536000, immutable`; `index.html` →
   `no-cache`.
-- [ ] **Unknown `/api/*` returns the SPA.** Unmatched API paths fall through
+- [x] **Unknown `/api/*` returns the SPA.** Unmatched API paths fall through
   to the index.html fallback as 200 HTML; exclude `/api/` from the fallback
   and return 404 JSON.
-- [ ] Minors: `LoginLimiter` map never prunes IPs it does not see again
+- [x] Minors: `LoginLimiter` map never prunes IPs it does not see again
   (unbounded growth — global sweep on insert); expired sessions and audit
   rows accumulate with no cleanup (periodic DELETE); usage text omits
   `--version`; `run_add_user` echoes the password typed on stdin (termios

@@ -22,6 +22,10 @@ const SESSION_ABSOLUTE_SECS: i64 = 7 * 24 * 3600;
 /// store is the real boundary.
 pub const MIN_PASSWORD_LEN: usize = 8;
 
+/// Most recent audit rows kept by `purge_expired`; older ones are trimmed so
+/// the log cannot grow without bound.
+const AUDIT_RETAIN: i64 = 10_000;
+
 #[derive(Debug)]
 pub enum StoreError {
     Db(rusqlite::Error),
@@ -63,6 +67,15 @@ pub struct SessionTokens {
 pub struct SessionInfo {
     pub user_id: i64,
     pub csrf_token: String,
+}
+
+/// A user's stored credential, fetched cheaply under the store lock so the
+/// expensive argon2 verification can run off it (off the lock).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Credential {
+    pub user_id: i64,
+    pub password_hash: String,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -234,6 +247,25 @@ impl AuthStore {
         Ok(hash.is_some_and(|hash| verify_password(password, &hash)))
     }
 
+    /// Fetch a user's credential by name (the cheap, lock-held half of login;
+    /// the caller runs argon2 verification off the lock).
+    pub fn credential(&self, name: &str) -> Result<Option<Credential>, StoreError> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT id, password_hash, enabled FROM users WHERE name = ?1",
+                params![name],
+                |row| {
+                    Ok(Credential {
+                        user_id: row.get(0)?,
+                        password_hash: row.get(1)?,
+                        enabled: row.get::<_, i64>(2)? != 0,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
     pub fn user_name(&self, user_id: i64) -> Result<Option<String>, StoreError> {
         Ok(self
             .connection
@@ -329,16 +361,24 @@ impl AuthStore {
     }
 
     pub fn list_groups(&self) -> Result<Vec<Group>, StoreError> {
-        let mut statement = self.connection.prepare("SELECT id, name FROM groups ORDER BY name")?;
-        let bare: Vec<(i64, String)> =
-            statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?.collect::<Result<_, _>>()?;
-        let mut groups = Vec::with_capacity(bare.len());
-        for (id, name) in bare {
-            let mut permission_statement =
-                self.connection.prepare("SELECT permission FROM group_permissions WHERE group_id = ?1 ORDER BY permission")?;
-            let permissions: Vec<String> =
-                permission_statement.query_map(params![id], |row| row.get(0))?.collect::<Result<_, _>>()?;
-            groups.push(Group { id, name, permissions });
+        let mut statement = self.connection.prepare(
+            "SELECT g.id, g.name, gp.permission
+             FROM groups g
+             LEFT JOIN group_permissions gp ON gp.group_id = g.id
+             ORDER BY g.name, gp.permission",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?))
+        })?;
+        let mut groups: Vec<Group> = Vec::new();
+        for row in rows {
+            let (id, name, permission) = row?;
+            if groups.last().map(|group| group.id) != Some(id) {
+                groups.push(Group { id, name, permissions: Vec::new() });
+            }
+            if let Some(permission) = permission {
+                groups.last_mut().expect("just pushed").permissions.push(permission);
+            }
         }
         Ok(groups)
     }
@@ -451,6 +491,21 @@ impl AuthStore {
         self.connection.execute(
             "INSERT INTO audit_log (at, actor_id, actor, action, target, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![now(), actor_id, actor, action, target, status as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Delete sessions past their idle/absolute expiry and trim the audit log
+    /// to its most recent rows. Cheap; meant to run on a slow timer.
+    pub fn purge_expired(&self) -> Result<(), StoreError> {
+        let now = now();
+        self.connection.execute(
+            "DELETE FROM sessions WHERE ?1 - last_seen_at > ?2 OR ?1 - created_at > ?3",
+            params![now, SESSION_IDLE_SECS, SESSION_ABSOLUTE_SECS],
+        )?;
+        self.connection.execute(
+            "DELETE FROM audit_log WHERE id NOT IN (SELECT id FROM audit_log ORDER BY id DESC LIMIT ?1)",
+            params![AUDIT_RETAIN],
         )?;
         Ok(())
     }
@@ -751,6 +806,31 @@ mod tests {
         assert!(matches!(store.update_password(user, "short", None), Err(StoreError::Conflict(_))));
         assert!(store.verify_user_password(user, "password1").unwrap());
         assert!(!store.verify_user_password(user, "wrong").unwrap());
+    }
+
+    #[test]
+    fn list_groups_returns_permissions_per_group() {
+        let store = AuthStore::open_in_memory().unwrap();
+        let a = store.create_group("alpha").unwrap();
+        store.create_group("beta").unwrap(); // no permissions
+        store.set_group_permissions(a, &[Permission::ViewsRead, Permission::PeersKick]).unwrap();
+        let groups = store.list_groups().unwrap();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].name, "alpha");
+        assert_eq!(groups[0].permissions, vec!["peers.kick", "views.read"]);
+        assert_eq!(groups[1].name, "beta");
+        assert!(groups[1].permissions.is_empty());
+    }
+
+    #[test]
+    fn purge_expired_trims_audit_log() {
+        let store = AuthStore::open_in_memory().unwrap();
+        for index in 0..3 {
+            store.record_audit(None, "x", "POST", &format!("/api/{index}"), 200).unwrap();
+        }
+        store.purge_expired().unwrap();
+        // Recent rows are retained (well under AUDIT_RETAIN).
+        assert_eq!(store.list_audit(100).unwrap().len(), 3);
     }
 
     #[test]

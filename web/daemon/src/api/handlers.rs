@@ -12,6 +12,8 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use tokio::sync::broadcast;
 
+use crate::auth::password::verify_password;
+use crate::auth::store::Credential;
 use crate::auth::Permission;
 use crate::protocol::admin::{AclLevel, IfconfigOp};
 use crate::telemetry::TelemetryFrame;
@@ -201,26 +203,29 @@ pub(crate) async fn auth_state(
     headers: HeaderMap,
 ) -> Result<Json<AuthStateDto>, ApiError> {
     let needs_bootstrap = with_auth(&state, |store| store.user_count()).await? == 0;
-    if let Some(token) = cookie_value(&headers, SESSION_COOKIE) {
-        if let Some(session) = with_auth(&state, move |store| store.validate_session(&token)).await? {
-            let user_id = session.user_id;
-            let name = with_auth(&state, move |store| store.user_name(user_id)).await?;
-            let permissions = with_auth(&state, move |store| store.effective_permissions(user_id)).await?;
-            return Ok(Json(AuthStateDto {
-                needs_bootstrap,
-                authenticated: true,
-                user: name,
-                permissions: permission_names(&permissions),
-                csrf_token: Some(session.csrf_token),
-            }));
-        }
-    }
+    let anonymous = || {
+        Json(AuthStateDto {
+            needs_bootstrap,
+            authenticated: false,
+            user: None,
+            permissions: vec![],
+            csrf_token: None,
+        })
+    };
+
+    let Some(token) = cookie_value(&headers, SESSION_COOKIE) else { return Ok(anonymous()) };
+    let Some(session) = with_auth(&state, move |store| store.validate_session(&token)).await? else {
+        return Ok(anonymous());
+    };
+    let user_id = session.user_id;
+    let name = with_auth(&state, move |store| store.user_name(user_id)).await?;
+    let permissions = with_auth(&state, move |store| store.effective_permissions(user_id)).await?;
     Ok(Json(AuthStateDto {
         needs_bootstrap,
-        authenticated: false,
-        user: None,
-        permissions: vec![],
-        csrf_token: None,
+        authenticated: true,
+        user: name,
+        permissions: permission_names(&permissions),
+        csrf_token: Some(session.csrf_token),
     }))
 }
 
@@ -245,7 +250,8 @@ pub(crate) async fn login(
     }
 
     let verify_name = name.clone();
-    let user_id = with_auth(&state, move |store| store.verify_login(&verify_name, &password)).await?;
+    let credential = with_auth(&state, move |store| store.credential(&verify_name)).await?;
+    let user_id = verify_credential(credential, password).await;
     let Some(user_id) = user_id else {
         {
             let mut limiter = state.login_limiter.lock().expect("limiter poisoned");
@@ -316,6 +322,19 @@ pub(crate) async fn setup(State(state): State<AppState>, Json(body): Json<Creden
             csrf_token: Some(tokens.csrf_token),
         },
     ))
+}
+
+/// Verify a fetched credential without holding the store lock: argon2 runs on a
+/// blocking task so its ~100 ms cost does not serialize concurrent requests.
+async fn verify_credential(credential: Option<Credential>, password: String) -> Option<i64> {
+    let credential = credential?;
+    if !credential.enabled {
+        return None;
+    }
+    let user_id = credential.user_id;
+    let hash = credential.password_hash;
+    let verified = tokio::task::spawn_blocking(move || verify_password(&password, &hash)).await.unwrap_or(false);
+    verified.then_some(user_id)
 }
 
 /// Fire-and-forget audit record for the public auth endpoints (the gate

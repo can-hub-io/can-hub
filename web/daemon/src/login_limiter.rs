@@ -37,6 +37,17 @@ impl LoginLimiter {
     pub fn record_failure(&mut self, key: &str, now: Instant) {
         self.prune(key, now);
         self.failures.entry(key.to_string()).or_default().push(now);
+        self.sweep(now);
+    }
+
+    /// Drop every key whose failures have all aged out, so the map cannot grow
+    /// without bound from keys (IPs, names) seen once and never again.
+    fn sweep(&mut self, now: Instant) {
+        let window = self.window;
+        self.failures.retain(|_, times| {
+            times.retain(|&at| now.duration_since(at) < window);
+            !times.is_empty()
+        });
     }
 
     /// A successful login clears the key's failure history.
@@ -89,6 +100,17 @@ mod tests {
         assert!(!limiter.allowed("ip:127.0.0.1", now));
         limiter.record_success("ip:127.0.0.1");
         assert!(limiter.allowed("ip:127.0.0.1", now));
+    }
+
+    #[test]
+    fn stale_keys_are_swept_on_insert() {
+        let mut limiter = LoginLimiter::new(5, Duration::from_secs(60));
+        let start = Instant::now();
+        limiter.record_failure("ip:old", start);
+        // A much later failure for a different key sweeps the aged-out one.
+        limiter.record_failure("ip:new", start + Duration::from_secs(120));
+        assert!(!limiter.failures.contains_key("ip:old"));
+        assert!(limiter.failures.contains_key("ip:new"));
     }
 
     #[test]
