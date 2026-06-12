@@ -265,6 +265,15 @@ ADMIN_FORGET_REPLY (total 8)
 @4   status u8 (0 ok, 1 unknown agent)
 @5   reserved u8[3]
 
+ADMIN_PIN_ADD (total 200)
+@4   agent_name char[128]
+@132 fingerprint_hex char[65]  (sha256 hex, NUL-terminated)
+@197 reserved u8[3]
+
+ADMIN_PIN_ADD_REPLY (total 8)
+@4   status u8 (0 ok, non-zero: rejected)
+@5   reserved u8[3]
+
 ADMIN_KICK_PEER (total 8)
 @4   peer_id u32
 
@@ -325,6 +334,44 @@ ADMIN_CLIENTS_REPLY (total 8 + count * 164)
      +140 interface_name char[16]
      +156 frames_forwarded u32  (this channel, hub -> client)
      +160 frames_dropped u32    (this channel, dropped at the hub egress)
+
+ADMIN_ACL_SET (total 216)
+@4   agent_name char[128]      (object agent; * for any)
+@132 interface_name char[16]   (object interface; * for any)
+@148 fingerprint_hex char[65]  (subject client fingerprint; * for any)
+@213 can_read u8 (0/1)
+@214 can_write u8 (0/1)
+@215 reserved u8[1]
+
+ADMIN_ACL_SET_REPLY (total 8)
+@4   status u8 (0 ok, non-zero: rejected)
+@5   reserved u8[3]
+
+ADMIN_ACL_REVOKE (total 216)
+@4   agent_name char[128]      (object agent; * for any)
+@132 interface_name char[16]   (object interface; * for any)
+@148 fingerprint_hex char[65]  (subject client fingerprint; * for any)
+@213 reserved u8[3]            (can_read/can_write unused on revoke)
+
+ADMIN_ACL_REVOKE_REPLY (total 8)
+@4   status u8 (0 ok, 1 no matching grant)
+@5   reserved u8[3]
+
+ADMIN_ACL_LIST (total 8)
+@4   offset u16        (pagination start index)
+@6   reserved u16
+
+ADMIN_ACL_LIST_REPLY (total 8 + count * 212)
+@4   count u8          (0-16 entries in this reply)
+@5   flags u8          (bit 0: more entries beyond offset + count)
+@6   reserved u16
+@8   entries, each 212 bytes:
+     +0   agent_name char[128]
+     +128 interface_name char[16]
+     +144 fingerprint_hex char[65]
+     +209 can_read u8 (0/1)
+     +210 can_write u8 (0/1)
+     +211 reserved u8[1]
 ```
 
 Limits: agent name <= 127 chars, interface name 1-15 chars (Linux IFNAMSIZ), <= 16 interfaces per agent, error detail <= 63 chars.

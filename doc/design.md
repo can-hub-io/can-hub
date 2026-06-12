@@ -110,15 +110,15 @@ Protocol compatibility needs no license: adapters let socketcand or cannelloni c
 
 Both shims are deliberately client-hosted rather than hub listeners: it keeps the hub free of a second, unauthenticated plane and reuses the existing client ACLs instead of inventing a parallel exposure model. A hub-side listener shim (for protocols better terminated centrally) remains an option as an additional listener transport that translates to the broker's transport contract.
 
-### Web admin (design decided 2026-06-12, unbuilt)
+### Web admin (built, #14)
 
-A web panel for the same admin surface as `can-hub-cli`: peers, agents, clients, interfaces, live metrics, kick, interface config, pins and ACLs. Epic and phased sub-issues track the work (#14).
+A web panel for the same admin surface as `can-hub-cli`: peers, agents, clients, interfaces, live metrics, kick, interface config, pins and ACLs. Shipped as the optional `can-hub-web` package (`web/daemon` Rust backend + `web/ui` React SPA).
 
 - **Separate process, not embedded.** `can-hub-web` is an ordinary admin client of the hub unix socket (HELLO role admin, only accepted on local transports — so the daemon runs on the hub host) and an HTTP server towards browsers. The hub binary is untouched, gains no second unauthenticated plane, and the panel ships as an optional package — same posture as the client-hosted compatibility shims. The admin protocol (the binary 0x10–0x2B family) is the contract; the daemon is a sibling consumer of it alongside the CLI, never a wrapper around the CLI.
 - **Rust backend.** A separate process is not bound by the freestanding-C11 rule, so the daemon is Rust: a static single binary that matches the cross-arch deb packaging story, with a batteries-included HTTP+auth ecosystem (axum, serde, argon2, rusqlite, tower) so sessions, password hashing, CSRF and rate limiting are library work rather than hand-rolled C on a browser-facing parser. The admin codecs are fixed little-endian layouts, reimplemented from doc/protocol.md (or FFI to `src/protocol/`). C (reuses the codecs but hand-rolls the whole HTTP/auth surface) and Python (drags an interpreter into a static-binary product) were rejected; dependencies must stay AGPL-compatible (MIT/BSD/Apache).
 - **REST API + React UI.** The daemon exposes a first-class JSON REST API (scriptable) and serves a React + Vite SPA built at release time. Views map 1:1 to admin replies; the paginated pull views (16 entries/reply) are aggregated per request.
 - **Real-time telemetry over WebSocket, derived daemon-side.** The hub keeps cumulative monotonic counters (broker metrics, per-peer, per-interface) and stays pull-only — no hub-side metrics worker (the single-threaded epoll loop and freestanding domain forbid one). The daemon owns one poll loop over the admin counters, diffs successive samples into rates, and fans them out over WebSocket to all subscribed browsers (one poller for N browsers). A KPI that cannot be reconstructed from a cumulative counter (p99 latency, per-window histograms) would later live in a `metrics` domain module on the existing `Broker_Tick`, never a thread — out of scope for v1.
-- **Browser auth: users and groups.** The daemon holds full admin power over the socket, so authorization is enforced in the web layer: users (argon2id), groups, N:M membership, permissions keyed by operation class (`views.read`, `peers.kick`, `interfaces.config`, `pins.manage`, `acl.manage`, `users.manage`), effective permission the union across a user's groups. State lives in a separate `web.db` (hub.db and IdentityStorePort untouched). Server-side sessions over an HttpOnly cookie; first run with zero users forces an admin bootstrap (`--add-user` for headless provisioning). Default bind 127.0.0.1, TLS via reverse proxy.
+- **Browser auth: users and groups.** The daemon holds full admin power over the socket, so authorization is enforced in the web layer: users (argon2id), groups, N:M membership, permissions keyed by operation class (`views.read`, `peers.kick`, `interfaces.config`, `pins.manage`, `acl.manage`, `users.manage`), effective permission the union across a user's groups. State lives in a separate `web.db` (hub.db and IdentityStorePort untouched). Server-side sessions (token stored hashed) over an HttpOnly cookie, CSRF token on mutating requests, login audit log, per-IP + per-name login rate limiting (`--trusted-proxy` keys on X-Forwarded-For behind a proxy), security response headers, anti-lockout guards (the last `users.manage` holder cannot be removed), and self-service + admin password change. First run with zero users forces an admin bootstrap (`--add-user` for headless provisioning). Default bind 127.0.0.1, TLS via reverse proxy (`--secure-cookies`).
 
 ## Stories
 
@@ -131,10 +131,11 @@ Delivered:
 - Hardening & security — TOFU identities, mTLS, TLS-over-TCP, admin plane, backpressure/eviction, metrics.
 - Authorization & control — client ACLs, SUBSCRIBE id-mask filters, interface configuration (bitrate/link), socketcand shim.
 - Compatibility — `attach` mirrors a remote bus into a local vcan (bidirectional).
+- Web admin — `can-hub-web` daemon (REST + WebSocket telemetry) and React SPA over the admin socket, with browser auth (users/groups/permissions), audit, and the full admin surface.
 
 Pending work is tracked as GitHub issues, grouped by milestone (priority order — 0 users today, so adoption first, freeze last):
 
 - **Adoption & product** — namespaced interface names, bus-to-bus bridge rules, cansend syntax gaps, error-frame export.
-- **Reach** — microcontroller agent (lwIP + bxCAN), R-UDP transport, web admin panel.
+- **Reach** — microcontroller agent (lwIP + bxCAN), R-UDP transport.
 - **Protocol v1 freeze** — version negotiation, timestamp encoding decision, reconnect-matrix verification, then freeze (deprioritized while there are no users to break compat with).
 - **Backlog** — P2P phase 2 and deferred epics/polish.
