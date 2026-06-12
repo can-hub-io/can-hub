@@ -9,5 +9,6 @@
 pub mod admin_client;
 pub mod api;
 pub mod auth;
+pub mod login_limiter;
 pub mod protocol;
 pub mod telemetry;

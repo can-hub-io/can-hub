@@ -45,6 +45,30 @@ pub struct Group {
     pub permissions: Vec<String>,
 }
 
+/// Tokens minted with a session: the opaque session token (cookie) and the
+/// CSRF token the client echoes in a header on mutating requests.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionTokens {
+    pub session_token: String,
+    pub csrf_token: String,
+}
+
+/// A validated session's identity and CSRF token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionInfo {
+    pub user_id: i64,
+    pub csrf_token: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditEntry {
+    pub at: i64,
+    pub actor: String,
+    pub action: String,
+    pub target: String,
+    pub status: u16,
+}
+
 pub struct AuthStore {
     connection: Connection,
 }
@@ -90,7 +114,17 @@ impl AuthStore {
                  token TEXT PRIMARY KEY,
                  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                  created_at INTEGER NOT NULL,
-                 last_seen_at INTEGER NOT NULL
+                 last_seen_at INTEGER NOT NULL,
+                 csrf_token TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS audit_log (
+                 id INTEGER PRIMARY KEY,
+                 at INTEGER NOT NULL,
+                 actor_id INTEGER,
+                 actor TEXT NOT NULL,
+                 action TEXT NOT NULL,
+                 target TEXT NOT NULL,
+                 status INTEGER NOT NULL
              );",
         )?;
         Ok(())
@@ -265,31 +299,32 @@ impl AuthStore {
 
     // ----------------------------------------------------------- sessions
 
-    /// Open a session for a user, returning the opaque token to set as a
-    /// cookie.
-    pub fn create_session(&self, user_id: i64) -> Result<String, StoreError> {
-        let token = random_token();
+    /// Open a session for a user, returning the session token (cookie) and the
+    /// CSRF token the client echoes on mutating requests.
+    pub fn create_session(&self, user_id: i64) -> Result<SessionTokens, StoreError> {
+        let session_token = random_token();
+        let csrf_token = random_token();
         let now = now();
         self.connection.execute(
-            "INSERT INTO sessions (token, user_id, created_at, last_seen_at) VALUES (?1, ?2, ?3, ?3)",
-            params![token, user_id, now],
+            "INSERT INTO sessions (token, user_id, created_at, last_seen_at, csrf_token) VALUES (?1, ?2, ?3, ?3, ?4)",
+            params![session_token, user_id, now, csrf_token],
         )?;
-        Ok(token)
+        Ok(SessionTokens { session_token, csrf_token })
     }
 
-    /// Resolve a session token to its user id, enforcing idle and absolute
-    /// expiry. A valid session has its `last_seen_at` refreshed; an expired one
-    /// is deleted and resolves to None.
-    pub fn validate_session(&self, token: &str) -> Result<Option<i64>, StoreError> {
-        let row: Option<(i64, i64, i64)> = self
+    /// Resolve a session token to its user id and CSRF token, enforcing idle
+    /// and absolute expiry. A valid session has its `last_seen_at` refreshed;
+    /// an expired one is deleted and resolves to None.
+    pub fn validate_session(&self, token: &str) -> Result<Option<SessionInfo>, StoreError> {
+        let row: Option<(i64, i64, i64, String)> = self
             .connection
             .query_row(
-                "SELECT user_id, created_at, last_seen_at FROM sessions WHERE token = ?1",
+                "SELECT user_id, created_at, last_seen_at, csrf_token FROM sessions WHERE token = ?1",
                 params![token],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .optional()?;
-        let Some((user_id, created_at, last_seen_at)) = row else { return Ok(None) };
+        let Some((user_id, created_at, last_seen_at, csrf_token)) = row else { return Ok(None) };
 
         let now = now();
         let expired = now - last_seen_at > SESSION_IDLE_SECS || now - created_at > SESSION_ABSOLUTE_SECS;
@@ -298,12 +333,49 @@ impl AuthStore {
             return Ok(None);
         }
         self.connection.execute("UPDATE sessions SET last_seen_at = ?1 WHERE token = ?2", params![now, token])?;
-        Ok(Some(user_id))
+        Ok(Some(SessionInfo { user_id, csrf_token }))
     }
 
     pub fn delete_session(&self, token: &str) -> Result<(), StoreError> {
         self.connection.execute("DELETE FROM sessions WHERE token = ?1", params![token])?;
         Ok(())
+    }
+
+    // ----------------------------------------------------------- audit log
+
+    /// Record a mutating operation. `actor` is the user name (or a marker for
+    /// pre-auth events), `action` the method, `target` the path, `status` the
+    /// HTTP status the request produced.
+    pub fn record_audit(
+        &self,
+        actor_id: Option<i64>,
+        actor: &str,
+        action: &str,
+        target: &str,
+        status: u16,
+    ) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO audit_log (at, actor_id, actor, action, target, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![now(), actor_id, actor, action, target, status as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Most recent audit entries, newest first.
+    pub fn list_audit(&self, limit: i64) -> Result<Vec<AuditEntry>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT at, actor, action, target, status FROM audit_log ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit], |row| {
+            Ok(AuditEntry {
+                at: row.get(0)?,
+                actor: row.get(1)?,
+                action: row.get(2)?,
+                target: row.get(3)?,
+                status: row.get::<_, i64>(4)? as u16,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 }
 
@@ -385,11 +457,15 @@ mod tests {
     fn session_lifecycle() {
         let store = AuthStore::open_in_memory().unwrap();
         let user = store.create_user("admin", "pw", true).unwrap();
-        let token = store.create_session(user).unwrap();
-        assert_eq!(token.len(), 64);
-        assert_eq!(store.validate_session(&token).unwrap(), Some(user));
-        store.delete_session(&token).unwrap();
-        assert_eq!(store.validate_session(&token).unwrap(), None);
+        let tokens = store.create_session(user).unwrap();
+        assert_eq!(tokens.session_token.len(), 64);
+        assert_eq!(tokens.csrf_token.len(), 64);
+        assert_ne!(tokens.session_token, tokens.csrf_token);
+        let info = store.validate_session(&tokens.session_token).unwrap().unwrap();
+        assert_eq!(info.user_id, user);
+        assert_eq!(info.csrf_token, tokens.csrf_token);
+        store.delete_session(&tokens.session_token).unwrap();
+        assert_eq!(store.validate_session(&tokens.session_token).unwrap(), None);
     }
 
     #[test]
@@ -404,8 +480,20 @@ mod tests {
         let user = store.create_user("temp", "pw", true).unwrap();
         let group = store.create_group("g").unwrap();
         store.add_user_to_group(user, group).unwrap();
-        let token = store.create_session(user).unwrap();
+        let tokens = store.create_session(user).unwrap();
         store.delete_user(user).unwrap();
-        assert_eq!(store.validate_session(&token).unwrap(), None);
+        assert_eq!(store.validate_session(&tokens.session_token).unwrap(), None);
+    }
+
+    #[test]
+    fn audit_log_records_newest_first() {
+        let store = AuthStore::open_in_memory().unwrap();
+        store.record_audit(Some(1), "admin", "POST", "/api/peers/5/kick", 200).unwrap();
+        store.record_audit(Some(1), "admin", "DELETE", "/api/pins/ghost", 409).unwrap();
+        let entries = store.list_audit(10).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].target, "/api/pins/ghost");
+        assert_eq!(entries[0].status, 409);
+        assert_eq!(entries[1].action, "POST");
     }
 }

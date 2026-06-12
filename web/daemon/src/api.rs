@@ -6,14 +6,15 @@
 //! structs are mapped to camelCase DTOs so the React UI consumes stable shapes
 //! decoupled from the wire layout.
 
+use std::net::SocketAddr;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, Request, State};
+use axum::extract::{ConnectInfo, Path, Request, State};
 use axum::http::header::{COOKIE, SET_COOKIE};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
@@ -25,6 +26,7 @@ use tower_http::services::{ServeDir, ServeFile};
 use crate::admin_client::{AdminClient, AdminClientError};
 use crate::auth::store::{AuthStore, StoreError};
 use crate::auth::Permission;
+use crate::login_limiter::LoginLimiter;
 use crate::protocol::admin::{
     AclEntry, AclLevel, AgentEntry, ClientEntry, IfconfigOp, InterfaceEntry, PeerEntry, PinEntry,
     Status,
@@ -32,14 +34,18 @@ use crate::protocol::admin::{
 use crate::telemetry::TelemetryFrame;
 
 const SESSION_COOKIE: &str = "canhub_session";
+const CSRF_HEADER: &str = "x-csrf-token";
 
 /// Shared handler state: the hub admin socket, the telemetry broadcast every
-/// WebSocket subscriber reads from, and the auth store (web.db).
+/// WebSocket subscriber reads from, the auth store (web.db), the login rate
+/// limiter, and whether to mark the session cookie Secure (behind TLS).
 #[derive(Clone)]
 pub struct AppState {
     pub socket_path: Arc<str>,
     pub telemetry: broadcast::Sender<Arc<TelemetryFrame>>,
     pub auth: Arc<Mutex<AuthStore>>,
+    pub login_limiter: Arc<Mutex<LoginLimiter>>,
+    pub secure_cookies: bool,
 }
 
 /// Build the router. When `assets_dir` is set, the built SPA is served from it
@@ -69,7 +75,8 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
         .route("/api/pins", get(pins).post(pin_add))
         .route("/api/pins/{name}", delete(pin_delete))
         .route("/api/interfaces/config", post(interface_config))
-        // user/group management (users.manage)
+        // user/group management + audit (users.manage)
+        .route("/api/audit", get(list_audit_log))
         .route("/api/permissions", get(list_permissions))
         .route("/api/users", get(list_users).post(create_user))
         .route("/api/users/{id}", delete(delete_user))
@@ -549,6 +556,8 @@ struct AuthStateDto {
     authenticated: bool,
     user: Option<String>,
     permissions: Vec<String>,
+    /// Token the client echoes in the X-CSRF-Token header on mutating requests.
+    csrf_token: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -560,8 +569,8 @@ struct Credentials {
 async fn auth_state(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<AuthStateDto>, ApiError> {
     let needs_bootstrap = with_auth(&state, |store| store.user_count()).await? == 0;
     if let Some(token) = cookie_value(&headers, SESSION_COOKIE) {
-        let lookup_token = token.clone();
-        if let Some(user_id) = with_auth(&state, move |store| store.validate_session(&lookup_token)).await? {
+        if let Some(session) = with_auth(&state, move |store| store.validate_session(&token)).await? {
+            let user_id = session.user_id;
             let name = with_auth(&state, move |store| store.user_name(user_id)).await?;
             let permissions = with_auth(&state, move |store| store.effective_permissions(user_id)).await?;
             return Ok(Json(AuthStateDto {
@@ -569,28 +578,53 @@ async fn auth_state(State(state): State<AppState>, headers: HeaderMap) -> Result
                 authenticated: true,
                 user: name,
                 permissions: permission_names(&permissions),
+                csrf_token: Some(session.csrf_token),
             }));
         }
     }
-    Ok(Json(AuthStateDto { needs_bootstrap, authenticated: false, user: None, permissions: vec![] }))
+    Ok(Json(AuthStateDto {
+        needs_bootstrap,
+        authenticated: false,
+        user: None,
+        permissions: vec![],
+        csrf_token: None,
+    }))
 }
 
-async fn login(State(state): State<AppState>, Json(body): Json<Credentials>) -> Result<Response, ApiError> {
+async fn login(
+    State(state): State<AppState>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
+    Json(body): Json<Credentials>,
+) -> Result<Response, ApiError> {
+    let ip = remote.ip();
+    {
+        let mut limiter = state.login_limiter.lock().expect("limiter poisoned");
+        if !limiter.allowed(ip, std::time::Instant::now()) {
+            return Ok((StatusCode::TOO_MANY_REQUESTS, Json(ErrorBody { error: "too many attempts".into() }))
+                .into_response());
+        }
+    }
+
     let Credentials { name, password } = body;
     let verify_name = name.clone();
     let user_id = with_auth(&state, move |store| store.verify_login(&verify_name, &password)).await?;
     let Some(user_id) = user_id else {
+        state.login_limiter.lock().expect("limiter poisoned").record_failure(ip, std::time::Instant::now());
         return Ok((StatusCode::UNAUTHORIZED, Json(ErrorBody { error: "invalid credentials".into() })).into_response());
     };
-    let token = with_auth(&state, move |store| store.create_session(user_id)).await?;
+    state.login_limiter.lock().expect("limiter poisoned").record_success(ip);
+
+    let tokens = with_auth(&state, move |store| store.create_session(user_id)).await?;
     let permissions = with_auth(&state, move |store| store.effective_permissions(user_id)).await?;
     Ok(session_response(
-        &token,
+        &state,
+        &tokens.session_token,
         AuthStateDto {
             needs_bootstrap: false,
             authenticated: true,
             user: Some(name),
             permissions: permission_names(&permissions),
+            csrf_token: Some(tokens.csrf_token),
         },
     ))
 }
@@ -621,49 +655,85 @@ async fn setup(State(state): State<AppState>, Json(body): Json<Credentials>) -> 
         Ok(user_id)
     })
     .await?;
-    let token = with_auth(&state, move |store| store.create_session(user_id)).await?;
+    let tokens = with_auth(&state, move |store| store.create_session(user_id)).await?;
     Ok(session_response(
-        &token,
+        &state,
+        &tokens.session_token,
         AuthStateDto {
             needs_bootstrap: false,
             authenticated: true,
             user: Some(response_name),
             permissions: Permission::ALL.iter().map(|p| p.as_str().to_string()).collect(),
+            csrf_token: Some(tokens.csrf_token),
         },
     ))
 }
 
-fn session_response(token: &str, body: AuthStateDto) -> Response {
-    let cookie = format!("{SESSION_COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/");
+fn session_response(state: &AppState, token: &str, body: AuthStateDto) -> Response {
+    let secure = if state.secure_cookies { "; Secure" } else { "" };
+    let cookie = format!("{SESSION_COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/{secure}");
     let mut response = Json(body).into_response();
     response.headers_mut().insert(SET_COOKIE, HeaderValue::from_str(&cookie).expect("ascii cookie"));
     response
 }
 
 /// Permission gate: public paths pass; everything else needs a valid session
-/// and the operation class for the path.
+/// and the operation class for the path. Mutating requests additionally need a
+/// matching CSRF token, and are recorded in the audit log.
 async fn require_permission(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let path = request.uri().path().to_string();
     if is_public(&path) {
         return next.run(request).await;
     }
 
+    let method = request.method().clone();
+    let csrf_header = request.headers().get(CSRF_HEADER).and_then(|v| v.to_str().ok()).map(str::to_string);
     let token = cookie_value(request.headers(), SESSION_COOKIE);
-    let user_id = match token {
+
+    let session = match token {
         Some(token) => match with_auth(&state, move |store| store.validate_session(&token)).await {
-            Ok(Some(user_id)) => user_id,
+            Ok(Some(session)) => session,
             Ok(None) => return unauthorized(),
             Err(error) => return error.into_response(),
         },
         None => return unauthorized(),
     };
+    let user_id = session.user_id;
 
     let required = required_permission(&path);
     match with_auth(&state, move |store| store.effective_permissions(user_id)).await {
-        Ok(permissions) if permissions.contains(&required) => next.run(request).await,
-        Ok(_) => forbidden(),
-        Err(error) => error.into_response(),
+        Ok(permissions) if permissions.contains(&required) => {}
+        Ok(_) => return forbidden(),
+        Err(error) => return error.into_response(),
     }
+
+    let mutating = is_mutating(&method);
+    if mutating && csrf_header.as_deref() != Some(session.csrf_token.as_str()) {
+        return (StatusCode::FORBIDDEN, Json(ErrorBody { error: "missing or invalid CSRF token".into() }))
+            .into_response();
+    }
+
+    let response = next.run(request).await;
+
+    if mutating {
+        let actor = with_auth(&state, move |store| store.user_name(user_id))
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| format!("#{user_id}"));
+        let status = response.status().as_u16();
+        let action = method.to_string();
+        let _ = with_auth(&state, move |store| {
+            store.record_audit(Some(user_id), &actor, &action, &path, status)
+        })
+        .await;
+    }
+
+    response
+}
+
+fn is_mutating(method: &Method) -> bool {
+    matches!(*method, Method::POST | Method::PUT | Method::DELETE | Method::PATCH)
 }
 
 fn is_public(path: &str) -> bool {
@@ -680,7 +750,11 @@ fn required_permission(path: &str) -> Permission {
         Permission::AclManage
     } else if (path.starts_with("/api/peers/") || path.starts_with("/api/agents/")) && path.ends_with("/kick") {
         Permission::PeersKick
-    } else if path.starts_with("/api/users") || path.starts_with("/api/groups") || path == "/api/permissions" {
+    } else if path.starts_with("/api/users")
+        || path.starts_with("/api/groups")
+        || path.starts_with("/api/audit")
+        || path == "/api/permissions"
+    {
         Permission::UsersManage
     } else {
         Permission::ViewsRead
@@ -750,6 +824,26 @@ struct PermissionsBody {
 
 async fn list_permissions() -> Json<Vec<&'static str>> {
     Json(Permission::ALL.iter().map(|p| p.as_str()).collect())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuditDto {
+    at: i64,
+    actor: String,
+    action: String,
+    target: String,
+    status: u16,
+}
+
+async fn list_audit_log(State(state): State<AppState>) -> Result<Json<Vec<AuditDto>>, ApiError> {
+    let entries = with_auth(&state, |store| store.list_audit(200)).await?;
+    Ok(Json(
+        entries
+            .into_iter()
+            .map(|e| AuditDto { at: e.at, actor: e.actor, action: e.action, target: e.target, status: e.status })
+            .collect(),
+    ))
 }
 
 async fn list_users(State(state): State<AppState>) -> Result<Json<Vec<UserDto>>, ApiError> {

@@ -12,7 +12,7 @@ import {
 import { useAuth, usePolling, useTelemetry } from './hooks'
 import './App.css'
 
-type Tab = 'dashboard' | 'peers' | 'agents' | 'clients' | 'interfaces' | 'pins' | 'acls' | 'users'
+type Tab = 'dashboard' | 'peers' | 'agents' | 'clients' | 'interfaces' | 'pins' | 'acls' | 'users' | 'audit'
 
 // Each tab requires a permission to appear.
 const TABS: [Tab, string, string][] = [
@@ -24,6 +24,7 @@ const TABS: [Tab, string, string][] = [
   ['pins', 'Pins', PERMISSION.pinsManage],
   ['acls', 'ACLs', PERMISSION.aclManage],
   ['users', 'Users', PERMISSION.usersManage],
+  ['audit', 'Audit', PERMISSION.usersManage],
 ]
 
 function App() {
@@ -119,8 +120,34 @@ function Console({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) 
         {tab === 'pins' && <Pins />}
         {tab === 'acls' && <Acls />}
         {tab === 'users' && <Users />}
+        {tab === 'audit' && <Audit />}
       </main>
     </div>
+  )
+}
+
+function Audit() {
+  const { data, error } = usePolling(api.listAudit, 5000)
+  if (error) return <p className="error">{error}</p>
+  if (!data) return <p>Loading…</p>
+  if (data.length === 0) return <p>No audited actions yet.</p>
+  return (
+    <table>
+      <thead>
+        <tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th className="num">Status</th></tr>
+      </thead>
+      <tbody>
+        {data.map((entry, index) => (
+          <tr key={index}>
+            <td>{new Date(entry.at * 1000).toLocaleString()}</td>
+            <td>{entry.actor}</td>
+            <td>{entry.action}</td>
+            <td>{entry.target}</td>
+            <td className="num">{entry.status}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   )
 }
 

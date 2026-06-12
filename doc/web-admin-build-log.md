@@ -39,11 +39,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs dec
 - Secure cookie flag deferred to Phase 5 (needs TLS/proxy); audit log Phase 5
 
 ## Phase 5 — Hardening + audit (#87)
-- [ ] CSRF token on mutating requests
-- [ ] login rate limiting
-- [ ] secure cookie flags
-- [ ] audit log of mutating operations (actor/target/timestamp)
-- [ ] reverse-proxy / TLS deployment docs
+- [x] CSRF token on mutating requests: per-session token, returned by auth/state+login+setup, echoed in X-CSRF-Token; middleware rejects mismatched mutations (403). UI sends it automatically
+- [x] login rate limiting: per-IP, 5 failures/60s sliding window → 429 (in-memory, unit-tested with injected time)
+- [x] secure cookie flags: HttpOnly + SameSite=Strict always; `--secure-cookies` adds Secure (behind TLS)
+- [x] audit log: every mutating /api op recorded (actor/action/target/status) in middleware; GET /api/audit + Audit UI tab (users.manage)
+- [x] reverse-proxy / TLS deployment docs: web/README.md (build, run, bootstrap, nginx TLS example)
 
 ## Phase 6 — Packaging + docs (#88)
 - [ ] deb package (React build + Rust binary)
@@ -59,3 +59,4 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs dec
 - Phase 2 verified: 32 unit + 1 integration test (telemetry pipe over a real unix socket) green; WS upgrade returns 101; UI builds (tsc + vite). Telemetry interval 1s, broadcast capacity 16 (latest-wins for slow subscribers). Per-request admin connect still (pooling deferred).
 - Phase 3 verified: admin action methods unit-tested; endpoints smoke-tested (400/409/502). pins read codec added.
 - Phase 4 verified: 48 unit tests (incl. 11 auth) + 1 integration green; full auth flow smoke-tested end-to-end (bootstrap→cookie→gated access→logout→401, re-setup 409); permission gating proven (viewer 502 read / 403 mutate); `--add-user` headless works; UI builds with login/bootstrap/management.
+- Phase 5 verified: 52 unit tests + 1 integration green; smoke-tested CSRF (no token 403, with token 200), audit log records the action, login rate limit (5 ok, 6th → 429). web/README.md documents TLS reverse-proxy deployment + --secure-cookies.

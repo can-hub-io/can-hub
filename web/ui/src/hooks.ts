@@ -8,7 +8,7 @@ export function useAuth() {
     try {
       setState(await api.authState())
     } catch {
-      setState({ needsBootstrap: false, authenticated: false, user: null, permissions: [] })
+      setState({ needsBootstrap: false, authenticated: false, user: null, permissions: [], csrfToken: null })
     }
   }, [])
   useEffect(() => {

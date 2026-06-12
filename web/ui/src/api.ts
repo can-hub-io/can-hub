@@ -62,7 +62,19 @@ export interface AuthState {
   authenticated: boolean
   user: string | null
   permissions: string[]
+  csrfToken: string | null
 }
+
+export interface AuditEntry {
+  at: number
+  actor: string
+  action: string
+  target: string
+  status: number
+}
+
+// CSRF token from the current session, echoed on mutating requests.
+let csrfToken: string | null = null
 
 export interface ManagedUser {
   id: number
@@ -108,10 +120,17 @@ async function getJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>
 }
 
+function mutatingHeaders(hasBody: boolean): Record<string, string> {
+  const headers: Record<string, string> = {}
+  if (hasBody) headers['content-type'] = 'application/json'
+  if (csrfToken) headers['x-csrf-token'] = csrfToken
+  return headers
+}
+
 async function send(path: string, method: string, body?: unknown): Promise<void> {
   const response = await fetch(path, {
     method,
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+    headers: mutatingHeaders(body !== undefined),
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (!response.ok) {
@@ -120,17 +139,23 @@ async function send(path: string, method: string, body?: unknown): Promise<void>
   }
 }
 
-async function sendJson<T>(path: string, method: string, body: unknown): Promise<T> {
+async function sendJson<T extends { csrfToken?: string | null }>(
+  path: string,
+  method: string,
+  body: unknown,
+): Promise<T> {
   const response = await fetch(path, {
     method,
-    headers: { 'content-type': 'application/json' },
+    headers: mutatingHeaders(true),
     body: JSON.stringify(body),
   })
   if (!response.ok) {
     const detail = await response.json().catch(() => null)
     throw new Error(detail?.error ?? `request failed (${response.status})`)
   }
-  return response.json() as Promise<T>
+  const result = (await response.json()) as T
+  if ('csrfToken' in result) csrfToken = result.csrfToken ?? null
+  return result
 }
 
 export type AclLevel = 'none' | 'ro' | 'rw'
@@ -158,10 +183,15 @@ export const api = {
     send('/api/interfaces/config', 'POST', { agentName, interfaceName, op, bitrate }),
 
   // auth
-  authState: () => getJson<AuthState>('/api/auth/state'),
+  authState: async () => {
+    const state = await getJson<AuthState>('/api/auth/state')
+    csrfToken = state.csrfToken
+    return state
+  },
   login: (name: string, password: string) => sendJson<AuthState>('/api/login', 'POST', { name, password }),
   setup: (name: string, password: string) => sendJson<AuthState>('/api/setup', 'POST', { name, password }),
   logout: () => send('/api/logout', 'POST'),
+  listAudit: () => getJson<AuditEntry[]>('/api/audit'),
 
   // user/group management
   listPermissions: () => getJson<string[]>('/api/permissions'),
