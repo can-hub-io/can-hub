@@ -88,6 +88,7 @@ function AuthForm({ title, submitLabel, action, onDone }: {
 function Console({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) {
   const allowed = TABS.filter(([, , permission]) => auth.permissions.includes(permission))
   const [tab, setTab] = useState<Tab>(allowed[0]?.[0] ?? 'dashboard')
+  const [changingPassword, setChangingPassword] = useState(false)
 
   const logout = async () => {
     await api.logout()
@@ -100,9 +101,12 @@ function Console({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) 
         <div className="topbar">
           <h1>can-hub admin</h1>
           <span className="who">
-            {auth.user} <button onClick={logout}>Sign out</button>
+            {auth.user}{' '}
+            <button onClick={() => setChangingPassword((open) => !open)}>Change password</button>{' '}
+            <button onClick={logout}>Sign out</button>
           </span>
         </div>
+        {changingPassword && <ChangePassword onClose={() => setChangingPassword(false)} />}
         <nav>
           {allowed.map(([id, label]) => (
             <button key={id} className={id === tab ? 'active' : ''} onClick={() => setTab(id)}>
@@ -123,6 +127,65 @@ function Console({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) 
         {tab === 'audit' && <Audit />}
       </main>
     </div>
+  )
+}
+
+function ChangePassword({ onClose }: { onClose: () => void }) {
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState(false)
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setError(null)
+    if (next.length < 8) return setError('new password must be at least 8 characters')
+    if (next !== confirm) return setError('new passwords do not match')
+    try {
+      await api.changeOwnPassword(current, next)
+      setDone(true)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  if (done) {
+    return (
+      <div className="form" style={{ padding: '0.5rem 0' }}>
+        <span>Password changed. Other sessions were signed out.</span>
+        <button onClick={onClose}>Close</button>
+      </div>
+    )
+  }
+
+  return (
+    <form className="form" onSubmit={submit} style={{ padding: '0.5rem 0' }}>
+      <input
+        placeholder="current password"
+        type="password"
+        autoComplete="current-password"
+        value={current}
+        onChange={(e) => setCurrent(e.target.value)}
+      />
+      <input
+        placeholder="new password"
+        type="password"
+        autoComplete="new-password"
+        value={next}
+        onChange={(e) => setNext(e.target.value)}
+      />
+      <input
+        placeholder="confirm new password"
+        type="password"
+        autoComplete="new-password"
+        value={confirm}
+        onChange={(e) => setConfirm(e.target.value)}
+      />
+      <button type="submit">Update</button>
+      <button type="button" onClick={onClose}>Cancel</button>
+      {error && <span className="error">{error}</span>}
+    </form>
   )
 }
 
@@ -565,6 +628,14 @@ function Users() {
                 )
               })}
               <td className="num">
+                <button
+                  onClick={() => {
+                    const password = window.prompt(`New password for ${u.name} (min 8 chars)`)
+                    if (password) runAction(() => api.resetUserPassword(u.id, password), refreshAll)
+                  }}
+                >
+                  Reset pw
+                </button>{' '}
                 <button onClick={() => runAction(() => api.deleteManagedUser(u.id), refreshAll)}>Delete</button>
               </td>
             </tr>

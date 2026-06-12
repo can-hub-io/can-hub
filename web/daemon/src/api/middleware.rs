@@ -25,11 +25,12 @@ const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CurrentUser(pub i64);
 
-/// Permission gate for one route group: requires a valid session whose user
-/// holds `required`. Mutating requests additionally need a matching CSRF token,
-/// and are recorded in the audit log.
+/// Permission gate for one route group: requires a valid session, and — when a
+/// permission is declared — that the user holds it (`None` gates on
+/// authentication alone, for self-service routes). Mutating requests
+/// additionally need a matching CSRF token, and are recorded in the audit log.
 pub(crate) async fn require_permission(
-    State((state, required)): State<(AppState, Permission)>,
+    State((state, required)): State<(AppState, Option<Permission>)>,
     mut request: Request,
     next: Next,
 ) -> Response {
@@ -48,10 +49,12 @@ pub(crate) async fn require_permission(
     };
     let user_id = session.user_id;
 
-    match with_auth(&state, move |store| store.effective_permissions(user_id)).await {
-        Ok(permissions) if permissions.contains(&required) => {}
-        Ok(_) => return forbidden(),
-        Err(error) => return error.into_response(),
+    if let Some(required) = required {
+        match with_auth(&state, move |store| store.effective_permissions(user_id)).await {
+            Ok(permissions) if permissions.contains(&required) => {}
+            Ok(_) => return forbidden(),
+            Err(error) => return error.into_response(),
+        }
     }
 
     let mutating = is_mutating(&method);

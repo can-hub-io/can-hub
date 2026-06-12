@@ -262,6 +262,18 @@ pub(crate) struct PermissionsBody {
     pub permissions: Vec<String>,
 }
 
+#[derive(Deserialize)]
+pub(crate) struct PasswordBody {
+    pub password: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SelfPasswordBody {
+    pub current_password: String,
+    pub new_password: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AuditDto {

@@ -74,7 +74,11 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
         .route("/api/logout", post(handlers::logout))
         .route("/api/setup", post(handlers::setup));
 
-    let views = guarded(&state, Permission::ViewsRead, Router::new()
+    // Self-service: any authenticated user, no specific permission.
+    let authenticated = guarded(&state, None, Router::new()
+        .route("/api/auth/password", post(handlers::change_own_password)));
+
+    let views = guarded(&state, Some(Permission::ViewsRead), Router::new()
         .route("/api/status", get(handlers::status))
         .route("/api/peers", get(handlers::peers))
         .route("/api/agents", get(handlers::agents))
@@ -82,27 +86,28 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
         .route("/api/interfaces", get(handlers::interfaces))
         .route("/api/telemetry/ws", get(handlers::telemetry_ws)));
 
-    let peers_kick = guarded(&state, Permission::PeersKick, Router::new()
+    let peers_kick = guarded(&state, Some(Permission::PeersKick), Router::new()
         .route("/api/peers/{id}/kick", post(handlers::kick_peer))
         .route("/api/agents/{name}/kick", post(handlers::kick_agent)));
 
-    let interfaces_config = guarded(&state, Permission::InterfacesConfig, Router::new()
+    let interfaces_config = guarded(&state, Some(Permission::InterfacesConfig), Router::new()
         .route("/api/interfaces/config", post(handlers::interface_config)));
 
-    let pins_manage = guarded(&state, Permission::PinsManage, Router::new()
+    let pins_manage = guarded(&state, Some(Permission::PinsManage), Router::new()
         .route("/api/pins", get(handlers::pins).post(handlers::pin_add))
         .route("/api/pins/{name}", delete(handlers::pin_delete)));
 
-    let acl_manage = guarded(&state, Permission::AclManage, Router::new()
+    let acl_manage = guarded(&state, Some(Permission::AclManage), Router::new()
         .route("/api/acls", get(handlers::acls).post(handlers::acl_set))
         .route("/api/acls/revoke", post(handlers::acl_revoke)));
 
-    let users_manage = guarded(&state, Permission::UsersManage, Router::new()
+    let users_manage = guarded(&state, Some(Permission::UsersManage), Router::new()
         .route("/api/audit", get(handlers::list_audit_log))
         .route("/api/permissions", get(handlers::list_permissions))
         .route("/api/users", get(handlers::list_users).post(handlers::create_user))
         .route("/api/users/{id}", delete(handlers::delete_user))
         .route("/api/users/{id}/enabled", post(handlers::set_user_enabled))
+        .route("/api/users/{id}/password", post(handlers::reset_user_password))
         .route("/api/users/{id}/groups", post(handlers::add_membership))
         .route("/api/users/{id}/groups/{group_id}", delete(handlers::remove_membership))
         .route("/api/groups", get(handlers::list_groups).post(handlers::create_group))
@@ -110,6 +115,7 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
         .route("/api/groups/{id}/permissions", put(handlers::set_group_permissions)));
 
     let mut router = public
+        .merge(authenticated)
         .merge(views)
         .merge(peers_kick)
         .merge(interfaces_config)
@@ -152,7 +158,7 @@ fn with_security_headers(router: Router) -> Router {
 /// Wrap a group of routes in the session/permission/CSRF/audit gate for one
 /// permission class. The middleware carries its own `(state, permission)` so
 /// each group enforces exactly the permission it was declared with.
-fn guarded(state: &AppState, permission: Permission, router: Router<AppState>) -> Router<AppState> {
+fn guarded(state: &AppState, permission: Option<Permission>, router: Router<AppState>) -> Router<AppState> {
     router.route_layer(axum::middleware::from_fn_with_state((state.clone(), permission), require_permission))
 }
 

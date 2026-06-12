@@ -157,6 +157,43 @@ async fn unknown_api_route_is_404_not_spa() {
     assert_eq!(code, StatusCode::NOT_FOUND);
 }
 
+fn json_with_session(method: Method, path: &str, session: &SessionTokens, json: &str) -> Request<Body> {
+    build_request(method, path, Some(session), true, Some(json.to_string()))
+}
+
+#[tokio::test]
+async fn self_password_change_requires_authentication() {
+    let state = make_state();
+    let code = status_of(state, json_request(Method::POST, "/api/auth/password", r#"{"currentPassword":"x","newPassword":"newpassword"}"#)).await;
+    assert_eq!(code, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn self_password_change_checks_current_password() {
+    let state = make_state();
+    let session = seed_session(&state, "u", &[Permission::ViewsRead]);
+    let wrong = json_with_session(Method::POST, "/api/auth/password", &session, r#"{"currentPassword":"wrong","newPassword":"newpassword"}"#);
+    assert_eq!(status_of(state.clone(), wrong).await, StatusCode::BAD_REQUEST);
+    let right = json_with_session(Method::POST, "/api/auth/password", &session, r#"{"currentPassword":"password1","newPassword":"newpassword"}"#);
+    assert_eq!(status_of(state, right).await, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn admin_password_reset_needs_users_manage() {
+    let state = make_state();
+    let admin = seed_session(&state, "admin", &[Permission::UsersManage]);
+    let viewer = seed_session(&state, "viewer", &[Permission::ViewsRead]);
+    let target = {
+        let store = state.auth.lock().unwrap();
+        store.create_user("target", "password1", true).unwrap()
+    };
+    let path = format!("/api/users/{target}/password");
+    let denied = json_with_session(Method::POST, &path, &viewer, r#"{"password":"newpassword"}"#);
+    assert_eq!(status_of(state.clone(), denied).await, StatusCode::FORBIDDEN);
+    let ok = json_with_session(Method::POST, &path, &admin, r#"{"password":"newpassword"}"#);
+    assert_eq!(status_of(state, ok).await, StatusCode::OK);
+}
+
 #[tokio::test]
 async fn responses_carry_security_headers() {
     let response =

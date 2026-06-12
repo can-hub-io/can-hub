@@ -101,7 +101,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Milestone 4 — password change (one commit)
 
-- [ ] **No password change exists** (no `update_password` in the store); the
+- [x] **No password change exists** (no `update_password` in the store); the
   only recourse is delete+recreate, which loses id and memberships. Add:
   store `update_password(user_id, password)` invalidating the user's other
   sessions; `POST /api/users/{id}/password` (users.manage);

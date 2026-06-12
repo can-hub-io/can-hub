@@ -191,6 +191,8 @@ export const api = {
   login: (name: string, password: string) => sendJson<AuthState>('/api/login', 'POST', { name, password }),
   setup: (name: string, password: string) => sendJson<AuthState>('/api/setup', 'POST', { name, password }),
   logout: () => send('/api/logout', 'POST'),
+  changeOwnPassword: (currentPassword: string, newPassword: string) =>
+    send('/api/auth/password', 'POST', { currentPassword, newPassword }),
   listAudit: () => getJson<AuditEntry[]>('/api/audit'),
 
   // user/group management
@@ -199,6 +201,7 @@ export const api = {
   createManagedUser: (name: string, password: string) => send('/api/users', 'POST', { name, password }),
   deleteManagedUser: (id: number) => send(`/api/users/${id}`, 'DELETE'),
   setManagedUserEnabled: (id: number, enabled: boolean) => send(`/api/users/${id}/enabled`, 'POST', { enabled }),
+  resetUserPassword: (id: number, password: string) => send(`/api/users/${id}/password`, 'POST', { password }),
   addMembership: (id: number, groupId: number) => send(`/api/users/${id}/groups`, 'POST', { groupId }),
   removeMembership: (id: number, groupId: number) => send(`/api/users/${id}/groups/${groupId}`, 'DELETE'),
   listManagedGroups: () => getJson<ManagedGroup[]>('/api/groups'),

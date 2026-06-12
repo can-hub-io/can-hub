@@ -193,6 +193,47 @@ impl AuthStore {
         }
     }
 
+    /// Replace a user's password. Invalidates the user's sessions except an
+    /// optional one to keep (a user changing their own password stays logged in
+    /// on the current session; an admin resetting someone else's passes None,
+    /// forcing that user to re-authenticate everywhere).
+    pub fn update_password(
+        &self,
+        user_id: i64,
+        password: &str,
+        keep_session_token: Option<&str>,
+    ) -> Result<(), StoreError> {
+        if password.len() < MIN_PASSWORD_LEN {
+            return Err(StoreError::Conflict("password too short"));
+        }
+        let hash = hash_password(password).map_err(StoreError::Hash)?;
+        let transaction = self.connection.unchecked_transaction()?;
+        let updated =
+            transaction.execute("UPDATE users SET password_hash = ?1 WHERE id = ?2", params![hash, user_id])?;
+        if updated == 0 {
+            return Err(StoreError::Conflict("no such user"));
+        }
+        match keep_session_token {
+            Some(token) => transaction.execute(
+                "DELETE FROM sessions WHERE user_id = ?1 AND token != ?2",
+                params![user_id, hash_token(token)],
+            )?,
+            None => transaction.execute("DELETE FROM sessions WHERE user_id = ?1", params![user_id])?,
+        };
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Whether `password` matches the stored hash for `user_id` (for confirming
+    /// the current password on a self-service change).
+    pub fn verify_user_password(&self, user_id: i64, password: &str) -> Result<bool, StoreError> {
+        let hash: Option<String> = self
+            .connection
+            .query_row("SELECT password_hash FROM users WHERE id = ?1", params![user_id], |row| row.get(0))
+            .optional()?;
+        Ok(hash.is_some_and(|hash| verify_password(password, &hash)))
+    }
+
     pub fn user_name(&self, user_id: i64) -> Result<Option<String>, StoreError> {
         Ok(self
             .connection
@@ -679,6 +720,37 @@ mod tests {
         ));
         // And deleting that group is refused too.
         assert!(matches!(store.delete_group(group), Err(StoreError::Conflict(_))));
+    }
+
+    #[test]
+    fn update_password_keeps_current_session_and_drops_others() {
+        let store = AuthStore::open_in_memory().unwrap();
+        let user = store.create_user("op", "password1", true).unwrap();
+        let keep = store.create_session(user).unwrap();
+        let other = store.create_session(user).unwrap();
+        store.update_password(user, "newpassword", Some(&keep.session_token)).unwrap();
+        assert!(store.validate_session(&keep.session_token).unwrap().is_some());
+        assert_eq!(store.validate_session(&other.session_token).unwrap(), None);
+        assert_eq!(store.verify_login("op", "password1").unwrap(), None);
+        assert_eq!(store.verify_login("op", "newpassword").unwrap(), Some(user));
+    }
+
+    #[test]
+    fn admin_password_reset_drops_all_sessions() {
+        let store = AuthStore::open_in_memory().unwrap();
+        let user = store.create_user("op", "password1", true).unwrap();
+        let session = store.create_session(user).unwrap();
+        store.update_password(user, "newpassword", None).unwrap();
+        assert_eq!(store.validate_session(&session.session_token).unwrap(), None);
+    }
+
+    #[test]
+    fn update_password_rejects_short_and_verifies_current() {
+        let store = AuthStore::open_in_memory().unwrap();
+        let user = store.create_user("op", "password1", true).unwrap();
+        assert!(matches!(store.update_password(user, "short", None), Err(StoreError::Conflict(_))));
+        assert!(store.verify_user_password(user, "password1").unwrap());
+        assert!(!store.verify_user_password(user, "wrong").unwrap());
     }
 
     #[test]

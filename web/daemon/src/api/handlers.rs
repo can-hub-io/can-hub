@@ -389,6 +389,37 @@ pub(crate) async fn set_user_enabled(
     Ok(Json(ActionResult { ok: true }))
 }
 
+/// Admin password reset for another user: drops all that user's sessions so
+/// they must log in again with the new password.
+pub(crate) async fn reset_user_password(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<PasswordBody>,
+) -> ActionResponse {
+    with_auth(&state, move |store| store.update_password(id, &body.password, None)).await?;
+    Ok(Json(ActionResult { ok: true }))
+}
+
+/// Self-service password change: confirms the current password, then updates
+/// and keeps the caller's current session alive while dropping the others.
+pub(crate) async fn change_own_password(
+    State(state): State<AppState>,
+    Extension(actor): Extension<CurrentUser>,
+    headers: HeaderMap,
+    Json(body): Json<SelfPasswordBody>,
+) -> Result<Json<ActionResult>, ApiError> {
+    let user_id = actor.0;
+    let current = body.current_password;
+    let verified = with_auth(&state, move |store| store.verify_user_password(user_id, &current)).await?;
+    if !verified {
+        return Err(ApiError::BadRequest("current password is incorrect".into()));
+    }
+    let keep = cookie_value(&headers, SESSION_COOKIE);
+    let new_password = body.new_password;
+    with_auth(&state, move |store| store.update_password(user_id, &new_password, keep.as_deref())).await?;
+    Ok(Json(ActionResult { ok: true }))
+}
+
 pub(crate) async fn add_membership(
     State(state): State<AppState>,
     Path(id): Path<i64>,
