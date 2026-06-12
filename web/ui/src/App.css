@@ -96,6 +96,38 @@ th.num, td.num {
   color: #c0392b;
 }
 
+.form {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.form input,
+.form select {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #8886;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+button {
+  padding: 0.35rem 0.7rem;
+  border: 1px solid #8886;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+button:hover {
+  border-color: currentColor;
+}
+
 .dot {
   width: 9px;
   height: 9px;

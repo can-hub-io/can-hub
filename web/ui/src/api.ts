@@ -52,6 +52,11 @@ export interface Acl {
   level: string
 }
 
+export interface Pin {
+  agentName: string
+  fingerprintHex: string
+}
+
 export interface InterfaceRate {
   interfaceId: number
   agentName: string
@@ -83,6 +88,21 @@ async function getJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>
 }
 
+async function send(path: string, method: string, body?: unknown): Promise<void> {
+  const response = await fetch(path, {
+    method,
+    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null)
+    throw new Error(detail?.error ?? `request failed (${response.status})`)
+  }
+}
+
+export type AclLevel = 'none' | 'ro' | 'rw'
+export type IfconfigOp = 'bitrate' | 'up' | 'down'
+
 export const api = {
   status: () => getJson<Status>('/api/status'),
   peers: () => getJson<Peer[]>('/api/peers'),
@@ -90,6 +110,19 @@ export const api = {
   clients: () => getJson<Client[]>('/api/clients'),
   interfaces: () => getJson<Interface[]>('/api/interfaces'),
   acls: () => getJson<Acl[]>('/api/acls'),
+  pins: () => getJson<Pin[]>('/api/pins'),
+
+  kickPeer: (peerId: number) => send(`/api/peers/${peerId}/kick`, 'POST'),
+  kickAgent: (name: string) => send(`/api/agents/${encodeURIComponent(name)}/kick`, 'POST'),
+  pinAdd: (agentName: string, fingerprintHex: string) =>
+    send('/api/pins', 'POST', { agentName, fingerprintHex }),
+  pinDelete: (name: string) => send(`/api/pins/${encodeURIComponent(name)}`, 'DELETE'),
+  aclSet: (fingerprintHex: string, agentName: string, interfaceName: string, level: AclLevel) =>
+    send('/api/acls', 'POST', { fingerprintHex, agentName, interfaceName, level }),
+  aclRevoke: (fingerprintHex: string, agentName: string, interfaceName: string) =>
+    send('/api/acls/revoke', 'POST', { fingerprintHex, agentName, interfaceName }),
+  interfaceConfig: (agentName: string, interfaceName: string, op: IfconfigOp, bitrate: number) =>
+    send('/api/interfaces/config', 'POST', { agentName, interfaceName, op, bitrate }),
 }
 
 export function telemetryUrl(): string {

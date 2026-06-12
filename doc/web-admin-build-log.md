@@ -22,10 +22,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs dec
 - [x] Live dashboard: status cards + live rate cards + per-interface throughput table via WS
 
 ## Phase 3 — Admin actions (#85)
-- [ ] REST mutating endpoints + UI: kick peer / kick agent
-- [ ] interface set bitrate / up / down
-- [ ] pins add / delete
-- [ ] acl add / delete (grant editor)
+- [x] REST mutating endpoints + UI: kick peer / kick agent (POST /api/peers/{id}/kick, /api/agents/{name}/kick)
+- [x] interface set bitrate / up / down (POST /api/interfaces/config); UI config form
+- [x] pins add / delete (POST /api/pins, DELETE /api/pins/{name}) + pins list (added ADMIN_PINS codec) + UI tab
+- [x] acl add / delete (POST /api/acls, /api/acls/revoke); UI grant editor + revoke
+- [x] admin client action methods unit-tested; endpoints map hub status→200/409, bad input→400, hub-down→502 (smoke verified)
 
 ## Phase 4 — Auth (#86)
 - [ ] `web.db` schema: users (argon2id), groups, membership, permission classes

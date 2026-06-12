@@ -9,9 +9,10 @@
 use std::io::{self, Read, Write};
 
 use crate::protocol::admin::{
-    self, AclEntry, AgentEntry, ClientEntry, InterfaceEntry, Page, PeerEntry, Status,
+    self, AclEntry, AclLevel, AgentEntry, ClientEntry, IfconfigOp, InterfaceEntry, Page, PeerEntry,
+    PinEntry, Status,
 };
-use crate::protocol::{DecodeError, Header, Role, HEADER_SIZE};
+use crate::protocol::{DecodeError, Header, MessageType, Role, HEADER_SIZE};
 
 /// Pagination guard: replies cap at 16 entries, so this many pages covers any
 /// plausible catalogue while bounding a misbehaving peer that always sets the
@@ -88,6 +89,64 @@ impl<T: Read + Write> AdminClient<T> {
 
     pub fn acl_list(&mut self) -> Result<Vec<AclEntry>> {
         self.fetch_all(|offset| admin::encode_acl_list(offset).to_vec(), admin::decode_acl_list_reply)
+    }
+
+    pub fn pins(&mut self) -> Result<Vec<PinEntry>> {
+        self.fetch_all(|offset| admin::encode_pins(offset).to_vec(), admin::decode_pins_reply)
+    }
+
+    // --- mutating actions: each returns the reply's status byte (0 = ok) ---
+
+    pub fn kick_agent(&mut self, agent_name: &str) -> Result<u8> {
+        let reply = self.exchange(&admin::encode_kick(agent_name))?;
+        Ok(admin::decode_status_byte(&reply, MessageType::AdminKickReply)?)
+    }
+
+    pub fn kick_peer(&mut self, peer_id: u32) -> Result<u8> {
+        let reply = self.exchange(&admin::encode_kick_peer(peer_id))?;
+        Ok(admin::decode_status_byte(&reply, MessageType::AdminKickPeerReply)?)
+    }
+
+    pub fn pin_add(&mut self, agent_name: &str, fingerprint_hex: &str) -> Result<u8> {
+        let reply = self.exchange(&admin::encode_pin_add(agent_name, fingerprint_hex))?;
+        Ok(admin::decode_status_byte(&reply, MessageType::AdminPinAddReply)?)
+    }
+
+    pub fn pin_delete(&mut self, agent_name: &str) -> Result<u8> {
+        let reply = self.exchange(&admin::encode_forget(agent_name))?;
+        Ok(admin::decode_status_byte(&reply, MessageType::AdminForgetReply)?)
+    }
+
+    pub fn acl_set(
+        &mut self,
+        fingerprint_hex: &str,
+        agent_name: &str,
+        interface_name: &str,
+        level: AclLevel,
+    ) -> Result<u8> {
+        let reply = self.exchange(&admin::encode_acl_set(fingerprint_hex, agent_name, interface_name, level))?;
+        Ok(admin::decode_status_byte(&reply, MessageType::AdminAclSetReply)?)
+    }
+
+    pub fn acl_revoke(
+        &mut self,
+        fingerprint_hex: &str,
+        agent_name: &str,
+        interface_name: &str,
+    ) -> Result<u8> {
+        let reply = self.exchange(&admin::encode_acl_revoke(fingerprint_hex, agent_name, interface_name))?;
+        Ok(admin::decode_status_byte(&reply, MessageType::AdminAclRevokeReply)?)
+    }
+
+    pub fn ifconfig(
+        &mut self,
+        agent_name: &str,
+        interface_name: &str,
+        op: IfconfigOp,
+        bitrate: u32,
+    ) -> Result<u8> {
+        let reply = self.exchange(&admin::encode_ifconfig(agent_name, interface_name, op, bitrate))?;
+        Ok(admin::decode_status_byte(&reply, MessageType::AdminIfconfigReply)?)
     }
 
     /// Send a pre-encoded request and read one framed reply.
@@ -244,6 +303,53 @@ mod tests {
         let transport = MockTransport::with_replies(&[interfaces_page(&[], true)]);
         let mut client = AdminClient::connect(transport).unwrap();
         assert_eq!(client.interfaces().unwrap().len(), 0);
+    }
+
+    fn status_byte_reply(message_type: MessageType, status: u8) -> Vec<u8> {
+        let mut reply = vec![0u8; 8];
+        Header::write(&mut reply, message_type, 0, 4);
+        reply[4] = status;
+        reply
+    }
+
+    #[test]
+    fn kick_peer_sends_request_and_returns_status() {
+        let transport =
+            MockTransport::with_replies(&[status_byte_reply(MessageType::AdminKickPeerReply, 0)]);
+        let mut client = AdminClient::connect(transport).unwrap();
+        assert_eq!(client.kick_peer(0x80000001).unwrap(), 0);
+        // HELLO (12) then the kick-peer request (8).
+        let request = &client.transport.outbound[12..12 + 8];
+        assert_eq!(request[0], MessageType::AdminKickPeer as u8);
+        assert_eq!(u32::from_le_bytes([request[4], request[5], request[6], request[7]]), 0x80000001);
+    }
+
+    #[test]
+    fn kick_agent_propagates_unknown_status() {
+        let transport = MockTransport::with_replies(&[status_byte_reply(MessageType::AdminKickReply, 1)]);
+        let mut client = AdminClient::connect(transport).unwrap();
+        assert_eq!(client.kick_agent("ghost").unwrap(), 1);
+    }
+
+    #[test]
+    fn acl_set_sends_level_bytes() {
+        let transport = MockTransport::with_replies(&[status_byte_reply(MessageType::AdminAclSetReply, 0)]);
+        let mut client = AdminClient::connect(transport).unwrap();
+        assert_eq!(client.acl_set("ab12cd", "truck42", "can0", AclLevel::ReadWrite).unwrap(), 0);
+        let request = &client.transport.outbound[12..12 + 216];
+        assert_eq!(request[0], MessageType::AdminAclSet as u8);
+        assert_eq!(request[213], 1); // can_read
+        assert_eq!(request[214], 1); // can_write
+    }
+
+    #[test]
+    fn ifconfig_sends_op_and_bitrate() {
+        let transport = MockTransport::with_replies(&[status_byte_reply(MessageType::AdminIfconfigReply, 0)]);
+        let mut client = AdminClient::connect(transport).unwrap();
+        assert_eq!(client.ifconfig("truck42", "can0", IfconfigOp::SetBitrate, 250_000).unwrap(), 0);
+        let request = &client.transport.outbound[12..12 + 156];
+        assert_eq!(request[0], MessageType::AdminIfconfig as u8);
+        assert_eq!(request[148], IfconfigOp::SetBitrate as u8);
     }
 
     #[test]

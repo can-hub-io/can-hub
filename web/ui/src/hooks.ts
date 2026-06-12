@@ -5,6 +5,7 @@ import { telemetryUrl, type TelemetryFrame } from './api'
 export function usePolling<T>(fetcher: () => Promise<T>, intervalMs = 2000) {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [version, setVersion] = useState(0)
   const fetcherRef = useRef(fetcher)
   fetcherRef.current = fetcher
 
@@ -27,9 +28,11 @@ export function usePolling<T>(fetcher: () => Promise<T>, intervalMs = 2000) {
       active = false
       clearInterval(timer)
     }
-  }, [intervalMs])
+  }, [intervalMs, version])
 
-  return { data, error }
+  // Trigger an immediate reload (e.g. after a mutating action).
+  const refresh = () => setVersion((v) => v + 1)
+  return { data, error, refresh }
 }
 
 // Subscribe to the telemetry WebSocket, reconnecting if it drops. Returns the

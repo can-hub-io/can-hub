@@ -65,6 +65,12 @@ pub struct ClientEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinEntry {
+    pub agent_name: String,
+    pub fingerprint_hex: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterfaceEntry {
     pub interface_id: u32,
     pub subscriber_count: u8,
@@ -132,6 +138,10 @@ pub fn encode_peers(offset: u16) -> [u8; 8] {
 
 pub fn encode_interfaces(offset: u16) -> [u8; 8] {
     encode_paginated(MessageType::AdminInterfaces, offset)
+}
+
+pub fn encode_pins(offset: u16) -> [u8; 8] {
+    encode_paginated(MessageType::AdminPins, offset)
 }
 
 fn encode_paginated(message_type: MessageType, offset: u16) -> [u8; 8] {
@@ -346,6 +356,15 @@ pub fn decode_clients_reply(buffer: &[u8]) -> Result<Page<ClientEntry>, DecodeEr
     })
 }
 
+/// ADMIN_PINS_REPLY (8 + count * 196). Entry: agent_name[128] @0,
+/// fingerprint_hex[65] @128, 3 reserved.
+pub fn decode_pins_reply(buffer: &[u8]) -> Result<Page<PinEntry>, DecodeError> {
+    decode_page(buffer, MessageType::AdminPinsReply, 196, |entry| PinEntry {
+        agent_name: read_fixed_str(entry, 0, AGENT_NAME_SIZE),
+        fingerprint_hex: read_fixed_str(entry, 128, FINGERPRINT_SIZE),
+    })
+}
+
 /// ADMIN_INTERFACES_REPLY (8 + count * 160).
 pub fn decode_interfaces_reply(buffer: &[u8]) -> Result<Page<InterfaceEntry>, DecodeError> {
     decode_page(buffer, MessageType::AdminInterfacesReply, 160, |entry| InterfaceEntry {
@@ -518,6 +537,18 @@ mod tests {
         Header::write(&mut buffer, MessageType::AdminInterfacesReply, 0, 104);
         buffer[4] = 1;
         assert_eq!(decode_interfaces_reply(&buffer), Err(DecodeError::TruncatedEntries));
+    }
+
+    #[test]
+    fn pins_reply_decodes_entry() {
+        let mut buffer = vec![0u8; 8 + 196];
+        Header::write(&mut buffer, MessageType::AdminPinsReply, 0, (4 + 196) as u16);
+        buffer[4] = 1;
+        write_fixed_str(&mut buffer, 8, AGENT_NAME_SIZE, "truck42");
+        write_fixed_str(&mut buffer, 8 + 128, FINGERPRINT_SIZE, "ab12cd");
+        let page = decode_pins_reply(&buffer).unwrap();
+        assert_eq!(page.entries[0].agent_name, "truck42");
+        assert_eq!(page.entries[0].fingerprint_hex, "ab12cd");
     }
 
     #[test]

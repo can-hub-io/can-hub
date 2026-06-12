@@ -11,18 +11,19 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::admin_client::{AdminClient, AdminClientError};
 use crate::protocol::admin::{
-    AclEntry, AclLevel, AgentEntry, ClientEntry, InterfaceEntry, PeerEntry, Status,
+    AclEntry, AclLevel, AgentEntry, ClientEntry, IfconfigOp, InterfaceEntry, PeerEntry, PinEntry,
+    Status,
 };
 use crate::telemetry::TelemetryFrame;
 
@@ -46,7 +47,13 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
         .route("/api/agents", get(agents))
         .route("/api/clients", get(clients))
         .route("/api/interfaces", get(interfaces))
-        .route("/api/acls", get(acls))
+        .route("/api/acls", get(acls).post(acl_set))
+        .route("/api/acls/revoke", post(acl_revoke))
+        .route("/api/peers/{id}/kick", post(kick_peer))
+        .route("/api/agents/{name}/kick", post(kick_agent))
+        .route("/api/pins", get(pins).post(pin_add))
+        .route("/api/pins/{name}", delete(pin_delete))
+        .route("/api/interfaces/config", post(interface_config))
         .route("/api/telemetry/ws", get(telemetry_ws))
         .with_state(state);
 
@@ -90,6 +97,135 @@ async fn interfaces(State(state): State<AppState>) -> Result<Json<Vec<InterfaceD
 async fn acls(State(state): State<AppState>) -> Result<Json<Vec<AclDto>>, ApiError> {
     let entries = with_admin(&state, |client| client.acl_list()).await?;
     Ok(Json(entries.into_iter().map(AclDto::from).collect()))
+}
+
+async fn pins(State(state): State<AppState>) -> Result<Json<Vec<PinDto>>, ApiError> {
+    let entries = with_admin(&state, |client| client.pins()).await?;
+    Ok(Json(entries.into_iter().map(PinDto::from).collect()))
+}
+
+// ---------------------------------------------------------------- actions
+
+#[derive(Serialize)]
+struct ActionResult {
+    ok: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PinAddBody {
+    agent_name: String,
+    fingerprint_hex: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AclBody {
+    fingerprint_hex: String,
+    agent_name: String,
+    interface_name: String,
+    /// "none" | "ro" | "rw"; ignored by revoke.
+    #[serde(default)]
+    level: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InterfaceConfigBody {
+    agent_name: String,
+    interface_name: String,
+    /// "bitrate" | "up" | "down".
+    op: String,
+    #[serde(default)]
+    bitrate: u32,
+}
+
+async fn kick_peer(State(state): State<AppState>, Path(id): Path<String>) -> ActionResponse {
+    let peer_id = parse_peer_id(&id)?;
+    action(with_admin(&state, move |client| client.kick_peer(peer_id)).await?)
+}
+
+async fn kick_agent(State(state): State<AppState>, Path(name): Path<String>) -> ActionResponse {
+    action(with_admin(&state, move |client| client.kick_agent(&name)).await?)
+}
+
+async fn pin_add(State(state): State<AppState>, Json(body): Json<PinAddBody>) -> ActionResponse {
+    action(with_admin(&state, move |client| client.pin_add(&body.agent_name, &body.fingerprint_hex)).await?)
+}
+
+async fn pin_delete(State(state): State<AppState>, Path(name): Path<String>) -> ActionResponse {
+    action(with_admin(&state, move |client| client.pin_delete(&name)).await?)
+}
+
+async fn acl_set(State(state): State<AppState>, Json(body): Json<AclBody>) -> ActionResponse {
+    let level = parse_level(&body.level)?;
+    action(
+        with_admin(&state, move |client| {
+            client.acl_set(&body.fingerprint_hex, &body.agent_name, &body.interface_name, level)
+        })
+        .await?,
+    )
+}
+
+async fn acl_revoke(State(state): State<AppState>, Json(body): Json<AclBody>) -> ActionResponse {
+    action(
+        with_admin(&state, move |client| {
+            client.acl_revoke(&body.fingerprint_hex, &body.agent_name, &body.interface_name)
+        })
+        .await?,
+    )
+}
+
+async fn interface_config(
+    State(state): State<AppState>,
+    Json(body): Json<InterfaceConfigBody>,
+) -> ActionResponse {
+    let op = parse_ifconfig_op(&body.op)?;
+    let bitrate = body.bitrate;
+    action(
+        with_admin(&state, move |client| {
+            client.ifconfig(&body.agent_name, &body.interface_name, op, bitrate)
+        })
+        .await?,
+    )
+}
+
+type ActionResponse = Result<Json<ActionResult>, ApiError>;
+
+/// Map an admin status byte (0 = ok) to the action response.
+fn action(status: u8) -> ActionResponse {
+    if status == 0 {
+        Ok(Json(ActionResult { ok: true }))
+    } else {
+        Err(ApiError::HubRejected(status))
+    }
+}
+
+fn parse_peer_id(raw: &str) -> Result<u32, ApiError> {
+    let parsed = if let Some(hex) = raw.strip_prefix("0x") {
+        u32::from_str_radix(hex, 16)
+    } else {
+        raw.parse::<u32>()
+    };
+    parsed.map_err(|_| ApiError::BadRequest(format!("invalid peer id: {raw}")))
+}
+
+fn parse_level(raw: &str) -> Result<AclLevel, ApiError> {
+    match raw {
+        "none" => Ok(AclLevel::None),
+        "ro" => Ok(AclLevel::ReadOnly),
+        "rw" => Ok(AclLevel::ReadWrite),
+        other => Err(ApiError::BadRequest(format!("invalid level: {other} (none|ro|rw)"))),
+    }
+}
+
+fn parse_ifconfig_op(raw: &str) -> Result<IfconfigOp, ApiError> {
+    match raw {
+        "bitrate" => Ok(IfconfigOp::SetBitrate),
+        "up" => Ok(IfconfigOp::LinkUp),
+        "down" => Ok(IfconfigOp::LinkDown),
+        other => Err(ApiError::BadRequest(format!("invalid op: {other} (bitrate|up|down)"))),
+    }
 }
 
 /// Telemetry WebSocket: subscribe to the shared broadcast and forward each
@@ -142,6 +278,10 @@ where
 pub enum ApiError {
     Hub(AdminClientError),
     Internal(String),
+    BadRequest(String),
+    /// The hub processed the request but returned a non-zero status (unknown
+    /// agent/peer, apply failed, …).
+    HubRejected(u8),
 }
 
 impl IntoResponse for ApiError {
@@ -149,6 +289,10 @@ impl IntoResponse for ApiError {
         let (code, message) = match self {
             ApiError::Hub(error) => (StatusCode::BAD_GATEWAY, format!("hub unreachable: {error:?}")),
             ApiError::Internal(detail) => (StatusCode::INTERNAL_SERVER_ERROR, detail),
+            ApiError::BadRequest(detail) => (StatusCode::BAD_REQUEST, detail),
+            ApiError::HubRejected(status) => {
+                (StatusCode::CONFLICT, format!("hub rejected the request (status {status})"))
+            }
         };
         (code, Json(ErrorBody { error: message })).into_response()
     }
@@ -296,6 +440,19 @@ impl From<AclEntry> for AclDto {
             interface_name: entry.interface_name,
             level: acl_level_name(entry.level),
         }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinDto {
+    pub agent_name: String,
+    pub fingerprint_hex: String,
+}
+
+impl From<PinEntry> for PinDto {
+    fn from(entry: PinEntry) -> Self {
+        PinDto { agent_name: entry.agent_name, fingerprint_hex: entry.fingerprint_hex }
     }
 }
 
