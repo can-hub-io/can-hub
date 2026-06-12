@@ -1,0 +1,98 @@
+#compdef can-hub-cli
+
+_can_hub_cli_connect()
+{
+    local i
+    for ((i = 2; i < $#words; i++)); do
+        if [[ ${words[i]} == "--connect" ]]; then
+            print -- "${words[i + 1]}"
+            return
+        fi
+    done
+}
+
+_can_hub_cli_dynamic()
+{
+    local connect
+    connect=$(_can_hub_cli_connect)
+    if [[ -n $connect ]]; then
+        can-hub-cli --connect "$connect" --complete "$1" 2>/dev/null
+    else
+        can-hub-cli --complete "$1" 2>/dev/null
+    fi
+}
+
+_can-hub-cli()
+{
+    local -a commands values
+    local verb sub verb_index i
+
+    commands=(status peers agents clients interfaces pins acl interface)
+
+    for ((i = 2; i < CURRENT; i++)); do
+        case ${words[i]} in
+            --connect) ((i++)) ;;
+            -*) ;;
+            *) verb=${words[i]}; verb_index=i; break ;;
+        esac
+    done
+
+    if [[ -z $verb ]]; then
+        if [[ ${words[CURRENT]} == --* ]]; then
+            _values 'flag' '--connect[hub admin socket URL]'
+        else
+            _describe 'command' commands
+        fi
+        return
+    fi
+
+    sub=${words[verb_index + 1]}
+    case $verb in
+        peers)
+            if (( CURRENT == verb_index + 1 )); then
+                _values 'subcommand' 'kick'
+            elif [[ $sub == kick ]]; then
+                values=(${(f)"$(_can_hub_cli_dynamic peers)"})
+                _describe 'peer-id' values
+            fi
+            ;;
+        agents)
+            if (( CURRENT == verb_index + 1 )); then
+                _values 'subcommand' 'show' 'kick'
+            elif [[ $sub == show || $sub == kick ]]; then
+                values=(${(f)"$(_can_hub_cli_dynamic agents)"})
+                _describe 'agent' values
+            fi
+            ;;
+        pins)
+            if (( CURRENT == verb_index + 1 )); then
+                _values 'subcommand' 'add' 'delete'
+            elif [[ $sub == delete ]]; then
+                values=(${(f)"$(_can_hub_cli_dynamic agents)"})
+                _describe 'agent' values
+            fi
+            ;;
+        acl)
+            if (( CURRENT == verb_index + 1 )); then
+                _values 'subcommand' 'add' 'delete' 'list'
+            elif [[ $sub == add || $sub == delete ]] && (( CURRENT == verb_index + 3 )); then
+                values=('*' ${(f)"$(_can_hub_cli_dynamic interfaces)"})
+                _describe 'interface' values
+            elif [[ $sub == add ]] && (( CURRENT == verb_index + 4 )); then
+                _values 'level' 'none' 'ro' 'rw'
+            fi
+            ;;
+        interface)
+            if (( CURRENT == verb_index + 1 )); then
+                _values 'subcommand' 'set' 'up' 'down'
+            elif (( CURRENT == verb_index + 2 )); then
+                values=(${(f)"$(_can_hub_cli_dynamic interfaces)"})
+                _describe 'interface' values
+            elif [[ $sub == set ]] && (( CURRENT == verb_index + 3 )); then
+                _values 'keyword' 'bitrate'
+            fi
+            ;;
+    esac
+}
+
+_can-hub-cli "$@"

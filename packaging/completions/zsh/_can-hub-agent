@@ -1,0 +1,29 @@
+#compdef can-hub-agent
+
+_can_hub_agent_can_interfaces()
+{
+    ip -br link show type can 2>/dev/null | awk '{print $1}'
+}
+
+_can-hub-agent()
+{
+    local -a flags values
+
+    flags=(
+        '--connect[hub URL: quic/tls/tcp/unix]:url:'
+        '--name[agent name advertised to the hub]:name:'
+        '--state-dir[identity directory]:dir:_files -/'
+        '--show-identity[print this agent TLS fingerprint]'
+    )
+
+    if [[ ${words[CURRENT]} == --* ]]; then
+        _arguments $flags
+        return
+    fi
+
+    values=(${(f)"$(_can_hub_agent_can_interfaces)"})
+    _describe 'can interface' values
+    _arguments $flags
+}
+
+_can-hub-agent "$@"

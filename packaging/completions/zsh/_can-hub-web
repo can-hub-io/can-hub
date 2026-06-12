@@ -1,0 +1,17 @@
+#compdef can-hub-web
+
+_can-hub-web()
+{
+    _arguments \
+        '--connect[hub admin socket path]:file:_files' \
+        '--listen[HTTP bind address host:port]:addr:' \
+        '--assets[built SPA directory to serve]:dir:_files -/' \
+        '--db[web database path]:file:_files' \
+        '--add-user[create a user headless and exit]:name:' \
+        '--secure-cookies[mark the session cookie Secure]' \
+        '--trusted-proxy[key rate limiting on X-Forwarded-For]' \
+        '--version[print version and exit]' \
+        '--help[show usage]'
+}
+
+_can-hub-web "$@"

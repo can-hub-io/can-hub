@@ -99,6 +99,22 @@ make static ARCH=x86_64|arm64|armv7   # fully static binaries via docker, into d
 make windows                    # libcanhub + canhub-dump for Windows (llvm-mingw / mingw-w64)
 ```
 
+## Shell completion
+
+The Debian packages ship bash and zsh completions for every binary, so tab
+completion works out of the box after `apt install` (bash-completion loads them
+on demand; zsh reads `/usr/share/zsh/vendor-completions`). Beyond subcommands
+and flags they complete the painful dynamic values — namespaced interface names
+(`agent/iface`), agent names and peer ids — by querying the hub, and fall back
+to static completion when it is unreachable.
+
+Building from source instead of installing a deb? Drop the scripts in by hand:
+
+```sh
+sudo cp packaging/completions/bash/* /usr/share/bash-completion/completions/
+sudo cp packaging/completions/zsh/_*  /usr/share/zsh/vendor-completions/
+```
+
 ## State directories
 
 | Component | Default | Contents |

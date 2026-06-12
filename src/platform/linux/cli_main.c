@@ -66,11 +66,13 @@ static uint32_t target_peer_id;
 static uint32_t target_bitrate;
 static uint16_t page_offset;
 static bool page_header_printed;
+static bool complete_mode;
 static int32_t exit_code = -1;
 
 static void printUsage(FILE *stream, const char *program);
 static bool parseArguments(int argc, char **argv, char *host, char *port_text);
 static bool mapCommand(const char *words[], uint8_t word_count);
+static bool mapCompleteKind(const char *kind);
 static bool parsePeerId(const char *text);
 static bool parseBitrate(const char *text);
 static bool parseInterfaceRef(const char *text);
@@ -170,6 +172,11 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
     for(i=1; i<argc; i++) {
         if (strcmp(argv[i], "--connect") == 0 && i + 1 < argc) {
             connect_url = argv[++i];
+        } else if (strcmp(argv[i], "--complete") == 0 && i + 1 < argc) {
+            if (!mapCompleteKind(argv[++i])) {
+                return false;
+            }
+            complete_mode = true;
         } else if (word_count < COMMAND_WORDS_MAX) {
             words[word_count++] = argv[i];
         } else {
@@ -177,7 +184,7 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
         }
     }
 
-    if (!mapCommand(words, word_count)) {
+    if (!complete_mode && !mapCommand(words, word_count)) {
         return false;
     }
 
@@ -287,6 +294,24 @@ static bool mapCommand(const char *words[], uint8_t word_count)
     snprintf(target_agent, sizeof(target_agent), "%s", words[2]);
 
     return target_agent[0] != '\0';
+}
+
+static bool mapCompleteKind(const char *kind)
+{
+    if (strcmp(kind, "interfaces") == 0) {
+        command = kCLI_COMMAND_INTERFACES;
+        return true;
+    }
+    if (strcmp(kind, "agents") == 0) {
+        command = kCLI_COMMAND_AGENTS;
+        return true;
+    }
+    if (strcmp(kind, "peers") == 0) {
+        command = kCLI_COMMAND_PEERS;
+        return true;
+    }
+
+    return false;
 }
 
 static bool parsePeerId(const char *text)
@@ -694,6 +719,16 @@ static void handlePeersReply(const uint8_t *payload, uint16_t payload_length)
         return;
     }
 
+    if (complete_mode) {
+        for(i=0; i<reply.count; i++) {
+            printf("0x%08X\n", reply.entries[i].peer_id);
+        }
+        if (!requestNextPage(reply.flags, reply.count)) {
+            exit_code = 0;
+        }
+        return;
+    }
+
     if (!page_header_printed) {
         printf("%-12s %-8s %-32s %-10s %-8s %s\n", "peer-id", "role", "agent", "forwarded", "dropped", "fingerprint");
         page_header_printed = true;
@@ -722,6 +757,16 @@ static void handleAgentsReply(const uint8_t *payload, uint16_t payload_length)
 
     if (!AdminAgentsReplyMessage_Decode(&reply, payload, payload_length)) {
         exit_code = 1;
+        return;
+    }
+
+    if (complete_mode) {
+        for(i=0; i<reply.count; i++) {
+            printf("%s\n", reply.entries[i].agent_name);
+        }
+        if (!requestNextPage(reply.flags, reply.count)) {
+            exit_code = 0;
+        }
         return;
     }
 
@@ -798,6 +843,16 @@ static void handleInterfacesReply(const uint8_t *payload, uint16_t payload_lengt
 
     if (!AdminInterfacesReplyMessage_Decode(&reply, payload, payload_length)) {
         exit_code = 1;
+        return;
+    }
+
+    if (complete_mode) {
+        for(i=0; i<reply.count; i++) {
+            printf("%s/%s\n", reply.entries[i].agent_name, reply.entries[i].interface_name);
+        }
+        if (!requestNextPage(reply.flags, reply.count)) {
+            exit_code = 0;
+        }
         return;
     }
 

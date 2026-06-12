@@ -1,0 +1,13 @@
+#compdef can-hub
+
+_can-hub()
+{
+    _arguments \
+        '*--listen[listener URL, replaces network defaults]:url:(quic:// tls:// tcp:// unix://)' \
+        '--cert[TLS certificate PEM]:file:_files -g "*.pem"' \
+        '--key[TLS private key PEM]:file:_files -g "*.pem"' \
+        '--state-dir[identity and database directory]:dir:_files -/' \
+        '--require-known-agents[reject agents whose fingerprint is not pinned]'
+}
+
+_can-hub "$@"

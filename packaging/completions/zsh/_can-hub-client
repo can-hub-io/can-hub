@@ -1,0 +1,70 @@
+#compdef can-hub-client
+
+_can_hub_client_connect()
+{
+    local i
+    for ((i = 2; i < $#words; i++)); do
+        if [[ ${words[i]} == "--connect" ]]; then
+            print -- "${words[i + 1]}"
+            return
+        fi
+    done
+}
+
+_can_hub_client_interfaces()
+{
+    local connect
+    connect=$(_can_hub_client_connect)
+    if [[ -n $connect ]]; then
+        can-hub-client --connect "$connect" --complete interfaces 2>/dev/null
+    else
+        can-hub-client --complete interfaces 2>/dev/null
+    fi
+}
+
+_can-hub-client()
+{
+    local -a commands flags values
+    local verb verb_index i
+
+    commands=(list dump send attach socketcand)
+    flags=(
+        '--connect[hub URL: quic/tls/tcp/unix]:url:'
+        '--state-dir[identity and pin store directory]:dir:_files -/'
+        '--no-echo[suppress own echo on dump]'
+        '--no-beacon[disable socketcand beacon]'
+        '--listen[socketcand bind address]:addr:'
+        '--show-identity[print this client TLS fingerprint]'
+    )
+
+    for ((i = 2; i < CURRENT; i++)); do
+        case ${words[i]} in
+            --connect | --state-dir | --listen) ((i++)) ;;
+            -*) ;;
+            *) verb=${words[i]}; verb_index=i; break ;;
+        esac
+    done
+
+    if [[ -z $verb ]]; then
+        if [[ ${words[CURRENT]} == --* ]]; then
+            _arguments $flags
+        else
+            _describe 'command' commands
+            _arguments $flags
+        fi
+        return
+    fi
+
+    case $verb in
+        dump | send | attach)
+            if (( CURRENT == verb_index + 1 )); then
+                values=(${(f)"$(_can_hub_client_interfaces)"})
+                _describe 'interface' values
+            elif [[ $verb == attach ]] && (( CURRENT == verb_index + 2 )); then
+                _net_interfaces
+            fi
+            ;;
+    esac
+}
+
+_can-hub-client "$@"
