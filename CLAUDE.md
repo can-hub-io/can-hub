@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-CAN-over-network hub in C11. Devices behind NAT export SocketCAN interfaces to a central hub over QUIC (mTLS); clients consume them through the hub or P2P. Binaries: `can-hub` (hub), `can-hub-agent` (device daemon), `can-hub-cli` (admin), `can-hub-client` (reference consumer). Design source of truth: `doc/design.md` and `doc/protocol.md`. `TODO.md` is the scratchpad of pending work and known debts.
+CAN-over-network hub in C11. Devices behind NAT export SocketCAN interfaces to a central hub over QUIC (mTLS); clients consume them through the hub or P2P. Binaries: `can-hub` (hub), `can-hub-agent` (device daemon), `can-hub-cli` (admin), `can-hub-client` (reference consumer). Design source of truth: `doc/design.md` and `doc/protocol.md`; user-facing docs live in `doc/` (index: `doc/README.md`). Pending work is tracked as GitHub issues; `TODO.md` is the historical decision log only.
 
 ## Commands
 
