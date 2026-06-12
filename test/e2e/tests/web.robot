@@ -168,6 +168,7 @@ Audit Log Records Authentication
 Setup Web Bench
     Setup Bench    ${BENCH}
     Create VCAN On ${LOCAL_SERVER}    vcan0
+    Reset Hub State On ${LOCAL_SERVER}
     ${hub_cfg}=    Hub Configuration
     ${hub}=    Start CAN HUB On ${LOCAL_SERVER} With ${hub_cfg}
     Set Suite Variable    ${HUB}    ${hub}

@@ -24,6 +24,10 @@ class WebKeywords:
             self._schema = SchemaValidator()
         return self._schema
 
+    @keyword("Reset Hub State On ${server}")
+    def reset_hub_state(self, server):
+        server.exec("rm", "-rf", str(server.work_dir / "hub-state"), check=False)
+
     @keyword("Start CAN HUB Web On ${server} Against ${hub}")
     def start_web(self, server, hub, port=8080) -> CanHubWeb:
         return CanHubWeb.start(server, hub, int(port))
