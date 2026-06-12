@@ -24,7 +24,7 @@ _BUILD_DEB := build/$(ARCH)/package
 _BUILD_TEST := build/test
 _CEST_RUNNER := test/vendor/cest-runner_linux_x86_64
 
-.PHONY: release debug install deb static deb-debug test e2e e2e-image windows clean
+.PHONY: release debug install deb static deb-debug test e2e e2e-image web-daemon windows clean
 
 _BUILD_WINDOWS := build/mingw-x86_64/release
 
@@ -98,10 +98,14 @@ test:
 e2e-image:
 	docker build -f test/e2e/docker/Dockerfile -t $(_E2E_IMAGE) test/e2e/docker
 
-e2e: release e2e-image
+web-daemon:
+	cd web/daemon && cargo build --release
+
+e2e: release web-daemon e2e-image
 	docker run --rm --privileged \
 	    -v /lib/modules:/lib/modules:ro \
 	    -v $(abspath .):/work \
+	    -e CAN_HUB_WEB_BIN=/work/web/daemon/target/release/can-hub-web \
 	    $(_E2E_IMAGE) \
 	    robot --outputdir /work/build/e2e tests
 

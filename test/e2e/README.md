@@ -26,9 +26,24 @@ the container can `modprobe vcan`). Local only for now (no CI).
 - `BenchKeywords.py` — Robot keyword layer over the library.
 - `tests/` — the suites (`smoke.robot` to start).
 
+## Web admin suite
+
+`tests/web.robot` drives the `can-hub-web` daemon over REST against a real hub +
+agent, validating every response body against `web/openapi.yaml` (the contract).
+Extras: `CanHubWeb` (`lib/can_hub_web.py`) launches the daemon bound on the
+Server's bridge IP so the Robot process reaches it; `RestClient` /
+`SchemaValidator` (`lib/rest.py`) carry the session + CSRF and check schemas;
+`WebKeywords.py` is the keyword layer. `make e2e` builds the daemon
+(`web/daemon`, `cargo build --release`) and points the container at it via
+`CAN_HUB_WEB_BIN`.
+
 ## Example
 
 ```robotframework
 ${hub}=      Start CAN HUB On ${LOCAL_SERVER} With ${hub_cfg}
 ${agent}=    Start CAN Agent On ${LOCAL_SERVER} With ${agent_cfg}
+${web}=      Start CAN HUB Web On ${LOCAL_SERVER} Against ${hub}
+${r}=        GET /api/status On ${web}
+Status Of ${r} Should Be    200
+Body Of ${r} Should Match    Status
 ```
