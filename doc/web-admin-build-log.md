@@ -46,9 +46,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs dec
 - [x] reverse-proxy / TLS deployment docs: web/README.md (build, run, bootstrap, nginx TLS example)
 
 ## Phase 6 — Packaging + docs (#88)
-- [ ] deb package (React build + Rust binary)
-- [ ] systemd unit (After=can-hub.service, socket group)
-- [ ] user docs (install, bootstrap, TLS)
+- [x] self-contained binary: `embed-ui` cargo feature embeds web/ui/dist via rust-embed; serves the SPA with no --assets (verified: index/SPA-route/JS+mime/healthz). Off by default so dev `cargo build` needs no prior UI build
+- [x] systemd unit `packaging/systemd/can-hub-web.service` (After=can-hub.service, runs as can-hub user/group for socket access, hardened) + `packaging/web.conf` (WEB_ARGS)
+- [x] debian maintainer scripts `packaging/debian/web/` (enable unit, reuse can-hub user, drop web.db on purge)
+- [x] `web/build-release.sh`: builds UI + embedded binary, stages binary/unit/conf into DESTDIR (verified)
+- [x] user docs (install, bootstrap, TLS, packaging) in web/README.md
 - [x] update doc/design.md §Web admin with decided design
 
 ## Notes / decisions log
@@ -60,3 +62,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs dec
 - Phase 3 verified: admin action methods unit-tested; endpoints smoke-tested (400/409/502). pins read codec added.
 - Phase 4 verified: 48 unit tests (incl. 11 auth) + 1 integration green; full auth flow smoke-tested end-to-end (bootstrap→cookie→gated access→logout→401, re-setup 409); permission gating proven (viewer 502 read / 403 mutate); `--add-user` headless works; UI builds with login/bootstrap/management.
 - Phase 5 verified: 52 unit tests + 1 integration green; smoke-tested CSRF (no token 403, with token 200), audit log records the action, login rate limit (5 ok, 6th → 429). web/README.md documents TLS reverse-proxy deployment + --secure-cookies.
+- Phase 6 verified: release build with `--features embed-ui` serves the embedded SPA (200 html / SPA route / JS+mime) with no --assets; `DESTDIR=… web/build-release.sh` stages usr/bin + lib/systemd/system + etc/can-hub. All 6 phases complete.
+
+## Status: all phases (1–6) complete
+8 commits on `doc/web-admin-design`. 52 unit + 1 integration test green; backend + UI build; full auth/telemetry/action/hardening/packaging flows smoke-verified end-to-end (no live hub exercised — hub-reachable paths return 502 as expected). Remaining real-world follow-ups: deb integration into the cmake/cpack build (the Rust+npm toolchain is separate today), live-hub integration test, persistent pooled admin connection.

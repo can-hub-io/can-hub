@@ -21,6 +21,21 @@ npm install
 npm run build      # emits web/ui/dist
 ```
 
+### Self-contained release
+
+`web/build-release.sh` builds the UI and then the binary with the SPA embedded
+(cargo feature `embed-ui`), producing a single self-contained `can-hub-web`
+that needs no `--assets`:
+
+```sh
+web/build-release.sh                      # build only
+DESTDIR=/tmp/stage web/build-release.sh   # build + stage package layout
+```
+
+With `DESTDIR` it installs the binary to `usr/bin`, the systemd unit to
+`lib/systemd/system/can-hub-web.service` and the config to
+`etc/can-hub/web.conf` under `$DESTDIR` — the layout the deb packages.
+
 ## Run
 
 ```sh
@@ -34,7 +49,18 @@ can-hub-web \
 
 In development run the daemon without `--assets` and use the Vite dev server
 (`npm run dev` in `web/ui`), which proxies `/api` and the telemetry WebSocket
-to `127.0.0.1:8080`.
+to `127.0.0.1:8080`. (A dev `cargo build` without `embed-ui` serves no static
+assets; use the Vite dev server or pass `--assets web/ui/dist`.)
+
+## systemd / packaging
+
+`packaging/systemd/can-hub-web.service` runs the daemon as the `can-hub`
+user/group (so it can reach `/run/can-hub/hub.sock`), `After=can-hub.service`,
+with the SPA embedded so no asset path is needed. `packaging/web.conf` (→
+`/etc/can-hub/web.conf`) holds `WEB_ARGS`. Debian maintainer scripts live in
+`packaging/debian/web/` (enable the unit, reuse the `can-hub` system user,
+remove `web.db` on purge). A deb stages the files produced by
+`DESTDIR=… web/build-release.sh`.
 
 ## First-run bootstrap
 

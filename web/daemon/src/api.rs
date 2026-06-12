@@ -92,6 +92,11 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
     if let Some(dir) = assets_dir {
         let index = dir.join("index.html");
         router = router.fallback_service(ServeDir::new(dir).fallback(ServeFile::new(index)));
+    } else {
+        #[cfg(feature = "embed-ui")]
+        {
+            router = router.fallback(crate::embedded::serve);
+        }
     }
 
     router
