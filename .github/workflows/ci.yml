@@ -83,6 +83,32 @@ jobs:
             python/dist/*.whl
           retention-days: 7
 
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: web/daemon
+      - name: daemon tests
+        working-directory: web/daemon
+        run: cargo test
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/ui/package-lock.json
+      - name: ui install
+        working-directory: web/ui
+        run: npm ci
+      - name: ui lint
+        working-directory: web/ui
+        run: npm run lint
+      - name: ui build
+        working-directory: web/ui
+        run: npm run build
+
   static:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest

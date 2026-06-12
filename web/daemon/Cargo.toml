@@ -1,0 +1,39 @@
+[package]
+name = "can-hub-web"
+version = "0.1.0"
+edition = "2021"
+description = "Web admin panel daemon for can-hub: REST API + React UI over the hub admin socket"
+license = "AGPL-3.0-only"
+
+[[bin]]
+name = "can-hub-web"
+path = "src/main.rs"
+
+[lib]
+name = "can_hub_web"
+path = "src/lib.rs"
+
+[features]
+# Embed the built SPA (web/ui/dist) into the binary for a self-contained
+# release. Off by default so `cargo build` works without a prior `npm run
+# build`; packaging enables it after building the UI.
+embed-ui = ["dep:rust-embed"]
+
+[dependencies]
+argon2 = "0.5.3"
+axum = { version = "0.8", features = ["ws"] }
+rand = "0.10.1"
+rust-embed = { version = "8", optional = true, features = ["mime-guess"] }
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+sha2 = "0.10.9"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "signal", "time", "io-util"] }
+tower-http = { version = "0.6.11", features = ["fs", "set-header", "trace"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# The protocol codecs stay dependency-free; serde/rusqlite/argon2/tower land
+# with the phases that need them.
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

@@ -18,6 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && pip3 install --no-cache-dir --break-system-packages \
         robotframework \
         python-can \
+        requests \
+        jsonschema \
+        pyyaml \
     && rm -rf /var/lib/apt/lists/*
 
 ENV CAN_HUB_BIN_DIR=/work/build/x86_64/release

@@ -56,6 +56,7 @@ class Bench:
         self._reset()
         run(["ip", "link", "add", BRIDGE, "type", "bridge"])
         run(["ip", "link", "set", BRIDGE, "up"])
+        self._give_root_namespace_a_bridge_address()
         hosts_lines = []
         for spec in self.specs:
             self._make_namespace(spec)
@@ -101,6 +102,9 @@ class Bench:
 
     def _ns(self, ns: str, *argv: str) -> None:
         run(["ip", "netns", "exec", ns, *argv])
+
+    def _give_root_namespace_a_bridge_address(self) -> None:
+        run(["ip", "addr", "add", f"{SUBNET}.1/24", "dev", BRIDGE], check=False)
 
     def _reset(self) -> None:
         for spec in self.specs:
