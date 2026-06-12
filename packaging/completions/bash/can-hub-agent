@@ -1,0 +1,28 @@
+# bash completion for can-hub-agent
+
+_can_hub_agent_can_interfaces()
+{
+    ip -br link show type can 2>/dev/null | awk '{print $1}'
+}
+
+_can_hub_agent()
+{
+    local cur prev words cword
+    _init_completion || return
+
+    local flags="--connect --name --state-dir --show-identity"
+
+    case $prev in
+        --connect | --name | --state-dir)
+            return
+            ;;
+    esac
+    if [[ $cur == --* ]]; then
+        COMPREPLY=($(compgen -W "$flags" -- "$cur"))
+        return
+    fi
+
+    COMPREPLY=($(compgen -W "$(_can_hub_agent_can_interfaces) $flags" -- "$cur"))
+}
+
+complete -F _can_hub_agent can-hub-agent

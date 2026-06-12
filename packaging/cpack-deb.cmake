@@ -32,7 +32,39 @@ install(
 
 install(TARGETS can-hub-cli RUNTIME DESTINATION bin COMPONENT hub)
 
+set(_completions ${CMAKE_CURRENT_SOURCE_DIR}/packaging/completions)
+install(
+    FILES ${_completions}/bash/can-hub ${_completions}/bash/can-hub-cli
+    DESTINATION share/bash-completion/completions
+    COMPONENT hub
+)
+install(
+    FILES ${_completions}/zsh/_can-hub ${_completions}/zsh/_can-hub-cli
+    DESTINATION share/zsh/vendor-completions
+    COMPONENT hub
+)
+install(
+    FILES ${_completions}/bash/can-hub-agent
+    DESTINATION share/bash-completion/completions
+    COMPONENT agent
+)
+install(
+    FILES ${_completions}/zsh/_can-hub-agent
+    DESTINATION share/zsh/vendor-completions
+    COMPONENT agent
+)
+
 install(TARGETS can-hub-client RUNTIME DESTINATION bin COMPONENT client)
+install(
+    FILES ${_completions}/bash/can-hub-client
+    DESTINATION share/bash-completion/completions
+    COMPONENT client
+)
+install(
+    FILES ${_completions}/zsh/_can-hub-client
+    DESTINATION share/zsh/vendor-completions
+    COMPONENT client
+)
 install(
     FILES ${CMAKE_CURRENT_SOURCE_DIR}/packaging/systemd/can-hub-socketcand.service
     DESTINATION /lib/systemd/system

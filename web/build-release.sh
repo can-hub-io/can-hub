@@ -29,5 +29,9 @@ if [ -n "$DESTDIR" ]; then
     install -Dm644 "$repo/packaging/systemd/can-hub-web.service" \
         "$DESTDIR/lib/systemd/system/can-hub-web.service"
     install -Dm644 "$repo/packaging/web.conf" "$DESTDIR/etc/can-hub/web.conf"
-    echo "staged binary, systemd unit and /etc/can-hub/web.conf"
+    install -Dm644 "$repo/packaging/completions/bash/can-hub-web" \
+        "$DESTDIR/usr/share/bash-completion/completions/can-hub-web"
+    install -Dm644 "$repo/packaging/completions/zsh/_can-hub-web" \
+        "$DESTDIR/usr/share/zsh/vendor-completions/_can-hub-web"
+    echo "staged binary, systemd unit, /etc/can-hub/web.conf and shell completions"
 fi

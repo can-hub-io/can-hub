@@ -1,0 +1,27 @@
+# bash completion for can-hub-web
+
+_can_hub_web()
+{
+    local cur prev words cword
+    _init_completion || return
+
+    local flags="--connect --listen --assets --db --add-user --secure-cookies --trusted-proxy --version --help"
+
+    case $prev in
+        --connect | --db)
+            _filedir
+            return
+            ;;
+        --assets)
+            _filedir -d
+            return
+            ;;
+        --listen | --add-user)
+            return
+            ;;
+    esac
+
+    COMPREPLY=($(compgen -W "$flags" -- "$cur"))
+}
+
+complete -F _can_hub_web can-hub-web

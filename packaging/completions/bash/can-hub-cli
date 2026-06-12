@@ -1,0 +1,99 @@
+# bash completion for can-hub-cli
+
+_can_hub_cli_connect()
+{
+    local i
+    for ((i = 1; i < ${#COMP_WORDS[@]} - 1; i++)); do
+        if [[ ${COMP_WORDS[i]} == "--connect" ]]; then
+            printf -- '--connect\n%s' "${COMP_WORDS[i + 1]}"
+            return
+        fi
+    done
+}
+
+_can_hub_cli_dynamic()
+{
+    local kind=$1 connect
+    connect=$(_can_hub_cli_connect)
+    if [[ -n $connect ]]; then
+        can-hub-cli ${connect//$'\n'/ } --complete "$kind" 2>/dev/null
+    else
+        can-hub-cli --complete "$kind" 2>/dev/null
+    fi
+}
+
+_can_hub_cli()
+{
+    local cur prev words cword
+    _init_completion || return
+
+    local commands="status peers agents clients interfaces pins acl interface"
+
+    if [[ $cur == --* ]]; then
+        COMPREPLY=($(compgen -W "--connect" -- "$cur"))
+        return
+    fi
+    if [[ $prev == "--connect" ]]; then
+        return
+    fi
+
+    local verb=""
+    local i
+    for ((i = 1; i < cword; i++)); do
+        case ${words[i]} in
+            --connect) ((i++)) ;;
+            -*) ;;
+            *) verb=${words[i]}; break ;;
+        esac
+    done
+
+    if [[ -z $verb ]]; then
+        COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+        return
+    fi
+
+    local sub=${words[i + 1]}
+    case $verb in
+        peers)
+            if (( cword == i + 1 )); then
+                COMPREPLY=($(compgen -W "kick" -- "$cur"))
+            elif [[ $sub == "kick" ]]; then
+                COMPREPLY=($(compgen -W "$(_can_hub_cli_dynamic peers)" -- "$cur"))
+            fi
+            ;;
+        agents)
+            if (( cword == i + 1 )); then
+                COMPREPLY=($(compgen -W "show kick" -- "$cur"))
+            elif [[ $sub == "show" || $sub == "kick" ]]; then
+                COMPREPLY=($(compgen -W "$(_can_hub_cli_dynamic agents)" -- "$cur"))
+            fi
+            ;;
+        pins)
+            if (( cword == i + 1 )); then
+                COMPREPLY=($(compgen -W "add delete" -- "$cur"))
+            elif [[ $sub == "delete" ]]; then
+                COMPREPLY=($(compgen -W "$(_can_hub_cli_dynamic agents)" -- "$cur"))
+            fi
+            ;;
+        acl)
+            if (( cword == i + 1 )); then
+                COMPREPLY=($(compgen -W "add delete list" -- "$cur"))
+            elif [[ $sub == "add" || $sub == "delete" ]] && (( cword == i + 3 )); then
+                COMPREPLY=($(compgen -W "* $(_can_hub_cli_dynamic interfaces)" -- "$cur"))
+            elif [[ $sub == "add" ]] && (( cword == i + 4 )); then
+                COMPREPLY=($(compgen -W "none ro rw" -- "$cur"))
+            fi
+            ;;
+        interface)
+            if (( cword == i + 1 )); then
+                COMPREPLY=($(compgen -W "set up down" -- "$cur"))
+            elif (( cword == i + 2 )); then
+                COMPREPLY=($(compgen -W "$(_can_hub_cli_dynamic interfaces)" -- "$cur"))
+            elif [[ $sub == "set" ]] && (( cword == i + 3 )); then
+                COMPREPLY=($(compgen -W "bitrate" -- "$cur"))
+            fi
+            ;;
+    esac
+}
+
+complete -F _can_hub_cli can-hub-cli

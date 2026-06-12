@@ -1,0 +1,29 @@
+# bash completion for can-hub
+
+_can_hub()
+{
+    local cur prev words cword
+    _init_completion || return
+
+    local flags="--listen --cert --key --state-dir --require-known-agents"
+
+    case $prev in
+        --listen)
+            COMPREPLY=($(compgen -W "quic:// tls:// tcp:// unix://" -- "$cur"))
+            compopt -o nospace 2>/dev/null
+            return
+            ;;
+        --cert | --key)
+            _filedir pem
+            return
+            ;;
+        --state-dir)
+            _filedir -d
+            return
+            ;;
+    esac
+
+    COMPREPLY=($(compgen -W "$flags" -- "$cur"))
+}
+
+complete -F _can_hub can-hub

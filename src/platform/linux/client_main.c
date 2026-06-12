@@ -66,6 +66,7 @@ static Client client;
 static uint8_t command;
 static uint8_t connect_scheme;
 static uint8_t open_flags;
+static bool complete_mode;
 static uint32_t target_interface_id;
 static char target_interface_text[INTERFACE_NAME_NAMESPACED_SIZE];
 static bool target_is_namespaced;
@@ -216,6 +217,13 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
             if (!parseSocketcandListen(argv[++i])) {
                 return false;
             }
+        } else if (strcmp(argv[i], "--complete") == 0 && i + 1 < argc) {
+            if (strcmp(argv[++i], "interfaces") != 0) {
+                return false;
+            }
+            command_name = "list";
+            command = kCLIENT_COMMAND_LIST;
+            complete_mode = true;
         } else if (command_name == NULL) {
             command_name = argv[i];
             if (strcmp(command_name, "list") == 0) {
@@ -469,7 +477,17 @@ static bool initQuicTransport(const char *host, const char *port_text, const Tra
 
 static void clientOnListReply(void *context, const ListReplyMessage *reply)
 {
+    uint8_t i;
+
     (void)context;
+
+    if (complete_mode) {
+        for(i=0; i<reply->count; i++) {
+            printf("%s/%s\n", reply->entries[i].agent_name, reply->entries[i].interface_name);
+        }
+        exit_code = 0;
+        return;
+    }
 
     printListReply(reply);
     exit_code = 0;
