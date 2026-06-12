@@ -32,10 +32,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs dec
 - [x] `web.db` schema + store: users (argon2id), groups, group_permissions, user_groups, sessions. 11 unit tests (in-memory SQLite): create/verify, disabled login, dup conflict, permission union, session lifecycle + expiry, cascade delete
 - [x] Permission classes (views.read/peers.kick/interfaces.config/pins.manage/acl.manage/users.manage); effective = union across groups
 - [x] server-side sessions: 256-bit token, idle (12h) + absolute (7d) expiry, last_seen refresh
-- [ ] HTTP login/logout + HttpOnly session cookie
-- [ ] permission middleware on every REST route + WS subscription
-- [ ] bootstrap: setup page on zero users + `--add-user` headless
-- [ ] user/group management endpoints + UI (users.manage)
+- [x] HTTP login/logout + HttpOnly SameSite=Strict session cookie (POST /api/login, /api/logout)
+- [x] permission middleware (route_layer) on every /api route + WS; public: healthz/login/logout/setup/auth-state/static. Maps path→permission class. Verified: viewer gets 502 on reads, 403 on kick/users/pins
+- [x] bootstrap: POST /api/setup on zero users (creates admin + admins group w/ ALL perms); `--add-user <name>` headless (password via CANHUB_WEB_PASSWORD or stdin); `--db` path
+- [x] user/group management endpoints + UI: users CRUD + enable + membership, groups CRUD + permission toggles. Login/bootstrap screens, permission-gated tabs, sign-out
+- Secure cookie flag deferred to Phase 5 (needs TLS/proxy); audit log Phase 5
 
 ## Phase 5 — Hardening + audit (#87)
 - [ ] CSRF token on mutating requests
@@ -56,3 +57,5 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs dec
 - 2026-06-12: **protocol.md gap** — pin/acl admin layouts (0x22, 0x24..0x29) are listed in the type table but have no payload-layout block. Rust codecs derived from authoritative `src/protocol/admin_message.c` (offsets body-relative). Worth backfilling protocol.md.
 - Phase 1 verified: 28 cargo tests green; daemon serves /healthz, /api/* (502 without a hub), and the built SPA with client-route fallback. Live-hub integration not exercised here (no running hub).
 - Phase 2 verified: 32 unit + 1 integration test (telemetry pipe over a real unix socket) green; WS upgrade returns 101; UI builds (tsc + vite). Telemetry interval 1s, broadcast capacity 16 (latest-wins for slow subscribers). Per-request admin connect still (pooling deferred).
+- Phase 3 verified: admin action methods unit-tested; endpoints smoke-tested (400/409/502). pins read codec added.
+- Phase 4 verified: 48 unit tests (incl. 11 auth) + 1 integration green; full auth flow smoke-tested end-to-end (bootstrap→cookie→gated access→logout→401, re-setup 409); permission gating proven (viewer 502 read / 403 mutate); `--add-user` headless works; UI builds with login/bootstrap/management.

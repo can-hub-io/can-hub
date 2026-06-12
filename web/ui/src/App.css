@@ -18,6 +18,21 @@ header h1 {
   font-size: 1.4rem;
 }
 
+.topbar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.who {
+  font-size: 0.9rem;
+  opacity: 0.8;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 nav {
   display: flex;
   gap: 0.25rem;

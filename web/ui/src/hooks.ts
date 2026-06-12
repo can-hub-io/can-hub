@@ -1,5 +1,21 @@
-import { useEffect, useRef, useState } from 'react'
-import { telemetryUrl, type TelemetryFrame } from './api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { api, telemetryUrl, type AuthState, type TelemetryFrame } from './api'
+
+// Current auth state (bootstrap needed / authenticated / permissions).
+export function useAuth() {
+  const [state, setState] = useState<AuthState | null>(null)
+  const reload = useCallback(async () => {
+    try {
+      setState(await api.authState())
+    } catch {
+      setState({ needsBootstrap: false, authenticated: false, user: null, permissions: [] })
+    }
+  }, [])
+  useEffect(() => {
+    reload()
+  }, [reload])
+  return { state, reload }
+}
 
 // Poll a fetcher on an interval, exposing the latest data and any error.
 export function usePolling<T>(fetcher: () => Promise<T>, intervalMs = 2000) {

@@ -8,31 +8,38 @@
 
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::extract::{Path, Request, State};
+use axum::http::header::{COOKIE, SET_COOKIE};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::admin_client::{AdminClient, AdminClientError};
+use crate::auth::store::{AuthStore, StoreError};
+use crate::auth::Permission;
 use crate::protocol::admin::{
     AclEntry, AclLevel, AgentEntry, ClientEntry, IfconfigOp, InterfaceEntry, PeerEntry, PinEntry,
     Status,
 };
 use crate::telemetry::TelemetryFrame;
 
-/// Shared handler state: where the hub admin socket lives plus the telemetry
-/// broadcast every WebSocket subscriber reads from.
+const SESSION_COOKIE: &str = "canhub_session";
+
+/// Shared handler state: the hub admin socket, the telemetry broadcast every
+/// WebSocket subscriber reads from, and the auth store (web.db).
 #[derive(Clone)]
 pub struct AppState {
     pub socket_path: Arc<str>,
     pub telemetry: broadcast::Sender<Arc<TelemetryFrame>>,
+    pub auth: Arc<Mutex<AuthStore>>,
 }
 
 /// Build the router. When `assets_dir` is set, the built SPA is served from it
@@ -42,11 +49,19 @@ pub struct AppState {
 pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
     let mut router = Router::new()
         .route("/healthz", get(healthz))
+        // auth (public: login/logout/setup/state)
+        .route("/api/auth/state", get(auth_state))
+        .route("/api/login", post(login))
+        .route("/api/logout", post(logout))
+        .route("/api/setup", post(setup))
+        // read views (views.read)
         .route("/api/status", get(status))
         .route("/api/peers", get(peers))
         .route("/api/agents", get(agents))
         .route("/api/clients", get(clients))
         .route("/api/interfaces", get(interfaces))
+        .route("/api/telemetry/ws", get(telemetry_ws))
+        // actions (per-class permissions)
         .route("/api/acls", get(acls).post(acl_set))
         .route("/api/acls/revoke", post(acl_revoke))
         .route("/api/peers/{id}/kick", post(kick_peer))
@@ -54,7 +69,17 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
         .route("/api/pins", get(pins).post(pin_add))
         .route("/api/pins/{name}", delete(pin_delete))
         .route("/api/interfaces/config", post(interface_config))
-        .route("/api/telemetry/ws", get(telemetry_ws))
+        // user/group management (users.manage)
+        .route("/api/permissions", get(list_permissions))
+        .route("/api/users", get(list_users).post(create_user))
+        .route("/api/users/{id}", delete(delete_user))
+        .route("/api/users/{id}/enabled", post(set_user_enabled))
+        .route("/api/users/{id}/groups", post(add_membership))
+        .route("/api/users/{id}/groups/{group_id}", delete(remove_membership))
+        .route("/api/groups", get(list_groups).post(create_group))
+        .route("/api/groups/{id}", delete(delete_group))
+        .route("/api/groups/{id}/permissions", put(set_group_permissions))
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_permission))
         .with_state(state);
 
     if let Some(dir) = assets_dir {
@@ -282,6 +307,14 @@ pub enum ApiError {
     /// The hub processed the request but returned a non-zero status (unknown
     /// agent/peer, apply failed, …).
     HubRejected(u8),
+    /// web.db error (conflict → 409, otherwise 500).
+    Store(StoreError),
+}
+
+impl From<StoreError> for ApiError {
+    fn from(error: StoreError) -> Self {
+        ApiError::Store(error)
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -293,6 +326,8 @@ impl IntoResponse for ApiError {
             ApiError::HubRejected(status) => {
                 (StatusCode::CONFLICT, format!("hub rejected the request (status {status})"))
             }
+            ApiError::Store(StoreError::Conflict(detail)) => (StatusCode::CONFLICT, detail.to_string()),
+            ApiError::Store(error) => (StatusCode::INTERNAL_SERVER_ERROR, format!("store error: {error:?}")),
         };
         (code, Json(ErrorBody { error: message })).into_response()
     }
@@ -471,4 +506,331 @@ fn acl_level_name(level: AclLevel) -> &'static str {
         AclLevel::ReadOnly => "ro",
         AclLevel::ReadWrite => "rw",
     }
+}
+
+// ---------------------------------------------------------------- auth
+
+/// Run a web.db query on a blocking task behind the store mutex.
+async fn with_auth<T, F>(state: &AppState, action: F) -> Result<T, ApiError>
+where
+    F: FnOnce(&AuthStore) -> Result<T, StoreError> + Send + 'static,
+    T: Send + 'static,
+{
+    let store = Arc::clone(&state.auth);
+    let outcome = tokio::task::spawn_blocking(move || {
+        let guard = store.lock().expect("auth mutex poisoned");
+        action(&guard)
+    })
+    .await;
+    match outcome {
+        Ok(result) => result.map_err(ApiError::from),
+        Err(join) => Err(ApiError::Internal(join.to_string())),
+    }
+}
+
+fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    let raw = headers.get(COOKIE)?.to_str().ok()?;
+    raw.split(';').find_map(|pair| {
+        let (key, value) = pair.trim().split_once('=')?;
+        (key == name).then(|| value.to_string())
+    })
+}
+
+fn permission_names(permissions: &std::collections::HashSet<Permission>) -> Vec<String> {
+    let mut names: Vec<String> = permissions.iter().map(|p| p.as_str().to_string()).collect();
+    names.sort();
+    names
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthStateDto {
+    needs_bootstrap: bool,
+    authenticated: bool,
+    user: Option<String>,
+    permissions: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct Credentials {
+    name: String,
+    password: String,
+}
+
+async fn auth_state(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<AuthStateDto>, ApiError> {
+    let needs_bootstrap = with_auth(&state, |store| store.user_count()).await? == 0;
+    if let Some(token) = cookie_value(&headers, SESSION_COOKIE) {
+        let lookup_token = token.clone();
+        if let Some(user_id) = with_auth(&state, move |store| store.validate_session(&lookup_token)).await? {
+            let name = with_auth(&state, move |store| store.user_name(user_id)).await?;
+            let permissions = with_auth(&state, move |store| store.effective_permissions(user_id)).await?;
+            return Ok(Json(AuthStateDto {
+                needs_bootstrap,
+                authenticated: true,
+                user: name,
+                permissions: permission_names(&permissions),
+            }));
+        }
+    }
+    Ok(Json(AuthStateDto { needs_bootstrap, authenticated: false, user: None, permissions: vec![] }))
+}
+
+async fn login(State(state): State<AppState>, Json(body): Json<Credentials>) -> Result<Response, ApiError> {
+    let Credentials { name, password } = body;
+    let verify_name = name.clone();
+    let user_id = with_auth(&state, move |store| store.verify_login(&verify_name, &password)).await?;
+    let Some(user_id) = user_id else {
+        return Ok((StatusCode::UNAUTHORIZED, Json(ErrorBody { error: "invalid credentials".into() })).into_response());
+    };
+    let token = with_auth(&state, move |store| store.create_session(user_id)).await?;
+    let permissions = with_auth(&state, move |store| store.effective_permissions(user_id)).await?;
+    Ok(session_response(
+        &token,
+        AuthStateDto {
+            needs_bootstrap: false,
+            authenticated: true,
+            user: Some(name),
+            permissions: permission_names(&permissions),
+        },
+    ))
+}
+
+async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, ApiError> {
+    if let Some(token) = cookie_value(&headers, SESSION_COOKIE) {
+        with_auth(&state, move |store| store.delete_session(&token)).await?;
+    }
+    let cookie = format!("{SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0");
+    let mut response = Json(ActionResult { ok: true }).into_response();
+    response.headers_mut().insert(SET_COOKIE, HeaderValue::from_str(&cookie).expect("ascii cookie"));
+    Ok(response)
+}
+
+/// First-run bootstrap: only when there are zero users, create the initial
+/// admin (in an `admins` group holding every permission) and log them in.
+async fn setup(State(state): State<AppState>, Json(body): Json<Credentials>) -> Result<Response, ApiError> {
+    let Credentials { name, password } = body;
+    let response_name = name.clone();
+    let user_id = with_auth(&state, move |store| {
+        if store.user_count()? != 0 {
+            return Err(StoreError::Conflict("setup already completed"));
+        }
+        let user_id = store.create_user(&name, &password, true)?;
+        let group_id = store.ensure_group("admins")?;
+        store.set_group_permissions(group_id, &Permission::ALL)?;
+        store.add_user_to_group(user_id, group_id)?;
+        Ok(user_id)
+    })
+    .await?;
+    let token = with_auth(&state, move |store| store.create_session(user_id)).await?;
+    Ok(session_response(
+        &token,
+        AuthStateDto {
+            needs_bootstrap: false,
+            authenticated: true,
+            user: Some(response_name),
+            permissions: Permission::ALL.iter().map(|p| p.as_str().to_string()).collect(),
+        },
+    ))
+}
+
+fn session_response(token: &str, body: AuthStateDto) -> Response {
+    let cookie = format!("{SESSION_COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/");
+    let mut response = Json(body).into_response();
+    response.headers_mut().insert(SET_COOKIE, HeaderValue::from_str(&cookie).expect("ascii cookie"));
+    response
+}
+
+/// Permission gate: public paths pass; everything else needs a valid session
+/// and the operation class for the path.
+async fn require_permission(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let path = request.uri().path().to_string();
+    if is_public(&path) {
+        return next.run(request).await;
+    }
+
+    let token = cookie_value(request.headers(), SESSION_COOKIE);
+    let user_id = match token {
+        Some(token) => match with_auth(&state, move |store| store.validate_session(&token)).await {
+            Ok(Some(user_id)) => user_id,
+            Ok(None) => return unauthorized(),
+            Err(error) => return error.into_response(),
+        },
+        None => return unauthorized(),
+    };
+
+    let required = required_permission(&path);
+    match with_auth(&state, move |store| store.effective_permissions(user_id)).await {
+        Ok(permissions) if permissions.contains(&required) => next.run(request).await,
+        Ok(_) => forbidden(),
+        Err(error) => error.into_response(),
+    }
+}
+
+fn is_public(path: &str) -> bool {
+    matches!(path, "/healthz" | "/api/auth/state" | "/api/login" | "/api/logout" | "/api/setup")
+        || !path.starts_with("/api/")
+}
+
+fn required_permission(path: &str) -> Permission {
+    if path == "/api/interfaces/config" {
+        Permission::InterfacesConfig
+    } else if path.starts_with("/api/pins") {
+        Permission::PinsManage
+    } else if path.starts_with("/api/acls") {
+        Permission::AclManage
+    } else if (path.starts_with("/api/peers/") || path.starts_with("/api/agents/")) && path.ends_with("/kick") {
+        Permission::PeersKick
+    } else if path.starts_with("/api/users") || path.starts_with("/api/groups") || path == "/api/permissions" {
+        Permission::UsersManage
+    } else {
+        Permission::ViewsRead
+    }
+}
+
+fn unauthorized() -> Response {
+    (StatusCode::UNAUTHORIZED, Json(ErrorBody { error: "authentication required".into() })).into_response()
+}
+
+fn forbidden() -> Response {
+    (StatusCode::FORBIDDEN, Json(ErrorBody { error: "insufficient permission".into() })).into_response()
+}
+
+// ---------------------------------------------------- user/group management
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UserDto {
+    id: i64,
+    name: String,
+    enabled: bool,
+    group_ids: Vec<i64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GroupDto {
+    id: i64,
+    name: String,
+    permissions: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateUserBody {
+    name: String,
+    password: String,
+    #[serde(default = "default_true")]
+    enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Deserialize)]
+struct EnabledBody {
+    enabled: bool,
+}
+
+#[derive(Deserialize)]
+struct NameBody {
+    name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MembershipBody {
+    group_id: i64,
+}
+
+#[derive(Deserialize)]
+struct PermissionsBody {
+    permissions: Vec<String>,
+}
+
+async fn list_permissions() -> Json<Vec<&'static str>> {
+    Json(Permission::ALL.iter().map(|p| p.as_str()).collect())
+}
+
+async fn list_users(State(state): State<AppState>) -> Result<Json<Vec<UserDto>>, ApiError> {
+    let users = with_auth(&state, |store| {
+        let summaries = store.list_users()?;
+        let mut result = Vec::with_capacity(summaries.len());
+        for summary in summaries {
+            let group_ids = store.user_group_ids(summary.id)?;
+            result.push(UserDto { id: summary.id, name: summary.name, enabled: summary.enabled, group_ids });
+        }
+        Ok(result)
+    })
+    .await?;
+    Ok(Json(users))
+}
+
+async fn create_user(State(state): State<AppState>, Json(body): Json<CreateUserBody>) -> ActionResponse {
+    with_auth(&state, move |store| store.create_user(&body.name, &body.password, body.enabled)).await?;
+    Ok(Json(ActionResult { ok: true }))
+}
+
+async fn delete_user(State(state): State<AppState>, Path(id): Path<i64>) -> ActionResponse {
+    with_auth(&state, move |store| store.delete_user(id)).await?;
+    Ok(Json(ActionResult { ok: true }))
+}
+
+async fn set_user_enabled(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<EnabledBody>,
+) -> ActionResponse {
+    with_auth(&state, move |store| store.set_user_enabled(id, body.enabled)).await?;
+    Ok(Json(ActionResult { ok: true }))
+}
+
+async fn add_membership(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<MembershipBody>,
+) -> ActionResponse {
+    with_auth(&state, move |store| store.add_user_to_group(id, body.group_id)).await?;
+    Ok(Json(ActionResult { ok: true }))
+}
+
+async fn remove_membership(State(state): State<AppState>, Path((id, group_id)): Path<(i64, i64)>) -> ActionResponse {
+    with_auth(&state, move |store| store.remove_user_from_group(id, group_id)).await?;
+    Ok(Json(ActionResult { ok: true }))
+}
+
+async fn list_groups(State(state): State<AppState>) -> Result<Json<Vec<GroupDto>>, ApiError> {
+    let groups = with_auth(&state, |store| store.list_groups()).await?;
+    Ok(Json(
+        groups
+            .into_iter()
+            .map(|g| GroupDto { id: g.id, name: g.name, permissions: g.permissions })
+            .collect(),
+    ))
+}
+
+async fn create_group(State(state): State<AppState>, Json(body): Json<NameBody>) -> ActionResponse {
+    with_auth(&state, move |store| store.create_group(&body.name)).await?;
+    Ok(Json(ActionResult { ok: true }))
+}
+
+async fn delete_group(State(state): State<AppState>, Path(id): Path<i64>) -> ActionResponse {
+    with_auth(&state, move |store| store.delete_group(id)).await?;
+    Ok(Json(ActionResult { ok: true }))
+}
+
+async fn set_group_permissions(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<PermissionsBody>,
+) -> ActionResponse {
+    let mut permissions = Vec::with_capacity(body.permissions.len());
+    for name in &body.permissions {
+        match Permission::from_str(name) {
+            Some(permission) => permissions.push(permission),
+            None => return Err(ApiError::BadRequest(format!("unknown permission: {name}"))),
+        }
+    }
+    with_auth(&state, move |store| store.set_group_permissions(id, &permissions)).await?;
+    Ok(Json(ActionResult { ok: true }))
 }

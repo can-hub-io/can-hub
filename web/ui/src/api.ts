@@ -57,6 +57,26 @@ export interface Pin {
   fingerprintHex: string
 }
 
+export interface AuthState {
+  needsBootstrap: boolean
+  authenticated: boolean
+  user: string | null
+  permissions: string[]
+}
+
+export interface ManagedUser {
+  id: number
+  name: string
+  enabled: boolean
+  groupIds: number[]
+}
+
+export interface ManagedGroup {
+  id: number
+  name: string
+  permissions: string[]
+}
+
 export interface InterfaceRate {
   interfaceId: number
   agentName: string
@@ -100,6 +120,19 @@ async function send(path: string, method: string, body?: unknown): Promise<void>
   }
 }
 
+async function sendJson<T>(path: string, method: string, body: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null)
+    throw new Error(detail?.error ?? `request failed (${response.status})`)
+  }
+  return response.json() as Promise<T>
+}
+
 export type AclLevel = 'none' | 'ro' | 'rw'
 export type IfconfigOp = 'bitrate' | 'up' | 'down'
 
@@ -123,7 +156,37 @@ export const api = {
     send('/api/acls/revoke', 'POST', { fingerprintHex, agentName, interfaceName }),
   interfaceConfig: (agentName: string, interfaceName: string, op: IfconfigOp, bitrate: number) =>
     send('/api/interfaces/config', 'POST', { agentName, interfaceName, op, bitrate }),
+
+  // auth
+  authState: () => getJson<AuthState>('/api/auth/state'),
+  login: (name: string, password: string) => sendJson<AuthState>('/api/login', 'POST', { name, password }),
+  setup: (name: string, password: string) => sendJson<AuthState>('/api/setup', 'POST', { name, password }),
+  logout: () => send('/api/logout', 'POST'),
+
+  // user/group management
+  listPermissions: () => getJson<string[]>('/api/permissions'),
+  listManagedUsers: () => getJson<ManagedUser[]>('/api/users'),
+  createManagedUser: (name: string, password: string) => send('/api/users', 'POST', { name, password }),
+  deleteManagedUser: (id: number) => send(`/api/users/${id}`, 'DELETE'),
+  setManagedUserEnabled: (id: number, enabled: boolean) => send(`/api/users/${id}/enabled`, 'POST', { enabled }),
+  addMembership: (id: number, groupId: number) => send(`/api/users/${id}/groups`, 'POST', { groupId }),
+  removeMembership: (id: number, groupId: number) => send(`/api/users/${id}/groups/${groupId}`, 'DELETE'),
+  listManagedGroups: () => getJson<ManagedGroup[]>('/api/groups'),
+  createManagedGroup: (name: string) => send('/api/groups', 'POST', { name }),
+  deleteManagedGroup: (id: number) => send(`/api/groups/${id}`, 'DELETE'),
+  setGroupPermissions: (id: number, permissions: string[]) =>
+    send(`/api/groups/${id}/permissions`, 'PUT', { permissions }),
 }
+
+// Permission class required to see each tab.
+export const PERMISSION = {
+  viewsRead: 'views.read',
+  peersKick: 'peers.kick',
+  interfacesConfig: 'interfaces.config',
+  pinsManage: 'pins.manage',
+  aclManage: 'acl.manage',
+  usersManage: 'users.manage',
+} as const
 
 export function telemetryUrl(): string {
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'

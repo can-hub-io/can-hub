@@ -139,6 +139,13 @@ impl AuthStore {
         }
     }
 
+    pub fn user_name(&self, user_id: i64) -> Result<Option<String>, StoreError> {
+        Ok(self
+            .connection
+            .query_row("SELECT name FROM users WHERE id = ?1", params![user_id], |row| row.get(0))
+            .optional()?)
+    }
+
     pub fn list_users(&self) -> Result<Vec<UserSummary>, StoreError> {
         let mut statement = self.connection.prepare("SELECT id, name, enabled FROM users ORDER BY name")?;
         let rows = statement.query_map([], |row| {
@@ -171,6 +178,18 @@ impl AuthStore {
         Ok(self.connection.last_insert_rowid())
     }
 
+    /// Get a group id by name, creating it if absent (idempotent bootstrap).
+    pub fn ensure_group(&self, name: &str) -> Result<i64, StoreError> {
+        let existing: Option<i64> = self
+            .connection
+            .query_row("SELECT id FROM groups WHERE name = ?1", params![name], |row| row.get(0))
+            .optional()?;
+        match existing {
+            Some(id) => Ok(id),
+            None => self.create_group(name),
+        }
+    }
+
     pub fn delete_group(&self, group_id: i64) -> Result<(), StoreError> {
         self.connection.execute("DELETE FROM groups WHERE id = ?1", params![group_id])?;
         Ok(())
@@ -200,6 +219,14 @@ impl AuthStore {
             groups.push(Group { id, name, permissions });
         }
         Ok(groups)
+    }
+
+    /// Group ids a user belongs to (for the management UI).
+    pub fn user_group_ids(&self, user_id: i64) -> Result<Vec<i64>, StoreError> {
+        let mut statement =
+            self.connection.prepare("SELECT group_id FROM user_groups WHERE user_id = ?1 ORDER BY group_id")?;
+        let rows = statement.query_map(params![user_id], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     pub fn add_user_to_group(&self, user_id: i64, group_id: i64) -> Result<(), StoreError> {

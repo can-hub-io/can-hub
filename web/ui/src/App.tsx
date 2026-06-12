@@ -1,35 +1,109 @@
 import { useState, type ReactNode } from 'react'
 import {
   api,
+  PERMISSION,
   type AclLevel,
   type Agent,
+  type AuthState,
   type Client,
   type IfconfigOp,
   type Peer,
 } from './api'
-import { usePolling, useTelemetry } from './hooks'
+import { useAuth, usePolling, useTelemetry } from './hooks'
 import './App.css'
 
-type Tab = 'dashboard' | 'peers' | 'agents' | 'clients' | 'interfaces' | 'pins' | 'acls'
+type Tab = 'dashboard' | 'peers' | 'agents' | 'clients' | 'interfaces' | 'pins' | 'acls' | 'users'
 
-const TABS: [Tab, string][] = [
-  ['dashboard', 'Dashboard'],
-  ['peers', 'Peers'],
-  ['agents', 'Agents'],
-  ['clients', 'Clients'],
-  ['interfaces', 'Interfaces'],
-  ['pins', 'Pins'],
-  ['acls', 'ACLs'],
+// Each tab requires a permission to appear.
+const TABS: [Tab, string, string][] = [
+  ['dashboard', 'Dashboard', PERMISSION.viewsRead],
+  ['peers', 'Peers', PERMISSION.viewsRead],
+  ['agents', 'Agents', PERMISSION.viewsRead],
+  ['clients', 'Clients', PERMISSION.viewsRead],
+  ['interfaces', 'Interfaces', PERMISSION.viewsRead],
+  ['pins', 'Pins', PERMISSION.pinsManage],
+  ['acls', 'ACLs', PERMISSION.aclManage],
+  ['users', 'Users', PERMISSION.usersManage],
 ]
 
 function App() {
-  const [tab, setTab] = useState<Tab>('dashboard')
+  const { state, reload } = useAuth()
+  if (!state) return <p style={{ padding: '2rem' }}>Loading…</p>
+  if (state.needsBootstrap) return <Bootstrap onDone={reload} />
+  if (!state.authenticated) return <Login onDone={reload} />
+  return <Console auth={state} onLogout={reload} />
+}
+
+function Bootstrap({ onDone }: { onDone: () => void }) {
+  return (
+    <AuthForm
+      title="Create the first admin"
+      submitLabel="Create admin"
+      action={(name, password) => api.setup(name, password)}
+      onDone={onDone}
+    />
+  )
+}
+
+function Login({ onDone }: { onDone: () => void }) {
+  return (
+    <AuthForm title="can-hub admin" submitLabel="Sign in" action={(name, password) => api.login(name, password)} onDone={onDone} />
+  )
+}
+
+function AuthForm({ title, submitLabel, action, onDone }: {
+  title: string
+  submitLabel: string
+  action: (name: string, password: string) => Promise<AuthState>
+  onDone: () => void
+}) {
+  const [name, setName] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    try {
+      await action(name, password)
+      onDone()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  return (
+    <div className="app" style={{ maxWidth: 360 }}>
+      <h1>{title}</h1>
+      <form className="form" onSubmit={submit} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+        <input placeholder="user" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        <input placeholder="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        {error && <p className="error">{error}</p>}
+        <button type="submit">{submitLabel}</button>
+      </form>
+    </div>
+  )
+}
+
+function Console({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) {
+  const allowed = TABS.filter(([, , permission]) => auth.permissions.includes(permission))
+  const [tab, setTab] = useState<Tab>(allowed[0]?.[0] ?? 'dashboard')
+
+  const logout = async () => {
+    await api.logout()
+    onLogout()
+  }
+
   return (
     <div className="app">
       <header>
-        <h1>can-hub admin</h1>
+        <div className="topbar">
+          <h1>can-hub admin</h1>
+          <span className="who">
+            {auth.user} <button onClick={logout}>Sign out</button>
+          </span>
+        </div>
         <nav>
-          {TABS.map(([id, label]) => (
+          {allowed.map(([id, label]) => (
             <button key={id} className={id === tab ? 'active' : ''} onClick={() => setTab(id)}>
               {label}
             </button>
@@ -44,12 +118,12 @@ function App() {
         {tab === 'interfaces' && <Interfaces />}
         {tab === 'pins' && <Pins />}
         {tab === 'acls' && <Acls />}
+        {tab === 'users' && <Users />}
       </main>
     </div>
   )
 }
 
-// Run a mutating action, reporting failures and refreshing on success.
 async function runAction(action: () => Promise<void>, refresh: () => void) {
   try {
     await action()
@@ -350,6 +424,124 @@ function Acls() {
             </tr>
           ))}
           {data && data.length === 0 && <tr><td colSpan={4}>None.</td></tr>}
+        </tbody>
+      </table>
+    </section>
+  )
+}
+
+function Users() {
+  const users = usePolling(api.listManagedUsers)
+  const groups = usePolling(api.listManagedGroups)
+  const permissions = usePolling(api.listPermissions)
+  const [userName, setUserName] = useState('')
+  const [userPassword, setUserPassword] = useState('')
+  const [groupName, setGroupName] = useState('')
+
+  const refreshAll = () => {
+    users.refresh()
+    groups.refresh()
+  }
+
+  const addUser = () => {
+    if (!userName || !userPassword) return alert('name and password required')
+    runAction(async () => {
+      await api.createManagedUser(userName, userPassword)
+      setUserName('')
+      setUserPassword('')
+    }, refreshAll)
+  }
+
+  const addGroup = () => {
+    if (!groupName) return alert('group name required')
+    runAction(async () => {
+      await api.createManagedGroup(groupName)
+      setGroupName('')
+    }, refreshAll)
+  }
+
+  const groupList = groups.data ?? []
+  const permissionList = permissions.data ?? []
+
+  return (
+    <section>
+      <h2>Groups</h2>
+      <div className="form">
+        <input placeholder="group name" value={groupName} onChange={(e) => setGroupName(e.target.value)} />
+        <button onClick={addGroup}>Add group</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Group</th>{permissionList.map((p) => <th key={p}>{p}</th>)}<th></th></tr>
+        </thead>
+        <tbody>
+          {groupList.map((g) => (
+            <tr key={g.id}>
+              <td>{g.name}</td>
+              {permissionList.map((p) => {
+                const has = g.permissions.includes(p)
+                const next = has ? g.permissions.filter((x) => x !== p) : [...g.permissions, p]
+                return (
+                  <td key={p} className="num">
+                    <input
+                      type="checkbox"
+                      checked={has}
+                      onChange={() => runAction(() => api.setGroupPermissions(g.id, next), refreshAll)}
+                    />
+                  </td>
+                )
+              })}
+              <td className="num">
+                <button onClick={() => runAction(() => api.deleteManagedGroup(g.id), refreshAll)}>Delete</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h2>Users</h2>
+      <div className="form">
+        <input placeholder="user name" value={userName} onChange={(e) => setUserName(e.target.value)} />
+        <input placeholder="password" type="password" value={userPassword} onChange={(e) => setUserPassword(e.target.value)} />
+        <button onClick={addUser}>Add user</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th>User</th><th>Enabled</th>{groupList.map((g) => <th key={g.id}>{g.name}</th>)}<th></th></tr>
+        </thead>
+        <tbody>
+          {(users.data ?? []).map((u) => (
+            <tr key={u.id}>
+              <td>{u.name}</td>
+              <td className="num">
+                <input
+                  type="checkbox"
+                  checked={u.enabled}
+                  onChange={() => runAction(() => api.setManagedUserEnabled(u.id, !u.enabled), refreshAll)}
+                />
+              </td>
+              {groupList.map((g) => {
+                const member = u.groupIds.includes(g.id)
+                return (
+                  <td key={g.id} className="num">
+                    <input
+                      type="checkbox"
+                      checked={member}
+                      onChange={() =>
+                        runAction(
+                          () => (member ? api.removeMembership(u.id, g.id) : api.addMembership(u.id, g.id)),
+                          refreshAll,
+                        )
+                      }
+                    />
+                  </td>
+                )
+              })}
+              <td className="num">
+                <button onClick={() => runAction(() => api.deleteManagedUser(u.id), refreshAll)}>Delete</button>
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </section>
