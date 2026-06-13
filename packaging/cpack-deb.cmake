@@ -84,7 +84,7 @@ set(CPACK_COMPONENTS_ALL hub agent client)
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_CONTACT "Javier Moragon <jamofer@gmail.com>")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Javier Moragon <jamofer@gmail.com>")
-set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/jamofer/can-hub")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/can-hub-io/can-hub")
 set(CPACK_DEBIAN_PACKAGE_SECTION "net")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 # Static debs (CAN_HUB_DEB_STATIC, built in docker/static.Dockerfile) carry

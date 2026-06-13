@@ -1,7 +1,7 @@
 # python-can-hub
 
 Native [python-can](https://python-can.readthedocs.io) backend for
-[can-hub](https://github.com/jamofer/can-hub): consume remote CAN interfaces
+[can-hub](https://github.com/can-hub-io/can-hub): consume remote CAN interfaces
 exported by can-hub agents, directly over the binary protocol — unix socket,
 plain TCP, TLS or QUIC, with mTLS identity and TOFU pinning on the encrypted
 transports. No bridge process in between.

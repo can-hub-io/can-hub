@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Design source of truth
-    url: https://github.com/jamofer/can-hub/blob/main/doc/design.md
+    url: https://github.com/can-hub-io/can-hub/blob/main/doc/design.md
     about: Read the design before filing a feature.
   - name: Wire protocol spec
-    url: https://github.com/jamofer/can-hub/blob/main/doc/protocol.md
+    url: https://github.com/can-hub-io/can-hub/blob/main/doc/protocol.md
     about: The binary wire format reference.
