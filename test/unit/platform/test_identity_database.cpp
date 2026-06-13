@@ -9,9 +9,13 @@ extern "C" {
 #define TRUCK_FINGERPRINT "aa11bb22cc33dd44ee55ff66aa77bb88cc99dd00ee11ff22aa33bb44cc55dd66"
 #define OTHER_FINGERPRINT "0000000000000000000000000000000000000000000000000000000000000000"
 #define PIN_FILE_PATH "/tmp/can_hub_test_known_agents"
+#define DB_FILE_PATH "/tmp/can_hub_test_migrations.db"
 
 static IdentityDatabase database;
 static IdentityStorePort *port;
+
+static int32_t readUserVersionFile(const char *path);
+static void executeRaw(const char *path, const char *sql);
 
 describe("identity_database", []() {
     beforeEach([]() {
@@ -178,3 +182,73 @@ describe("identity_database", []() {
         expect(port->lookup(port->context, "van7", fingerprint)).toBe(true);
     });
 });
+
+describe("identity_database migrations", []() {
+    afterEach([]() {
+        std::remove(DB_FILE_PATH);
+    });
+
+    it("brings a fresh db to the latest schema version", []() {
+        IdentityDatabase fresh;
+
+        expect(IdentityDatabase_Open(&fresh, DB_FILE_PATH)).toBe(true);
+        IdentityDatabase_Close(&fresh);
+
+        expect(readUserVersionFile(DB_FILE_PATH)).toBe(1);
+    });
+
+    it("migrates a legacy db that has tables but no recorded version", []() {
+        IdentityDatabase migrated;
+        char fingerprint[IDENTITY_FINGERPRINT_HEX_SIZE];
+
+        executeRaw(
+            DB_FILE_PATH,
+            "CREATE TABLE agent_identities (name TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,"
+            " first_seen_at INTEGER NOT NULL DEFAULT 0);"
+            "INSERT INTO agent_identities (name, fingerprint) VALUES ('truck42', '" TRUCK_FINGERPRINT "');"
+            "PRAGMA user_version = 0"
+        );
+
+        expect(IdentityDatabase_Open(&migrated, DB_FILE_PATH)).toBe(true);
+        IdentityStorePort *migrated_port = IdentityDatabase_Port(&migrated);
+        expect(migrated_port->lookup(migrated_port->context, "truck42", fingerprint)).toBe(true);
+        expect((const char *)fingerprint).toBe(TRUCK_FINGERPRINT);
+        IdentityDatabase_Close(&migrated);
+
+        expect(readUserVersionFile(DB_FILE_PATH)).toBe(1);
+    });
+
+    it("refuses to open a db newer than the binary supports", []() {
+        IdentityDatabase newer;
+
+        executeRaw(DB_FILE_PATH, "PRAGMA user_version = 999");
+
+        expect(IdentityDatabase_Open(&newer, DB_FILE_PATH)).toBe(false);
+    });
+});
+
+static int32_t readUserVersionFile(const char *path)
+{
+    sqlite3 *database = nullptr;
+    sqlite3_stmt *statement = nullptr;
+    int32_t version = -1;
+
+    sqlite3_open(path, &database);
+    sqlite3_prepare_v2(database, "PRAGMA user_version", -1, &statement, nullptr);
+    if (sqlite3_step(statement) == SQLITE_ROW) {
+        version = sqlite3_column_int(statement, 0);
+    }
+    sqlite3_finalize(statement);
+    sqlite3_close(database);
+
+    return version;
+}
+
+static void executeRaw(const char *path, const char *sql)
+{
+    sqlite3 *database = nullptr;
+
+    sqlite3_open(path, &database);
+    sqlite3_exec(database, sql, nullptr, nullptr, nullptr);
+    sqlite3_close(database);
+}

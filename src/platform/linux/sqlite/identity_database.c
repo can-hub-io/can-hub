@@ -6,8 +6,10 @@
 
 #define LINE_BUFFER_SIZE 512
 #define IMPORT_KEY_MAX 256
+#define PRAGMA_BUFFER_SIZE 64
+#define SCHEMA_VERSION 1
 
-#define SCHEMA \
+#define SCHEMA_BASELINE \
     "CREATE TABLE IF NOT EXISTS agent_identities (" \
     "name TEXT PRIMARY KEY," \
     "fingerprint TEXT NOT NULL," \
@@ -22,6 +24,18 @@
     "PRIMARY KEY (fingerprint, agent_name, interface_name)" \
     ")"
 
+typedef struct {
+    int32_t version;
+    const char *statements;
+} SchemaMigration;
+
+static const SchemaMigration SCHEMA_MIGRATIONS[] = {
+    { 1, SCHEMA_BASELINE },
+};
+
+static bool migrateSchema(IdentityDatabase *self);
+static bool readUserVersion(sqlite3 *database, int32_t *version);
+static bool setUserVersion(sqlite3 *database, int32_t version);
 static bool storeLookup(void *context, const char *agent_name, char *fingerprint_hex);
 static bool storePin(void *context, const char *agent_name, const char *fingerprint_hex);
 static bool storeForget(void *context, const char *agent_name);
@@ -69,7 +83,7 @@ bool IdentityDatabase_Open(IdentityDatabase *self, const char *path)
         IdentityDatabase_Close(self);
         return false;
     }
-    if (sqlite3_exec(self->database, SCHEMA, NULL, NULL, NULL) != SQLITE_OK) {
+    if (!migrateSchema(self)) {
         IdentityDatabase_Close(self);
         return false;
     }
@@ -123,6 +137,73 @@ bool IdentityDatabase_ImportPinFile(IdentityDatabase *self, const char *path)
 }
 
 /* ---------- private ---------- */
+
+static bool migrateSchema(IdentityDatabase *self)
+{
+    int32_t version = 0;
+    size_t step;
+
+    if (!readUserVersion(self->database, &version)) {
+        return false;
+    }
+    if (version > SCHEMA_VERSION) {
+        fprintf(
+            stderr,
+            "hub.db schema version %d is newer than this binary supports (%d); refusing to start\n",
+            version,
+            SCHEMA_VERSION
+        );
+        return false;
+    }
+    if (version == SCHEMA_VERSION) {
+        return true;
+    }
+
+    if (sqlite3_exec(self->database, "BEGIN", NULL, NULL, NULL) != SQLITE_OK) {
+        return false;
+    }
+    for (step = 0; step < sizeof(SCHEMA_MIGRATIONS) / sizeof(SCHEMA_MIGRATIONS[0]); step++) {
+        if (SCHEMA_MIGRATIONS[step].version <= version) {
+            continue;
+        }
+        if (sqlite3_exec(self->database, SCHEMA_MIGRATIONS[step].statements, NULL, NULL, NULL) != SQLITE_OK) {
+            sqlite3_exec(self->database, "ROLLBACK", NULL, NULL, NULL);
+            return false;
+        }
+    }
+    if (!setUserVersion(self->database, SCHEMA_VERSION)) {
+        sqlite3_exec(self->database, "ROLLBACK", NULL, NULL, NULL);
+        return false;
+    }
+
+    return sqlite3_exec(self->database, "COMMIT", NULL, NULL, NULL) == SQLITE_OK;
+}
+
+static bool readUserVersion(sqlite3 *database, int32_t *version)
+{
+    sqlite3_stmt *statement = NULL;
+    bool read = false;
+
+    if (sqlite3_prepare_v2(database, "PRAGMA user_version", -1, &statement, NULL) != SQLITE_OK) {
+        return false;
+    }
+    if (sqlite3_step(statement) == SQLITE_ROW) {
+        *version = sqlite3_column_int(statement, 0);
+        read = true;
+    }
+    sqlite3_finalize(statement);
+
+    return read;
+}
+
+static bool setUserVersion(sqlite3 *database, int32_t version)
+{
+    char pragma[PRAGMA_BUFFER_SIZE];
+
+    snprintf(pragma, sizeof(pragma), "PRAGMA user_version = %d", version);
+
+    return sqlite3_exec(database, pragma, NULL, NULL, NULL) == SQLITE_OK;
+}
 
 static bool storeLookup(void *context, const char *agent_name, char *fingerprint_hex)
 {
