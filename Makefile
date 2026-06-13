@@ -10,6 +10,7 @@
 #   make deb-debug [ARCH=armv7|arm64|x86_64] Static debug agent .deb (-O0 -g,
 #                                            unstripped, musl, docker).
 #   make test                                Build + run host unit tests (CEST).
+#   make bump VERSION=x.y.z                   Set the version across C, Python, Rust.
 #   make clean                               Remove build trees.
 
 CMAKE ?= cmake
@@ -24,7 +25,7 @@ _BUILD_DEB := build/$(ARCH)/package
 _BUILD_TEST := build/test
 _CEST_RUNNER := test/vendor/cest-runner_linux_x86_64
 
-.PHONY: release debug install deb static deb-debug test e2e e2e-image web-daemon windows clean
+.PHONY: release debug install deb static deb-debug test e2e e2e-image web-daemon windows bump clean
 
 _BUILD_WINDOWS := build/mingw-x86_64/release
 
@@ -108,6 +109,18 @@ e2e: release web-daemon e2e-image
 	    -e CAN_HUB_WEB_BIN=/work/web/daemon/target/release/can-hub-web \
 	    $(_E2E_IMAGE) \
 	    robot --outputdir /work/build/e2e tests
+
+# Single source of the project version is three ecosystem manifests that must
+# agree (C/CMake, Python wheel, Rust web daemon). Keep them in lockstep here so
+# a release tag never ships a stale wheel version.
+bump:
+	@test -n "$(VERSION)" || { echo "usage: make bump VERSION=x.y.z"; exit 1; }
+	sed -i 's/\(project(can_hub VERSION \)[0-9.]\+/\1$(VERSION)/' CMakeLists.txt
+	sed -i 's/^version = ".*"/version = "$(VERSION)"/' python/pyproject.toml
+	sed -i 's/^version = ".*"/version = "$(VERSION)"/' web/daemon/Cargo.toml
+	perl -0pi -e 's/(name = "can-hub-web"\nversion = ")[0-9.]+(")/$${1}$(VERSION)$${2}/' web/daemon/Cargo.lock
+	@echo "version set to $(VERSION):"
+	@grep -nE 'project\(can_hub VERSION|^version = ' CMakeLists.txt python/pyproject.toml web/daemon/Cargo.toml
 
 clean:
 	rm -rf build/
