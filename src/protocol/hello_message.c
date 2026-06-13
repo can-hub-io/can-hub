@@ -42,6 +42,24 @@ size_t HelloMessage_Encode(const HelloMessage *self, uint8_t *buffer, size_t buf
     return total_size;
 }
 
+size_t HelloMessage_Build(uint8_t role, const char *name, uint32_t capabilities, uint8_t *buffer, size_t buffer_size)
+{
+    HelloMessage hello;
+    size_t length;
+
+    hello.version = PROTOCOL_VERSION;
+    hello.role = role;
+    hello.capabilities = capabilities;
+    hello.name[0] = '\0';
+    if (name != NULL) {
+        length = strnlen(name, HELLO_NAME_SIZE - 1);
+        memcpy(hello.name, name, length);
+        hello.name[length] = '\0';
+    }
+
+    return HelloMessage_Encode(&hello, buffer, buffer_size);
+}
+
 bool HelloMessage_Decode(HelloMessage *self, const uint8_t *payload, size_t payload_length)
 {
     if (payload_length < HELLO_BODY_SIZE) {

@@ -1,4 +1,5 @@
 #include <cest>
+#include <cstring>
 
 extern "C" {
 #include "protocol/hello_message.h"
@@ -23,6 +24,58 @@ describe("hello_message", []() {
         expect(decoded.role).toBe(kPEER_ROLE_CLIENT);
         expect(decoded.capabilities).toBe((uint32_t)0xCAFE0001);
         expect((const char *)decoded.name).toBe("dashboard");
+    });
+
+    it("builds and round-trips from role, name and capabilities", []() {
+        HelloMessage decoded;
+        uint8_t buffer[128];
+        size_t expected_size = MESSAGE_HEADER_SIZE + HELLO_BODY_SIZE;
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = HelloMessage_Build(kPEER_ROLE_CLIENT, "dashboard", 0xCAFE0001, buffer, sizeof(buffer));
+        decoded_ok = HelloMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, HELLO_BODY_SIZE);
+
+        expect(encoded_size).toBe(expected_size);
+        expect(decoded_ok).toBe(true);
+        expect(decoded.version).toBe(PROTOCOL_VERSION);
+        expect(decoded.role).toBe(kPEER_ROLE_CLIENT);
+        expect(decoded.capabilities).toBe((uint32_t)0xCAFE0001);
+        expect((const char *)decoded.name).toBe("dashboard");
+    });
+
+    it("builds an empty name from a null pointer", []() {
+        HelloMessage decoded;
+        uint8_t buffer[128];
+        size_t encoded_size;
+
+        encoded_size = HelloMessage_Build(kPEER_ROLE_AGENT, NULL, 0, buffer, sizeof(buffer));
+        HelloMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, HELLO_BODY_SIZE);
+
+        expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + HELLO_BODY_SIZE));
+        expect((const char *)decoded.name).toBe("");
+    });
+
+    it("truncates an over-long name when building", []() {
+        char long_name[HELLO_NAME_SIZE + 16];
+        HelloMessage decoded;
+        uint8_t buffer[128];
+
+        memset(long_name, 'x', sizeof(long_name) - 1);
+        long_name[sizeof(long_name) - 1] = '\0';
+        HelloMessage_Build(kPEER_ROLE_CLIENT, long_name, 0, buffer, sizeof(buffer));
+        HelloMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, HELLO_BODY_SIZE);
+
+        expect(strlen(decoded.name)).toBe((size_t)(HELLO_NAME_SIZE - 1));
+    });
+
+    it("rejects building into a too-small buffer", []() {
+        uint8_t buffer[8];
+        size_t encoded_size;
+
+        encoded_size = HelloMessage_Build(kPEER_ROLE_CLIENT, "x", 0, buffer, sizeof(buffer));
+
+        expect(encoded_size).toBe((size_t)0);
     });
 
     it("rejects encoding an invalid role", []() {

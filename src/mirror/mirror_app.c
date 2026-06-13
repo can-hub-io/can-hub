@@ -222,12 +222,10 @@ static void handleOpenAck(MirrorApp *self, const OpenAckMessage *ack)
 
 static void sendHello(MirrorApp *self)
 {
-    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0, "" };
     uint8_t encoded[WIRE_BUFFER_SIZE];
     size_t encoded_size;
 
-    snprintf(hello.name, sizeof(hello.name), "%s", self->name);
-    encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+    encoded_size = HelloMessage_Build(kPEER_ROLE_CLIENT, self->name, 0, encoded, sizeof(encoded));
     if (encoded_size > 0) {
         self->hub->send_control(self->hub->context, encoded, encoded_size);
     }

@@ -259,11 +259,10 @@ static void scheduleReconnect(Agent *self, uint64_t now_us)
 
 static void sendHelloAndRegister(Agent *self)
 {
-    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_AGENT, 0, "" };
     uint8_t encoded[CONTROL_BUFFER_SIZE];
     size_t encoded_size;
 
-    encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+    encoded_size = HelloMessage_Build(kPEER_ROLE_AGENT, NULL, 0, encoded, sizeof(encoded));
     self->transport->send_control(self->transport->context, encoded, encoded_size);
 
     encoded_size = RegisterMessage_Encode(&self->registration, encoded, sizeof(encoded));

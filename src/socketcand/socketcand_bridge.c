@@ -424,12 +424,10 @@ static void handleSend(SocketcandBridge *self, SocketcandConnection *connection,
 
 static void sendHello(SocketcandBridge *self)
 {
-    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0, "" };
     uint8_t encoded[WIRE_BUFFER_SIZE];
     size_t encoded_size;
 
-    copyString(hello.name, sizeof(hello.name), self->name);
-    encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+    encoded_size = HelloMessage_Build(kPEER_ROLE_CLIENT, self->name, 0, encoded, sizeof(encoded));
     if (encoded_size > 0) {
         self->hub->send_control(self->hub->context, encoded, encoded_size);
     }

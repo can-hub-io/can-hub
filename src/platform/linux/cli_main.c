@@ -405,11 +405,10 @@ static bool initTransport(const char *host, const char *port_text, const Transpo
 static void onConnected(void *context)
 {
     TcpClientTransport *self = context;
-    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_ADMIN, 0, "" };
     uint8_t encoded[COMMAND_BUFFER_SIZE];
     size_t encoded_size;
 
-    encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+    encoded_size = HelloMessage_Build(kPEER_ROLE_ADMIN, NULL, 0, encoded, sizeof(encoded));
     self->port.send_control(self->port.context, encoded, encoded_size);
 
     sendRequest();

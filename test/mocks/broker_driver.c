@@ -97,11 +97,10 @@ uint8_t BrokerDriver_OpenInterface(
 
 static void sendHello(const HubTransportEvents *events, uint32_t peer_id, uint8_t role)
 {
-    HelloMessage hello = { PROTOCOL_VERSION, role, 0, "" };
     uint8_t encoded[DRIVER_BUFFER_SIZE];
     size_t encoded_size;
 
-    encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+    encoded_size = HelloMessage_Build(role, NULL, 0, encoded, sizeof(encoded));
     events->on_peer_control(events->context, peer_id, encoded, encoded_size, 0);
 }
 
