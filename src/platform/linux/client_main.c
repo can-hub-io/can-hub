@@ -15,6 +15,7 @@
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/hub_defaults.h"
+#include "platform/linux/shared/log.h"
 #include "platform/linux/shared/tls_identity.h"
 #include "platform/linux/socketcan/socketcan_adapter.h"
 #include "platform/linux/socketcand/socketcand_server.h"
@@ -146,6 +147,8 @@ int main(int argc, char **argv)
         return 0;
     }
 
+    Log_InitFromArgs("can-hub-client", argc, argv);
+
     for(i=1; i<argc; i++) {
         if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
             state_directory_override = argv[i + 1];
@@ -170,13 +173,13 @@ int main(int argc, char **argv)
     }
 
     if (!initTransport(host, port_text, &events)) {
-        fprintf(stderr, "could not initialize transport\n");
+        LOG_ERROR("could not initialize transport");
         return 1;
     }
     Client_Init(&client, active_port, &client_events);
     startClientCommand();
     if (!active_port->connect(active_port->context)) {
-        fprintf(stderr, "could not connect to %s\n", host);
+        LOG_ERROR("could not connect to %s", host);
         return 1;
     }
 
@@ -195,6 +198,7 @@ static void printUsage(FILE *stream, const char *program)
     fprintf(stream, "       | attach <interface> <vcan>   mirror a remote bus into a local pre-created vcan (bidirectional)\n");
     fprintf(stream, "       <interface> is the numeric id (from list) or the namespaced name agent/iface\n");
     fprintf(stream, "       %s --show-identity [--state-dir <path>]   print this client's TLS fingerprint\n", program);
+    fprintf(stream, "       [--log-level error|warn|info|debug]\n");
     fprintf(stream, "       default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
 }
 
@@ -209,6 +213,8 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
             connect_url = argv[++i];
         } else if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
             state_directory_override = argv[++i];
+        } else if (strcmp(argv[i], "--log-level") == 0 && i + 1 < argc) {
+            i++;
         } else if (strcmp(argv[i], "--no-echo") == 0) {
             open_flags |= OPEN_FLAG_SUPPRESS_OWN_ECHO;
         } else if (strcmp(argv[i], "--no-beacon") == 0) {
@@ -357,7 +363,7 @@ static void sendFrameAndQuit(void)
 {
     frame_to_send.timestamp_us = Clock_RealtimeUs();
     if (!Client_SendFrame(&client, &frame_to_send)) {
-        fprintf(stderr, "could not send the frame\n");
+        LOG_ERROR("could not send the frame");
         exit_code = 1;
         return;
     }
@@ -428,11 +434,11 @@ static int32_t showIdentity(void)
     char fingerprint[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
 
     if (!prepareSecurityMaterial("identity", "0")) {
-        fprintf(stderr, "could not load or create TLS identity\n");
+        LOG_ERROR("could not load or create TLS identity");
         return 1;
     }
     if (!TlsIdentity_FingerprintOfFile(identity_certificate_path, fingerprint)) {
-        fprintf(stderr, "could not read the identity fingerprint\n");
+        LOG_ERROR("could not read the identity fingerprint");
         return 1;
     }
 
@@ -498,7 +504,7 @@ static void clientOnOpenResult(void *context, uint8_t status, uint8_t channel, u
     (void)context;
 
     if (status != OPEN_STATUS_OK) {
-        fprintf(stderr, "open rejected for interface %u\n", interface_id);
+        LOG_ERROR("open rejected for interface %u", interface_id);
         exit_code = 1;
         return;
     }
@@ -507,7 +513,7 @@ static void clientOnOpenResult(void *context, uint8_t status, uint8_t channel, u
         return;
     }
 
-    fprintf(stderr, "dumping interface %u (channel %u), ctrl-c to stop\n", interface_id, channel);
+    LOG_INFO("dumping interface %u (channel %u), ctrl-c to stop", interface_id, channel);
 }
 
 static void clientOnFrame(void *context, const FrameMessage *frame)
@@ -522,11 +528,11 @@ static void clientOnError(void *context, uint16_t code, const char *detail)
     (void)context;
 
     if (code == CLIENT_ERROR_INTERFACE_NOT_FOUND) {
-        fprintf(stderr, "interface %s not found\n", detail);
+        LOG_ERROR("interface %s not found", detail);
     } else if (code == CLIENT_ERROR_MALFORMED_REPLY) {
-        fprintf(stderr, "%s\n", detail);
+        LOG_ERROR("%s", detail);
     } else {
-        fprintf(stderr, "hub error %u: %.*s\n", code, (int)ERROR_DETAIL_SIZE, detail);
+        LOG_ERROR("hub error %u: %.*s", code, (int)ERROR_DETAIL_SIZE, detail);
     }
 
     exit_code = 1;
@@ -536,7 +542,7 @@ static void clientOnDisconnected(void *context)
 {
     (void)context;
 
-    fprintf(stderr, "connection lost\n");
+    LOG_WARN("connection lost");
     exit_code = 1;
 }
 
@@ -693,22 +699,22 @@ static int32_t runSocketcandServer(const char *host, const char *port_text)
     char beacon_url[SOCKETCAND_URL_SIZE];
 
     if (!initTransport(host, port_text, &hub_events)) {
-        fprintf(stderr, "could not initialize transport\n");
+        LOG_ERROR("could not initialize transport");
         return 1;
     }
     if (!SocketcandServer_Init(&socketcand_server, socketcand_bind_address, socketcand_port_text, SOCKETCAND_BEACON_PORT, &server_events)) {
-        fprintf(stderr, "could not bind socketcand server on %s:%s\n", socketcand_bind_address, socketcand_port_text);
+        LOG_ERROR("could not bind socketcand server on %s:%s", socketcand_bind_address, socketcand_port_text);
         return 1;
     }
     if (strcmp(socketcand_bind_address, HUB_LOCAL_ADDRESS) != 0) {
-        fprintf(stderr, "warning: socketcand server bound to %s (not loopback) — socketcand clients are unauthenticated\n", socketcand_bind_address);
+        LOG_WARN("socketcand server bound to %s (not loopback) — socketcand clients are unauthenticated", socketcand_bind_address);
     }
 
     resolveDeviceName(device_name, sizeof(device_name));
     buildBeaconUrl(beacon_url, sizeof(beacon_url));
     SocketcandApp_Init(&socketcand_app, active_port, SocketcandServer_Port(&socketcand_server), device_name, beacon_url, beacon_enabled);
 
-    fprintf(stderr, "socketcand server on %s:%s, hub %s, beacon %s\n",
+    LOG_INFO("socketcand server on %s:%s, hub %s, beacon %s",
             socketcand_bind_address, socketcand_port_text, host, beacon_enabled ? "on" : "off");
 
     return runSocketcandLoop();
@@ -856,11 +862,11 @@ static int32_t runAttach(const char *host, const char *port_text)
     snprintf(registration.interface_names[0], REGISTER_INTERFACE_NAME_SIZE, "%s", attach_interface_name);
 
     if (!initTransport(host, port_text, &events)) {
-        fprintf(stderr, "could not initialize transport\n");
+        LOG_ERROR("could not initialize transport");
         return 1;
     }
     if (!SocketCanAdapter_Open(&mirror_can_adapter, &registration, false)) {
-        fprintf(stderr, "could not open vcan %s (does it exist?)\n", attach_interface_name);
+        LOG_ERROR("could not open vcan %s (does it exist?)", attach_interface_name);
         return 1;
     }
 
@@ -877,11 +883,11 @@ static int32_t runAttach(const char *host, const char *port_text)
     }
 
     if (!active_port->connect(active_port->context)) {
-        fprintf(stderr, "could not connect to %s\n", host);
+        LOG_ERROR("could not connect to %s", host);
         return 1;
     }
 
-    fprintf(stderr, "mirroring interface %s to %s, ctrl-c to stop\n", target_interface_text, attach_interface_name);
+    LOG_INFO("mirroring interface %s to %s, ctrl-c to stop", target_interface_text, attach_interface_name);
 
     return runAttachLoop();
 }
@@ -910,7 +916,7 @@ static int32_t runAttachLoop(void)
         }
     }
 
-    fprintf(stderr, "connection lost\n");
+    LOG_WARN("connection lost");
 
     return 1;
 }

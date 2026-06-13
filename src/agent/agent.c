@@ -45,6 +45,7 @@ void Agent_Init(Agent *self, TransportPort *transport, CanPort *can, const Regis
     self->state = kAGENT_STATE_DISCONNECTED;
     self->next_connect_at_us = 0;
     self->register_deadline_us = 0;
+    self->pending_reconnect_delay_ms = 0;
 }
 
 TransportEvents Agent_TransportEvents(Agent *self)
@@ -192,6 +193,11 @@ uint8_t Agent_State(const Agent *self)
     return self->state;
 }
 
+uint32_t Agent_PendingReconnectDelayMs(const Agent *self)
+{
+    return self->pending_reconnect_delay_ms;
+}
+
 /* ---------- private ---------- */
 
 static void eventConnected(void *context)
@@ -247,6 +253,7 @@ static void scheduleReconnect(Agent *self, uint64_t now_us)
 {
     uint64_t delay_ms = ReconnectBackoff_NextDelayMs(&self->backoff);
 
+    self->pending_reconnect_delay_ms = (uint32_t)delay_ms;
     self->next_connect_at_us = now_us + delay_ms * MICROSECONDS_PER_MILLISECOND;
 }
 

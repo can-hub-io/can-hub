@@ -40,6 +40,7 @@ typedef struct {
     uint8_t state;
     uint64_t next_connect_at_us;
     uint64_t register_deadline_us;
+    uint32_t pending_reconnect_delay_ms;
 } Agent;
 
 void Agent_Init(Agent *self, TransportPort *transport, CanPort *can, const RegisterMessage *registration);
@@ -52,3 +53,4 @@ void Agent_OnControlMessage(Agent *self, const uint8_t *data, size_t size, uint6
 void Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *frame);
 void Agent_OnTransportFrame(Agent *self, const uint8_t *data, size_t size);
 uint8_t Agent_State(const Agent *self);
+uint32_t Agent_PendingReconnectDelayMs(const Agent *self);

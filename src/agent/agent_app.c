@@ -21,3 +21,8 @@ void AgentApp_Tick(AgentApp *self, uint64_t now_us)
 {
     Agent_Tick(&self->agent, now_us);
 }
+
+uint32_t AgentApp_PendingReconnectDelayMs(const AgentApp *self)
+{
+    return Agent_PendingReconnectDelayMs(&self->agent);
+}

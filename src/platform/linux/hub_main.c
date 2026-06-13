@@ -15,6 +15,7 @@
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/cli_meta.h"
 #include "platform/linux/shared/hub_defaults.h"
+#include "platform/linux/shared/log.h"
 #include "platform/linux/shared/tls_identity.h"
 #include "platform/linux/sqlite/identity_database.h"
 #include "platform/linux/tcp/tcp_server_transport.h"
@@ -101,6 +102,8 @@ int main(int argc, char **argv)
         return 0;
     }
 
+    Log_InitFromArgs("can-hub", argc, argv);
+
     if (!parseArguments(argc, argv)) {
         printUsage(stderr, argv[0]);
         return 1;
@@ -110,9 +113,8 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    fprintf(
-        stderr,
-        "can-hub %s ready (tls:%s quic:%s tcp:%s unix:%s)%s\n",
+    LOG_INFO(
+        "%s ready (tls:%s quic:%s tcp:%s unix:%s)%s",
         Version_String(),
         tls_enabled ? "on" : "off",
         quic_enabled ? "on" : "off",
@@ -121,10 +123,9 @@ int main(int argc, char **argv)
         require_known_agents ? " [locked: known agents only]" : ""
     );
     if (require_known_agents && tcp_enabled && strcmp(tcp_listen.bind_address, "127.0.0.1") != 0) {
-        fprintf(
-            stderr,
-            "warning: plain tcp on %s carries no identity and bypasses the agent allowlist;"
-            " bind it to a trusted interface or disable it\n",
+        LOG_WARN(
+            "plain tcp on %s carries no identity and bypasses the agent allowlist;"
+            " bind it to a trusted interface or disable it",
             tcp_listen.bind_address
         );
     }
@@ -157,7 +158,8 @@ static void printUsage(FILE *stream, const char *program)
         stream,
         "usage: %s [--listen tls://[<bind-ip>:]<port>] [--listen quic://[<bind-ip>:]<port>]\n"
         "       [--listen tcp://[<bind-ip>:]<port>] [--listen unix://<path>]\n"
-        "       [--cert <pem> --key <pem>] [--state-dir <path>] [--require-known-agents]\n"
+        "       [--cert <pem> --key <pem>] [--state-dir <path>] [--require-known-agents]"
+        " [--log-level error|warn|info|debug]\n"
         "       defaults: tls://0.0.0.0:" HUB_DEFAULT_PORT_TEXT ", quic://0.0.0.0:" HUB_DEFAULT_PORT_TEXT
         ", tcp://127.0.0.1:" HUB_DEFAULT_PLAIN_TCP_PORT_TEXT ", unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n"
         "       bind-ip defaults to 0.0.0.0 (tcp: 127.0.0.1); explicit --listen replaces the network\n"
@@ -226,7 +228,7 @@ static bool parseArguments(int argc, char **argv)
             certificate = identity_certificate_path;
             key = identity_key_path;
         } else {
-            fprintf(stderr, "TLS listeners disabled: could not load or create TLS identity\n");
+            LOG_WARN("TLS listeners disabled: could not load or create TLS identity");
             if (explicit_quic || explicit_tls) {
                 return false;
             }
@@ -276,7 +278,7 @@ static bool startListeners(const char *unix_path, const char *certificate, const
         if (tcp_started) {
             tcp_enabled = true;
         } else {
-            fprintf(stderr, "could not open TCP listener on %s:%s\n", tcp_listen.bind_address, tcp_listen.port_text);
+            LOG_ERROR("could not open TCP listener on %s:%s", tcp_listen.bind_address, tcp_listen.port_text);
             if (explicit_listen) {
                 return false;
             }
@@ -295,7 +297,7 @@ static bool startListeners(const char *unix_path, const char *certificate, const
         if (quic_started) {
             quic_enabled = true;
         } else {
-            fprintf(stderr, "could not open QUIC listener on %s:%s\n", quic_listen.bind_address, quic_listen.port_text);
+            LOG_ERROR("could not open QUIC listener on %s:%s", quic_listen.bind_address, quic_listen.port_text);
             if (explicit_listen) {
                 return false;
             }
@@ -314,7 +316,7 @@ static bool startListeners(const char *unix_path, const char *certificate, const
         if (tls_started) {
             tls_enabled = true;
         } else {
-            fprintf(stderr, "could not open TLS listener on %s:%s\n", tls_listen.bind_address, tls_listen.port_text);
+            LOG_ERROR("could not open TLS listener on %s:%s", tls_listen.bind_address, tls_listen.port_text);
             if (explicit_listen) {
                 return false;
             }
@@ -328,7 +330,7 @@ static bool startListeners(const char *unix_path, const char *certificate, const
     if (TcpServerTransport_InitUnix(&unix_transport, unix_path, UNIX_PEER_ID_BASE, &transport_events)) {
         unix_enabled = true;
     } else {
-        fprintf(stderr, "could not open unix socket listener on %s\n", unix_path);
+        LOG_ERROR("could not open unix socket listener on %s", unix_path);
         if (explicit_unix) {
             return false;
         }
@@ -354,7 +356,7 @@ static IdentityStorePort *identityStore(void)
 
     snprintf(database_path, sizeof(database_path), "%s/%s", state_directory, DATABASE_FILE);
     if (!IdentityDatabase_Open(&identity_database, database_path)) {
-        fprintf(stderr, "agent identity pinning disabled: could not open %s\n", database_path);
+        LOG_WARN("agent identity pinning disabled: could not open %s", database_path);
         return NULL;
     }
     database_open = true;
@@ -380,13 +382,13 @@ static void importLegacyPinFile(void)
     }
 
     if (!IdentityDatabase_ImportPinFile(&identity_database, pin_file_path)) {
-        fprintf(stderr, "could not import %s into the identity database\n", pin_file_path);
+        LOG_ERROR("could not import %s into the identity database", pin_file_path);
         return;
     }
 
     snprintf(imported_path, sizeof(imported_path), "%s/%s.imported", state_directory, KNOWN_AGENTS_FILE);
     rename(pin_file_path, imported_path);
-    fprintf(stderr, "imported %s into the identity database\n", pin_file_path);
+    LOG_INFO("imported %s into the identity database", pin_file_path);
 }
 
 static bool muxSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size)

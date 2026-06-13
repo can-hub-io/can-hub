@@ -45,3 +45,6 @@ Noun-first grammar; an omitted verb lists.
 - Kicked agents normally reconnect on their backoff. To keep one out,
   `pins delete` it first and run the hub with `--require-known-agents`.
 - Failures print `hub error <code>: <detail>` from the hub's ERROR message.
+- Command output goes to stdout, diagnostics to stderr. Tune the stderr
+  verbosity with `--log-level error|warn|info|debug` (default `info`) or the
+  `CAN_HUB_LOG` environment variable.

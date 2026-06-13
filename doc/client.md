@@ -105,3 +105,10 @@ network-trusted with full access. Full model in
   [python/README.md](../python/README.md).
 - C: [libcanhub](libcanhub.md), the embeddable client library (Linux and
   Windows).
+
+## Logging
+
+Frames and query results print to stdout; diagnostics go to stderr, so piping
+`dump` output is unaffected. Tune the stderr verbosity with `--log-level
+error|warn|info|debug` (default `info`) or the `CAN_HUB_LOG` environment
+variable.

@@ -93,6 +93,7 @@ endif()
 set(COMMON_SOURCES
     src/version.c
     src/platform/linux/shared/cli_meta.c
+    src/platform/linux/shared/log.c
     src/protocol/wire.c
     src/protocol/admin_message.c
     src/protocol/message_header.c

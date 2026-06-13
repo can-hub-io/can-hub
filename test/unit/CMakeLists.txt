@@ -26,6 +26,12 @@ add_unit_test(test_version
         ${ROOT_SRC_DIR}/version.c
 )
 
+add_unit_test(test_log
+    SOURCES
+        platform/test_log.cpp
+        ${ROOT_SRC_DIR}/platform/linux/shared/log.c
+)
+
 add_unit_test(test_message_header
     SOURCES
         protocol/test_message_header.cpp

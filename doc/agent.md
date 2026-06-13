@@ -85,3 +85,14 @@ Anything `cansend`/`candump` does on `vcan0` flows through the hub.
 The agent core is freestanding C11 — no POSIX, heap or syscalls — and
 compiles for microcontrollers as-is; only the transport and CAN adapters are
 platform code. See [design](design.md) for the port architecture.
+
+## Logging
+
+On a healthy start the agent prints `connecting to …`, then `connected to
+hub`, then `registered as <name>: <iface>=ch<channel> …` so you can see the
+buses went live. Rejections print the reason (unknown agent, identity
+mismatch, name/interface collision) and drops print `connection lost,
+reconnecting in <n>s`. Diagnostics go to stderr at four levels — `error`,
+`warn`, `info`, `debug`; set the verbosity with `--log-level <level>` (default
+`info`) or the `CAN_HUB_LOG` environment variable, the flag wins. Under systemd
+the lines carry a syslog priority prefix for `journalctl -p`.
