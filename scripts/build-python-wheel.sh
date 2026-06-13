@@ -24,20 +24,15 @@ if [ -z "$ARCH" ]; then
     exit 0
 fi
 
-# A 32-bit armv7 container on an arm64 host reports uname -m aarch64, which would
-# make OpenSSL configure linux-aarch64 (ARMv8 asm) against the 32-bit toolchain.
-# Force the processor for that case so it configures linux-armv4.
-TARGET_PROCESSOR=
 case "$ARCH" in
     x86_64)  IMAGE=quay.io/pypa/manylinux_2_28_x86_64;  PLATFORM=linux/amd64 ;;
     aarch64) IMAGE=quay.io/pypa/manylinux_2_28_aarch64; PLATFORM=linux/arm64 ;;
-    armv7l)  IMAGE=quay.io/pypa/manylinux_2_31_armv7l;  PLATFORM=linux/arm/v7; TARGET_PROCESSOR=armv7l ;;
+    armv7l)  IMAGE=quay.io/pypa/manylinux_2_31_armv7l;  PLATFORM=linux/arm/v7 ;;
     *) echo "unsupported arch '$ARCH' (x86_64, aarch64, armv7l)" >&2; exit 1 ;;
 esac
 
 docker build -f docker/wheel.Dockerfile \
     --platform "$PLATFORM" \
     --build-arg MANYLINUX_IMAGE="$IMAGE" \
-    --build-arg TARGET_PROCESSOR="$TARGET_PROCESSOR" \
     --output "python/dist/$ARCH" .
 ls -la "python/dist/$ARCH"
