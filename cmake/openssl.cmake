@@ -12,7 +12,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
     set(_openssl_target linux-x86_64)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
-    set(_openssl_target linux-aarch64)
+    # A 32-bit ARM toolchain in a container whose kernel reports aarch64 (armv7
+    # on an arm64 host) would otherwise pick the ARMv8 asm and fail to assemble.
+    # CMAKE_SIZEOF_VOID_P reflects the real compiler and is never host-clobbered.
+    if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+        set(_openssl_target linux-armv4)
+    else()
+        set(_openssl_target linux-aarch64)
+    endif()
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
     set(_openssl_target linux-armv4)
 else()

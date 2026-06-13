@@ -18,11 +18,6 @@ FROM ${MANYLINUX_IMAGE} AS build
 ARG BUILD_PYTHON=cp312-cp312
 ENV PATH=/opt/python/${BUILD_PYTHON}/bin:$PATH
 
-# Override the OpenSSL Configure target when uname misreports the arch: an
-# armv7 container on an arm64 host reports aarch64, so force armv7l here.
-ARG TARGET_PROCESSOR=
-ENV TARGET_PROCESSOR=${TARGET_PROCESSOR}
-
 # ninja from pip works on every base; OpenSSL's Configure needs the full perl
 # core, which the AlmaLinux-based images (manylinux_2_28) split out — the
 # Ubuntu-based ones (manylinux_2_31_armv7l) already ship it.
@@ -34,7 +29,6 @@ COPY . /src
 RUN cmake -S /src -B /build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCAN_HUB_STATIC=OFF \
-        ${TARGET_PROCESSOR:+-DCMAKE_SYSTEM_PROCESSOR=$TARGET_PROCESSOR} \
     && cmake --build /build --target canhub_shared
 
 RUN cp /build/libcanhub.so.0 /src/python/canhub/libcanhub.so \
