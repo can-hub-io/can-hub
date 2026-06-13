@@ -2,7 +2,7 @@
 
 ## Debian packages (from releases)
 
-Every [release](https://github.com/jamofer/can-hub/releases) ships
+Every [release](https://github.com/can-hub-io/can-hub/releases) ships
 per-architecture `.deb` packages (x86_64, arm64, armv7), statically linked —
 no runtime dependencies:
 

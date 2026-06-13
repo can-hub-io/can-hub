@@ -12,7 +12,7 @@ requires-python = ">=3.9"
 dependencies = ["python-can>=4.0"]
 
 [project.urls]
-Homepage = "https://github.com/jamofer/can-hub"
+Homepage = "https://github.com/can-hub-io/can-hub"
 
 [project.entry-points."can.interface"]
 canhub = "canhub.bus:CanHubBus"

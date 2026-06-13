@@ -1,6 +1,6 @@
 [Unit]
 Description=can-hub socketcand bridge (exposes hub interfaces as a local socketcand server)
-Documentation=https://github.com/jamofer/can-hub
+Documentation=https://github.com/can-hub-io/can-hub
 After=can-hub.service
 Wants=can-hub.service
 
