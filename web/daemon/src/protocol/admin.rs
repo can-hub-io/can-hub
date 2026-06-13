@@ -12,6 +12,7 @@ use super::{
 const AGENT_NAME_SIZE: usize = 128;
 const INTERFACE_NAME_SIZE: usize = 16;
 const FINGERPRINT_SIZE: usize = 65;
+const ORIGIN_SIZE: usize = 56;
 
 /// A page of a paginated admin reply, plus whether more entries exist beyond
 /// `offset + entries.len()` (header flags bit 0).
@@ -38,9 +39,12 @@ pub struct PeerEntry {
     pub peer_id: u32,
     pub frames_forwarded: u32,
     pub frames_dropped: u32,
+    pub uptime_seconds: u32,
     pub role: u8,
+    pub transport_kind: u8,
     pub agent_name: String,
     pub fingerprint_hex: String,
+    pub origin: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -320,15 +324,21 @@ fn decode_page<T>(
     Ok(Page { entries, more })
 }
 
-/// ADMIN_PEERS_REPLY (8 + count * 212).
+/// ADMIN_PEERS_REPLY (8 + count * 272). Entry layout (entry-relative):
+/// peer_id @0, frames_forwarded @4, frames_dropped @8, role @12,
+/// transport_kind @13, agent_name[128] @16, fingerprint_hex[65] @144,
+/// uptime_seconds @209, origin[56] @213.
 pub fn decode_peers_reply(buffer: &[u8]) -> Result<Page<PeerEntry>, DecodeError> {
-    decode_page(buffer, MessageType::AdminPeersReply, 212, |entry| PeerEntry {
+    decode_page(buffer, MessageType::AdminPeersReply, 272, |entry| PeerEntry {
         peer_id: read_u32(entry, 0),
         frames_forwarded: read_u32(entry, 4),
         frames_dropped: read_u32(entry, 8),
+        uptime_seconds: read_u32(entry, 209),
         role: entry[12],
+        transport_kind: entry[13],
         agent_name: read_fixed_str(entry, 16, AGENT_NAME_SIZE),
         fingerprint_hex: read_fixed_str(entry, 144, FINGERPRINT_SIZE),
+        origin: read_fixed_str(entry, 213, ORIGIN_SIZE),
     })
 }
 
@@ -495,25 +505,31 @@ mod tests {
 
     #[test]
     fn peers_reply_decodes_entry() {
-        let mut buffer = vec![0u8; 8 + 212];
-        Header::write(&mut buffer, MessageType::AdminPeersReply, 0, (4 + 212) as u16);
+        let mut buffer = vec![0u8; 8 + 272];
+        Header::write(&mut buffer, MessageType::AdminPeersReply, 0, (4 + 272) as u16);
         buffer[4] = 1;
         let base = 8;
         buffer[base..base + 4].copy_from_slice(&0x40000001u32.to_le_bytes());
         buffer[base + 4..base + 8].copy_from_slice(&123u32.to_le_bytes());
         buffer[base + 8..base + 12].copy_from_slice(&4u32.to_le_bytes());
         buffer[base + 12] = 1; // role agent
+        buffer[base + 13] = 4; // transport quic
         write_fixed_str(&mut buffer, base + 16, AGENT_NAME_SIZE, "truck42");
         write_fixed_str(&mut buffer, base + 144, FINGERPRINT_SIZE, "ab12cd");
+        buffer[base + 209..base + 213].copy_from_slice(&90u32.to_le_bytes());
+        write_fixed_str(&mut buffer, base + 213, ORIGIN_SIZE, "203.0.113.7:51000");
 
         let page = decode_peers_reply(&buffer).unwrap();
         assert_eq!(page.entries.len(), 1);
         let peer = &page.entries[0];
         assert_eq!(peer.peer_id, 0x40000001);
         assert_eq!(peer.frames_forwarded, 123);
+        assert_eq!(peer.uptime_seconds, 90);
         assert_eq!(peer.role, 1);
+        assert_eq!(peer.transport_kind, 4);
         assert_eq!(peer.agent_name, "truck42");
         assert_eq!(peer.fingerprint_hex, "ab12cd");
+        assert_eq!(peer.origin, "203.0.113.7:51000");
         assert!(!page.more);
     }
 

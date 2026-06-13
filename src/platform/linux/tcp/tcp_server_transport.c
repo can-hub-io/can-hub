@@ -17,7 +17,9 @@
 #include "protocol/message_header.h"
 
 #define LISTEN_BACKLOG 8
+#define ORIGIN_TEXT_SIZE 56
 
+static void formatOrigin(const struct sockaddr_in *address, char *out, size_t size);
 static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static void portClosePeer(void *context, uint32_t peer_id);
@@ -116,11 +118,15 @@ bool TcpServerTransport_SlotWantsWritable(const TcpServerTransport *self, uint8_
 void TcpServerTransport_OnAcceptReady(TcpServerTransport *self)
 {
     TcpServerPeer *peer;
+    HubPeerConnectInfo info;
+    struct sockaddr_in remote;
+    socklen_t remote_size = sizeof(remote);
+    char origin[ORIGIN_TEXT_SIZE];
     int32_t peer_fd;
     int32_t nodelay = 1;
 
     for (;;) {
-        peer_fd = accept4(self->listen_fd, NULL, NULL, SOCK_NONBLOCK);
+        peer_fd = accept4(self->listen_fd, (struct sockaddr *)&remote, &remote_size, SOCK_NONBLOCK);
         if (peer_fd < 0) {
             return;
         }
@@ -134,7 +140,16 @@ void TcpServerTransport_OnAcceptReady(TcpServerTransport *self)
         setsockopt(peer_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
         TcpChannel_Bind(&peer->channel, peer_fd);
         peer->peer_id = self->next_peer_id++;
-        self->events.on_peer_connected(self->events.context, peer->peer_id, NULL, self->local);
+
+        origin[0] = '\0';
+        if (!self->local) {
+            formatOrigin(&remote, origin, sizeof(origin));
+        }
+        info.fingerprint_hex = NULL;
+        info.origin = self->local ? NULL : origin;
+        info.transport_kind = self->local ? kPEER_TRANSPORT_UNIX : kPEER_TRANSPORT_TCP;
+        info.local = self->local;
+        self->events.on_peer_connected(self->events.context, peer->peer_id, &info, Clock_RealtimeUs());
     }
 }
 
@@ -171,6 +186,19 @@ void TcpServerTransport_OnSlotWritable(TcpServerTransport *self, uint8_t slot)
     if (self->events.on_peer_writable != NULL) {
         self->events.on_peer_writable(self->events.context, peer->peer_id);
     }
+}
+
+/* ---------- private ---------- */
+
+static void formatOrigin(const struct sockaddr_in *address, char *out, size_t size)
+{
+    char ip[INET_ADDRSTRLEN];
+
+    if (inet_ntop(AF_INET, &address->sin_addr, ip, sizeof(ip)) == NULL) {
+        out[0] = '\0';
+        return;
+    }
+    snprintf(out, size, "%s:%u", ip, ntohs(address->sin_port));
 }
 
 /* ---------- private: hub transport port ---------- */

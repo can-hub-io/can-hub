@@ -39,6 +39,7 @@ typedef struct {
     HubMetrics metrics;
     PendingIfconfig pending_ifconfig[BROKER_PENDING_IFCONFIG_MAX];
     bool require_known_agents;
+    uint64_t now_us;
 } Broker;
 
 void Broker_Init(

@@ -10,6 +10,7 @@
 #include "hub/ports/hub_transport_port.h"
 
 #define TLS_SERVER_PEERS_MAX 64
+#define TLS_SERVER_ORIGIN_SIZE 56
 
 /*
  * TLS-over-TCP server transport for the hub: accepts up to
@@ -22,6 +23,7 @@ typedef struct {
     TlsChannel channel;
     uint32_t peer_id;
     bool announced;
+    char origin[TLS_SERVER_ORIGIN_SIZE];
 } TlsServerPeer;
 
 typedef struct {

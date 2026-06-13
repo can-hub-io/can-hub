@@ -259,7 +259,7 @@ static void scheduleReconnect(Agent *self, uint64_t now_us)
 
 static void sendHelloAndRegister(Agent *self)
 {
-    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_AGENT, 0 };
+    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_AGENT, 0, "" };
     uint8_t encoded[CONTROL_BUFFER_SIZE];
     size_t encoded_size;
 

@@ -76,6 +76,7 @@ static CanFilter dump_filters[SUBSCRIBE_FILTERS_MAX];
 static uint8_t dump_filter_count;
 static int32_t exit_code = -1;
 static const char *state_directory_override;
+static const char *client_name = "";
 static char state_directory[TLS_IDENTITY_PATH_MAX];
 static char identity_certificate_path[TLS_IDENTITY_PATH_MAX];
 static char identity_key_path[TLS_IDENTITY_PATH_MAX];
@@ -177,6 +178,7 @@ int main(int argc, char **argv)
         return 1;
     }
     Client_Init(&client, active_port, &client_events);
+    Client_SetName(&client, client_name);
     startClientCommand();
     if (!active_port->connect(active_port->context)) {
         LOG_ERROR("could not connect to %s", host);
@@ -191,7 +193,7 @@ int main(int argc, char **argv)
 static void printUsage(FILE *stream, const char *program)
 {
     fprintf(stream, "usage: %s [--connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>|unix://<path>]\n", program);
-    fprintf(stream, "       [--state-dir <path>] list | dump [--no-echo] <interface> [<id>[:<mask>] ...]\n");
+    fprintf(stream, "       [--state-dir <path>] [--name <label>] list | dump [--no-echo] <interface> [<id>[:<mask>] ...]\n");
     fprintf(stream, "       | send <interface> <can-id>#<hex-payload>   (cansend syntax, e.g. 123#DEADBEEF)\n");
     fprintf(stream, "       | socketcand [--listen [<bind-ip>:]<port>] [--no-beacon]\n");
     fprintf(stream, "                                           local socketcand server (default 127.0.0.1:" SOCKETCAND_DEFAULT_PORT_TEXT ")\n");
@@ -213,6 +215,8 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
             connect_url = argv[++i];
         } else if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
             state_directory_override = argv[++i];
+        } else if (strcmp(argv[i], "--name") == 0 && i + 1 < argc) {
+            client_name = argv[++i];
         } else if (strcmp(argv[i], "--log-level") == 0 && i + 1 < argc) {
             i++;
         } else if (strcmp(argv[i], "--no-echo") == 0) {
@@ -713,6 +717,7 @@ static int32_t runSocketcandServer(const char *host, const char *port_text)
     resolveDeviceName(device_name, sizeof(device_name));
     buildBeaconUrl(beacon_url, sizeof(beacon_url));
     SocketcandApp_Init(&socketcand_app, active_port, SocketcandServer_Port(&socketcand_server), device_name, beacon_url, beacon_enabled);
+    SocketcandApp_SetName(&socketcand_app, client_name);
 
     LOG_INFO("socketcand server on %s:%s, hub %s, beacon %s",
             socketcand_bind_address, socketcand_port_text, host, beacon_enabled ? "on" : "off");
@@ -881,6 +886,7 @@ static int32_t runAttach(const char *host, const char *port_text)
             NULL
         );
     }
+    MirrorApp_SetName(&mirror_app, client_name);
 
     if (!active_port->connect(active_port->context)) {
         LOG_ERROR("could not connect to %s", host);

@@ -25,8 +25,11 @@
 #define PEER_ENTRY_FRAMES_FORWARDED_OFFSET 4
 #define PEER_ENTRY_FRAMES_DROPPED_OFFSET 8
 #define PEER_ENTRY_ROLE_OFFSET 12
+#define PEER_ENTRY_TRANSPORT_KIND_OFFSET 13
 #define PEER_ENTRY_AGENT_NAME_OFFSET 16
 #define PEER_ENTRY_FINGERPRINT_OFFSET 144
+#define PEER_ENTRY_UPTIME_OFFSET 209
+#define PEER_ENTRY_ORIGIN_OFFSET 213
 
 #define PIN_ENTRY_AGENT_NAME_OFFSET 0
 #define PIN_ENTRY_FINGERPRINT_OFFSET 128
@@ -960,9 +963,12 @@ static void writePeerEntry(uint8_t *destination, const AdminPeersReplyEntry *ent
     Wire_WriteU32(destination + PEER_ENTRY_PEER_ID_OFFSET, entry->peer_id);
     Wire_WriteU32(destination + PEER_ENTRY_FRAMES_FORWARDED_OFFSET, entry->frames_forwarded);
     Wire_WriteU32(destination + PEER_ENTRY_FRAMES_DROPPED_OFFSET, entry->frames_dropped);
+    Wire_WriteU32(destination + PEER_ENTRY_UPTIME_OFFSET, entry->uptime_seconds);
     destination[PEER_ENTRY_ROLE_OFFSET] = entry->role;
+    destination[PEER_ENTRY_TRANSPORT_KIND_OFFSET] = entry->transport_kind;
     memcpy(destination + PEER_ENTRY_AGENT_NAME_OFFSET, entry->agent_name, strlen(entry->agent_name));
     memcpy(destination + PEER_ENTRY_FINGERPRINT_OFFSET, entry->fingerprint_hex, strlen(entry->fingerprint_hex));
+    memcpy(destination + PEER_ENTRY_ORIGIN_OFFSET, entry->origin, strlen(entry->origin));
 }
 
 static void readPeerEntry(const uint8_t *source, AdminPeersReplyEntry *entry)
@@ -970,11 +976,15 @@ static void readPeerEntry(const uint8_t *source, AdminPeersReplyEntry *entry)
     entry->peer_id = Wire_ReadU32(source + PEER_ENTRY_PEER_ID_OFFSET);
     entry->frames_forwarded = Wire_ReadU32(source + PEER_ENTRY_FRAMES_FORWARDED_OFFSET);
     entry->frames_dropped = Wire_ReadU32(source + PEER_ENTRY_FRAMES_DROPPED_OFFSET);
+    entry->uptime_seconds = Wire_ReadU32(source + PEER_ENTRY_UPTIME_OFFSET);
     entry->role = source[PEER_ENTRY_ROLE_OFFSET];
+    entry->transport_kind = source[PEER_ENTRY_TRANSPORT_KIND_OFFSET];
     memcpy(entry->agent_name, source + PEER_ENTRY_AGENT_NAME_OFFSET, REGISTER_AGENT_NAME_SIZE);
     entry->agent_name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';
     memcpy(entry->fingerprint_hex, source + PEER_ENTRY_FINGERPRINT_OFFSET, ADMIN_FINGERPRINT_HEX_SIZE);
     entry->fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] = '\0';
+    memcpy(entry->origin, source + PEER_ENTRY_ORIGIN_OFFSET, ADMIN_ORIGIN_SIZE);
+    entry->origin[ADMIN_ORIGIN_SIZE - 1] = '\0';
 }
 
 static void writePinEntry(uint8_t *destination, const AdminPinsReplyEntry *entry)

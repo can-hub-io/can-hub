@@ -19,6 +19,7 @@ typedef struct {
 } SocketcandApp;
 
 void SocketcandApp_Init(SocketcandApp *self, TransportPort *hub, SocketcandServerPort *server, const char *device_name, const char *beacon_url, bool beacon_enabled);
+void SocketcandApp_SetName(SocketcandApp *self, const char *name);
 TransportEvents SocketcandApp_TransportEvents(SocketcandApp *self);
 SocketcandServerEvents SocketcandApp_ServerEvents(SocketcandApp *self);
 void SocketcandApp_Tick(SocketcandApp *self, uint64_t now_us);

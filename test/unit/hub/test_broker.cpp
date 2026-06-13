@@ -31,13 +31,20 @@ static HubTransportEvents events;
 static uint8_t client_channel;
 static const RegisterMessage truck_registration = { "truck42", 2, { "can0", "can1" } };
 
+static void connectPeer(uint32_t peer_id, const char *fingerprint, bool local)
+{
+    HubPeerConnectInfo info = { fingerprint, NULL, kPEER_TRANSPORT_TCP, local };
+
+    events.on_peer_connected(events.context, peer_id, &info, 0);
+}
+
 static void connectClientWithFingerprint(uint32_t peer_id, const char *fingerprint)
 {
-    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0 };
-    uint8_t encoded[64];
+    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0, "" };
+    uint8_t encoded[128];
     size_t encoded_size;
 
-    events.on_peer_connected(events.context, peer_id, fingerprint, false);
+    connectPeer(peer_id, fingerprint, false);
     encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
     events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
 }
@@ -47,7 +54,7 @@ static uint8_t openInterface(uint32_t peer_id, uint32_t interface_id, uint8_t op
     OpenMessage open = { interface_id, open_flags };
     OpenAckMessage ack;
     MessageHeader header;
-    uint8_t encoded[64];
+    uint8_t encoded[128];
     size_t encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
     int reply_index;
 
@@ -61,11 +68,11 @@ static uint8_t openInterface(uint32_t peer_id, uint32_t interface_id, uint8_t op
 
 static void registerAgentWithFingerprint(uint32_t peer_id, const char *fingerprint)
 {
-    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_AGENT, 0 };
+    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_AGENT, 0, "" };
     uint8_t encoded[512];
     size_t encoded_size;
 
-    events.on_peer_connected(events.context, peer_id, fingerprint, false);
+    connectPeer(peer_id, fingerprint, false);
     encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
     events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
     encoded_size = RegisterMessage_Encode(&truck_registration, encoded, sizeof(encoded));
@@ -114,13 +121,13 @@ describe("broker", []() {
         });
 
         it("acknowledges a registration with channels", []() {
-            HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_AGENT, 0 };
+            HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_AGENT, 0, "" };
             RegisterAckMessage ack;
             MessageHeader header;
             uint8_t encoded[512];
             size_t encoded_size;
 
-            events.on_peer_connected(events.context, AGENT_PEER, NULL, false);
+            connectPeer(AGENT_PEER, NULL, false);
             encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
             events.on_peer_control(events.context, AGENT_PEER, encoded, encoded_size, 0);
             encoded_size = RegisterMessage_Encode(&truck_registration, encoded, sizeof(encoded));
@@ -137,16 +144,16 @@ describe("broker", []() {
         });
 
         it("rejects and disconnects a colliding registration", []() {
-            HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_AGENT, 0 };
+            HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_AGENT, 0, "" };
             RegisterAckMessage ack;
             MessageHeader header;
             uint8_t encoded[512];
-            uint8_t hello_encoded[64];
+            uint8_t hello_encoded[128];
             size_t encoded_size;
             size_t hello_size;
 
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
-            events.on_peer_connected(events.context, 101, NULL, false);
+            connectPeer(101, NULL, false);
             hello_size = HelloMessage_Encode(&hello, hello_encoded, sizeof(hello_encoded));
             events.on_peer_control(events.context, 101, hello_encoded, hello_size, 0);
             encoded_size = RegisterMessage_Encode(&truck_registration, encoded, sizeof(encoded));
@@ -277,7 +284,7 @@ describe("broker", []() {
         it("releases the peer slot of a rejected agent (no ghost)", []() {
             AdminPeersMessage request = { 0 };
             AdminPeersReplyMessage reply;
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t encoded_size = AdminPeersMessage_Encode(&request, encoded, sizeof(encoded));
 
             registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
@@ -342,7 +349,7 @@ describe("broker", []() {
             ListMessage list = { 0 };
             ListReplyMessage reply;
             MessageHeader header;
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t encoded_size = ListMessage_Encode(&list, encoded, sizeof(encoded));
 
             events.on_peer_control(events.context, CLIENT_PEER, encoded, encoded_size, 0);
@@ -359,7 +366,7 @@ describe("broker", []() {
             OpenMessage open = { interface_id, 0 };
             OpenAckMessage ack;
             MessageHeader header;
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
 
             events.on_peer_control(events.context, CLIENT_PEER, encoded, encoded_size, 0);
@@ -375,7 +382,7 @@ describe("broker", []() {
             OpenMessage open = { 9999, 0 };
             OpenAckMessage ack;
             MessageHeader header;
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
 
             events.on_peer_control(events.context, CLIENT_PEER, encoded, encoded_size, 0);
@@ -502,7 +509,7 @@ describe("broker", []() {
             HubTransportPortMock_Reset(&transport);
             Broker_Init(&broker, &transport.port, NULL, NULL, false);
             events = Broker_Events(&broker);
-            events.on_peer_connected(events.context, AGENT_PEER, NULL, false);
+            connectPeer(AGENT_PEER, NULL, false);
         });
 
         it("answers ping with pong", []() {
@@ -533,13 +540,13 @@ describe("broker", []() {
         });
 
         it("closes a non-local peer claiming the admin role telling it why", []() {
-            HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_ADMIN, 0 };
+            HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_ADMIN, 0, "" };
             ErrorMessage error;
             uint8_t error_type;
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
 
-            events.on_peer_connected(events.context, 999, NULL, false);
+            connectPeer(999, NULL, false);
             sendControlFrom(999, encoded, encoded_size);
             error_type = lastReply(&error, ErrorMessage_Decode);
 
@@ -552,7 +559,7 @@ describe("broker", []() {
         it("answers status with peer and interface counters", []() {
             AdminStatusReplyMessage reply;
             uint8_t reply_type;
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t encoded_size = AdminStatusMessage_Encode(encoded, sizeof(encoded));
 
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
@@ -566,7 +573,7 @@ describe("broker", []() {
         });
 
         it("ignores admin requests from non-admin peers", []() {
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t encoded_size = AdminStatusMessage_Encode(encoded, sizeof(encoded));
 
             sendControlFrom(CLIENT_PEER, encoded, encoded_size);
@@ -578,7 +585,7 @@ describe("broker", []() {
             AdminPeersMessage request = { 0 };
             AdminPeersReplyMessage reply;
             uint8_t reply_type;
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t encoded_size = AdminPeersMessage_Encode(&request, encoded, sizeof(encoded));
 
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
@@ -591,6 +598,31 @@ describe("broker", []() {
             expect((const char *)reply.entries[0].agent_name).toBe("truck42");
             expect(reply.entries[1].role).toBe(kPEER_ROLE_CLIENT);
             expect(reply.entries[2].role).toBe(kPEER_ROLE_ADMIN);
+        });
+
+        it("surfaces a client name carried in its HELLO", []() {
+            AdminPeersMessage request = { 0 };
+            AdminPeersReplyMessage reply;
+            HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0, "dashboard" };
+            uint8_t encoded[128];
+            size_t encoded_size;
+            const char *named = "";
+            uint8_t i;
+
+            connectPeer(777, NULL, false);
+            encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+            sendControlFrom(777, encoded, encoded_size);
+
+            encoded_size = AdminPeersMessage_Encode(&request, encoded, sizeof(encoded));
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            lastReply(&reply, AdminPeersReplyMessage_Decode);
+
+            for(i=0; i<reply.count; i++) {
+                if (reply.entries[i].peer_id == 777) {
+                    named = reply.entries[i].agent_name;
+                }
+            }
+            expect((const char *)named).toBe("dashboard");
         });
 
         it("kicks a registered agent by name", []() {
@@ -633,7 +665,7 @@ describe("broker", []() {
             AdminPinsMessage request = { 0 };
             AdminPinsReplyMessage reply;
             uint8_t reply_type;
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t encoded_size = AdminPinsMessage_Encode(&request, encoded, sizeof(encoded));
 
             IdentityStoreMock_Preload(&identity_store, "truck42", TRUCK_FINGERPRINT);
@@ -671,7 +703,7 @@ describe("broker", []() {
             ErrorMessage error;
             uint8_t reply_type;
             uint8_t error_type;
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t encoded_size = AdminKickPeerMessage_Encode(&kick, encoded, sizeof(encoded));
 
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
@@ -690,7 +722,7 @@ describe("broker", []() {
         it("rejects kicking an unknown peer id", []() {
             AdminKickPeerMessage kick = { 0xDEAD };
             AdminKickPeerReplyMessage reply;
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t encoded_size = AdminKickPeerMessage_Encode(&kick, encoded, sizeof(encoded));
 
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
@@ -887,7 +919,7 @@ describe("broker", []() {
             OpenMessage open = { can0_interface_id, OPEN_FLAG_WANT_WRITE };
             OpenAckMessage ack;
             MessageHeader header;
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
 
             connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
@@ -913,7 +945,7 @@ describe("broker", []() {
             OpenMessage open = { can0_interface_id, 0 };
             OpenAckMessage ack;
             MessageHeader header;
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
 
             AuthorizationMock_Grant(&authorization, "*", "truck42", "can0", false, false);
@@ -995,7 +1027,7 @@ describe("broker", []() {
             AdminAclListMessage request = { 0 };
             AdminAclListReplyMessage reply;
             uint8_t reply_type;
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t encoded_size = AdminAclListMessage_Encode(&request, encoded, sizeof(encoded));
 
             AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true, true);
@@ -1028,7 +1060,7 @@ describe("broker", []() {
             AdminPeersMessage request = { 0 };
             AdminPeersReplyMessage reply;
             uint8_t frame_encoded[128];
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t frame_size = FrameMessage_Encode(&frame, frame_encoded, sizeof(frame_encoded));
             size_t encoded_size = AdminPeersMessage_Encode(&request, encoded, sizeof(encoded));
 
@@ -1078,7 +1110,7 @@ describe("broker", []() {
             FrameMessage unroutable = { 0x456, 1000, 1, 1, 0, 0, { 0x55 } };
             AdminStatusReplyMessage reply;
             uint8_t frame_encoded[128];
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t routable_size = FrameMessage_Encode(&routable, frame_encoded, sizeof(frame_encoded));
             size_t encoded_size = AdminStatusMessage_Encode(encoded, sizeof(encoded));
 
@@ -1103,7 +1135,7 @@ describe("broker", []() {
             AdminInterfacesReplyMessage reply;
             uint8_t reply_type;
             uint8_t frame_encoded[128];
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t frame_size = FrameMessage_Encode(&frame, frame_encoded, sizeof(frame_encoded));
             size_t encoded_size = AdminInterfacesMessage_Encode(&request, encoded, sizeof(encoded));
 
@@ -1122,7 +1154,7 @@ describe("broker", []() {
 
         it("evicts a peer whose control send fails", []() {
             ListMessage list = { 0 };
-            uint8_t encoded[64];
+            uint8_t encoded[128];
             size_t encoded_size = ListMessage_Encode(&list, encoded, sizeof(encoded));
 
             transport.control_result = false;
@@ -1136,7 +1168,7 @@ describe("broker", []() {
             ErrorMessage error;
             uint8_t error_type;
 
-            events.on_peer_connected(events.context, 999, NULL, false);
+            connectPeer(999, NULL, false);
 
             Broker_Tick(&broker, 0);
             Broker_Tick(&broker, 4999999);

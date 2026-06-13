@@ -94,11 +94,12 @@ socket); an admin HELLO arriving over TCP or QUIC closes the connection.
 Offsets are from the start of the message (header included).
 
 ```
-HELLO (total 12)
+HELLO (total 76)
 @4   version u8
 @5   role u8 (1 agent, 2 client, 3 admin)
 @6   reserved u16
 @8   capabilities u32
+@12  name char[64]   (optional client label; agents name themselves in REGISTER)
 
 ERROR (total 72)
 @4   code u16 (1 malformed message, 2 role rejected, 3 hub full,
@@ -224,19 +225,22 @@ ADMIN_PEERS (total 8)
 @4   offset u16        (pagination start index)
 @6   reserved u16
 
-ADMIN_PEERS_REPLY (total 8 + count * 212)
+ADMIN_PEERS_REPLY (total 8 + count * 272)
 @4   count u8          (0-16 entries in this reply)
 @5   flags u8          (bit 0: more entries beyond offset + count)
 @6   reserved u16
-@8   entries, each 212 bytes:
+@8   entries, each 272 bytes:
      +0   peer_id u32
      +4   frames_forwarded u32      (frames the hub delivered to this peer)
      +8   frames_dropped u32        (frames dropped towards this peer, TX budget full)
      +12  role u8 (0 unknown, 1 agent, 2 client, 3 admin)
-     +13  reserved u8[3]
-     +16  agent_name char[128]      (empty unless a registered agent)
+     +13  transport_kind u8 (0 unknown, 1 unix, 2 tcp, 3 tls, 4 quic)
+     +14  reserved u8[2]
+     +16  agent_name char[128]      (agent name, or the client's HELLO label)
      +144 fingerprint_hex char[65]  (empty on plaintext transports)
-     +209 reserved u8[3]
+     +209 uptime_seconds u32        (seconds since this peer connected)
+     +213 origin char[56]           (remote ip:port; empty for local peers)
+     +269 reserved u8[3]
 
 ADMIN_KICK (total 132)
 @4   agent_name char[128]

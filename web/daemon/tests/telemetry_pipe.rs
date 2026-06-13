@@ -11,7 +11,7 @@ use can_hub_web::telemetry;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
 
-const HELLO_SIZE: usize = 12;
+const HELLO_SIZE: usize = 76;
 const HEADER_SIZE: usize = 4;
 const ADMIN_STATUS: u8 = 0x10;
 const ADMIN_INTERFACES: u8 = 0x20;

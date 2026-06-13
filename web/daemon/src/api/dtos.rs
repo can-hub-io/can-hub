@@ -91,8 +91,11 @@ impl From<Status> for StatusDto {
 pub(crate) struct PeerDto {
     pub peer_id: u32,
     pub role: &'static str,
+    pub transport: &'static str,
     pub agent_name: String,
+    pub origin: String,
     pub fingerprint_hex: String,
+    pub uptime_seconds: u32,
     pub frames_forwarded: u32,
     pub frames_dropped: u32,
 }
@@ -102,8 +105,11 @@ impl From<PeerEntry> for PeerDto {
         PeerDto {
             peer_id: entry.peer_id,
             role: role_name(entry.role),
+            transport: transport_name(entry.transport_kind),
             agent_name: entry.agent_name,
+            origin: entry.origin,
             fingerprint_hex: entry.fingerprint_hex,
+            uptime_seconds: entry.uptime_seconds,
             frames_forwarded: entry.frames_forwarded,
             frames_dropped: entry.frames_dropped,
         }
@@ -289,6 +295,16 @@ fn role_name(role: u8) -> &'static str {
         1 => "agent",
         2 => "client",
         3 => "admin",
+        _ => "unknown",
+    }
+}
+
+fn transport_name(transport_kind: u8) -> &'static str {
+    match transport_kind {
+        1 => "unix",
+        2 => "tcp",
+        3 => "tls",
+        4 => "quic",
         _ => "unknown",
     }
 }

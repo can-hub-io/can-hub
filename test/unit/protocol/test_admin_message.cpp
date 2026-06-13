@@ -5,6 +5,7 @@
 extern "C" {
 #include "protocol/admin_message.h"
 #include "protocol/message_header.h"
+#include "hub/ports/hub_transport_events.h"
 }
 
 #define FINGERPRINT "aa11bb22cc33dd44ee55ff66aa77bb88cc99dd00ee11ff22aa33bb44cc55dd66"
@@ -72,8 +73,8 @@ describe("admin_peers_message", []() {
 
     it("round-trips peer entries with the more flag", []() {
         AdminPeersReplyMessage reply = { 2, ADMIN_REPLY_FLAG_MORE, {
-            { 0x80000001, 1500, 7, 1, "truck42", FINGERPRINT },
-            { 0x40000001, 0, 0, 3, "", "" },
+            { 0x80000001, 1500, 7, 90, 1, kPEER_TRANSPORT_QUIC, "truck42", FINGERPRINT, "203.0.113.7:51000" },
+            { 0x40000001, 0, 0, 0, 3, kPEER_TRANSPORT_UNIX, "", "", "" },
         } };
         AdminPeersReplyMessage decoded;
         uint8_t buffer[1024];
@@ -91,10 +92,14 @@ describe("admin_peers_message", []() {
         expect(decoded.entries[0].peer_id).toBe((uint32_t)0x80000001);
         expect(decoded.entries[0].frames_forwarded).toBe((uint32_t)1500);
         expect(decoded.entries[0].frames_dropped).toBe((uint32_t)7);
+        expect(decoded.entries[0].uptime_seconds).toBe((uint32_t)90);
         expect(decoded.entries[0].role).toBe(1);
+        expect(decoded.entries[0].transport_kind).toBe((uint8_t)kPEER_TRANSPORT_QUIC);
         expect((const char *)decoded.entries[0].agent_name).toBe("truck42");
         expect((const char *)decoded.entries[0].fingerprint_hex).toBe(FINGERPRINT);
+        expect((const char *)decoded.entries[0].origin).toBe("203.0.113.7:51000");
         expect(decoded.entries[1].role).toBe(3);
+        expect(decoded.entries[1].transport_kind).toBe((uint8_t)kPEER_TRANSPORT_UNIX);
         expect((const char *)decoded.entries[1].agent_name).toBe("");
     });
 

@@ -6,10 +6,10 @@ extern "C" {
 }
 
 describe("hello_message", []() {
-    it("round-trips version, role and capabilities", []() {
-        HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_AGENT, 0xCAFE0001 };
+    it("round-trips version, role, capabilities and name", []() {
+        HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0xCAFE0001, "dashboard" };
         HelloMessage decoded;
-        uint8_t buffer[32];
+        uint8_t buffer[128];
         size_t expected_size = MESSAGE_HEADER_SIZE + HELLO_BODY_SIZE;
         size_t encoded_size;
         bool decoded_ok;
@@ -20,12 +20,13 @@ describe("hello_message", []() {
         expect(encoded_size).toBe(expected_size);
         expect(decoded_ok).toBe(true);
         expect(decoded.version).toBe(PROTOCOL_VERSION);
-        expect(decoded.role).toBe(kPEER_ROLE_AGENT);
+        expect(decoded.role).toBe(kPEER_ROLE_CLIENT);
         expect(decoded.capabilities).toBe((uint32_t)0xCAFE0001);
+        expect((const char *)decoded.name).toBe("dashboard");
     });
 
     it("rejects encoding an invalid role", []() {
-        HelloMessage hello = { PROTOCOL_VERSION, 0, 0 };
+        HelloMessage hello = { PROTOCOL_VERSION, 0, 0, "" };
         uint8_t buffer[32];
         size_t encoded_size;
 
