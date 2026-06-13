@@ -1,5 +1,6 @@
-import { type LucideIcon, Cable, KeyRound, LogOut } from 'lucide-react'
+import { type LucideIcon, KeyRound, LogOut } from 'lucide-react'
 import { cn } from '../../lib/utils'
+import { Logo } from '../ui/Logo'
 
 export interface NavItem {
   id: string
@@ -19,10 +20,8 @@ export function Sidebar({ items, active, onSelect, user, onChangePassword, onLog
   return (
     <aside className="flex h-screen w-56 shrink-0 flex-col border-r border-gray-200 bg-white">
       <div className="flex items-center gap-2 border-b border-gray-100 px-5 py-4">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-600 text-white">
-          <Cable size={18} />
-        </div>
-        <div className="font-semibold text-gray-900">can-hub</div>
+        <Logo size={28} />
+        <div className="font-semibold tracking-tight text-gray-900">can-hub</div>
       </div>
 
       <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-4">

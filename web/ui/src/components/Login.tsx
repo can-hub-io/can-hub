@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Cable } from 'lucide-react'
 import { api, type AuthState } from '../api'
+import { Logo } from './ui/Logo'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 
@@ -61,9 +61,7 @@ function AuthForm({ title, subtitle, submitLabel, action, onDone, confirmPasswor
     <div className="flex min-h-screen items-center justify-center px-4">
       <form onSubmit={submit} className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary-600 text-white">
-            <Cable size={22} />
-          </div>
+          <Logo size={44} />
           <h1 className="text-lg font-semibold text-gray-900">{title}</h1>
           <p className="text-sm text-gray-500">{subtitle}</p>
         </div>
