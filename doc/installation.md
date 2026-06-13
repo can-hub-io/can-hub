@@ -70,8 +70,8 @@ tar xzf can-hub-v*-linux-x86_64-static.tar.gz
 pip install python-can-hub
 ```
 
-Manylinux wheels for x86_64, aarch64 and armv7l; the wheel bundles
-`libcanhub` with the TLS/QUIC stack statically linked. See
+Manylinux wheels for x86_64, aarch64 and armv7l, plus a win_amd64 wheel; the
+wheel bundles `libcanhub` with the TLS/QUIC stack statically linked. See
 [python/README.md](../python/README.md).
 
 ## From source

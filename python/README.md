@@ -48,5 +48,6 @@ cross arches):
 ./scripts/build-python-wheel.sh armv7l
 ```
 
-The release workflow builds all three and publishes them to PyPI on a `v*`
-tag.
+The release workflow builds these three on native runners (aarch64/armv7l on
+the arm64 hosted runner, no QEMU) plus a cross-compiled win_amd64 wheel, and
+publishes all four to PyPI on a `v*` tag.
