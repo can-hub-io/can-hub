@@ -192,6 +192,11 @@ uint8_t Agent_State(const Agent *self)
     return self->state;
 }
 
+uint32_t Agent_PendingReconnectDelayMs(const Agent *self)
+{
+    return self->pending_reconnect_delay_ms;
+}
+
 /* ---------- private ---------- */
 
 static void eventConnected(void *context)
@@ -247,6 +252,7 @@ static void scheduleReconnect(Agent *self, uint64_t now_us)
 {
     uint64_t delay_ms = ReconnectBackoff_NextDelayMs(&self->backoff);
 
+    self->pending_reconnect_delay_ms = (uint32_t)delay_ms;
     self->next_connect_at_us = now_us + delay_ms * MICROSECONDS_PER_MILLISECOND;
 }
 

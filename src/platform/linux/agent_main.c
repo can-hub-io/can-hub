@@ -15,6 +15,7 @@
 #include "platform/linux/shared/cli_meta.h"
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
+#include "platform/linux/shared/log.h"
 #include "platform/linux/shared/tls_identity.h"
 #include "platform/linux/socketcan/socketcan_adapter.h"
 #include "platform/linux/tcp/tcp_client_transport.h"
@@ -57,6 +58,7 @@ static TransportEvents loggingTransportEvents(void);
 static void loggingOnConnected(void *context);
 static void loggingOnDisconnected(void *context, uint64_t now_us);
 static void loggingOnControl(void *context, const uint8_t *data, size_t size, uint64_t now_us);
+static void logRegistered(const RegisterAckMessage *ack);
 static const char *registerStatusText(uint8_t status);
 static bool prepareSecurityMaterial(const char *host, const char *port_text);
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *transport_events);
@@ -84,6 +86,8 @@ int main(int argc, char **argv)
         return 0;
     }
 
+    Log_InitFromArgs("can-hub-agent", argc, argv);
+
     for(i=1; i<argc; i++) {
         if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
             state_directory_override = argv[++i];
@@ -101,7 +105,7 @@ int main(int argc, char **argv)
     }
 
     if (!SocketCanAdapter_Open(&can_adapter, &registration, true)) {
-        fprintf(stderr, "could not open CAN interfaces\n");
+        LOG_ERROR("could not open CAN interfaces");
         return 1;
     }
 
@@ -109,7 +113,7 @@ int main(int argc, char **argv)
     transport_events = loggingTransportEvents();
     can_events = AgentApp_CanEvents(&app);
     if (!initTransport(host, port_text, &transport_events)) {
-        fprintf(stderr, "could not initialize transport\n");
+        LOG_ERROR("could not initialize transport");
         return 1;
     }
 
@@ -119,7 +123,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    fprintf(stderr, "can-hub-agent %s connecting to %s:%s\n", Version_String(), host, port_text);
+    LOG_INFO("%s connecting to %s:%s", Version_String(), host, port_text);
 
     while (!should_shutdown) {
         syncStreamRegistration();
@@ -133,7 +137,7 @@ int main(int argc, char **argv)
     }
 
     transportPort()->disconnect(transportPort()->context);
-    fprintf(stderr, "can-hub-agent shutting down\n");
+    LOG_INFO("shutting down");
 
     return 0;
 }
@@ -145,7 +149,7 @@ static void printUsage(FILE *stream, const char *program)
     fprintf(
         stream,
         "usage: %s --connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>"
-        " --name <agent-name> [--state-dir <path>] <can-if> [...]\n"
+        " --name <agent-name> [--state-dir <path>] [--log-level error|warn|info|debug] <can-if> [...]\n"
         "       %s --show-identity [--state-dir <path>]   print this agent's"
         " TLS fingerprint for the hub allowlist\n",
         program,
@@ -168,9 +172,9 @@ static void loggingOnConnected(void *context)
 {
     hub_connect_count++;
     if (hub_connect_count == 1) {
-        fprintf(stderr, "can-hub-agent connected to hub\n");
+        LOG_INFO("connected to hub");
     } else {
-        fprintf(stderr, "can-hub-agent reconnected to hub (session #%u)\n", hub_connect_count);
+        LOG_INFO("reconnected to hub (session #%u)", hub_connect_count);
     }
 
     agent_core_events.on_connected(context);
@@ -178,9 +182,12 @@ static void loggingOnConnected(void *context)
 
 static void loggingOnDisconnected(void *context, uint64_t now_us)
 {
-    fprintf(stderr, "can-hub-agent lost hub connection, reconnecting\n");
+    uint32_t delay_seconds;
 
     agent_core_events.on_disconnected(context, now_us);
+
+    delay_seconds = (AgentApp_PendingReconnectDelayMs(&app) + 999) / 1000;
+    LOG_WARN("connection lost, reconnecting in %us", delay_seconds);
 }
 
 static void loggingOnControl(void *context, const uint8_t *data, size_t size, uint64_t now_us)
@@ -191,16 +198,46 @@ static void loggingOnControl(void *context, const uint8_t *data, size_t size, ui
 
     if (MessageHeader_Decode(&header, data, size) && size >= (size_t)MESSAGE_HEADER_SIZE + header.length) {
         if (header.type == kMESSAGE_TYPE_REGISTER_ACK
-            && RegisterAckMessage_Decode(&ack, data + MESSAGE_HEADER_SIZE, header.length)
-            && ack.status != REGISTER_STATUS_OK) {
-            fprintf(stderr, "can-hub-agent registration rejected: %s\n", registerStatusText(ack.status));
+            && RegisterAckMessage_Decode(&ack, data + MESSAGE_HEADER_SIZE, header.length)) {
+            if (ack.status == REGISTER_STATUS_OK) {
+                logRegistered(&ack);
+            } else {
+                LOG_ERROR("registration rejected: %s", registerStatusText(ack.status));
+            }
         } else if (header.type == kMESSAGE_TYPE_ERROR
                    && ErrorMessage_Decode(&error, data + MESSAGE_HEADER_SIZE, header.length)) {
-            fprintf(stderr, "can-hub-agent hub error: %.*s\n", (int)ERROR_DETAIL_SIZE, error.detail);
+            LOG_ERROR("hub error: %.*s", (int)ERROR_DETAIL_SIZE, error.detail);
         }
     }
 
     agent_core_events.on_control(context, data, size, now_us);
+}
+
+static void logRegistered(const RegisterAckMessage *ack)
+{
+    char interfaces[256];
+    size_t offset;
+    int32_t written;
+    uint8_t i;
+
+    offset = 0;
+    interfaces[0] = '\0';
+    for(i=0; i<ack->interface_count && i<REGISTER_INTERFACES_MAX; i++) {
+        written = snprintf(
+            interfaces + offset,
+            sizeof(interfaces) - offset,
+            "%s%s=ch%u",
+            (i == 0) ? "" : " ",
+            registration.interface_names[i],
+            (unsigned)ack->channels[i]
+        );
+        if (written < 0 || (size_t)written >= sizeof(interfaces) - offset) {
+            break;
+        }
+        offset += (size_t)written;
+    }
+
+    LOG_INFO("registered as %s: %s", registration.agent_name, interfaces);
 }
 
 static const char *registerStatusText(uint8_t status)
@@ -232,6 +269,8 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
             agent_name = argv[++i];
         } else if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
             state_directory_override = argv[++i];
+        } else if (strcmp(argv[i], "--log-level") == 0 && i + 1 < argc) {
+            i++;
         } else {
             if (registration.interface_count >= REGISTER_INTERFACES_MAX) {
                 return false;
@@ -277,7 +316,7 @@ static bool initTransport(const char *host, const char *port_text, const Transpo
 
     if (transport_scheme == kCONNECT_SCHEME_QUIC || transport_scheme == kCONNECT_SCHEME_TLS) {
         if (!prepareSecurityMaterial(host, port_text)) {
-            fprintf(stderr, "could not load or create TLS identity\n");
+            LOG_ERROR("could not load or create TLS identity");
             return false;
         }
     }
@@ -443,11 +482,11 @@ static int32_t showIdentity(void)
     char fingerprint[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
 
     if (!prepareSecurityMaterial("identity", "0")) {
-        fprintf(stderr, "could not load or create TLS identity\n");
+        LOG_ERROR("could not load or create TLS identity");
         return 1;
     }
     if (!TlsIdentity_FingerprintOfFile(identity_certificate_path, fingerprint)) {
-        fprintf(stderr, "could not read the identity fingerprint\n");
+        LOG_ERROR("could not read the identity fingerprint");
         return 1;
     }
 

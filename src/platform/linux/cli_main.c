@@ -11,6 +11,7 @@
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/hub_defaults.h"
+#include "platform/linux/shared/log.h"
 #include "platform/linux/tcp/tcp_client_transport.h"
 #include "protocol/admin_message.h"
 #include "protocol/error_message.h"
@@ -120,17 +121,19 @@ int main(int argc, char **argv)
         return 0;
     }
 
+    Log_InitFromArgs("can-hub-cli", argc, argv);
+
     if (!parseArguments(argc, argv, host, port_text)) {
         printUsage(stderr, argv[0]);
         return 1;
     }
 
     if (!initTransport(host, port_text, &events)) {
-        fprintf(stderr, "could not initialize transport\n");
+        LOG_ERROR("could not initialize transport");
         return 1;
     }
     if (!transport.port.connect(transport.port.context)) {
-        fprintf(stderr, "could not connect to %s\n", host);
+        LOG_ERROR("could not connect to %s", host);
         return 1;
     }
 
@@ -141,7 +144,7 @@ int main(int argc, char **argv)
 
 static void printUsage(FILE *stream, const char *program)
 {
-    fprintf(stream, "usage: %s [--connect unix://<path>] <command>\n", program);
+    fprintf(stream, "usage: %s [--connect unix://<path>] [--log-level error|warn|info|debug] <command>\n", program);
     fprintf(stream, "commands:\n");
     fprintf(stream, "  status                 hub counters\n");
     fprintf(stream, "  peers                  every live connection\n");
@@ -177,6 +180,8 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
                 return false;
             }
             complete_mode = true;
+        } else if (strcmp(argv[i], "--log-level") == 0 && i + 1 < argc) {
+            i++;
         } else if (word_count < COMMAND_WORDS_MAX) {
             words[word_count++] = argv[i];
         } else {
@@ -412,7 +417,7 @@ static void onDisconnected(void *context, uint64_t now_us)
     (void)context;
     (void)now_us;
 
-    fprintf(stderr, "connection lost\n");
+    LOG_WARN("connection lost");
     exit_code = 1;
 }
 
@@ -438,7 +443,7 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
 
     if (header.type == kMESSAGE_TYPE_ERROR) {
         if (ErrorMessage_Decode(&error, data + MESSAGE_HEADER_SIZE, header.length)) {
-            fprintf(stderr, "hub error %u: %s\n", error.code, error.detail);
+            LOG_ERROR("hub error %u: %s", error.code, error.detail);
         }
         exit_code = 1;
         return;
@@ -485,7 +490,7 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
     if (header.type == kMESSAGE_TYPE_ADMIN_PIN_ADD_REPLY) {
         AdminPinAddReplyMessage_Decode(&pin_add_reply, data + MESSAGE_HEADER_SIZE, header.length);
         if (pin_add_reply.status != ADMIN_STATUS_OK) {
-            fprintf(stderr, "could not pin %s\n", target_agent);
+            LOG_ERROR("could not pin %s", target_agent);
             exit_code = 1;
             return;
         }
@@ -505,7 +510,7 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
     if (header.type == kMESSAGE_TYPE_ADMIN_ACL_SET_REPLY) {
         AdminAclSetReplyMessage_Decode(&acl_set_reply, data + MESSAGE_HEADER_SIZE, header.length);
         if (acl_set_reply.status != ADMIN_STATUS_OK) {
-            fprintf(stderr, "could not set acl\n");
+            LOG_ERROR("could not set acl");
             exit_code = 1;
             return;
         }
@@ -522,7 +527,7 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
     if (header.type == kMESSAGE_TYPE_ADMIN_ACL_REVOKE_REPLY) {
         AdminAclRevokeReplyMessage_Decode(&acl_revoke_reply, data + MESSAGE_HEADER_SIZE, header.length);
         if (acl_revoke_reply.status != ADMIN_STATUS_OK) {
-            fprintf(stderr, "no acl for %s on %s/%s\n", target_fingerprint, target_agent, target_interface);
+            LOG_ERROR("no acl for %s on %s/%s", target_fingerprint, target_agent, target_interface);
             exit_code = 1;
             return;
         }
@@ -772,7 +777,7 @@ static void handleAgentsReply(const uint8_t *payload, uint16_t payload_length)
 
     if (command == kCLI_COMMAND_AGENTS_SHOW) {
         if (reply.count == 0) {
-            fprintf(stderr, "unknown agent %s\n", target_agent);
+            LOG_ERROR("unknown agent %s", target_agent);
             exit_code = 1;
             return;
         }
@@ -998,7 +1003,7 @@ static void printClientRow(const AdminClientsReplyEntry *entry, const char *inde
 static void printActionReply(uint8_t status, const char *action, const char *target_kind, const char *target)
 {
     if (status != ADMIN_STATUS_OK) {
-        fprintf(stderr, "unknown %s %s\n", target_kind, target);
+        LOG_ERROR("unknown %s %s", target_kind, target);
         exit_code = 1;
         return;
     }
@@ -1010,17 +1015,17 @@ static void printActionReply(uint8_t status, const char *action, const char *tar
 static void printIfconfigReply(uint8_t status)
 {
     if (status == ADMIN_IFCONFIG_STATUS_UNKNOWN_INTERFACE) {
-        fprintf(stderr, "unknown interface %s/%s\n", target_agent, target_interface);
+        LOG_ERROR("unknown interface %s/%s", target_agent, target_interface);
         exit_code = 1;
         return;
     }
     if (status == ADMIN_IFCONFIG_STATUS_AGENT_UNREACHABLE) {
-        fprintf(stderr, "agent for %s/%s is not connected\n", target_agent, target_interface);
+        LOG_ERROR("agent for %s/%s is not connected", target_agent, target_interface);
         exit_code = 1;
         return;
     }
     if (status == ADMIN_IFCONFIG_STATUS_APPLY_FAILED) {
-        fprintf(stderr, "agent could not apply the change to %s/%s (needs CAP_NET_ADMIN)\n", target_agent, target_interface);
+        LOG_ERROR("agent could not apply the change to %s/%s (needs CAP_NET_ADMIN)", target_agent, target_interface);
         exit_code = 1;
         return;
     }

@@ -81,3 +81,11 @@ spot how a peer is connected.
 - Agent names up to 127 chars.
 - 16 CAN id filters per open channel.
 - Frame payloads up to 64 bytes (CAN FD).
+
+## Logging
+
+Diagnostics go to stderr at four levels — `error`, `warn`, `info`, `debug`.
+Set the verbosity with `--log-level <level>` (default `info`) or the
+`CAN_HUB_LOG` environment variable; the flag wins. Under systemd each line
+carries a syslog priority prefix so `journalctl -p err` (and friends) filter by
+level; on a terminal the lines read plainly as `can-hub: <message>`.
