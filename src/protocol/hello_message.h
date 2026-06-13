@@ -23,4 +23,5 @@ typedef struct {
 } HelloMessage;
 
 size_t HelloMessage_Encode(const HelloMessage *self, uint8_t *buffer, size_t buffer_size);
+size_t HelloMessage_Build(uint8_t role, const char *name, uint32_t capabilities, uint8_t *buffer, size_t buffer_size);
 bool HelloMessage_Decode(HelloMessage *self, const uint8_t *payload, size_t payload_length);

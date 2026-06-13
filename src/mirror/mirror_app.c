@@ -3,12 +3,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "protocol/control_buffer.h"
 #include "protocol/hello_message.h"
 #include "protocol/list_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
-
-#define WIRE_BUFFER_SIZE 128
 
 #define OPEN_FLAGS_READ_ONLY OPEN_FLAG_SUPPRESS_OWN_ECHO
 #define OPEN_FLAGS_READ_WRITE (OPEN_FLAG_SUPPRESS_OWN_ECHO | OPEN_FLAG_WANT_WRITE)
@@ -63,7 +62,7 @@ TransportEvents MirrorApp_TransportEvents(MirrorApp *self)
 void MirrorApp_OnCanFrame(MirrorApp *self, const FrameMessage *frame)
 {
     FrameMessage outgoing = *frame;
-    uint8_t encoded[WIRE_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size;
 
     if (self->state != kMIRROR_PUMPING || !self->can_write) {
@@ -222,12 +221,10 @@ static void handleOpenAck(MirrorApp *self, const OpenAckMessage *ack)
 
 static void sendHello(MirrorApp *self)
 {
-    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0, "" };
-    uint8_t encoded[WIRE_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size;
 
-    snprintf(hello.name, sizeof(hello.name), "%s", self->name);
-    encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+    encoded_size = HelloMessage_Build(kPEER_ROLE_CLIENT, self->name, 0, encoded, sizeof(encoded));
     if (encoded_size > 0) {
         self->hub->send_control(self->hub->context, encoded, encoded_size);
     }
@@ -236,7 +233,7 @@ static void sendHello(MirrorApp *self)
 static void sendList(MirrorApp *self, uint16_t offset)
 {
     ListMessage list = { offset };
-    uint8_t encoded[WIRE_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size = ListMessage_Encode(&list, encoded, sizeof(encoded));
 
     if (encoded_size > 0) {
@@ -247,7 +244,7 @@ static void sendList(MirrorApp *self, uint16_t offset)
 static void sendOpen(MirrorApp *self, uint8_t flags)
 {
     OpenMessage open = { self->interface_id, flags };
-    uint8_t encoded[WIRE_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
 
     if (encoded_size > 0) {

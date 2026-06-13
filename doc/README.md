@@ -23,4 +23,5 @@
 
 - [design.md](design.md) — architecture and the reasoning behind every decision.
 - [protocol.md](protocol.md) — the wire protocol, version 0 (CC-BY-4.0; independent implementations welcome).
+- [wire-change-runbook.md](wire-change-runbook.md) — changing or adding a wire message: checklist and the index of every codec site.
 - [CONTRIBUTING.md](../CONTRIBUTING.md) and [CODE_STYLE.md](../CODE_STYLE.md).
