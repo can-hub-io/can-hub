@@ -131,8 +131,23 @@ jobs:
         run: |
           file dist/${{ matrix.arch }}/can-hub-agent
           file dist/${{ matrix.arch }}/can-hub-agent | grep -q "statically linked"
+      - name: lintian
+        run: |
+          sudo apt-get update && sudo apt-get install -y lintian
+          lintian --fail-on error dist/${{ matrix.arch }}/*.deb
       - uses: actions/upload-artifact@v4
         with:
           name: can-hub-static-${{ matrix.arch }}
           path: dist/${{ matrix.arch }}/can-hub*
           retention-days: 7
+
+  deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build perl lintian
+      - name: build per-binary debs
+        run: make deb
+      - name: lintian
+        run: lintian --fail-on error build/x86_64/package/*.deb
