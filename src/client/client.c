@@ -3,13 +3,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "protocol/control_buffer.h"
 #include "protocol/hello_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
-
-#define CONTROL_BUFFER_SIZE 128
-#define SUBSCRIBE_BUFFER_SIZE (MESSAGE_HEADER_SIZE + SUBSCRIBE_FIXED_FIELDS_SIZE + SUBSCRIBE_FILTERS_MAX * CAN_FILTER_SIZE)
-#define FRAME_BUFFER_SIZE (MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD)
 
 typedef enum tclient_pending_e {
     kCLIENT_PENDING_NONE = 0,
@@ -119,7 +116,7 @@ void Client_SetFilters(Client *self, const CanFilter *filters, uint8_t count)
 
 bool Client_SendFrame(Client *self, FrameMessage *frame)
 {
-    uint8_t encoded[FRAME_BUFFER_SIZE];
+    uint8_t encoded[FRAME_WIRE_SIZE];
     size_t encoded_size;
 
     if (self->state != kCLIENT_OPEN) {
@@ -340,7 +337,7 @@ static void emitLocalError(Client *self, uint16_t code, const char *detail)
 
 static void sendHello(Client *self)
 {
-    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size;
 
     encoded_size = HelloMessage_Build(kPEER_ROLE_CLIENT, self->name, 0, encoded, sizeof(encoded));
@@ -353,7 +350,7 @@ static void sendHello(Client *self)
 static void sendList(Client *self, uint16_t offset)
 {
     ListMessage list = { offset };
-    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size = ListMessage_Encode(&list, encoded, sizeof(encoded));
 
     if (encoded_size > 0) {
@@ -364,7 +361,7 @@ static void sendList(Client *self, uint16_t offset)
 static void sendOpen(Client *self)
 {
     OpenMessage open = { self->interface_id, self->open_flags };
-    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
 
     if (encoded_size > 0) {
@@ -375,7 +372,7 @@ static void sendOpen(Client *self)
 static void sendSubscribe(Client *self)
 {
     SubscribeMessage subscribe;
-    uint8_t encoded[SUBSCRIBE_BUFFER_SIZE];
+    uint8_t encoded[SUBSCRIBE_WIRE_SIZE];
     size_t encoded_size;
 
     subscribe.channel = self->channel;

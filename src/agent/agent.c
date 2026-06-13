@@ -2,11 +2,11 @@
 
 #include <string.h>
 
+#include "protocol/control_buffer.h"
 #include "protocol/hello_message.h"
 #include "protocol/ifconfig_message.h"
 #include "protocol/message_header.h"
 
-#define CONTROL_BUFFER_SIZE 512
 #define MICROSECONDS_PER_MILLISECOND 1000
 #define PING_REPLY_FLAG 0x01
 
@@ -259,7 +259,7 @@ static void scheduleReconnect(Agent *self, uint64_t now_us)
 
 static void sendHelloAndRegister(Agent *self)
 {
-    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size;
 
     encoded_size = HelloMessage_Build(kPEER_ROLE_AGENT, NULL, 0, encoded, sizeof(encoded));
@@ -321,7 +321,7 @@ static void handleIfconfig(Agent *self, const MessageHeader *header, const uint8
 {
     IfconfigMessage request;
     IfconfigReplyMessage reply;
-    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     uint8_t interface_index;
     size_t encoded_size;
 

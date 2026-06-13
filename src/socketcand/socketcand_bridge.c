@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "protocol/control_buffer.h"
 #include "protocol/frame_message.h"
 #include "protocol/hello_message.h"
 #include "protocol/list_message.h"
@@ -10,7 +11,6 @@
 #include "socketcand/domain/beacon_xml.h"
 #include "socketcand/domain/socketcand_codec.h"
 
-#define WIRE_BUFFER_SIZE 128
 #define ASCII_BUFFER_SIZE 256
 #define BEACON_BUFFER_SIZE 8192
 
@@ -395,7 +395,7 @@ static bool openBus(SocketcandBridge *self, SocketcandConnection *connection, co
 static void handleSend(SocketcandBridge *self, SocketcandConnection *connection, const FrameMessage *frame)
 {
     FrameMessage outgoing = *frame;
-    uint8_t encoded[WIRE_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     char ascii[ASCII_BUFFER_SIZE];
     size_t encoded_size;
     size_t length;
@@ -424,7 +424,7 @@ static void handleSend(SocketcandBridge *self, SocketcandConnection *connection,
 
 static void sendHello(SocketcandBridge *self)
 {
-    uint8_t encoded[WIRE_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size;
 
     encoded_size = HelloMessage_Build(kPEER_ROLE_CLIENT, self->name, 0, encoded, sizeof(encoded));
@@ -436,7 +436,7 @@ static void sendHello(SocketcandBridge *self)
 static void sendListPage(SocketcandBridge *self, uint16_t offset)
 {
     ListMessage list = { offset };
-    uint8_t encoded[WIRE_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size = ListMessage_Encode(&list, encoded, sizeof(encoded));
 
     if (encoded_size > 0) {
@@ -447,7 +447,7 @@ static void sendListPage(SocketcandBridge *self, uint16_t offset)
 static void sendOpen(SocketcandBridge *self, uint32_t interface_id, uint8_t flags)
 {
     OpenMessage open = { interface_id, flags };
-    uint8_t encoded[WIRE_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
 
     if (encoded_size > 0) {
@@ -458,7 +458,7 @@ static void sendOpen(SocketcandBridge *self, uint32_t interface_id, uint8_t flag
 static void sendClose(SocketcandBridge *self, uint8_t channel)
 {
     CloseMessage close = { channel };
-    uint8_t encoded[WIRE_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size = CloseMessage_Encode(&close, encoded, sizeof(encoded));
 
     if (encoded_size > 0) {

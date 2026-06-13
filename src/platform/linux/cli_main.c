@@ -15,6 +15,7 @@
 #include "platform/linux/tcp/tcp_client_transport.h"
 #include "hub/ports/hub_transport_events.h"
 #include "protocol/admin_message.h"
+#include "protocol/control_buffer.h"
 #include "protocol/error_message.h"
 #include "protocol/hello_message.h"
 #include "protocol/ifconfig_message.h"
@@ -24,7 +25,6 @@
 #define MAX_EPOLL_EVENTS 8
 #define POLL_PERIOD_MS 100
 #define TCP_SLOT 0
-#define COMMAND_BUFFER_SIZE 256
 #define COMMAND_WORDS_MAX 5
 
 typedef enum tcli_command_e {
@@ -405,7 +405,7 @@ static bool initTransport(const char *host, const char *port_text, const Transpo
 static void onConnected(void *context)
 {
     TcpClientTransport *self = context;
-    uint8_t encoded[COMMAND_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size;
 
     encoded_size = HelloMessage_Build(kPEER_ROLE_ADMIN, NULL, 0, encoded, sizeof(encoded));
@@ -568,7 +568,7 @@ static void sendRequest(void)
     AdminAclRevokeMessage acl_revoke;
     AdminAclListMessage acl_list = { page_offset };
     AdminIfconfigMessage ifconfig;
-    uint8_t encoded[COMMAND_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size = 0;
 
     memset(&agents, 0, sizeof(agents));
@@ -668,7 +668,7 @@ static void sendShowStage(uint8_t stage)
     AdminAgentsMessage agents;
     AdminClientsMessage clients;
     ListMessage list = { page_offset };
-    uint8_t encoded[COMMAND_BUFFER_SIZE];
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size = 0;
 
     if (stage == kCLI_SHOW_STAGE_AGENT) {
