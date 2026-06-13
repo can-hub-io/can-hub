@@ -217,7 +217,7 @@ static void handleOpenAck(MirrorApp *self, const OpenAckMessage *ack)
 
 static void sendHello(MirrorApp *self)
 {
-    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0 };
+    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0, "" };
     uint8_t encoded[WIRE_BUFFER_SIZE];
     size_t encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
 

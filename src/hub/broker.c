@@ -29,7 +29,7 @@ typedef void (*TControlHandler)(
     const uint8_t *payload
 );
 
-static void onPeerConnected(void *context, uint32_t peer_id, const char *fingerprint_hex, bool local);
+static void onPeerConnected(void *context, uint32_t peer_id, const HubPeerConnectInfo *info, uint64_t now_us);
 static void onPeerDisconnected(void *context, uint32_t peer_id, uint64_t now_us);
 static void onPeerControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size, uint64_t now_us);
 static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
@@ -141,6 +141,8 @@ void Broker_Tick(Broker *self, uint64_t now_us)
     HubPeer *peer;
     uint8_t i;
 
+    self->now_us = now_us;
+
     for(i=0; i<PEER_DIRECTORY_MAX; i++) {
         peer = PeerDirectory_At(&self->directory, i);
         if (peer == NULL) {
@@ -157,10 +159,12 @@ void Broker_Tick(Broker *self, uint64_t now_us)
 
 /* ---------- private: events ---------- */
 
-static void onPeerConnected(void *context, uint32_t peer_id, const char *fingerprint_hex, bool local)
+static void onPeerConnected(void *context, uint32_t peer_id, const HubPeerConnectInfo *info, uint64_t now_us)
 {
     Broker *self = context;
     HubPeer *peer = PeerDirectory_Allocate(&self->directory, peer_id);
+
+    self->now_us = now_us;
 
     if (peer == NULL) {
         sendError(self, peer_id, kERROR_CODE_HUB_FULL, "no peer slot available");
@@ -168,9 +172,14 @@ static void onPeerConnected(void *context, uint32_t peer_id, const char *fingerp
         return;
     }
 
-    peer->local = local;
-    if (fingerprint_hex != NULL) {
-        strncpy(peer->fingerprint_hex, fingerprint_hex, IDENTITY_FINGERPRINT_HEX_SIZE - 1);
+    peer->local = info->local;
+    peer->transport_kind = info->transport_kind;
+    peer->connected_at_us = now_us;
+    if (info->fingerprint_hex != NULL) {
+        strncpy(peer->fingerprint_hex, info->fingerprint_hex, IDENTITY_FINGERPRINT_HEX_SIZE - 1);
+    }
+    if (info->origin != NULL) {
+        strncpy(peer->origin, info->origin, HUB_PEER_ORIGIN_SIZE - 1);
     }
 }
 
@@ -199,7 +208,7 @@ static void onPeerControl(void *context, uint32_t peer_id, const uint8_t *data, 
     HubPeer *peer = PeerDirectory_Find(&self->directory, peer_id);
     MessageHeader header;
 
-    (void)now_us;
+    self->now_us = now_us;
 
     if (peer == NULL) {
         return;
@@ -314,6 +323,11 @@ static void handleHello(Broker *self, HubPeer *peer, const MessageHeader *header
     if (!HubPeer_AdoptRole(peer, hello.role)) {
         sendError(self, peer->peer_id, kERROR_CODE_ROLE_REJECTED, "admin role requires a local transport");
         disconnectPeer(self, peer->peer_id);
+        return;
+    }
+
+    if (peer->role == kHUB_PEER_ROLE_CLIENT && hello.name[0] != '\0') {
+        HubPeer_SetAgentName(peer, hello.name);
     }
 }
 
@@ -516,7 +530,7 @@ static void handleAdminPeers(Broker *self, HubPeer *peer, const MessageHeader *h
         return;
     }
 
-    PeerDirectory_List(&self->directory, request.offset, &reply);
+    PeerDirectory_List(&self->directory, request.offset, &reply, self->now_us);
     sendControl(self, peer, encoded, AdminPeersReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 

@@ -8,6 +8,7 @@
 #define VERSION_OFFSET 0
 #define ROLE_OFFSET 1
 #define CAPABILITIES_OFFSET 4
+#define NAME_OFFSET 8
 
 static bool isRoleValid(uint8_t role);
 
@@ -36,6 +37,7 @@ size_t HelloMessage_Encode(const HelloMessage *self, uint8_t *buffer, size_t buf
     body[VERSION_OFFSET] = self->version;
     body[ROLE_OFFSET] = self->role;
     Wire_WriteU32(body + CAPABILITIES_OFFSET, self->capabilities);
+    memcpy(body + NAME_OFFSET, self->name, strnlen(self->name, HELLO_NAME_SIZE - 1));
 
     return total_size;
 }
@@ -49,6 +51,8 @@ bool HelloMessage_Decode(HelloMessage *self, const uint8_t *payload, size_t payl
     self->version = payload[VERSION_OFFSET];
     self->role = payload[ROLE_OFFSET];
     self->capabilities = Wire_ReadU32(payload + CAPABILITIES_OFFSET);
+    memcpy(self->name, payload + NAME_OFFSET, HELLO_NAME_SIZE);
+    self->name[HELLO_NAME_SIZE - 1] = '\0';
 
     return isRoleValid(self->role);
 }

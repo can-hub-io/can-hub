@@ -7,6 +7,7 @@
 #include "agent/ports/transport_port.h"
 #include "protocol/error_message.h"
 #include "protocol/frame_message.h"
+#include "protocol/hello_message.h"
 #include "protocol/interface_name.h"
 #include "protocol/list_message.h"
 #include "protocol/subscribe_message.h"
@@ -46,9 +47,11 @@ typedef struct {
     uint8_t channel;
     uint8_t filter_count;
     CanFilter filters[SUBSCRIBE_FILTERS_MAX];
+    char name[HELLO_NAME_SIZE];
 } Client;
 
 void Client_Init(Client *self, TransportPort *hub, const ClientEvents *events);
+void Client_SetName(Client *self, const char *name);
 TransportEvents Client_TransportEvents(Client *self);
 void Client_RequestList(Client *self, uint16_t offset);
 void Client_OpenById(Client *self, uint32_t interface_id, uint8_t flags);

@@ -107,7 +107,7 @@ uint16_t PeerDirectory_CountRole(const PeerDirectory *self, uint8_t role)
     return count;
 }
 
-void PeerDirectory_List(const PeerDirectory *self, uint16_t offset, AdminPeersReplyMessage *reply)
+void PeerDirectory_List(const PeerDirectory *self, uint16_t offset, AdminPeersReplyMessage *reply, uint64_t now_us)
 {
     const HubPeer *peer;
     uint16_t skipped = 0;
@@ -128,6 +128,6 @@ void PeerDirectory_List(const PeerDirectory *self, uint16_t offset, AdminPeersRe
             reply->flags |= ADMIN_REPLY_FLAG_MORE;
             return;
         }
-        HubPeer_FillAdminEntry(peer, &reply->entries[reply->count++]);
+        HubPeer_FillAdminEntry(peer, &reply->entries[reply->count++], now_us);
     }
 }

@@ -7,7 +7,7 @@
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
 
-#define CONTROL_BUFFER_SIZE 64
+#define CONTROL_BUFFER_SIZE 128
 #define SUBSCRIBE_BUFFER_SIZE (MESSAGE_HEADER_SIZE + SUBSCRIBE_FIXED_FIELDS_SIZE + SUBSCRIBE_FILTERS_MAX * CAN_FILTER_SIZE)
 #define FRAME_BUFFER_SIZE (MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD)
 
@@ -46,6 +46,11 @@ void Client_Init(Client *self, TransportPort *hub, const ClientEvents *events)
     self->events = *events;
     self->state = kCLIENT_DISCONNECTED;
     self->pending = kCLIENT_PENDING_NONE;
+}
+
+void Client_SetName(Client *self, const char *name)
+{
+    snprintf(self->name, sizeof(self->name), "%s", name);
 }
 
 TransportEvents Client_TransportEvents(Client *self)
@@ -335,9 +340,12 @@ static void emitLocalError(Client *self, uint16_t code, const char *detail)
 
 static void sendHello(Client *self)
 {
-    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0 };
+    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0, "" };
     uint8_t encoded[CONTROL_BUFFER_SIZE];
-    size_t encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+    size_t encoded_size;
+
+    snprintf(hello.name, sizeof(hello.name), "%s", self->name);
+    encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
 
     if (encoded_size > 0) {
         self->hub->send_control(self->hub->context, encoded, encoded_size);

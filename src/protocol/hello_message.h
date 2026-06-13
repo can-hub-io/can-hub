@@ -4,7 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define HELLO_BODY_SIZE 8
+#define HELLO_NAME_SIZE 64
+#define HELLO_BODY_SIZE 72
 #define PROTOCOL_VERSION 0
 
 typedef enum tpeer_role_e {
@@ -18,6 +19,7 @@ typedef struct {
     uint8_t version;
     uint8_t role;
     uint32_t capabilities;
+    char name[HELLO_NAME_SIZE];
 } HelloMessage;
 
 size_t HelloMessage_Encode(const HelloMessage *self, uint8_t *buffer, size_t buffer_size);

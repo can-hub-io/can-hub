@@ -13,6 +13,7 @@
 #include "platform/linux/shared/hub_defaults.h"
 #include "platform/linux/shared/log.h"
 #include "platform/linux/tcp/tcp_client_transport.h"
+#include "hub/ports/hub_transport_events.h"
 #include "protocol/admin_message.h"
 #include "protocol/error_message.h"
 #include "protocol/hello_message.h"
@@ -99,6 +100,8 @@ static void printClientRow(const AdminClientsReplyEntry *entry, const char *inde
 static void printActionReply(uint8_t status, const char *action, const char *target_kind, const char *target);
 static void printIfconfigReply(uint8_t status);
 static const char *roleName(uint8_t role);
+static const char *transportName(uint8_t transport_kind);
+static void formatUptime(uint32_t seconds, char *out, size_t size);
 static const char *textOrDash(const char *text);
 static bool requestNextPage(uint8_t flags, uint8_t count);
 static int32_t runEventLoop(void);
@@ -402,7 +405,7 @@ static bool initTransport(const char *host, const char *port_text, const Transpo
 static void onConnected(void *context)
 {
     TcpClientTransport *self = context;
-    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_ADMIN, 0 };
+    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_ADMIN, 0, "" };
     uint8_t encoded[COMMAND_BUFFER_SIZE];
     size_t encoded_size;
 
@@ -735,15 +738,24 @@ static void handlePeersReply(const uint8_t *payload, uint16_t payload_length)
     }
 
     if (!page_header_printed) {
-        printf("%-12s %-8s %-32s %-10s %-8s %s\n", "peer-id", "role", "agent", "forwarded", "dropped", "fingerprint");
+        printf(
+            "%-12s %-8s %-6s %-24s %-22s %-8s %-10s %-8s %s\n",
+            "peer-id", "role", "via", "name", "origin", "uptime", "forwarded", "dropped", "fingerprint"
+        );
         page_header_printed = true;
     }
     for(i=0; i<reply.count; i++) {
+        char uptime[16];
+
+        formatUptime(reply.entries[i].uptime_seconds, uptime, sizeof(uptime));
         printf(
-            "0x%08X   %-8s %-32s %-10u %-8u %s\n",
+            "0x%08X   %-8s %-6s %-24s %-22s %-8s %-10u %-8u %s\n",
             reply.entries[i].peer_id,
             roleName(reply.entries[i].role),
+            transportName(reply.entries[i].transport_kind),
             textOrDash(reply.entries[i].agent_name),
+            textOrDash(reply.entries[i].origin),
+            uptime,
             reply.entries[i].frames_forwarded,
             reply.entries[i].frames_dropped,
             textOrDash(reply.entries[i].fingerprint_hex)
@@ -1053,6 +1065,41 @@ static const char *roleName(uint8_t role)
     }
 
     return "unknown";
+}
+
+static const char *transportName(uint8_t transport_kind)
+{
+    if (transport_kind == kPEER_TRANSPORT_UNIX) {
+        return "unix";
+    }
+    if (transport_kind == kPEER_TRANSPORT_TCP) {
+        return "tcp";
+    }
+    if (transport_kind == kPEER_TRANSPORT_TLS) {
+        return "tls";
+    }
+    if (transport_kind == kPEER_TRANSPORT_QUIC) {
+        return "quic";
+    }
+
+    return "-";
+}
+
+static void formatUptime(uint32_t seconds, char *out, size_t size)
+{
+    if (seconds < 60) {
+        snprintf(out, size, "%us", seconds);
+        return;
+    }
+    if (seconds < 3600) {
+        snprintf(out, size, "%um%us", seconds / 60, seconds % 60);
+        return;
+    }
+    if (seconds < 86400) {
+        snprintf(out, size, "%uh%um", seconds / 3600, (seconds % 3600) / 60);
+        return;
+    }
+    snprintf(out, size, "%ud%uh", seconds / 86400, (seconds % 86400) / 3600);
 }
 
 static const char *textOrDash(const char *text)

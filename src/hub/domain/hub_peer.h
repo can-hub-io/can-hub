@@ -23,21 +23,26 @@ typedef enum thub_peer_role_e {
     kHUB_PEER_ROLE_MAX,
 } THUB_PEER_ROLE;
 
+#define HUB_PEER_ORIGIN_SIZE 56
+
 typedef struct {
     bool in_use;
     bool local;
     bool send_failed;
     uint32_t peer_id;
     uint8_t role;
+    uint8_t transport_kind;
     uint64_t hello_deadline_us;
+    uint64_t connected_at_us;
     uint32_t frames_forwarded;
     uint32_t frames_dropped;
     char fingerprint_hex[IDENTITY_FINGERPRINT_HEX_SIZE];
     char agent_name[REGISTER_AGENT_NAME_SIZE];
+    char origin[HUB_PEER_ORIGIN_SIZE];
     ClientSession session;
     EgressQueue egress;
 } HubPeer;
 
 bool HubPeer_AdoptRole(HubPeer *self, uint8_t wire_role);
 void HubPeer_SetAgentName(HubPeer *self, const char *agent_name);
-void HubPeer_FillAdminEntry(const HubPeer *self, AdminPeersReplyEntry *entry);
+void HubPeer_FillAdminEntry(const HubPeer *self, AdminPeersReplyEntry *entry, uint64_t now_us);

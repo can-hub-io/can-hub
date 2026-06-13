@@ -26,13 +26,18 @@ void HubPeer_SetAgentName(HubPeer *self, const char *agent_name)
     strncpy(self->agent_name, agent_name, REGISTER_AGENT_NAME_SIZE - 1);
 }
 
-void HubPeer_FillAdminEntry(const HubPeer *self, AdminPeersReplyEntry *entry)
+void HubPeer_FillAdminEntry(const HubPeer *self, AdminPeersReplyEntry *entry, uint64_t now_us)
 {
     memset(entry, 0, sizeof(*entry));
     entry->peer_id = self->peer_id;
     entry->role = self->role;
+    entry->transport_kind = self->transport_kind;
     entry->frames_forwarded = self->frames_forwarded;
     entry->frames_dropped = self->frames_dropped;
+    if (now_us > self->connected_at_us) {
+        entry->uptime_seconds = (uint32_t)((now_us - self->connected_at_us) / 1000000u);
+    }
     memcpy(entry->agent_name, self->agent_name, REGISTER_AGENT_NAME_SIZE);
     memcpy(entry->fingerprint_hex, self->fingerprint_hex, IDENTITY_FINGERPRINT_HEX_SIZE);
+    memcpy(entry->origin, self->origin, HUB_PEER_ORIGIN_SIZE < ADMIN_ORIGIN_SIZE ? HUB_PEER_ORIGIN_SIZE : ADMIN_ORIGIN_SIZE);
 }

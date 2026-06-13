@@ -1,11 +1,13 @@
 #include "platform/linux/quic/quic_server_transport.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
 #include <sys/timerfd.h>
 
 #include "platform/linux/clock/clock.h"
@@ -13,7 +15,9 @@
 #include "protocol/message_header.h"
 
 #define UDP_PACKET_BUFFER_SIZE 1452
+#define QUIC_SERVER_ORIGIN_SIZE 56
 
+static void formatOrigin(const struct sockaddr_storage *address, char *out, size_t size);
 static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static void portClosePeer(void *context, uint32_t peer_id);
@@ -473,6 +477,28 @@ static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool n
 
 /* ---------- private: connection events ---------- */
 
+static void formatOrigin(const struct sockaddr_storage *address, char *out, size_t size)
+{
+    const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)address;
+    const struct sockaddr_in *in = (const struct sockaddr_in *)address;
+    char ip[INET6_ADDRSTRLEN];
+
+    if (address->ss_family == AF_INET6) {
+        if (inet_ntop(AF_INET6, &in6->sin6_addr, ip, sizeof(ip)) == NULL) {
+            out[0] = '\0';
+            return;
+        }
+        snprintf(out, size, "[%s]:%u", ip, ntohs(in6->sin6_port));
+        return;
+    }
+
+    if (inet_ntop(AF_INET, &in->sin_addr, ip, sizeof(ip)) == NULL) {
+        out[0] = '\0';
+        return;
+    }
+    snprintf(out, size, "%s:%u", ip, ntohs(in->sin_port));
+}
+
 static void capturePeerFingerprint(QuicServerPeer *peer)
 {
     X509 *certificate = SSL_get0_peer_certificate(peer->ssl);
@@ -515,14 +541,21 @@ static void dispatchControlMessages(QuicServerTransport *self, QuicServerPeer *p
 static void onHandshakeCompleted(void *context)
 {
     QuicServerPeer *peer = context;
+    HubPeerConnectInfo info;
+    char origin[QUIC_SERVER_ORIGIN_SIZE];
 
     capturePeerFingerprint(peer);
     peer->connected = true;
+    formatOrigin(&peer->remote_address, origin, sizeof(origin));
+    info.fingerprint_hex = peer->fingerprint_hex[0] != '\0' ? peer->fingerprint_hex : NULL;
+    info.origin = origin;
+    info.transport_kind = kPEER_TRANSPORT_QUIC;
+    info.local = false;
     peer->transport->events.on_peer_connected(
         peer->transport->events.context,
         peer->peer_id,
-        peer->fingerprint_hex[0] != '\0' ? peer->fingerprint_hex : NULL,
-        false
+        &info,
+        Clock_RealtimeUs()
     );
 }
 

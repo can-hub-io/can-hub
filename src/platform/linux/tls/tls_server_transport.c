@@ -2,6 +2,7 @@
 
 #include "platform/linux/tls/tls_server_transport.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -26,6 +27,7 @@ static void pumpHandshake(TlsServerTransport *self, TlsServerPeer *peer);
 static void announcePeer(TlsServerTransport *self, TlsServerPeer *peer);
 static void dispatchMessages(TlsServerTransport *self, TlsServerPeer *peer);
 static void closePeer(TlsServerTransport *self, TlsServerPeer *peer, bool notify);
+static void formatOrigin(const struct sockaddr_in *address, char *out, size_t size);
 
 /* ---------- public ---------- */
 
@@ -105,11 +107,13 @@ void TlsServerTransport_OnAcceptReady(TlsServerTransport *self)
 {
     TlsServerPeer *peer;
     SSL *ssl;
+    struct sockaddr_in remote;
+    socklen_t remote_size = sizeof(remote);
     int32_t peer_fd;
     int32_t nodelay = 1;
 
     for (;;) {
-        peer_fd = accept4(self->listen_fd, NULL, NULL, SOCK_NONBLOCK);
+        peer_fd = accept4(self->listen_fd, (struct sockaddr *)&remote, &remote_size, SOCK_NONBLOCK);
         if (peer_fd < 0) {
             return;
         }
@@ -128,6 +132,7 @@ void TlsServerTransport_OnAcceptReady(TlsServerTransport *self)
         TlsChannel_Bind(&peer->channel, peer_fd, ssl);
         peer->peer_id = self->next_peer_id++;
         peer->announced = false;
+        formatOrigin(&remote, peer->origin, sizeof(peer->origin));
         pumpHandshake(self, peer);
     }
 }
@@ -267,14 +272,14 @@ static void announcePeer(TlsServerTransport *self, TlsServerPeer *peer)
 {
     char fingerprint_hex[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
     bool has_fingerprint = TlsChannel_PeerFingerprint(&peer->channel, fingerprint_hex);
+    HubPeerConnectInfo info;
 
     peer->announced = true;
-    self->events.on_peer_connected(
-        self->events.context,
-        peer->peer_id,
-        has_fingerprint ? fingerprint_hex : NULL,
-        false
-    );
+    info.fingerprint_hex = has_fingerprint ? fingerprint_hex : NULL;
+    info.origin = peer->origin;
+    info.transport_kind = kPEER_TRANSPORT_TLS;
+    info.local = false;
+    self->events.on_peer_connected(self->events.context, peer->peer_id, &info, Clock_RealtimeUs());
 
     if (!TlsChannel_Receive(&peer->channel)) {
         closePeer(self, peer, true);
@@ -324,4 +329,15 @@ static void closePeer(TlsServerTransport *self, TlsServerPeer *peer, bool notify
     if (notify && was_announced) {
         self->events.on_peer_disconnected(self->events.context, peer_id, Clock_RealtimeUs());
     }
+}
+
+static void formatOrigin(const struct sockaddr_in *address, char *out, size_t size)
+{
+    char ip[INET_ADDRSTRLEN];
+
+    if (inet_ntop(AF_INET, &address->sin_addr, ip, sizeof(ip)) == NULL) {
+        out[0] = '\0';
+        return;
+    }
+    snprintf(out, size, "%s:%u", ip, ntohs(address->sin_port));
 }
