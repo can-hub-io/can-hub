@@ -45,6 +45,7 @@ void Agent_Init(Agent *self, TransportPort *transport, CanPort *can, const Regis
     self->state = kAGENT_STATE_DISCONNECTED;
     self->next_connect_at_us = 0;
     self->register_deadline_us = 0;
+    self->pending_reconnect_delay_ms = 0;
 }
 
 TransportEvents Agent_TransportEvents(Agent *self)
