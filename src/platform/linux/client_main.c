@@ -717,6 +717,7 @@ static int32_t runSocketcandServer(const char *host, const char *port_text)
     resolveDeviceName(device_name, sizeof(device_name));
     buildBeaconUrl(beacon_url, sizeof(beacon_url));
     SocketcandApp_Init(&socketcand_app, active_port, SocketcandServer_Port(&socketcand_server), device_name, beacon_url, beacon_enabled);
+    SocketcandApp_SetName(&socketcand_app, client_name);
 
     LOG_INFO("socketcand server on %s:%s, hub %s, beacon %s",
             socketcand_bind_address, socketcand_port_text, host, beacon_enabled ? "on" : "off");
@@ -885,6 +886,7 @@ static int32_t runAttach(const char *host, const char *port_text)
             NULL
         );
     }
+    MirrorApp_SetName(&mirror_app, client_name);
 
     if (!active_port->connect(active_port->context)) {
         LOG_ERROR("could not connect to %s", host);

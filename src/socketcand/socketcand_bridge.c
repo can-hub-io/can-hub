@@ -63,6 +63,11 @@ void SocketcandBridge_Init(SocketcandBridge *self, TransportPort *hub, Socketcan
     copyString(self->beacon_url, sizeof(self->beacon_url), beacon_url);
 }
 
+void SocketcandBridge_SetName(SocketcandBridge *self, const char *name)
+{
+    copyString(self->name, sizeof(self->name), name);
+}
+
 TransportEvents SocketcandBridge_TransportEvents(SocketcandBridge *self)
 {
     TransportEvents events = {
@@ -421,8 +426,10 @@ static void sendHello(SocketcandBridge *self)
 {
     HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0, "" };
     uint8_t encoded[WIRE_BUFFER_SIZE];
-    size_t encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+    size_t encoded_size;
 
+    copyString(hello.name, sizeof(hello.name), self->name);
+    encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
     if (encoded_size > 0) {
         self->hub->send_control(self->hub->context, encoded, encoded_size);
     }

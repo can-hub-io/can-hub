@@ -142,14 +142,16 @@ impl Header {
     }
 }
 
-/// Encode a HELLO (total 12 bytes). Capabilities default to 0 in version 0.
-pub fn encode_hello(role: Role, version: u8, capabilities: u32) -> [u8; 12] {
-    let mut out = [0u8; 12];
-    Header::write(&mut out, MessageType::Hello, 0, 8);
+/// Encode a HELLO (total 76 bytes). Capabilities default to 0 in version 0.
+/// The trailing name[64] is left empty; admin sessions carry no peer name.
+pub fn encode_hello(role: Role, version: u8, capabilities: u32) -> [u8; 76] {
+    let mut out = [0u8; 76];
+    Header::write(&mut out, MessageType::Hello, 0, 72);
     out[4] = version;
     out[5] = role as u8;
     // @6 reserved u16 stays zero.
     out[8..12].copy_from_slice(&capabilities.to_le_bytes());
+    // @12 name[64] stays zero.
     out
 }
 
@@ -218,9 +220,9 @@ mod tests {
     #[test]
     fn hello_admin_layout() {
         let hello = encode_hello(Role::Admin, 0, 0);
-        assert_eq!(hello.len(), 12);
+        assert_eq!(hello.len(), 76);
         assert_eq!(hello[0], MessageType::Hello as u8);
-        assert_eq!(u16::from_le_bytes([hello[2], hello[3]]), 8);
+        assert_eq!(u16::from_le_bytes([hello[2], hello[3]]), 72);
         assert_eq!(hello[4], 0); // version
         assert_eq!(hello[5], Role::Admin as u8);
         assert_eq!(read_u32(&hello, 8), 0); // capabilities

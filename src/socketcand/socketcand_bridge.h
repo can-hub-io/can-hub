@@ -6,6 +6,7 @@
 
 #include "agent/ports/transport_events.h"
 #include "agent/ports/transport_port.h"
+#include "protocol/hello_message.h"
 #include "socketcand/domain/connection_table.h"
 #include "socketcand/domain/interface_catalogue.h"
 #include "socketcand/ports/socketcand_server_events.h"
@@ -47,9 +48,11 @@ typedef struct {
     bool beacon_enabled;
     char device_name[SOCKETCAND_DEVICE_NAME_SIZE];
     char beacon_url[SOCKETCAND_URL_SIZE];
+    char name[HELLO_NAME_SIZE];
 } SocketcandBridge;
 
 void SocketcandBridge_Init(SocketcandBridge *self, TransportPort *hub, SocketcandServerPort *server, const char *device_name, const char *beacon_url, bool beacon_enabled);
+void SocketcandBridge_SetName(SocketcandBridge *self, const char *name);
 TransportEvents SocketcandBridge_TransportEvents(SocketcandBridge *self);
 SocketcandServerEvents SocketcandBridge_ServerEvents(SocketcandBridge *self);
 void SocketcandBridge_Tick(SocketcandBridge *self, uint64_t now_us);

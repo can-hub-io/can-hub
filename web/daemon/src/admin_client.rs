@@ -264,7 +264,7 @@ mod tests {
         let transport = MockTransport::with_replies(&[]);
         let client = AdminClient::connect(transport).unwrap();
         let hello = &client.transport.outbound;
-        assert_eq!(hello.len(), 12);
+        assert_eq!(hello.len(), 76);
         assert_eq!(hello[0], MessageType::Hello as u8);
         assert_eq!(hello[5], Role::Admin as u8);
     }
@@ -276,8 +276,8 @@ mod tests {
         let status = client.status().unwrap();
         assert_eq!(status.peer_count, 7);
         // HELLO (12) + ADMIN_STATUS request (4) were written.
-        assert_eq!(client.transport.outbound.len(), 12 + 4);
-        assert_eq!(client.transport.outbound[12], MessageType::AdminStatus as u8);
+        assert_eq!(client.transport.outbound.len(), 76 + 4);
+        assert_eq!(client.transport.outbound[76], MessageType::AdminStatus as u8);
     }
 
     #[test]
@@ -293,7 +293,7 @@ mod tests {
         assert_eq!(interfaces[0].interface_id, 1);
         assert_eq!(interfaces[2].interface_id, 3);
         // Second request must carry offset = 2 (entries seen so far).
-        let second_request = &client.transport.outbound[12 + 8..12 + 16];
+        let second_request = &client.transport.outbound[76 + 8..76 + 16];
         assert_eq!(u16::from_le_bytes([second_request[4], second_request[5]]), 2);
     }
 
@@ -319,7 +319,7 @@ mod tests {
         let mut client = AdminClient::connect(transport).unwrap();
         assert_eq!(client.kick_peer(0x80000001).unwrap(), 0);
         // HELLO (12) then the kick-peer request (8).
-        let request = &client.transport.outbound[12..12 + 8];
+        let request = &client.transport.outbound[76..76 + 8];
         assert_eq!(request[0], MessageType::AdminKickPeer as u8);
         assert_eq!(u32::from_le_bytes([request[4], request[5], request[6], request[7]]), 0x80000001);
     }
@@ -336,7 +336,7 @@ mod tests {
         let transport = MockTransport::with_replies(&[status_byte_reply(MessageType::AdminAclSetReply, 0)]);
         let mut client = AdminClient::connect(transport).unwrap();
         assert_eq!(client.acl_set("ab12cd", "truck42", "can0", AclLevel::ReadWrite).unwrap(), 0);
-        let request = &client.transport.outbound[12..12 + 216];
+        let request = &client.transport.outbound[76..76 + 216];
         assert_eq!(request[0], MessageType::AdminAclSet as u8);
         assert_eq!(request[213], 1); // can_read
         assert_eq!(request[214], 1); // can_write
@@ -347,7 +347,7 @@ mod tests {
         let transport = MockTransport::with_replies(&[status_byte_reply(MessageType::AdminIfconfigReply, 0)]);
         let mut client = AdminClient::connect(transport).unwrap();
         assert_eq!(client.ifconfig("truck42", "can0", IfconfigOp::SetBitrate, 250_000).unwrap(), 0);
-        let request = &client.transport.outbound[12..12 + 156];
+        let request = &client.transport.outbound[76..76 + 156];
         assert_eq!(request[0], MessageType::AdminIfconfig as u8);
         assert_eq!(request[148], IfconfigOp::SetBitrate as u8);
     }

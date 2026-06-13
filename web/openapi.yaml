@@ -742,12 +742,15 @@ components:
 
     Peer:
       type: object
-      required: [peerId, role, agentName, fingerprintHex, framesForwarded, framesDropped]
+      required: [peerId, role, transport, agentName, origin, fingerprintHex, uptimeSeconds, framesForwarded, framesDropped]
       properties:
         peerId: { type: integer, format: uint32 }
         role: { type: string, enum: [agent, client, admin, unknown] }
+        transport: { type: string, enum: [unix, tcp, tls, quic, unknown] }
         agentName: { type: string }
+        origin: { type: string }
         fingerprintHex: { type: string }
+        uptimeSeconds: { type: integer, format: uint32 }
         framesForwarded: { type: integer, format: uint32 }
         framesDropped: { type: integer, format: uint32 }
 

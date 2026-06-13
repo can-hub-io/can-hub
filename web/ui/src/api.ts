@@ -14,8 +14,11 @@ export interface Status {
 export interface Peer {
   peerId: number
   role: string
+  transport: string
   agentName: string
+  origin: string
   fingerprintHex: string
+  uptimeSeconds: number
   framesForwarded: number
   framesDropped: number
 }

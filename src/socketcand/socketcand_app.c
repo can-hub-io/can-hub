@@ -7,6 +7,11 @@ void SocketcandApp_Init(SocketcandApp *self, TransportPort *hub, SocketcandServe
     SocketcandBridge_Init(&self->bridge, hub, server, device_name, beacon_url, beacon_enabled);
 }
 
+void SocketcandApp_SetName(SocketcandApp *self, const char *name)
+{
+    SocketcandBridge_SetName(&self->bridge, name);
+}
+
 TransportEvents SocketcandApp_TransportEvents(SocketcandApp *self)
 {
     return SocketcandBridge_TransportEvents(&self->bridge);

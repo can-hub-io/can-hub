@@ -1,5 +1,5 @@
 import { api, PERMISSION, type Peer } from '../api'
-import { can, peerId, shortFp, transportOf } from '../lib'
+import { can, formatUptime, peerId, shortFp } from '../lib'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { DataView, type Column } from './DataView'
@@ -10,7 +10,9 @@ export function Peers({ permissions }: { permissions: string[] }) {
     { header: 'Peer', render: (r) => <span className="font-mono">{peerId(r.peerId)}</span> },
     { header: 'Name', render: (r) => r.agentName || '—' },
     { header: 'Role', render: (r) => r.role },
-    { header: 'Transport', render: (r) => <Badge variant="outline">{transportOf(r.peerId)}</Badge> },
+    { header: 'Transport', render: (r) => <Badge variant="outline">{r.transport}</Badge> },
+    { header: 'Origin', render: (r) => <span className="font-mono text-xs">{r.origin || '—'}</span> },
+    { header: 'Uptime', render: (r) => formatUptime(r.uptimeSeconds), num: true },
     { header: 'Fingerprint', render: (r) => <span className="font-mono text-xs">{r.fingerprintHex ? shortFp(r.fingerprintHex) : '—'}</span> },
     { header: 'Forwarded', render: (r) => r.framesForwarded.toLocaleString(), num: true },
     { header: 'Dropped', render: (r) => r.framesDropped.toLocaleString(), num: true },
