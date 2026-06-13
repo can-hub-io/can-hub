@@ -55,10 +55,20 @@ jobs:
 
   python-wheels:
     needs: create-release
-    runs-on: ubuntu-latest
+    # Each arch builds on its native runner: aarch64/armv7l on the free arm64
+    # hosted runners instead of x86 + QEMU, which kept the emulated OpenSSL
+    # build under 30 min. buildx only emulates when target != host, so the
+    # --platform in build-python-wheel.sh is native on a matching host.
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        arch: [x86_64, aarch64, armv7l]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+          - arch: armv7l
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
@@ -73,8 +83,35 @@ jobs:
         with:
           files: python/dist/${{ matrix.arch }}/*.whl
 
+  python-wheel-windows:
+    needs: create-release
+    runs-on: ubuntu-latest
+    env:
+      LLVM_MINGW_VERSION: "20260602"
+      LLVM_MINGW_SHA256: 9d191203f9768ead60662d3ae53cdf28e0a28b1e6d44b7f329b9202cb2add337
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build perl
+      - name: install llvm-mingw
+        run: |
+          curl -fsSL -o /tmp/llvm-mingw.tar.xz "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/llvm-mingw-$LLVM_MINGW_VERSION-ucrt-ubuntu-22.04-x86_64.tar.xz"
+          echo "$LLVM_MINGW_SHA256  /tmp/llvm-mingw.tar.xz" | sha256sum -c
+          mkdir -p "$HOME/llvm-mingw"
+          tar -xf /tmp/llvm-mingw.tar.xz --strip-components=1 -C "$HOME/llvm-mingw"
+      - name: build win_amd64 wheel
+        run: PATH="$HOME/llvm-mingw/bin:$PATH" ./scripts/build-python-wheel-windows.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-win_amd64
+          path: python/dist/*.whl
+      - name: publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: python/dist/*.whl
+
   pypi-publish:
-    needs: python-wheels
+    needs: [python-wheels, python-wheel-windows]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
