@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# Superseded runs on the same ref are cancelled; a new push to a branch stops
+# the in-flight CI instead of running it to completion alongside the new one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-x86_64:
     runs-on: ubuntu-latest
