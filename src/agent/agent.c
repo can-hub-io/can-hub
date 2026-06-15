@@ -44,6 +44,7 @@ void Agent_Init(Agent *self, TransportPort *transport, CanPort *can, const Regis
     self->registration = *registration;
     ChannelMap_Reset(&self->channel_map);
     EchoCorrelator_Reset(&self->echo);
+    TxPacer_Reset(&self->tx_pacer);
     ReconnectBackoff_Init(&self->backoff, RECONNECT_DEFAULT_INITIAL_DELAY_MS, RECONNECT_DEFAULT_MAX_DELAY_MS);
     self->state = kAGENT_STATE_DISCONNECTED;
     self->next_connect_at_us = 0;
@@ -294,6 +295,7 @@ static void sendInterfaceStatus(Agent *self)
     InterfaceStatusMessage status;
     uint8_t encoded[MESSAGE_HEADER_SIZE + INTERFACE_STATUS_BODY_SIZE];
     size_t encoded_size;
+    uint32_t advertised_rate;
     uint8_t channel;
     uint8_t count = 0;
     uint8_t i;
@@ -302,10 +304,11 @@ static void sendInterfaceStatus(Agent *self)
         if (!ChannelMap_ChannelForInterface(&self->channel_map, i, &channel)) {
             continue;
         }
+        advertised_rate = self->can->bitrate(self->can->context, i);
         status.entries[count].channel = channel;
         status.entries[count].flags = 0;
-        status.entries[count].advertised_rate = self->can->bitrate(self->can->context, i);
-        status.entries[count].credit = 0;
+        status.entries[count].advertised_rate = advertised_rate;
+        status.entries[count].credit = TxPacer_Update(&self->tx_pacer, i, advertised_rate, self->tx_dropped[i]);
         status.entries[count].tx_dropped = self->tx_dropped[i];
         count++;
     }
@@ -346,6 +349,8 @@ static void handleRegisterAck(Agent *self, const MessageHeader *header, const ui
     ReconnectBackoff_Reset(&self->backoff);
     self->state = kAGENT_STATE_RUNNING;
     self->register_deadline_us = 0;
+    sendInterfaceStatus(self);
+    self->next_status_at_us = now_us + AGENT_STATUS_PERIOD_MS * MICROSECONDS_PER_MILLISECOND;
 }
 
 static void handlePing(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us)

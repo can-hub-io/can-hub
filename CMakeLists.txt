@@ -125,6 +125,7 @@ set(AGENT_SOURCES
     src/agent/domain/channel_map.c
     src/agent/domain/echo_correlator.c
     src/agent/domain/reconnect_backoff.c
+    src/agent/domain/tx_pacer.c
     src/platform/linux/clock/clock.c
     src/platform/linux/shared/connect_url.c
     src/platform/linux/shared/epoll_registry.c

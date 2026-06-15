@@ -16,6 +16,7 @@ ${BURST}    ${256}
 ${SINK_BURST}    ${2000}
 ${SINK_RATE}    20kbit
 ${SINK_RATE_BPS}    20000
+${SINK_RATE_BPS_HIGH}    40000
 
 *** Test Cases ***
 QUIC Client Write Burst Is Delivered In Full
@@ -38,7 +39,7 @@ QUIC Client Write Burst Is Delivered In Full
 
     ${capture}=    Start Candump On ${LOCAL_SERVER}    vcan0
     Burst ${BURST} Frames On ${LOCAL_SERVER} vcan1
-    Sleep    2s    reason=let the QUIC path drain the queued burst onto the bus
+    Wait Until Frames Captured By ${capture} Reaches ${BURST}
 
     ${delivered}=    Frames Captured By ${capture}
     Log    delivered: ${delivered}/${BURST}    console=True
@@ -67,11 +68,7 @@ A Rate-Limited Bus Counts The Silent CAN-TX Drops
 
     Shape CAN Sink On ${LOCAL_SERVER} vcan0 To ${SINK_RATE}
     Burst ${SINK_BURST} Frames On ${LOCAL_SERVER} vcan1
-    Sleep    3s    reason=let the bus overflow and the agent report a status
-
-    ${drops}=    TX Dropped On ${hub} For truck42/vcan0
-    Log    tx-dropped: ${drops}    console=True
-    Should Be True    ${drops} > 0    the agent reported no CAN-tx drops
+    Wait Until TX Dropped On ${hub} For truck42/vcan0 Exceeds 0
 
 Pacing Keeps The Burst Off The Silent CAN-TX Queue
     [Documentation]    Same rate-limited bus, but the agent advertises its rate
@@ -97,10 +94,35 @@ Pacing Keeps The Burst Off The Silent CAN-TX Queue
     Wait Until 1 Channels Open On ${hub}    12
 
     Shape CAN Sink On ${LOCAL_SERVER} vcan0 To ${SINK_RATE}
-    Sleep    2s    reason=let the agent advertise its rate so the hub shaper engages
     Burst ${SINK_BURST} Frames On ${LOCAL_SERVER} vcan1
-    Sleep    4s    reason=let the paced egress settle
-
-    ${drops}=    TX Dropped On ${hub} For truck42/vcan0
+    ${drops}=    Wait Until TX Dropped On ${hub} For truck42/vcan0 Settles
     Log    tx-dropped under pacing: ${drops}    console=True
     Should Be True    ${drops} < 20    pacing did not keep the CAN-tx queue from overflowing
+
+Credit Feedback Reins In A Too-High Pace Rate
+    [Documentation]    The agent advertises twice the real bus rate, so pacing
+    ...                alone would overrun the CAN-tx queue forever. The agent
+    ...                measures its own drops and backs its advertised credit off
+    ...                until the hub paces to the real rate, so the drops stop
+    ...                climbing. Settling (vs an unbounded climb) is the proof.
+    Create VCAN On ${LOCAL_SERVER}    vcan0
+    Create VCAN On ${LOCAL_SERVER}    vcan1
+
+    ${hub_cfg}=    Hub Configuration
+    ${hub}=    Start CAN HUB On ${LOCAL_SERVER} With ${hub_cfg}
+
+    ${pace}=    Create List    --pace-rate    ${SINK_RATE_BPS_HIGH}
+    ${agent_cfg}=    Agent Configuration    quic://127.0.0.1:7227    truck42    vcan0    extra=${pace}
+    ${agent}=    Start CAN Agent On ${LOCAL_SERVER} With ${agent_cfg}
+    Wait Until Agent ${agent} Registered On ${hub}    8
+
+    Run CLI On Hub ${hub}    acl    add    *    */*    rw
+
+    ${client_cfg}=    Client Configuration    attach    truck42/vcan0    vcan1    connect=quic://127.0.0.1:7227
+    ${client}=    Start CAN Client On ${LOCAL_SERVER} With ${client_cfg}
+    Wait Until 1 Channels Open On ${hub}    12
+
+    Shape CAN Sink On ${LOCAL_SERVER} vcan0 To ${SINK_RATE}
+    Flood vcan1 On ${LOCAL_SERVER}
+    ${settled}=    Wait Until TX Dropped On ${hub} For truck42/vcan0 Stops Climbing
+    Log    tx-dropped stopped climbing at ${settled}    console=True

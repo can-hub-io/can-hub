@@ -944,6 +944,7 @@ static void handleInterfaceStatus(Broker *self, HubPeer *peer, const MessageHead
             peer->peer_id,
             status.entries[i].channel,
             status.entries[i].advertised_rate,
+            status.entries[i].credit,
             self->now_us
         );
     }

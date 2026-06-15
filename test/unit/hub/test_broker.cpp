@@ -537,6 +537,29 @@ describe("broker", []() {
             expect(Broker_NextTimeoutMs(&broker, 100) < 100).toBe(true);
         });
 
+        it("paces to the credit when the agent backs off below the advertised rate", []() {
+            InterfaceStatusMessage status;
+            FrameMessage frame = { 0x456, 2000, client_channel, 64, FRAME_FLAG_FD, 0, { 0x55 } };
+            uint8_t encoded[512];
+            size_t encoded_size;
+            uint8_t i;
+
+            memset(&status, 0, sizeof(status));
+            status.interface_count = 1;
+            status.entries[0].channel = 1;
+            status.entries[0].advertised_rate = 800000;
+            status.entries[0].credit = 8000;
+            encoded_size = InterfaceStatusMessage_Encode(&status, encoded, sizeof(encoded));
+            sendControlFrom(AGENT_PEER, encoded, encoded_size);
+
+            encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+            for(i=0; i<14; i++) {
+                events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
+            }
+
+            expect(Broker_NextTimeoutMs(&broker, 100) > 10).toBe(true);
+        });
+
         it("delivers only frames matching the channel subscribe filter", []() {
             SubscribeMessage subscribe = { client_channel, 1, { { 0x100, 0x700 } } };
             FrameMessage matching = { 0x123, 1000, 1, 1, 0, 0, { 0x11 } };

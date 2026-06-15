@@ -347,7 +347,16 @@ describe("agent", []() {
             expect(reply.status).toBe(IFCONFIG_STATUS_APPLY_FAILED);
         });
 
-        it("reports tx-drop counters in a periodic interface status", []() {
+        it("emits an interface status immediately on entering running", []() {
+            MessageHeader header;
+            int status_index = transport.control_count - 1;
+
+            MessageHeader_Decode(&header, transport.control_log[status_index], transport.control_sizes[status_index]);
+
+            expect(header.type).toBe(kMESSAGE_TYPE_INTERFACE_STATUS);
+        });
+
+        it("reports tx-drop counters in the interface status", []() {
             FrameMessage injected = { 0x456, 2000, 7, 1, 0, 0, { 0x55 } };
             InterfaceStatusMessage status;
             MessageHeader header;
@@ -357,7 +366,7 @@ describe("agent", []() {
 
             can.write_result = false;
             Agent_OnTransportFrame(&agent, encoded_frame, encoded_frame_size);
-            Agent_Tick(&agent, 1);
+            Agent_Tick(&agent, AGENT_STATUS_PERIOD_MS * 1000);
 
             status_index = transport.control_count - 1;
             MessageHeader_Decode(&header, transport.control_log[status_index], transport.control_sizes[status_index]);
@@ -372,23 +381,19 @@ describe("agent", []() {
         });
 
         it("does not re-emit the interface status until the period elapses", []() {
-            int after_first;
+            int after_running = transport.control_count;
 
-            Agent_Tick(&agent, 1);
-            after_first = transport.control_count;
-            Agent_Tick(&agent, 1 + AGENT_STATUS_PERIOD_MS * 1000 - 1);
+            Agent_Tick(&agent, AGENT_STATUS_PERIOD_MS * 1000 - 1);
 
-            expect(transport.control_count).toBe(after_first);
+            expect(transport.control_count).toBe(after_running);
         });
 
         it("re-emits the interface status after the period elapses", []() {
-            int after_first;
+            int after_running = transport.control_count;
 
-            Agent_Tick(&agent, 1);
-            after_first = transport.control_count;
-            Agent_Tick(&agent, 1 + AGENT_STATUS_PERIOD_MS * 1000);
+            Agent_Tick(&agent, AGENT_STATUS_PERIOD_MS * 1000);
 
-            expect(transport.control_count).toBe(after_first + 1);
+            expect(transport.control_count).toBe(after_running + 1);
         });
 
         it("advertises the interface bitrate in the status", []() {
@@ -397,7 +402,7 @@ describe("agent", []() {
             int status_index;
 
             can.bitrate_value = 500000;
-            Agent_Tick(&agent, 1);
+            Agent_Tick(&agent, AGENT_STATUS_PERIOD_MS * 1000);
 
             status_index = transport.control_count - 1;
             MessageHeader_Decode(&header, transport.control_log[status_index], transport.control_sizes[status_index]);

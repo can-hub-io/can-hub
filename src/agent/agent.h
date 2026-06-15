@@ -7,6 +7,7 @@
 #include "agent/domain/channel_map.h"
 #include "agent/domain/echo_correlator.h"
 #include "agent/domain/reconnect_backoff.h"
+#include "agent/domain/tx_pacer.h"
 #include "agent/ports/can_events.h"
 #include "agent/ports/can_port.h"
 #include "agent/ports/transport_events.h"
@@ -38,6 +39,7 @@ typedef struct {
     ChannelMap channel_map;
     ReconnectBackoff backoff;
     EchoCorrelator echo;
+    TxPacer tx_pacer;
     uint8_t state;
     uint64_t next_connect_at_us;
     uint64_t register_deadline_us;
