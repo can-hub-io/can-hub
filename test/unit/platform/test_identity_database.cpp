@@ -1,6 +1,7 @@
 #include <cest>
 
 #include <cstdio>
+#include <cstring>
 
 extern "C" {
 #include "platform/linux/sqlite/identity_database.h"
@@ -164,6 +165,18 @@ describe("identity_database", []() {
         expect(port->list(port->context, 2, pins, 2, &more)).toBe(1);
         expect(more).toBe(false);
         expect((const char *)pins[0].agent_name).toBe("van7");
+    });
+
+    it("fully terminates a listed pin entry even with an empty name", []() {
+        IdentityPin pins[1];
+        bool more;
+
+        memset(pins, 0xFF, sizeof(pins));
+        port->pin(port->context, "", TRUCK_FINGERPRINT);
+
+        expect(port->list(port->context, 0, pins, 1, &more)).toBe(1);
+        expect((int)pins[0].agent_name[0]).toBe(0);
+        expect((int)pins[0].agent_name[REGISTER_AGENT_NAME_SIZE - 1]).toBe(0);
     });
 
     it("imports a known_agents pin file without overwriting existing pins", []() {
