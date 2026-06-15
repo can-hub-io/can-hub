@@ -13,7 +13,7 @@ static void portDisconnect(void *context);
 static bool portSendControl(void *context, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, const uint8_t *data, size_t size);
 static void teardown(QuicClientTransport *self, bool notify);
-static bool flushEgress(QuicClientTransport *self, const uint8_t *datagram, size_t datagram_size);
+static bool flushEgress(QuicClientTransport *self);
 static void sendPacket(void *context, const uint8_t *packet, size_t size);
 static void rearmTimer(QuicClientTransport *self);
 static void dispatchControlMessages(QuicClientTransport *self);
@@ -52,6 +52,7 @@ bool QuicClientTransport_Init(
     }
     QuicConnection_Bind(&self->connection, &connection_events);
     QuicControlChannel_Reset(&self->control);
+    QuicDatagramBacklog_Reset(&self->egress_backlog);
     snprintf(self->server.host, QUIC_HOST_MAX, "%s", host);
     snprintf(self->server.port_text, QUIC_PORT_TEXT_MAX, "%s", port);
 
@@ -99,13 +100,13 @@ void QuicClientTransport_OnUdpReadable(QuicClientTransport *self)
         self->dispatching = false;
 
         if (self->disconnect_pending) {
-            flushEgress(self, NULL, 0);
+            flushEgress(self);
             teardown(self, false);
             return;
         }
     }
 
-    flushEgress(self, NULL, 0);
+    flushEgress(self);
 }
 
 void QuicClientTransport_OnTimer(QuicClientTransport *self)
@@ -124,12 +125,12 @@ void QuicClientTransport_OnTimer(QuicClientTransport *self)
     self->dispatching = false;
 
     if (self->disconnect_pending) {
-        flushEgress(self, NULL, 0);
+        flushEgress(self);
         teardown(self, false);
         return;
     }
 
-    flushEgress(self, NULL, 0);
+    flushEgress(self);
 }
 
 /* ---------- private: transport port ---------- */
@@ -155,7 +156,7 @@ static bool portConnect(void *context)
         return false;
     }
 
-    return flushEgress(self, NULL, 0);
+    return flushEgress(self);
 }
 
 static void portDisconnect(void *context)
@@ -193,7 +194,7 @@ static bool portSendControl(void *context, const uint8_t *data, size_t size)
         return true;
     }
 
-    return flushEgress(self, NULL, 0);
+    return flushEgress(self);
 }
 
 static bool portSendFrame(void *context, const uint8_t *data, size_t size)
@@ -203,8 +204,14 @@ static bool portSendFrame(void *context, const uint8_t *data, size_t size)
     if (!self->connected) {
         return false;
     }
+    if (!QuicDatagramBacklog_Push(&self->egress_backlog, data, size)) {
+        return false;
+    }
+    if (self->dispatching) {
+        return true;
+    }
 
-    return flushEgress(self, data, size);
+    return flushEgress(self);
 }
 
 /* ---------- private: lifecycle ---------- */
@@ -229,21 +236,30 @@ static void teardown(QuicClientTransport *self, bool notify)
 
 /* ---------- private: egress pump ---------- */
 
-static bool flushEgress(QuicClientTransport *self, const uint8_t *datagram, size_t datagram_size)
+static bool flushEgress(QuicClientTransport *self)
 {
     QuicEgressSink sink = { self, sendPacket };
-    bool datagram_accepted = true;
+    const uint8_t *front;
+    size_t front_size;
+    bool datagram_accepted;
 
     if (!QuicConnection_IsOpen(&self->connection)) {
         return false;
     }
 
-    if (datagram != NULL) {
-        if (!QuicEgress_FlushDatagram(&self->connection, &sink, datagram, datagram_size, &datagram_accepted)) {
+    while (!QuicDatagramBacklog_IsEmpty(&self->egress_backlog)) {
+        front = QuicDatagramBacklog_Front(&self->egress_backlog, &front_size);
+        datagram_accepted = true;
+        if (!QuicEgress_FlushDatagram(&self->connection, &sink, front, front_size, &datagram_accepted)) {
             teardown(self, true);
             return false;
         }
+        if (!datagram_accepted) {
+            break;
+        }
+        QuicDatagramBacklog_PopFront(&self->egress_backlog);
     }
+
     if (!QuicEgress_Drain(&self->connection, &self->control, &sink)) {
         teardown(self, true);
         return false;
@@ -251,7 +267,7 @@ static bool flushEgress(QuicClientTransport *self, const uint8_t *datagram, size
 
     rearmTimer(self);
 
-    return datagram_accepted;
+    return true;
 }
 
 static void sendPacket(void *context, const uint8_t *packet, size_t size)

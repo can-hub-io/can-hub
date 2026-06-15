@@ -15,6 +15,7 @@
 #include "protocol/message_header.h"
 
 #define UDP_PACKET_BUFFER_SIZE 1452
+#define UDP_SOCKET_BUFFER_BYTES (4 * 1024 * 1024)
 #define QUIC_SERVER_ORIGIN_SIZE 56
 
 static void formatOrigin(const struct sockaddr_storage *address, char *out, size_t size);
@@ -62,6 +63,7 @@ bool QuicServerTransport_Init(
 )
 {
     struct sockaddr_in address;
+    int32_t buffer_bytes;
 
     memset(self, 0, sizeof(*self));
     self->port.context = self;
@@ -80,6 +82,10 @@ bool QuicServerTransport_Init(
     if (self->udp_fd < 0 || self->timer_fd < 0) {
         return false;
     }
+
+    buffer_bytes = UDP_SOCKET_BUFFER_BYTES;
+    setsockopt(self->udp_fd, SOL_SOCKET, SO_RCVBUF, &buffer_bytes, sizeof(buffer_bytes));
+    setsockopt(self->udp_fd, SOL_SOCKET, SO_SNDBUF, &buffer_bytes, sizeof(buffer_bytes));
 
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;

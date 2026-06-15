@@ -211,6 +211,16 @@ class BenchKeywords:
             server.exec("cansend", interface, f"{can_id}#{i:016X}")
             time.sleep(float(gap))
 
+    @keyword("Burst ${count} Frames On ${server} ${interface}")
+    def burst_frames_on(self, count, server, interface):
+        process = server.cangen(interface, 0, int(count))
+        process.wait(timeout=30)
+        return int(count)
+
+    @keyword("Frames Captured By ${process}")
+    def frames_captured_by(self, process):
+        return len(parse_candump(process.read_log()))
+
     @keyword("Channel Drops On ${hub}")
     def channel_drops_on(self, hub):
         return {r.interface: r.dropped for r in hub.clients() if r.channel != "-"}
