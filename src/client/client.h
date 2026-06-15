@@ -5,6 +5,7 @@
 
 #include "agent/ports/transport_events.h"
 #include "agent/ports/transport_port.h"
+#include "shared/egress_shaper.h"
 #include "protocol/error_message.h"
 #include "protocol/frame_message.h"
 #include "protocol/hello_message.h"
@@ -48,6 +49,8 @@ typedef struct {
     uint8_t filter_count;
     CanFilter filters[SUBSCRIBE_FILTERS_MAX];
     char name[HELLO_NAME_SIZE];
+    EgressShaper shaper;
+    uint64_t frames_paced_dropped;
 } Client;
 
 void Client_Init(Client *self, TransportPort *hub, const ClientEvents *events);
@@ -57,6 +60,6 @@ void Client_RequestList(Client *self, uint16_t offset);
 void Client_OpenById(Client *self, uint32_t interface_id, uint8_t flags);
 void Client_OpenByName(Client *self, const char *interface_name, uint8_t flags);
 void Client_SetFilters(Client *self, const CanFilter *filters, uint8_t count);
-bool Client_SendFrame(Client *self, FrameMessage *frame);
+bool Client_SendFrame(Client *self, FrameMessage *frame, uint64_t now_us);
 uint8_t Client_State(const Client *self);
 uint8_t Client_Channel(const Client *self);

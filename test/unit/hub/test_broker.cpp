@@ -560,6 +560,36 @@ describe("broker", []() {
             expect(Broker_NextTimeoutMs(&broker, 100) > 10).toBe(true);
         });
 
+        it("relays the paced rate to a client with the interface open", []() {
+            InterfaceStatusMessage agent_status;
+            InterfaceStatusMessage relayed;
+            MessageHeader header;
+            uint8_t encoded[512];
+            size_t encoded_size;
+            int found = -1;
+            int i;
+
+            memset(&agent_status, 0, sizeof(agent_status));
+            agent_status.interface_count = 1;
+            agent_status.entries[0].channel = 1;
+            agent_status.entries[0].advertised_rate = 250000;
+            encoded_size = InterfaceStatusMessage_Encode(&agent_status, encoded, sizeof(encoded));
+            sendControlFrom(AGENT_PEER, encoded, encoded_size);
+
+            for(i=0; i<transport.control_count; i++) {
+                MessageHeader_Decode(&header, transport.control_log[i], transport.control_sizes[i]);
+                if (transport.control_peers[i] == (uint32_t)CLIENT_PEER && header.type == kMESSAGE_TYPE_INTERFACE_STATUS) {
+                    found = i;
+                }
+            }
+
+            expect(found >= 0).toBe(true);
+            MessageHeader_Decode(&header, transport.control_log[found], transport.control_sizes[found]);
+            InterfaceStatusMessage_Decode(&relayed, transport.control_log[found] + MESSAGE_HEADER_SIZE, header.length);
+            expect(relayed.entries[0].channel).toBe(client_channel);
+            expect(relayed.entries[0].advertised_rate).toBe((uint32_t)200000);
+        });
+
         it("delivers only frames matching the channel subscribe filter", []() {
             SubscribeMessage subscribe = { client_channel, 1, { { 0x100, 0x700 } } };
             FrameMessage matching = { 0x123, 1000, 1, 1, 0, 0, { 0x11 } };

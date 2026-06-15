@@ -209,7 +209,7 @@ add_unit_test(test_interface_registry
     SOURCES
         hub/domain/test_interface_registry.cpp
         ${ROOT_SRC_DIR}/hub/domain/interface_registry.c
-        ${ROOT_SRC_DIR}/hub/domain/egress_shaper.c
+        ${ROOT_SRC_DIR}/shared/egress_shaper.c
         ${ROOT_SRC_DIR}/protocol/list_message.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/register_message.c
@@ -230,7 +230,7 @@ add_unit_test(test_admin_views
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
         ${ROOT_SRC_DIR}/hub/domain/egress_queue.c
         ${ROOT_SRC_DIR}/hub/domain/interface_registry.c
-        ${ROOT_SRC_DIR}/hub/domain/egress_shaper.c
+        ${ROOT_SRC_DIR}/shared/egress_shaper.c
         ${ROOT_SRC_DIR}/hub/domain/peer_directory.c
         ${ROOT_SRC_DIR}/protocol/list_message.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
@@ -254,7 +254,7 @@ add_unit_test(test_egress_queue
 add_unit_test(test_egress_shaper
     SOURCES
         hub/domain/test_egress_shaper.cpp
-        ${ROOT_SRC_DIR}/hub/domain/egress_shaper.c
+        ${ROOT_SRC_DIR}/shared/egress_shaper.c
 )
 
 add_unit_test(test_frame_routes
@@ -262,7 +262,7 @@ add_unit_test(test_frame_routes
         hub/domain/test_frame_routes.cpp
         ${ROOT_SRC_DIR}/hub/domain/frame_routes.c
         ${ROOT_SRC_DIR}/hub/domain/interface_registry.c
-        ${ROOT_SRC_DIR}/hub/domain/egress_shaper.c
+        ${ROOT_SRC_DIR}/shared/egress_shaper.c
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
         ${ROOT_SRC_DIR}/hub/domain/hub_peer.c
         ${ROOT_SRC_DIR}/hub/domain/egress_queue.c
@@ -283,7 +283,7 @@ add_unit_test(test_broker
         ${ROOT_SRC_DIR}/protocol/error_message.c
         ${ROOT_SRC_DIR}/hub/domain/hub_peer.c
         ${ROOT_SRC_DIR}/hub/domain/interface_registry.c
-        ${ROOT_SRC_DIR}/hub/domain/egress_shaper.c
+        ${ROOT_SRC_DIR}/shared/egress_shaper.c
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
         ${ROOT_SRC_DIR}/hub/domain/peer_directory.c
         ${ROOT_SRC_DIR}/protocol/admin_message.c
@@ -308,12 +308,14 @@ add_unit_test(test_client
         ${ROOT_SRC_DIR}/protocol/frame_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c
         ${ROOT_SRC_DIR}/protocol/interface_name.c
+        ${ROOT_SRC_DIR}/protocol/interface_status_message.c
         ${ROOT_SRC_DIR}/protocol/list_message.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/open_message.c
         ${ROOT_SRC_DIR}/protocol/register_message.c
         ${ROOT_SRC_DIR}/protocol/subscribe_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
+        ${ROOT_SRC_DIR}/shared/egress_shaper.c
 )
 target_link_libraries(test_client PRIVATE port_mocks)
 

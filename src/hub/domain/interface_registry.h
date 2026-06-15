@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "hub/domain/egress_shaper.h"
+#include "shared/egress_shaper.h"
 #include "protocol/list_message.h"
 #include "protocol/register_message.h"
 

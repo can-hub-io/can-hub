@@ -44,7 +44,7 @@ offset  size  field
 0x0A  OPEN_ACK     status + assigned channel
 0x0B  IFCONFIG     hub -> agent: apply an interface change (bitrate, up, down)
 0x0C  IFCONFIG_REPLY agent -> hub: apply status
-0x0D  INTERFACE_STATUS agent -> hub: periodic per-interface data-plane health (CAN-tx drops)
+0x0D  INTERFACE_STATUS agent->hub: per-interface health/credit; also hub->client: pace-rate relay
 0x10  ADMIN_STATUS        admin: hub counters
 0x11  ADMIN_STATUS_REPLY
 0x12  ADMIN_PEERS         admin: live peer table (paginated)
@@ -189,25 +189,29 @@ IFCONFIG_REPLY (total 24, agent -> hub)
 @20  status u8 (0 ok, 1 unknown interface, 2 apply failed)
 @21  reserved u8[3]
 
-INTERFACE_STATUS (total 328, agent -> hub)
+INTERFACE_STATUS (total 328; agent -> hub, also hub -> client)
 @4   interface_count u8
 @5   reserved u8[3]
 @8   entries[16], 20 bytes each, addressed by channel:
        +0  channel u8
        +1  flags u8 (bit 0 reliable; reserved, sent 0)
        +2  reserved u8[2]
-       +4  advertised_rate u32 (nominal bus bits/s the hub paces egress to; 0 = unpaced)
-       +8  credit u32 (tx headroom; reserved, sent 0)
+       +4  advertised_rate u32 (nominal bus bits/s; 0 = unpaced)
+       +8  credit u32 (agent's AIMD-measured sustainable rate)
        +12 tx_dropped u64 (monotonic CAN-tx drops, ENOBUFS at the bus sink)
 
-The agent emits this periodically while registered. tx_dropped exposes the
-silent rate-impedance loss at the CAN-tx queue (the bus is a fixed-rate sink);
-the hub stores the latest value per interface and surfaces it in
-ADMIN_INTERFACES. advertised_rate is the interface's nominal bitrate (read from
-the kernel, or forced with the agent's --pace-rate where there is no bit timing,
-e.g. vcan); the hub shapes data-plane egress to that interface within it (token
-bucket), parking the excess. credit and flags are reserved for the closed-loop
-credit feedback and the reliability toggle that build on this message.
+The agent emits this periodically while registered (and immediately on entering
+RUNNING). tx_dropped exposes the silent rate-impedance loss at the CAN-tx queue
+(the bus is a fixed-rate sink); the hub stores the latest value per interface and
+surfaces it in ADMIN_INTERFACES. advertised_rate is the interface's nominal
+bitrate (read from the kernel, or forced with the agent's --pace-rate where there
+is no bit timing, e.g. vcan); credit is the agent's AIMD-measured sustainable rate
+(it backs off when new tx drops appear, ramps back when none do). The hub shapes
+data-plane egress to that interface to min(advertised, credit) (token bucket),
+parking the excess, and relays that rate to clients holding the interface open via
+the same message (entries addressed by the client's channel, advertised_rate = the
+rate the client should pace its writes to) so a client sheds excess at the source
+instead of overrunning the hub. flags is reserved for the reliability toggle.
 
 ADMIN_IFCONFIG (total 156, admin -> hub)
 @4   agent_name char[128]

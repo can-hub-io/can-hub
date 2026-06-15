@@ -5,8 +5,13 @@
 
 #include "protocol/control_buffer.h"
 #include "protocol/hello_message.h"
+#include "protocol/interface_status_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
+
+#define CLIENT_PACE_BURST_BITS 8192
+#define FRAME_PACE_OVERHEAD_BITS 64
+#define FRAME_PACE_BITS_PER_BYTE 10
 
 typedef enum tclient_pending_e {
     kCLIENT_PENDING_NONE = 0,
@@ -27,6 +32,8 @@ static void startOpenByName(Client *self);
 static void handleError(Client *self, const uint8_t *body, uint16_t length);
 static void handleListReply(Client *self, const uint8_t *body, uint16_t length);
 static void handleOpenAck(Client *self, const uint8_t *body, uint16_t length);
+static void handleInterfaceStatus(Client *self, const uint8_t *body, uint16_t length, uint64_t now_us);
+static uint64_t frameWireBits(const FrameMessage *frame);
 static void resolveFromReply(Client *self, const ListReplyMessage *reply);
 static void emitLocalError(Client *self, uint16_t code, const char *detail);
 static void sendHello(Client *self);
@@ -114,7 +121,7 @@ void Client_SetFilters(Client *self, const CanFilter *filters, uint8_t count)
     }
 }
 
-bool Client_SendFrame(Client *self, FrameMessage *frame)
+bool Client_SendFrame(Client *self, FrameMessage *frame, uint64_t now_us)
 {
     uint8_t encoded[FRAME_WIRE_SIZE];
     size_t encoded_size;
@@ -124,6 +131,13 @@ bool Client_SendFrame(Client *self, FrameMessage *frame)
     }
 
     frame->channel = self->channel;
+
+    EgressShaper_Refill(&self->shaper, now_us);
+    if (!EgressShaper_TryConsume(&self->shaper, frameWireBits(frame))) {
+        self->frames_paced_dropped++;
+        return true;
+    }
+
     encoded_size = FrameMessage_Encode(frame, encoded, sizeof(encoded));
     if (encoded_size == 0) {
         return false;
@@ -170,8 +184,6 @@ static void transportOnControl(void *context, const uint8_t *data, size_t size, 
     Client *self = context;
     MessageHeader header;
 
-    (void)now_us;
-
     if (!MessageHeader_Decode(&header, data, size)) {
         return;
     }
@@ -189,6 +201,10 @@ static void transportOnControl(void *context, const uint8_t *data, size_t size, 
     }
     if (header.type == kMESSAGE_TYPE_OPEN_ACK) {
         handleOpenAck(self, data + MESSAGE_HEADER_SIZE, header.length);
+        return;
+    }
+    if (header.type == kMESSAGE_TYPE_INTERFACE_STATUS) {
+        handleInterfaceStatus(self, data + MESSAGE_HEADER_SIZE, header.length, now_us);
     }
 }
 
@@ -327,6 +343,33 @@ static void handleOpenAck(Client *self, const uint8_t *body, uint16_t length)
         sendSubscribe(self);
     }
     self->events.on_open_result(self->events.context, ack.status, ack.channel, ack.interface_id);
+}
+
+static void handleInterfaceStatus(Client *self, const uint8_t *body, uint16_t length, uint64_t now_us)
+{
+    InterfaceStatusMessage status;
+    uint8_t i;
+
+    if (!InterfaceStatusMessage_Decode(&status, body, length)) {
+        return;
+    }
+
+    for(i=0; i<status.interface_count; i++) {
+        if (status.entries[i].channel != self->channel) {
+            continue;
+        }
+        if (self->shaper.burst_bits == 0) {
+            EgressShaper_Init(&self->shaper, now_us, status.entries[i].advertised_rate, CLIENT_PACE_BURST_BITS);
+        } else {
+            EgressShaper_SetRate(&self->shaper, status.entries[i].advertised_rate);
+        }
+        return;
+    }
+}
+
+static uint64_t frameWireBits(const FrameMessage *frame)
+{
+    return FRAME_PACE_OVERHEAD_BITS + (uint64_t)FRAME_PACE_BITS_PER_BYTE * frame->payload_length;
 }
 
 static void emitLocalError(Client *self, uint16_t code, const char *detail)
