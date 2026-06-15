@@ -7,11 +7,12 @@
 #include "protocol/control_buffer.h"
 
 /*
- * Bounded FIFO of data-plane datagrams the QUIC client transport could not hand
- * to ngtcp2 right away (congestion window full): ngtcp2 does not buffer
- * unaccepted datagrams, so without this the frame would be dropped. Pushes that
- * overflow the ring fail, turning silent loss into explicit backpressure the
- * caller propagates to its producer.
+ * Bounded mitigation buffer for data-plane datagrams ngtcp2 could not take right
+ * away (congestion window full): ngtcp2 does not buffer unaccepted datagrams, so
+ * without this a short burst loses the frames the window briefly refuses. This
+ * only absorbs that transient; a push that overflows the ring still fails and
+ * the frame is dropped (the plane stays lossy). It is not reliability and not
+ * bus-rate pacing -- proper rate-matching is the design issue, not this buffer.
  */
 
 #define QUIC_DATAGRAM_BACKLOG_SLOTS 1024
