@@ -12,6 +12,8 @@ case "$1" in
             systemctl daemon-reload >/dev/null 2>&1 || true
             systemctl enable can-hub.service >/dev/null 2>&1 || true
             systemctl start can-hub.service >/dev/null 2>&1 || true
+            systemctl enable can-hub-web.service >/dev/null 2>&1 || true
+            systemctl start can-hub-web.service >/dev/null 2>&1 || true
         fi
         ;;
 esac

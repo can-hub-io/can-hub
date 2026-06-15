@@ -9,6 +9,7 @@ case "$1" in
         ;;
     purge)
         if [ -d /run/systemd/system ]; then
+            systemctl disable can-hub-web.service >/dev/null 2>&1 || true
             systemctl disable can-hub.service >/dev/null 2>&1 || true
             systemctl daemon-reload >/dev/null 2>&1 || true
         fi
