@@ -4,6 +4,7 @@ set -e
 case "$1" in
     remove|deconfigure)
         if [ -d /run/systemd/system ]; then
+            systemctl stop can-hub-web.service >/dev/null 2>&1 || true
             systemctl stop can-hub.service >/dev/null 2>&1 || true
         fi
         ;;

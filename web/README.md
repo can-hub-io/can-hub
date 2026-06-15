@@ -41,7 +41,9 @@ DESTDIR=/tmp/stage web/build-release.sh   # build + stage package layout
 With `DESTDIR` it installs the binary to `usr/bin`, the systemd unit to
 `lib/systemd/system/can-hub-web.service` and the config to
 `etc/can-hub/web.conf` under `$DESTDIR` — the layout the deb packages.
-Debian maintainer scripts live in `packaging/debian/web/`.
+The `can-hub` deb ships `can-hub-web` alongside the hub daemon: `make deb`
+runs this script and folds the binary, unit and config into that package
+(its maintainer scripts in `packaging/debian/hub/` enable the web service).
 
 ## Development loop
 

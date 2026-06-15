@@ -50,6 +50,48 @@ install(
     DESTINATION share/zsh/vendor-completions
     COMPONENT hub
 )
+
+# The web admin panel (Rust daemon with the React SPA embedded) ships inside
+# the hub package. A native `make deb` builds it in-tree via
+# web/build-release.sh (cargo + npm on PATH, installed by the deb CI job).
+# Cross/static builds cross-compile it to the musl target out of band and pass
+# the prebuilt binary with -DCAN_HUB_WEB_BINARY, skipping the in-tree build.
+set(CAN_HUB_WEB_BINARY "" CACHE FILEPATH "Prebuilt can-hub-web binary; skips the in-tree cargo/npm build")
+if(CAN_HUB_WEB_BINARY)
+    set(_can_hub_web_binary ${CAN_HUB_WEB_BINARY})
+else()
+    set(_can_hub_web_binary ${CMAKE_CURRENT_SOURCE_DIR}/web/daemon/target/release/can-hub-web)
+    # Custom targets always run, so cargo/npm see every web source change (an
+    # OUTPUT-keyed custom command would go stale, never rebuilding on edits).
+    add_custom_target(can-hub-web ALL
+        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/web/build-release.sh
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        BYPRODUCTS ${_can_hub_web_binary}
+        COMMENT "Building can-hub-web (cargo + npm)"
+        VERBATIM
+    )
+endif()
+install(PROGRAMS ${_can_hub_web_binary} DESTINATION bin COMPONENT hub)
+install(
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/packaging/systemd/can-hub-web.service
+    DESTINATION /lib/systemd/system
+    COMPONENT hub
+)
+install(
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/packaging/web.conf
+    DESTINATION /etc/can-hub
+    COMPONENT hub
+)
+install(
+    FILES ${_completions}/bash/can-hub-web
+    DESTINATION share/bash-completion/completions
+    COMPONENT hub
+)
+install(
+    FILES ${_completions}/zsh/_can-hub-web
+    DESTINATION share/zsh/vendor-completions
+    COMPONENT hub
+)
 install(
     FILES ${_completions}/bash/can-hub-agent
     DESTINATION share/bash-completion/completions
@@ -143,10 +185,11 @@ endif()
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 
 set(CPACK_DEBIAN_HUB_PACKAGE_NAME "can-hub")
-set(CPACK_COMPONENT_HUB_DESCRIPTION "CAN-over-network hub daemon and admin CLI
+set(CPACK_COMPONENT_HUB_DESCRIPTION "CAN-over-network hub daemon, admin CLI and web panel
 The can-hub daemon routes SocketCAN frames between NAT'd agents and clients
 over QUIC, TLS or TCP, with mTLS identities and per-client ACLs. Ships a
-systemd service and the can-hub-cli administration tool.")
+systemd service, the can-hub-cli administration tool and the can-hub-web admin
+panel (served over loopback HTTP, behind a reverse proxy).")
 set(CPACK_DEBIAN_HUB_PACKAGE_CONTROL_EXTRA
     "${CMAKE_CURRENT_SOURCE_DIR}/packaging/debian/hub/conffiles;${CMAKE_CURRENT_SOURCE_DIR}/packaging/debian/hub/postinst;${CMAKE_CURRENT_SOURCE_DIR}/packaging/debian/hub/prerm;${CMAKE_CURRENT_SOURCE_DIR}/packaging/debian/hub/postrm")
 
