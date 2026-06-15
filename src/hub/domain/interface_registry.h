@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "hub/domain/egress_shaper.h"
 #include "protocol/list_message.h"
 #include "protocol/register_message.h"
 
@@ -21,6 +22,8 @@ typedef struct {
     uint8_t agent_channel;
     uint64_t frames_received;
     uint64_t tx_dropped;
+    uint32_t advertised_rate;
+    EgressShaper shaper;
     char agent_name[REGISTER_AGENT_NAME_SIZE];
     char interface_name[REGISTER_INTERFACE_NAME_SIZE];
 } InterfaceEntry;
@@ -62,4 +65,25 @@ void InterfaceRegistry_SetTxDropped(
     uint32_t agent_peer_id,
     uint8_t agent_channel,
     uint64_t tx_dropped
+);
+void InterfaceRegistry_ApplyAdvertisedRate(
+    InterfaceRegistry *self,
+    uint32_t agent_peer_id,
+    uint8_t agent_channel,
+    uint32_t advertised_rate,
+    uint64_t now_us
+);
+bool InterfaceRegistry_TryEgress(
+    InterfaceRegistry *self,
+    uint32_t agent_peer_id,
+    uint8_t agent_channel,
+    uint64_t bits,
+    uint64_t now_us
+);
+uint64_t InterfaceRegistry_EgressDelayUs(
+    InterfaceRegistry *self,
+    uint32_t agent_peer_id,
+    uint8_t agent_channel,
+    uint64_t bits,
+    uint64_t now_us
 );

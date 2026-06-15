@@ -2,8 +2,12 @@
 
 #include <string.h>
 
+#define PACE_EFFECTIVE_PERCENT 80
+#define PACE_BURST_BITS 8192
+
 static bool isRegistrationColliding(const InterfaceRegistry *self, const RegisterMessage *registration);
 static InterfaceEntry *findFreeEntry(InterfaceRegistry *self);
+static InterfaceEntry *findMutableByAgentChannel(InterfaceRegistry *self, uint32_t agent_peer_id, uint8_t agent_channel);
 static bool namesMatch(const InterfaceEntry *entry, const char *agent_name, const char *interface_name);
 
 /* ---------- public ---------- */
@@ -190,16 +194,72 @@ void InterfaceRegistry_SetTxDropped(
     uint64_t tx_dropped
 )
 {
-    uint32_t i;
+    InterfaceEntry *entry = findMutableByAgentChannel(self, agent_peer_id, agent_channel);
 
-    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
-        if (self->entries[i].in_use
-            && self->entries[i].agent_peer_id == agent_peer_id
-            && self->entries[i].agent_channel == agent_channel) {
-            self->entries[i].tx_dropped = tx_dropped;
-            return;
-        }
+    if (entry != NULL) {
+        entry->tx_dropped = tx_dropped;
     }
+}
+
+void InterfaceRegistry_ApplyAdvertisedRate(
+    InterfaceRegistry *self,
+    uint32_t agent_peer_id,
+    uint8_t agent_channel,
+    uint32_t advertised_rate,
+    uint64_t now_us
+)
+{
+    InterfaceEntry *entry = findMutableByAgentChannel(self, agent_peer_id, agent_channel);
+    uint32_t paced_rate = (uint32_t)((uint64_t)advertised_rate * PACE_EFFECTIVE_PERCENT / 100);
+
+    if (entry == NULL) {
+        return;
+    }
+
+    entry->advertised_rate = advertised_rate;
+    if (entry->shaper.burst_bits == 0) {
+        EgressShaper_Init(&entry->shaper, now_us, paced_rate, PACE_BURST_BITS);
+    } else {
+        EgressShaper_SetRate(&entry->shaper, paced_rate);
+    }
+}
+
+bool InterfaceRegistry_TryEgress(
+    InterfaceRegistry *self,
+    uint32_t agent_peer_id,
+    uint8_t agent_channel,
+    uint64_t bits,
+    uint64_t now_us
+)
+{
+    InterfaceEntry *entry = findMutableByAgentChannel(self, agent_peer_id, agent_channel);
+
+    if (entry == NULL) {
+        return true;
+    }
+
+    EgressShaper_Refill(&entry->shaper, now_us);
+
+    return EgressShaper_TryConsume(&entry->shaper, bits);
+}
+
+uint64_t InterfaceRegistry_EgressDelayUs(
+    InterfaceRegistry *self,
+    uint32_t agent_peer_id,
+    uint8_t agent_channel,
+    uint64_t bits,
+    uint64_t now_us
+)
+{
+    InterfaceEntry *entry = findMutableByAgentChannel(self, agent_peer_id, agent_channel);
+
+    if (entry == NULL) {
+        return 0;
+    }
+
+    EgressShaper_Refill(&entry->shaper, now_us);
+
+    return EgressShaper_DelayUs(&entry->shaper, bits);
 }
 
 uint16_t InterfaceRegistry_Count(const InterfaceRegistry *self)
@@ -245,6 +305,21 @@ static InterfaceEntry *findFreeEntry(InterfaceRegistry *self)
 
     for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
         if (!self->entries[i].in_use) {
+            return &self->entries[i];
+        }
+    }
+
+    return NULL;
+}
+
+static InterfaceEntry *findMutableByAgentChannel(InterfaceRegistry *self, uint32_t agent_peer_id, uint8_t agent_channel)
+{
+    uint32_t i;
+
+    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
+        if (self->entries[i].in_use
+            && self->entries[i].agent_peer_id == agent_peer_id
+            && self->entries[i].agent_channel == agent_channel) {
             return &self->entries[i];
         }
     }

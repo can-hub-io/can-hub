@@ -19,6 +19,7 @@
 
 static bool portWriteFrame(void *context, uint8_t interface_index, const FrameMessage *frame);
 static bool portConfigure(void *context, uint8_t interface_index, uint8_t op, uint32_t bitrate);
+static uint32_t portBitrate(void *context, uint8_t interface_index);
 static bool writeClassicFrame(int32_t can_fd, const FrameMessage *frame);
 static bool writeFdFrame(int32_t can_fd, const FrameMessage *frame);
 static int32_t openCanSocket(const char *interface_name, bool receive_own_messages);
@@ -35,6 +36,7 @@ bool SocketCanAdapter_Open(SocketCanAdapter *self, const RegisterMessage *regist
     self->port.context = self;
     self->port.write_frame = portWriteFrame;
     self->port.configure = portConfigure;
+    self->port.bitrate = portBitrate;
     self->interface_count = registration->interface_count;
 
     for(i=0; i<self->interface_count; i++) {
@@ -64,6 +66,11 @@ void SocketCanAdapter_Close(SocketCanAdapter *self)
 CanPort *SocketCanAdapter_Port(SocketCanAdapter *self)
 {
     return &self->port;
+}
+
+void SocketCanAdapter_SetPaceRate(SocketCanAdapter *self, uint32_t pace_rate)
+{
+    self->pace_rate_override = pace_rate;
 }
 
 int32_t SocketCanAdapter_Fd(const SocketCanAdapter *self, uint8_t interface_index)
@@ -143,6 +150,20 @@ static bool portConfigure(void *context, uint8_t interface_index, uint8_t op, ui
     }
 
     return CanNetlink_SetLink(interface_name, true);
+}
+
+static uint32_t portBitrate(void *context, uint8_t interface_index)
+{
+    SocketCanAdapter *self = context;
+
+    if (interface_index >= self->interface_count) {
+        return 0;
+    }
+    if (self->pace_rate_override != 0) {
+        return self->pace_rate_override;
+    }
+
+    return CanNetlink_GetBitrate(self->interface_names[interface_index]);
 }
 
 static bool writeClassicFrame(int32_t can_fd, const FrameMessage *frame)

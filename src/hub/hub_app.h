@@ -22,3 +22,4 @@ void HubApp_Init(
 );
 HubTransportEvents HubApp_Events(HubApp *self);
 void HubApp_Tick(HubApp *self, uint64_t now_us);
+int32_t HubApp_NextTimeoutMs(HubApp *self, int32_t cap_ms);

@@ -390,6 +390,22 @@ describe("agent", []() {
 
             expect(transport.control_count).toBe(after_first + 1);
         });
+
+        it("advertises the interface bitrate in the status", []() {
+            InterfaceStatusMessage status;
+            MessageHeader header;
+            int status_index;
+
+            can.bitrate_value = 500000;
+            Agent_Tick(&agent, 1);
+
+            status_index = transport.control_count - 1;
+            MessageHeader_Decode(&header, transport.control_log[status_index], transport.control_sizes[status_index]);
+            InterfaceStatusMessage_Decode(&status, transport.control_log[status_index] + MESSAGE_HEADER_SIZE, header.length);
+
+            expect(status.entries[0].advertised_rate).toBe((uint32_t)500000);
+            expect(status.entries[1].advertised_rate).toBe((uint32_t)500000);
+        });
     });
 
 });

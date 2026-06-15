@@ -196,16 +196,18 @@ INTERFACE_STATUS (total 328, agent -> hub)
        +0  channel u8
        +1  flags u8 (bit 0 reliable; reserved, sent 0)
        +2  reserved u8[2]
-       +4  advertised_rate u32 (bus bits/s; reserved, sent 0)
+       +4  advertised_rate u32 (nominal bus bits/s the hub paces egress to; 0 = unpaced)
        +8  credit u32 (tx headroom; reserved, sent 0)
        +12 tx_dropped u64 (monotonic CAN-tx drops, ENOBUFS at the bus sink)
 
 The agent emits this periodically while registered. tx_dropped exposes the
 silent rate-impedance loss at the CAN-tx queue (the bus is a fixed-rate sink);
 the hub stores the latest value per interface and surfaces it in
-ADMIN_INTERFACES. advertised_rate, credit and flags are reserved for the
-rate-matched data plane (control-plane pacing) and the reliability toggle that
-build on this message.
+ADMIN_INTERFACES. advertised_rate is the interface's nominal bitrate (read from
+the kernel, or forced with the agent's --pace-rate where there is no bit timing,
+e.g. vcan); the hub shapes data-plane egress to that interface within it (token
+bucket), parking the excess. credit and flags are reserved for the closed-loop
+credit feedback and the reliability toggle that build on this message.
 
 ADMIN_IFCONFIG (total 156, admin -> hub)
 @4   agent_name char[128]

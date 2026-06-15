@@ -22,3 +22,8 @@ void HubApp_Tick(HubApp *self, uint64_t now_us)
 {
     Broker_Tick(&self->broker, now_us);
 }
+
+int32_t HubApp_NextTimeoutMs(HubApp *self, int32_t cap_ms)
+{
+    return Broker_NextTimeoutMs(&self->broker, cap_ms);
+}

@@ -33,6 +33,11 @@ class BenchKeywords:
     def teardown_bench(self, bench):
         bench.teardown()
 
+    @keyword("Reset Bench")
+    def reset_bench(self, bench):
+        for server in bench.servers.values():
+            server.stop_all()
+
     @keyword("Create VCAN On ${server}")
     def create_vcan_on(self, server, name="vcan0"):
         return server.make_vcan(name)

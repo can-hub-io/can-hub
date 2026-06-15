@@ -304,7 +304,7 @@ static void sendInterfaceStatus(Agent *self)
         }
         status.entries[count].channel = channel;
         status.entries[count].flags = 0;
-        status.entries[count].advertised_rate = 0;
+        status.entries[count].advertised_rate = self->can->bitrate(self->can->context, i);
         status.entries[count].credit = 0;
         status.entries[count].tx_dropped = self->tx_dropped[i];
         count++;

@@ -20,8 +20,11 @@
 #define HELLO_TIMEOUT_US 5000000
 #define FRAME_ROUTE_TOKEN_VALUES_MAX 63
 #define FRAME_CHANNEL_OFFSET (MESSAGE_HEADER_SIZE + 12)
+#define FRAME_PAYLOAD_LENGTH_OFFSET (MESSAGE_HEADER_SIZE + 13)
 #define FRAME_ROUTE_FLAGS_OFFSET (MESSAGE_HEADER_SIZE + 15)
 #define FRAME_BUFFER_SIZE (MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD)
+#define FRAME_PACE_OVERHEAD_BITS 64
+#define FRAME_PACE_BITS_PER_BYTE 10
 
 typedef void (*TControlHandler)(
     Broker *self,
@@ -70,6 +73,7 @@ static void detachAgent(Broker *self, uint32_t agent_peer_id);
 static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size);
 static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char *detail);
 static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id, const uint8_t *data, size_t size, uint8_t route_flags);
+static uint64_t frameWireBits(const uint8_t *wire, uint16_t size);
 static void enqueueFrame(Broker *self, HubPeer *peer, uint8_t channel, const uint8_t *data, size_t size);
 static void drainPeer(Broker *self, HubPeer *peer);
 static void countForwarded(Broker *self, HubPeer *peer, uint8_t channel);
@@ -158,6 +162,39 @@ void Broker_Tick(Broker *self, uint64_t now_us)
             drainPeer(self, peer);
         }
     }
+}
+
+int32_t Broker_NextTimeoutMs(Broker *self, int32_t cap_ms)
+{
+    uint64_t best_us = (uint64_t)cap_ms * 1000;
+    uint64_t delay;
+    const uint8_t *front;
+    uint16_t size;
+    uint16_t channel;
+    HubPeer *peer;
+    uint8_t i;
+
+    for(i=0; i<PEER_DIRECTORY_MAX; i++) {
+        peer = PeerDirectory_At(&self->directory, i);
+        if (peer == NULL || !EgressQueue_HasPending(&peer->egress)) {
+            continue;
+        }
+        for(channel=0; channel<EGRESS_QUEUE_CHANNELS_MAX; channel++) {
+            if (!EgressQueue_ChannelPending(&peer->egress, (uint8_t)channel)) {
+                continue;
+            }
+            front = EgressQueue_FrontOfChannel(&peer->egress, (uint8_t)channel, &size);
+            if (front == NULL) {
+                continue;
+            }
+            delay = InterfaceRegistry_EgressDelayUs(&self->registry, peer->peer_id, (uint8_t)channel, frameWireBits(front, size), self->now_us);
+            if (delay > 0 && delay < best_us) {
+                best_us = delay;
+            }
+        }
+    }
+
+    return (int32_t)((best_us + 999) / 1000);
 }
 
 /* ---------- private: events ---------- */
@@ -902,6 +939,13 @@ static void handleInterfaceStatus(Broker *self, HubPeer *peer, const MessageHead
             status.entries[i].channel,
             status.entries[i].tx_dropped
         );
+        InterfaceRegistry_ApplyAdvertisedRate(
+            &self->registry,
+            peer->peer_id,
+            status.entries[i].channel,
+            status.entries[i].advertised_rate,
+            self->now_us
+        );
     }
 }
 
@@ -1128,6 +1172,16 @@ static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id,
         return;
     }
 
+    if (!InterfaceRegistry_TryEgress(
+            &self->registry,
+            route->peer_id,
+            route->channel,
+            frameWireBits(forwarded, (uint16_t)size),
+            self->now_us)) {
+        enqueueFrame(self, destination, route->channel, forwarded, size);
+        return;
+    }
+
     if (self->transport->send_frame(self->transport->context, route->peer_id, forwarded, size)) {
         countForwarded(self, destination, route->channel);
         return;
@@ -1151,19 +1205,37 @@ static void drainPeer(Broker *self, HubPeer *peer)
 {
     const uint8_t *front;
     uint16_t size;
+    uint16_t visited;
     uint8_t channel;
 
-    while (EgressQueue_NextPendingChannel(&peer->egress, &channel)) {
-        front = EgressQueue_FrontOfChannel(&peer->egress, channel, &size);
-        if (front == NULL) {
-            continue;
-        }
-        if (!self->transport->send_frame(self->transport->context, peer->peer_id, front, size)) {
+    for(visited=0; visited<EGRESS_QUEUE_CHANNELS_MAX; visited++) {
+        if (!EgressQueue_NextPendingChannel(&peer->egress, &channel)) {
             return;
         }
-        EgressQueue_PopChannel(&peer->egress, channel);
-        countForwarded(self, peer, channel);
+        for(;;) {
+            front = EgressQueue_FrontOfChannel(&peer->egress, channel, &size);
+            if (front == NULL) {
+                break;
+            }
+            if (!InterfaceRegistry_TryEgress(&self->registry, peer->peer_id, channel, frameWireBits(front, size), self->now_us)) {
+                break;
+            }
+            if (!self->transport->send_frame(self->transport->context, peer->peer_id, front, size)) {
+                return;
+            }
+            EgressQueue_PopChannel(&peer->egress, channel);
+            countForwarded(self, peer, channel);
+        }
     }
+}
+
+static uint64_t frameWireBits(const uint8_t *wire, uint16_t size)
+{
+    if (size <= FRAME_PAYLOAD_LENGTH_OFFSET) {
+        return FRAME_PACE_OVERHEAD_BITS;
+    }
+
+    return FRAME_PACE_OVERHEAD_BITS + (uint64_t)FRAME_PACE_BITS_PER_BYTE * wire[FRAME_PAYLOAD_LENGTH_OFFSET];
 }
 
 static void countForwarded(Broker *self, HubPeer *peer, uint8_t channel)

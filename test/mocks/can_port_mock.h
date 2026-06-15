@@ -13,6 +13,7 @@ typedef struct {
     uint8_t last_configure_interface_index;
     uint8_t last_configure_op;
     uint32_t last_configure_bitrate;
+    uint32_t bitrate_value;
 } CanPortMock;
 
 void CanPortMock_Reset(CanPortMock *self);
