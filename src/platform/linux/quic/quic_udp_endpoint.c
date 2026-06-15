@@ -4,15 +4,25 @@
 #include <unistd.h>
 
 #include <netdb.h>
+#include <sys/socket.h>
 #include <sys/timerfd.h>
+
+#define UDP_SOCKET_BUFFER_BYTES (4 * 1024 * 1024)
 
 /* ---------- public ---------- */
 
 bool QuicUdpEndpoint_Open(QuicUdpEndpoint *self)
 {
+    int32_t buffer_bytes = UDP_SOCKET_BUFFER_BYTES;
+
     memset(self, 0, sizeof(*self));
     self->udp_fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
     self->timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+
+    if (self->udp_fd >= 0) {
+        setsockopt(self->udp_fd, SOL_SOCKET, SO_RCVBUF, &buffer_bytes, sizeof(buffer_bytes));
+        setsockopt(self->udp_fd, SOL_SOCKET, SO_SNDBUF, &buffer_bytes, sizeof(buffer_bytes));
+    }
 
     return self->udp_fd >= 0 && self->timer_fd >= 0;
 }

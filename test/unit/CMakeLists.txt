@@ -144,6 +144,12 @@ add_unit_test(test_connect_url
         ${ROOT_SRC_DIR}/platform/linux/shared/connect_url.c
 )
 
+add_unit_test(test_quic_datagram_backlog
+    SOURCES
+        platform/test_quic_datagram_backlog.cpp
+        ${ROOT_SRC_DIR}/platform/linux/quic/quic_datagram_backlog.c
+)
+
 add_unit_test(test_tls_channel
     SOURCES
         platform/test_tls_channel.cpp
