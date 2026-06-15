@@ -105,6 +105,7 @@ set(COMMON_SOURCES
     src/protocol/register_message.c
     src/protocol/subscribe_message.c
     src/protocol/ifconfig_message.c
+    src/protocol/interface_status_message.c
     src/protocol/interface_name.c
 )
 

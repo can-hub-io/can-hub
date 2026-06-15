@@ -241,17 +241,17 @@ mod tests {
 
     fn interfaces_page(ids: &[u32], more: bool) -> Vec<u8> {
         let count = ids.len();
-        let mut buffer = vec![0u8; 8 + count * 160];
+        let mut buffer = vec![0u8; 8 + count * 168];
         Header::write(
             &mut buffer,
             MessageType::AdminInterfacesReply,
             0,
-            (4 + count * 160) as u16,
+            (4 + count * 168) as u16,
         );
         buffer[4] = count as u8;
         buffer[5] = if more { 0x01 } else { 0x00 };
         for (index, &id) in ids.iter().enumerate() {
-            let base = 8 + index * 160;
+            let base = 8 + index * 168;
             buffer[base..base + 4].copy_from_slice(&id.to_le_bytes());
             write_fixed_str(&mut buffer, base + 16, 128, "truck42");
             write_fixed_str(&mut buffer, base + 144, 16, "can0");

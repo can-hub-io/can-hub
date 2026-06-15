@@ -43,7 +43,7 @@
 #define ADMIN_INTERFACES_BODY_SIZE 4
 #define ADMIN_INTERFACES_REPLY_FIXED_FIELDS_SIZE 4
 #define ADMIN_INTERFACES_REPLY_ENTRIES_MAX 16
-#define ADMIN_INTERFACES_REPLY_ENTRY_SIZE 160
+#define ADMIN_INTERFACES_REPLY_ENTRY_SIZE 168
 
 #define ADMIN_FINGERPRINT_HEX_SIZE 65
 #define ADMIN_REPLY_FLAG_MORE (1u << 0)
@@ -222,6 +222,7 @@ typedef struct {
     uint32_t interface_id;
     uint8_t subscriber_count;
     uint64_t frames_received;
+    uint64_t tx_dropped;
     char agent_name[REGISTER_AGENT_NAME_SIZE];
     char interface_name[REGISTER_INTERFACE_NAME_SIZE];
 } AdminInterfacesReplyEntry;

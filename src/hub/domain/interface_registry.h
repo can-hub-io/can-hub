@@ -20,6 +20,7 @@ typedef struct {
     uint32_t agent_peer_id;
     uint8_t agent_channel;
     uint64_t frames_received;
+    uint64_t tx_dropped;
     char agent_name[REGISTER_AGENT_NAME_SIZE];
     char interface_name[REGISTER_INTERFACE_NAME_SIZE];
 } InterfaceEntry;
@@ -56,3 +57,9 @@ const InterfaceEntry *InterfaceRegistry_FindByName(
 void InterfaceRegistry_List(const InterfaceRegistry *self, uint16_t offset, ListReplyMessage *reply);
 uint16_t InterfaceRegistry_Count(const InterfaceRegistry *self);
 void InterfaceRegistry_CountFrame(InterfaceRegistry *self, uint32_t interface_id);
+void InterfaceRegistry_SetTxDropped(
+    InterfaceRegistry *self,
+    uint32_t agent_peer_id,
+    uint8_t agent_channel,
+    uint64_t tx_dropped
+);

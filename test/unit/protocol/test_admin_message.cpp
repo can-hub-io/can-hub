@@ -409,7 +409,7 @@ describe("admin_interfaces_message", []() {
     });
 
     it("round-trips interface entries", []() {
-        AdminInterfacesReplyMessage reply = { 1, 0, { { 7, 2, 5000000000ULL, "truck42", "can0" } } };
+        AdminInterfacesReplyMessage reply = { 1, 0, { { 7, 2, 5000000000ULL, 123456789ULL, "truck42", "can0" } } };
         AdminInterfacesReplyMessage decoded;
         uint8_t buffer[512];
         size_t expected_size = MESSAGE_HEADER_SIZE + ADMIN_INTERFACES_REPLY_FIXED_FIELDS_SIZE + ADMIN_INTERFACES_REPLY_ENTRY_SIZE;
@@ -425,6 +425,7 @@ describe("admin_interfaces_message", []() {
         expect(decoded.entries[0].interface_id).toBe((uint32_t)7);
         expect(decoded.entries[0].subscriber_count).toBe(2);
         expect(decoded.entries[0].frames_received).toBe(5000000000ULL);
+        expect(decoded.entries[0].tx_dropped).toBe(123456789ULL);
         expect((const char *)decoded.entries[0].agent_name).toBe("truck42");
         expect((const char *)decoded.entries[0].interface_name).toBe("can0");
     });

@@ -71,6 +71,14 @@ add_unit_test(test_ifconfig_message
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
 
+add_unit_test(test_interface_status_message
+    SOURCES
+        protocol/test_interface_status_message.cpp
+        ${ROOT_SRC_DIR}/protocol/interface_status_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+
 add_unit_test(test_frame_message
     SOURCES
         protocol/test_frame_message.cpp
@@ -183,6 +191,7 @@ add_unit_test(test_agent
         ${ROOT_SRC_DIR}/protocol/frame_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c
         ${ROOT_SRC_DIR}/protocol/ifconfig_message.c
+        ${ROOT_SRC_DIR}/protocol/interface_status_message.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/register_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
@@ -269,6 +278,7 @@ add_unit_test(test_broker
         ${ROOT_SRC_DIR}/protocol/register_message.c
         ${ROOT_SRC_DIR}/protocol/subscribe_message.c
         ${ROOT_SRC_DIR}/protocol/ifconfig_message.c
+        ${ROOT_SRC_DIR}/protocol/interface_status_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
 target_link_libraries(test_broker PRIVATE port_mocks)

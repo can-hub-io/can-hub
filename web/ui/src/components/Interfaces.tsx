@@ -51,7 +51,7 @@ export function Interfaces({ permissions }: { permissions: string[] }) {
       <Table>
         <Thead>
           <Tr className="hover:bg-transparent">
-            <Th>Interface</Th><Th className="text-right">Subscribers</Th><Th className="text-right">Frames</Th>
+            <Th>Interface</Th><Th className="text-right">Subscribers</Th><Th className="text-right">Frames</Th><Th className="text-right">TX dropped</Th>
           </Tr>
         </Thead>
         <Tbody>
@@ -60,10 +60,11 @@ export function Interfaces({ permissions }: { permissions: string[] }) {
               <Td className="font-mono text-gray-800">{i.agentName}/{i.interfaceName}</Td>
               <Td className="text-right tabular-nums">{i.subscriberCount}</Td>
               <Td className="text-right tabular-nums">{i.framesReceived.toLocaleString()}</Td>
+              <Td className="text-right tabular-nums">{i.txDropped.toLocaleString()}</Td>
             </Tr>
           ))}
           {data && data.length === 0 && (
-            <Tr className="hover:bg-transparent"><Td className="text-gray-500" colSpan={3}>None.</Td></Tr>
+            <Tr className="hover:bg-transparent"><Td className="text-gray-500" colSpan={4}>None.</Td></Tr>
           )}
         </Tbody>
       </Table>

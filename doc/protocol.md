@@ -44,6 +44,7 @@ offset  size  field
 0x0A  OPEN_ACK     status + assigned channel
 0x0B  IFCONFIG     hub -> agent: apply an interface change (bitrate, up, down)
 0x0C  IFCONFIG_REPLY agent -> hub: apply status
+0x0D  INTERFACE_STATUS agent -> hub: periodic per-interface data-plane health (CAN-tx drops)
 0x10  ADMIN_STATUS        admin: hub counters
 0x11  ADMIN_STATUS_REPLY
 0x12  ADMIN_PEERS         admin: live peer table (paginated)
@@ -187,6 +188,24 @@ IFCONFIG_REPLY (total 24, agent -> hub)
 @4   interface_name char[16]   (echo, lets the hub correlate the request)
 @20  status u8 (0 ok, 1 unknown interface, 2 apply failed)
 @21  reserved u8[3]
+
+INTERFACE_STATUS (total 328, agent -> hub)
+@4   interface_count u8
+@5   reserved u8[3]
+@8   entries[16], 20 bytes each, addressed by channel:
+       +0  channel u8
+       +1  flags u8 (bit 0 reliable; reserved, sent 0)
+       +2  reserved u8[2]
+       +4  advertised_rate u32 (bus bits/s; reserved, sent 0)
+       +8  credit u32 (tx headroom; reserved, sent 0)
+       +12 tx_dropped u64 (monotonic CAN-tx drops, ENOBUFS at the bus sink)
+
+The agent emits this periodically while registered. tx_dropped exposes the
+silent rate-impedance loss at the CAN-tx queue (the bus is a fixed-rate sink);
+the hub stores the latest value per interface and surfaces it in
+ADMIN_INTERFACES. advertised_rate, credit and flags are reserved for the
+rate-matched data plane (control-plane pacing) and the reliability toggle that
+build on this message.
 
 ADMIN_IFCONFIG (total 156, admin -> hub)
 @4   agent_name char[128]

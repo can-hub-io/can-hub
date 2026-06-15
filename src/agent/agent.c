@@ -5,6 +5,7 @@
 #include "protocol/control_buffer.h"
 #include "protocol/hello_message.h"
 #include "protocol/ifconfig_message.h"
+#include "protocol/interface_status_message.h"
 #include "protocol/message_header.h"
 
 #define MICROSECONDS_PER_MILLISECOND 1000
@@ -19,8 +20,10 @@ static void eventTransportFrame(void *context, const uint8_t *data, size_t size)
 static void eventCanFrame(void *context, uint8_t interface_index, const FrameMessage *frame);
 static void tryConnect(Agent *self, uint64_t now_us);
 static void tickRegistering(Agent *self, uint64_t now_us);
+static void tickRunning(Agent *self, uint64_t now_us);
 static void scheduleReconnect(Agent *self, uint64_t now_us);
 static void sendHelloAndRegister(Agent *self);
+static void sendInterfaceStatus(Agent *self);
 static void handleRegisterAck(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
 static void handlePing(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
 static void handleIfconfig(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
@@ -45,7 +48,9 @@ void Agent_Init(Agent *self, TransportPort *transport, CanPort *can, const Regis
     self->state = kAGENT_STATE_DISCONNECTED;
     self->next_connect_at_us = 0;
     self->register_deadline_us = 0;
+    self->next_status_at_us = 0;
     self->pending_reconnect_delay_ms = 0;
+    memset(self->tx_dropped, 0, sizeof(self->tx_dropped));
 }
 
 TransportEvents Agent_TransportEvents(Agent *self)
@@ -75,6 +80,10 @@ void Agent_Tick(Agent *self, uint64_t now_us)
 {
     if (self->state == kAGENT_STATE_REGISTERING) {
         tickRegistering(self, now_us);
+        return;
+    }
+    if (self->state == kAGENT_STATE_RUNNING) {
+        tickRunning(self, now_us);
         return;
     }
     if (self->state != kAGENT_STATE_DISCONNECTED) {
@@ -185,6 +194,7 @@ void Agent_OnTransportFrame(Agent *self, const uint8_t *data, size_t size)
     EchoCorrelator_Push(&self->echo, interface_index, token, frame.can_id);
     if (!self->can->write_frame(self->can->context, interface_index, &frame)) {
         EchoCorrelator_DropNewest(&self->echo, interface_index);
+        self->tx_dropped[interface_index]++;
     }
 }
 
@@ -249,6 +259,16 @@ static void tickRegistering(Agent *self, uint64_t now_us)
     Agent_OnDisconnected(self, now_us);
 }
 
+static void tickRunning(Agent *self, uint64_t now_us)
+{
+    if (now_us < self->next_status_at_us) {
+        return;
+    }
+
+    sendInterfaceStatus(self);
+    self->next_status_at_us = now_us + AGENT_STATUS_PERIOD_MS * MICROSECONDS_PER_MILLISECOND;
+}
+
 static void scheduleReconnect(Agent *self, uint64_t now_us)
 {
     uint64_t delay_ms = ReconnectBackoff_NextDelayMs(&self->backoff);
@@ -266,6 +286,36 @@ static void sendHelloAndRegister(Agent *self)
     self->transport->send_control(self->transport->context, encoded, encoded_size);
 
     encoded_size = RegisterMessage_Encode(&self->registration, encoded, sizeof(encoded));
+    self->transport->send_control(self->transport->context, encoded, encoded_size);
+}
+
+static void sendInterfaceStatus(Agent *self)
+{
+    InterfaceStatusMessage status;
+    uint8_t encoded[MESSAGE_HEADER_SIZE + INTERFACE_STATUS_BODY_SIZE];
+    size_t encoded_size;
+    uint8_t channel;
+    uint8_t count = 0;
+    uint8_t i;
+
+    for(i=0; i<self->registration.interface_count; i++) {
+        if (!ChannelMap_ChannelForInterface(&self->channel_map, i, &channel)) {
+            continue;
+        }
+        status.entries[count].channel = channel;
+        status.entries[count].flags = 0;
+        status.entries[count].advertised_rate = 0;
+        status.entries[count].credit = 0;
+        status.entries[count].tx_dropped = self->tx_dropped[i];
+        count++;
+    }
+    status.interface_count = count;
+
+    encoded_size = InterfaceStatusMessage_Encode(&status, encoded, sizeof(encoded));
+    if (encoded_size == 0) {
+        return;
+    }
+
     self->transport->send_control(self->transport->context, encoded, encoded_size);
 }
 

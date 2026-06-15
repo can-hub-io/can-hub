@@ -5,6 +5,7 @@ extern "C" {
 #include "can_port_mock.h"
 #include "protocol/hello_message.h"
 #include "protocol/ifconfig_message.h"
+#include "protocol/interface_status_message.h"
 #include "protocol/message_header.h"
 #include "transport_port_mock.h"
 }
@@ -344,6 +345,50 @@ describe("agent", []() {
 
             expect(can.configure_count).toBe(1);
             expect(reply.status).toBe(IFCONFIG_STATUS_APPLY_FAILED);
+        });
+
+        it("reports tx-drop counters in a periodic interface status", []() {
+            FrameMessage injected = { 0x456, 2000, 7, 1, 0, 0, { 0x55 } };
+            InterfaceStatusMessage status;
+            MessageHeader header;
+            uint8_t encoded_frame[128];
+            size_t encoded_frame_size = FrameMessage_Encode(&injected, encoded_frame, sizeof(encoded_frame));
+            int status_index;
+
+            can.write_result = false;
+            Agent_OnTransportFrame(&agent, encoded_frame, encoded_frame_size);
+            Agent_Tick(&agent, 1);
+
+            status_index = transport.control_count - 1;
+            MessageHeader_Decode(&header, transport.control_log[status_index], transport.control_sizes[status_index]);
+            InterfaceStatusMessage_Decode(&status, transport.control_log[status_index] + MESSAGE_HEADER_SIZE, header.length);
+
+            expect(header.type).toBe(kMESSAGE_TYPE_INTERFACE_STATUS);
+            expect(status.interface_count).toBe(2);
+            expect(status.entries[0].channel).toBe(7);
+            expect(status.entries[0].tx_dropped).toBe((uint64_t)1);
+            expect(status.entries[1].channel).toBe(9);
+            expect(status.entries[1].tx_dropped).toBe((uint64_t)0);
+        });
+
+        it("does not re-emit the interface status until the period elapses", []() {
+            int after_first;
+
+            Agent_Tick(&agent, 1);
+            after_first = transport.control_count;
+            Agent_Tick(&agent, 1 + AGENT_STATUS_PERIOD_MS * 1000 - 1);
+
+            expect(transport.control_count).toBe(after_first);
+        });
+
+        it("re-emits the interface status after the period elapses", []() {
+            int after_first;
+
+            Agent_Tick(&agent, 1);
+            after_first = transport.control_count;
+            Agent_Tick(&agent, 1 + AGENT_STATUS_PERIOD_MS * 1000);
+
+            expect(transport.control_count).toBe(after_first + 1);
         });
     });
 

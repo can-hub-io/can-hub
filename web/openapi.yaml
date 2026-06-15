@@ -781,11 +781,12 @@ components:
 
     Interface:
       type: object
-      required: [interfaceId, subscriberCount, framesReceived, agentName, interfaceName]
+      required: [interfaceId, subscriberCount, framesReceived, txDropped, agentName, interfaceName]
       properties:
         interfaceId: { type: integer, format: uint32 }
         subscriberCount: { type: integer, format: uint8 }
         framesReceived: { type: integer, format: uint64 }
+        txDropped: { type: integer, format: uint64 }
         agentName: { type: string }
         interfaceName: { type: string }
 
