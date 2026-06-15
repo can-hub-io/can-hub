@@ -9,12 +9,13 @@ Library           BenchKeywords
 Variables         bench_variables.py
 Suite Setup       Setup Bench    ${BENCH}
 Suite Teardown    Teardown Bench    ${BENCH}
+Test Teardown     Reset Bench    ${BENCH}
 
 *** Variables ***
 ${BURST}    ${256}
 ${SINK_BURST}    ${2000}
 ${SINK_RATE}    20kbit
-${SINK_RATE_BPS}    ${20000}
+${SINK_RATE_BPS}    20000
 
 *** Test Cases ***
 QUIC Client Write Burst Is Delivered In Full
