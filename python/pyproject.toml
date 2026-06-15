@@ -17,6 +17,12 @@ Homepage = "https://github.com/can-hub-io/can-hub"
 [project.entry-points."can.interface"]
 canhub = "canhub.bus:CanHubBus"
 
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.setuptools]
 packages = ["canhub"]
 

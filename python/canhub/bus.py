@@ -1,7 +1,8 @@
 """python-can backend over libcanhub: can.Bus(interface="canhub", ...)."""
 
 import ctypes
-from typing import Optional, Tuple
+import os
+from typing import List, Optional, Tuple
 
 from can import BusABC, CanInitializationError, CanOperationError, Message
 
@@ -49,22 +50,9 @@ class CanHubBus(BusABC):
         self._session = None
         self._writable = False
 
-        if hub_fingerprint is not None:
-            hub_fingerprint = str(hub_fingerprint)
-            if not _is_fingerprint(hub_fingerprint):
-                raise CanInitializationError(
-                    "hub_fingerprint must be 64 hex characters (it may have been "
-                    "mangled by python-can config value casting; pass it as a string)"
-                )
-
-        config = native.CanHubConnectConfig()
-        config.struct_size = ctypes.sizeof(config)
-        config.url = url.encode() if url else None
-        config.state_directory = state_dir.encode() if state_dir else None
-        config.certificate_path = identity_cert.encode() if identity_cert else None
-        config.key_path = identity_key.encode() if identity_key else None
-        config.hub_fingerprint = hub_fingerprint.encode() if hub_fingerprint else None
-        config.connect_timeout_ms = DEFAULT_TIMEOUT_MS
+        config = self._build_connect_config(
+            url, identity_cert, identity_key, hub_fingerprint, state_dir, DEFAULT_TIMEOUT_MS
+        )
 
         self._session = native.lib.canhub_connect(ctypes.byref(config))
         if not self._session:
@@ -73,6 +61,62 @@ class CanHubBus(BusABC):
         self._open(str(channel), receive_own_messages)
         self.channel_info = f"canhub {channel} via {url or 'unix socket'}"
         super().__init__(channel=channel, **kwargs)
+
+    @classmethod
+    def list_interfaces(
+        cls,
+        url: Optional[str] = None,
+        identity_cert: Optional[str] = None,
+        identity_key: Optional[str] = None,
+        hub_fingerprint: Optional[str] = None,
+        state_dir: Optional[str] = None,
+        timeout: float = DEFAULT_TIMEOUT_MS / 1000,
+    ) -> List[dict]:
+        """List the interfaces a hub exports, ready to splat into ``can.Bus``.
+
+        Connects to ``url`` (or the local hub unix socket when ``None``), asks the
+        hub for its interface directory and disconnects. Each entry is a python-can
+        config dict whose keys ``can.Bus(**entry)`` consumes directly. Connection
+        parameters mirror :class:`CanHubBus`.
+        """
+        timeout_ms = max(0, int(timeout * 1000))
+        config = cls._build_connect_config(
+            url, identity_cert, identity_key, hub_fingerprint, state_dir, timeout_ms
+        )
+
+        session = native.lib.canhub_connect(ctypes.byref(config))
+        if not session:
+            raise CanInitializationError(f"could not connect to {url or 'the local can-hub socket'}")
+
+        try:
+            interfaces = native.list_interfaces(session, timeout_ms)
+        except OSError as error:
+            raise CanOperationError(str(error)) from error
+        finally:
+            native.lib.canhub_close(session)
+
+        connection = {
+            "url": url,
+            "identity_cert": identity_cert,
+            "identity_key": identity_key,
+            "hub_fingerprint": hub_fingerprint,
+            "state_dir": state_dir,
+        }
+        present = {key: value for key, value in connection.items() if value is not None}
+        return [cls._to_config(info, present) for info in interfaces]
+
+    @classmethod
+    def _detect_available_configs(cls) -> List[dict]:
+        try:
+            return cls.list_interfaces(
+                url=os.environ.get("CANHUB_URL"),
+                identity_cert=os.environ.get("CANHUB_IDENTITY_CERT"),
+                identity_key=os.environ.get("CANHUB_IDENTITY_KEY"),
+                hub_fingerprint=os.environ.get("CANHUB_HUB_FINGERPRINT"),
+                state_dir=os.environ.get("CANHUB_STATE_DIR"),
+            )
+        except Exception:
+            return []
 
     def _recv_internal(self, timeout: Optional[float]) -> Tuple[Optional[Message], bool]:
         frame = native.CanHubFrame()
@@ -150,6 +194,39 @@ class CanHubBus(BusABC):
             native.lib.canhub_close(self._session)
             self._session = None
             raise CanInitializationError(f"could not open {channel}: {detail}")
+
+    @staticmethod
+    def _build_connect_config(
+        url: Optional[str],
+        identity_cert: Optional[str],
+        identity_key: Optional[str],
+        hub_fingerprint: Optional[str],
+        state_dir: Optional[str],
+        timeout_ms: int,
+    ) -> "native.CanHubConnectConfig":
+        if hub_fingerprint is not None:
+            hub_fingerprint = str(hub_fingerprint)
+            if not _is_fingerprint(hub_fingerprint):
+                raise CanInitializationError(
+                    "hub_fingerprint must be 64 hex characters (it may have been "
+                    "mangled by python-can config value casting; pass it as a string)"
+                )
+
+        config = native.CanHubConnectConfig()
+        config.struct_size = ctypes.sizeof(config)
+        config.url = url.encode() if url else None
+        config.state_directory = state_dir.encode() if state_dir else None
+        config.certificate_path = identity_cert.encode() if identity_cert else None
+        config.key_path = identity_key.encode() if identity_key else None
+        config.hub_fingerprint = hub_fingerprint.encode() if hub_fingerprint else None
+        config.connect_timeout_ms = timeout_ms
+        return config
+
+    @staticmethod
+    def _to_config(info: native.CanHubInterfaceInfo, connection: dict) -> dict:
+        agent = info.agent.decode("utf-8", errors="replace")
+        name = info.interface_name.decode("utf-8", errors="replace")
+        return {"interface": "canhub", "channel": f"{agent}/{name}", **connection}
 
     @staticmethod
     def _to_message(frame: native.CanHubFrame) -> Message:
