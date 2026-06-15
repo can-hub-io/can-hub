@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "python-can-hub"
-version = "0.2.2"
+version = "0.2.3"
 description = "python-can backend for can-hub: remote CAN interfaces over unix/tcp/tls/quic"
 readme = "README.md"
 license = { text = "AGPL-3.0-only" }
