@@ -462,6 +462,81 @@ describe("broker", []() {
             expect(transport.frame_count).toBe(0);
         });
 
+        it("paces writes to a rate-limited agent interface, parking the excess", []() {
+            InterfaceStatusMessage status;
+            FrameMessage frame = { 0x456, 2000, client_channel, 64, FRAME_FLAG_FD, 0, { 0x55 } };
+            uint8_t encoded[512];
+            size_t encoded_size;
+            uint8_t i;
+
+            memset(&status, 0, sizeof(status));
+            status.interface_count = 1;
+            status.entries[0].channel = 1;
+            status.entries[0].advertised_rate = 1000;
+            encoded_size = InterfaceStatusMessage_Encode(&status, encoded, sizeof(encoded));
+            sendControlFrom(AGENT_PEER, encoded, encoded_size);
+
+            encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+            for(i=0; i<14; i++) {
+                events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
+            }
+
+            expect(transport.frame_count > 0).toBe(true);
+            expect(transport.frame_count < 14).toBe(true);
+        });
+
+        it("drains the parked paced frames as credit refills over time", []() {
+            InterfaceStatusMessage status;
+            FrameMessage frame = { 0x456, 2000, client_channel, 64, FRAME_FLAG_FD, 0, { 0x55 } };
+            uint8_t encoded[512];
+            size_t encoded_size;
+            int parked_at;
+            uint8_t i;
+
+            memset(&status, 0, sizeof(status));
+            status.interface_count = 1;
+            status.entries[0].channel = 1;
+            status.entries[0].advertised_rate = 1000;
+            encoded_size = InterfaceStatusMessage_Encode(&status, encoded, sizeof(encoded));
+            sendControlFrom(AGENT_PEER, encoded, encoded_size);
+
+            encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+            for(i=0; i<14; i++) {
+                events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
+            }
+            parked_at = transport.frame_count;
+
+            Broker_Tick(&broker, 20000000);
+
+            expect(transport.frame_count > parked_at).toBe(true);
+        });
+
+        it("keeps the full poll timeout when no paced frames wait", []() {
+            expect(Broker_NextTimeoutMs(&broker, 100)).toBe(100);
+        });
+
+        it("shortens the poll timeout while paced frames await credit", []() {
+            InterfaceStatusMessage status;
+            FrameMessage frame = { 0x456, 2000, client_channel, 64, FRAME_FLAG_FD, 0, { 0x55 } };
+            uint8_t encoded[512];
+            size_t encoded_size;
+            uint8_t i;
+
+            memset(&status, 0, sizeof(status));
+            status.interface_count = 1;
+            status.entries[0].channel = 1;
+            status.entries[0].advertised_rate = 100000;
+            encoded_size = InterfaceStatusMessage_Encode(&status, encoded, sizeof(encoded));
+            sendControlFrom(AGENT_PEER, encoded, encoded_size);
+
+            encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+            for(i=0; i<14; i++) {
+                events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
+            }
+
+            expect(Broker_NextTimeoutMs(&broker, 100) < 100).toBe(true);
+        });
+
         it("delivers only frames matching the channel subscribe filter", []() {
             SubscribeMessage subscribe = { client_channel, 1, { { 0x100, 0x700 } } };
             FrameMessage matching = { 0x123, 1000, 1, 1, 0, 0, { 0x11 } };

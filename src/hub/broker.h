@@ -51,3 +51,11 @@ void Broker_Init(
 );
 HubTransportEvents Broker_Events(Broker *self);
 void Broker_Tick(Broker *self, uint64_t now_us);
+
+/*
+ * Milliseconds until the next paced frame becomes drainable, clamped to
+ * cap_ms. The platform loop uses it as the poll timeout so paced egress wakes
+ * on time instead of waiting a full poll period; returns cap_ms when nothing is
+ * waiting on shaper credit.
+ */
+int32_t Broker_NextTimeoutMs(Broker *self, int32_t cap_ms);

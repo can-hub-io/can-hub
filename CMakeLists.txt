@@ -155,6 +155,7 @@ set(HUB_SOURCES
     src/hub/domain/admin_views.c
     src/hub/domain/client_session.c
     src/hub/domain/egress_queue.c
+    src/hub/domain/egress_shaper.c
     src/hub/domain/frame_routes.c
     src/hub/domain/hub_peer.c
     src/hub/domain/interface_registry.c

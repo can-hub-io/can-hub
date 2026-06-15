@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <signal.h>
@@ -44,6 +45,7 @@ static EpollRegistry poll_registry;
 static int32_t signal_fd = -1;
 static bool should_shutdown;
 static const char *state_directory_override;
+static uint32_t pace_rate_override;
 static char state_directory[TLS_IDENTITY_PATH_MAX];
 static char identity_certificate_path[TLS_IDENTITY_PATH_MAX];
 static char identity_key_path[TLS_IDENTITY_PATH_MAX];
@@ -108,6 +110,7 @@ int main(int argc, char **argv)
         LOG_ERROR("could not open CAN interfaces");
         return 1;
     }
+    SocketCanAdapter_SetPaceRate(&can_adapter, pace_rate_override);
 
     agent_core_events = AgentApp_TransportEvents(&app);
     transport_events = loggingTransportEvents();
@@ -149,7 +152,8 @@ static void printUsage(FILE *stream, const char *program)
     fprintf(
         stream,
         "usage: %s --connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>"
-        " --name <agent-name> [--state-dir <path>] [--log-level error|warn|info|debug] <can-if> [...]\n"
+        " --name <agent-name> [--state-dir <path>] [--log-level error|warn|info|debug]"
+        " [--pace-rate <bps>] <can-if> [...]\n"
         "       %s --show-identity [--state-dir <path>]   print this agent's"
         " TLS fingerprint for the hub allowlist\n",
         program,
@@ -271,6 +275,8 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
             state_directory_override = argv[++i];
         } else if (strcmp(argv[i], "--log-level") == 0 && i + 1 < argc) {
             i++;
+        } else if (strcmp(argv[i], "--pace-rate") == 0 && i + 1 < argc) {
+            pace_rate_override = (uint32_t)strtoul(argv[++i], NULL, 10);
         } else {
             if (registration.interface_count >= REGISTER_INTERFACES_MAX) {
                 return false;

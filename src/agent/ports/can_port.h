@@ -13,9 +13,13 @@
  * configure applies an interface-level change (op: set bitrate, link up,
  * link down) requested by the hub administrator; returns false when the
  * interface index is unknown or the change could not be applied.
+ *
+ * bitrate reports the interface's nominal bus bitrate (bits/s) so the core can
+ * advertise it for rate-matched pacing; returns 0 when unknown.
  */
 typedef struct {
     void *context;
     bool (*write_frame)(void *context, uint8_t interface_index, const FrameMessage *frame);
     bool (*configure)(void *context, uint8_t interface_index, uint8_t op, uint32_t bitrate);
+    uint32_t (*bitrate)(void *context, uint8_t interface_index);
 } CanPort;

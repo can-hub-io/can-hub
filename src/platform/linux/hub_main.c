@@ -140,7 +140,7 @@ int main(int argc, char **argv)
         if (tls_enabled) {
             syncTlsSlotRegistrations();
         }
-        event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
+        event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, HubApp_NextTimeoutMs(&app, POLL_PERIOD_MS));
 
         for(i=0; i<event_count; i++) {
             dispatchEvent(&events[i]);
