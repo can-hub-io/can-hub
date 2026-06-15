@@ -44,6 +44,7 @@ export interface Interface {
   interfaceId: number
   subscriberCount: number
   framesReceived: number
+  txDropped: number
   agentName: string
   interfaceName: string
 }
