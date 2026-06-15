@@ -71,6 +71,7 @@ void InterfaceRegistry_ApplyAdvertisedRate(
     uint32_t agent_peer_id,
     uint8_t agent_channel,
     uint32_t advertised_rate,
+    uint32_t credit,
     uint64_t now_us
 );
 bool InterfaceRegistry_TryEgress(

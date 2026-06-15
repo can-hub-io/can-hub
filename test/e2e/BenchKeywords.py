@@ -205,6 +205,39 @@ class BenchKeywords:
                 return row.tx_dropped
         return 0
 
+    @keyword("Wait Until TX Dropped On ${hub} For ${name} Exceeds ${threshold}")
+    def wait_tx_dropped_exceeds(self, hub, name, threshold, timeout=15):
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            if self.tx_dropped_on(hub, name) > int(threshold):
+                return
+            time.sleep(0.2)
+        raise AssertionError(f"tx-dropped on {name} stayed <= {threshold}")
+
+    @keyword("Wait Until TX Dropped On ${hub} For ${name} Settles")
+    def wait_tx_dropped_settles(self, hub, name, timeout=25):
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            if self._tx_dropped_growth(hub, name) <= 15:
+                return self.tx_dropped_on(hub, name)
+        raise AssertionError(f"tx-dropped on {name} did not settle")
+
+    @keyword("Wait Until TX Dropped On ${hub} For ${name} Stops Climbing")
+    def wait_tx_dropped_stops_climbing(self, hub, name, timeout=30):
+        deadline = time.monotonic() + float(timeout)
+        peaked = False
+        while time.monotonic() < deadline:
+            climbed = self._tx_dropped_growth(hub, name) > 15
+            peaked = peaked or climbed
+            if peaked and not climbed:
+                return self.tx_dropped_on(hub, name)
+        raise AssertionError(f"tx-dropped on {name} kept climbing")
+
+    def _tx_dropped_growth(self, hub, name):
+        before = self.tx_dropped_on(hub, name)
+        time.sleep(1.5)
+        return self.tx_dropped_on(hub, name) - before
+
     @keyword("Flood ${interface} On ${server}")
     def flood_on(self, interface, server, gap_ms=0.05, count=120000, can_id="200"):
         return server.cangen(interface, float(gap_ms), int(count), can_id=can_id)
@@ -239,6 +272,14 @@ class BenchKeywords:
     @keyword("Frames Captured By ${process}")
     def frames_captured_by(self, process):
         return len(parse_candump(process.read_log()))
+
+    @keyword("Wait Until Frames Captured By ${process} Reaches ${count}")
+    def wait_frames_captured(self, process, count, timeout=10):
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            if self.frames_captured_by(process) >= int(count):
+                return
+            time.sleep(0.2)
 
     @keyword("Channel Drops On ${hub}")
     def channel_drops_on(self, hub):

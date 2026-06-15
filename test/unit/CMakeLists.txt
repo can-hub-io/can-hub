@@ -137,6 +137,12 @@ add_unit_test(test_echo_correlator
         ${ROOT_SRC_DIR}/agent/domain/echo_correlator.c
 )
 
+add_unit_test(test_tx_pacer
+    SOURCES
+        agent/domain/test_tx_pacer.cpp
+        ${ROOT_SRC_DIR}/agent/domain/tx_pacer.c
+)
+
 add_unit_test(test_quic_control_channel
     SOURCES
         platform/test_quic_control_channel.cpp
@@ -188,6 +194,7 @@ add_unit_test(test_agent
         ${ROOT_SRC_DIR}/agent/domain/channel_map.c
         ${ROOT_SRC_DIR}/agent/domain/echo_correlator.c
         ${ROOT_SRC_DIR}/agent/domain/reconnect_backoff.c
+        ${ROOT_SRC_DIR}/agent/domain/tx_pacer.c
         ${ROOT_SRC_DIR}/protocol/frame_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c
         ${ROOT_SRC_DIR}/protocol/ifconfig_message.c

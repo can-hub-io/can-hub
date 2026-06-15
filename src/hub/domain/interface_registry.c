@@ -206,11 +206,13 @@ void InterfaceRegistry_ApplyAdvertisedRate(
     uint32_t agent_peer_id,
     uint8_t agent_channel,
     uint32_t advertised_rate,
+    uint32_t credit,
     uint64_t now_us
 )
 {
     InterfaceEntry *entry = findMutableByAgentChannel(self, agent_peer_id, agent_channel);
-    uint32_t paced_rate = (uint32_t)((uint64_t)advertised_rate * PACE_EFFECTIVE_PERCENT / 100);
+    uint32_t effective_rate = credit != 0 ? credit : advertised_rate;
+    uint32_t paced_rate = (uint32_t)((uint64_t)effective_rate * PACE_EFFECTIVE_PERCENT / 100);
 
     if (entry == NULL) {
         return;
