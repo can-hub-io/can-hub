@@ -45,6 +45,7 @@ class InterfaceRow:
     interface: str
     subscribers: int
     frames: int
+    tx_dropped: int
 
 
 @dataclass
@@ -116,9 +117,9 @@ def parse_clients(text: str) -> list[ClientRow]:
 def parse_interfaces(text: str) -> list[InterfaceRow]:
     rows = []
     for f in _data_rows(text):
-        if len(f) < 5 or not f[0].isdigit():
+        if len(f) < 6 or not f[0].isdigit():
             continue
-        rows.append(InterfaceRow(int(f[0]), f[1], f[2], int(f[3]), int(f[4])))
+        rows.append(InterfaceRow(int(f[0]), f[1], f[2], int(f[3]), int(f[4]), int(f[5])))
     return rows
 
 

@@ -65,6 +65,31 @@ describe("interface_registry", []() {
         expect((const char *)by_channel->interface_name).toBe("can1");
     });
 
+    it("stores the latest tx-drop counter by agent channel", []() {
+        RegisterAckMessage ack;
+        const InterfaceEntry *entry;
+
+        InterfaceRegistry_RegisterAgent(&registry, 100, &truck_registration, &ack);
+
+        InterfaceRegistry_SetTxDropped(&registry, 100, 1, 7);
+        InterfaceRegistry_SetTxDropped(&registry, 100, 1, 25);
+        entry = InterfaceRegistry_FindByAgentChannel(&registry, 100, 1);
+
+        expect(entry->tx_dropped).toBe((uint64_t)25);
+    });
+
+    it("leaves a quiet channel at zero when another reports drops", []() {
+        RegisterAckMessage ack;
+        const InterfaceEntry *quiet;
+
+        InterfaceRegistry_RegisterAgent(&registry, 100, &truck_registration, &ack);
+
+        InterfaceRegistry_SetTxDropped(&registry, 100, 1, 99);
+        quiet = InterfaceRegistry_FindByAgentChannel(&registry, 100, 0);
+
+        expect(quiet->tx_dropped).toBe((uint64_t)0);
+    });
+
     it("frees the names after the agent is removed", []() {
         RegisterAckMessage ack;
         bool registered_again;

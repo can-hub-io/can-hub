@@ -21,6 +21,7 @@
  */
 
 #define AGENT_REGISTER_TIMEOUT_MS 5000
+#define AGENT_STATUS_PERIOD_MS 1000
 
 typedef enum tagent_state_e {
     kAGENT_STATE_DISCONNECTED = 0,
@@ -40,6 +41,8 @@ typedef struct {
     uint8_t state;
     uint64_t next_connect_at_us;
     uint64_t register_deadline_us;
+    uint64_t next_status_at_us;
+    uint64_t tx_dropped[REGISTER_INTERFACES_MAX];
     uint32_t pending_reconnect_delay_ms;
 } Agent;
 

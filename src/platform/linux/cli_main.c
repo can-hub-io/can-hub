@@ -873,17 +873,21 @@ static void handleInterfacesReply(const uint8_t *payload, uint16_t payload_lengt
     }
 
     if (!page_header_printed) {
-        printf("%-10s %-32s %-16s %-12s %s\n", "id", "agent", "interface", "subscribers", "frames");
+        printf(
+            "%-10s %-32s %-16s %-12s %-12s %s\n",
+            "id", "agent", "interface", "subscribers", "frames", "tx-dropped"
+        );
         page_header_printed = true;
     }
     for(i=0; i<reply.count; i++) {
         printf(
-            "%-10u %-32s %-16s %-12u %llu\n",
+            "%-10u %-32s %-16s %-12u %-12llu %llu\n",
             reply.entries[i].interface_id,
             reply.entries[i].agent_name,
             reply.entries[i].interface_name,
             reply.entries[i].subscriber_count,
-            (unsigned long long)reply.entries[i].frames_received
+            (unsigned long long)reply.entries[i].frames_received,
+            (unsigned long long)reply.entries[i].tx_dropped
         );
     }
 

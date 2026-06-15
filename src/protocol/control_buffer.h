@@ -7,6 +7,7 @@
 #include "protocol/frame_message.h"
 #include "protocol/hello_message.h"
 #include "protocol/ifconfig_message.h"
+#include "protocol/interface_status_message.h"
 #include "protocol/list_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
@@ -28,6 +29,7 @@ static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + CLOSE_BODY_
 static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + LIST_BODY_SIZE, "LIST exceeds control buffer");
 static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + IFCONFIG_BODY_SIZE, "IFCONFIG exceeds control buffer");
 static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + IFCONFIG_REPLY_BODY_SIZE, "IFCONFIG_REPLY exceeds control buffer");
+static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + INTERFACE_STATUS_BODY_SIZE, "INTERFACE_STATUS exceeds control buffer");
 static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + ADMIN_IFCONFIG_BODY_SIZE, "ADMIN_IFCONFIG exceeds control buffer");
 static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + ADMIN_PEERS_BODY_SIZE, "ADMIN_PEERS exceeds control buffer");
 static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + ADMIN_KICK_BODY_SIZE, "ADMIN_KICK exceeds control buffer");

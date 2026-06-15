@@ -183,6 +183,25 @@ void InterfaceRegistry_CountFrame(InterfaceRegistry *self, uint32_t interface_id
     }
 }
 
+void InterfaceRegistry_SetTxDropped(
+    InterfaceRegistry *self,
+    uint32_t agent_peer_id,
+    uint8_t agent_channel,
+    uint64_t tx_dropped
+)
+{
+    uint32_t i;
+
+    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
+        if (self->entries[i].in_use
+            && self->entries[i].agent_peer_id == agent_peer_id
+            && self->entries[i].agent_channel == agent_channel) {
+            self->entries[i].tx_dropped = tx_dropped;
+            return;
+        }
+    }
+}
+
 uint16_t InterfaceRegistry_Count(const InterfaceRegistry *self)
 {
     uint16_t count = 0;

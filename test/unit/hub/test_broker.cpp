@@ -15,6 +15,7 @@ extern "C" {
 #include "protocol/open_message.h"
 #include "protocol/subscribe_message.h"
 #include "protocol/ifconfig_message.h"
+#include "protocol/interface_status_message.h"
 }
 
 #define AGENT_PEER 100
@@ -579,6 +580,54 @@ describe("broker", []() {
             sendControlFrom(CLIENT_PEER, encoded, encoded_size);
 
             expect(transport.control_count).toBe(0);
+        });
+
+        it("records agent tx-drop counters and surfaces them in interfaces", []() {
+            InterfaceStatusMessage status;
+            AdminInterfacesMessage request = { 0 };
+            AdminInterfacesReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[512];
+            size_t encoded_size;
+
+            memset(&status, 0, sizeof(status));
+            status.interface_count = 2;
+            status.entries[0].channel = 0;
+            status.entries[1].channel = 1;
+            status.entries[1].tx_dropped = 17;
+            encoded_size = InterfaceStatusMessage_Encode(&status, encoded, sizeof(encoded));
+            sendControlFrom(AGENT_PEER, encoded, encoded_size);
+
+            encoded_size = AdminInterfacesMessage_Encode(&request, encoded, sizeof(encoded));
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminInterfacesReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_INTERFACES_REPLY);
+            expect(reply.count).toBe(2);
+            expect((const char *)reply.entries[1].interface_name).toBe("can1");
+            expect(reply.entries[1].tx_dropped).toBe((uint64_t)17);
+            expect(reply.entries[0].tx_dropped).toBe((uint64_t)0);
+        });
+
+        it("ignores an interface status from a non-agent peer", []() {
+            InterfaceStatusMessage status;
+            AdminInterfacesMessage request = { 0 };
+            AdminInterfacesReplyMessage reply;
+            uint8_t encoded[512];
+            size_t encoded_size;
+
+            memset(&status, 0, sizeof(status));
+            status.interface_count = 2;
+            status.entries[1].channel = 1;
+            status.entries[1].tx_dropped = 99;
+            encoded_size = InterfaceStatusMessage_Encode(&status, encoded, sizeof(encoded));
+            sendControlFrom(CLIENT_PEER, encoded, encoded_size);
+
+            encoded_size = AdminInterfacesMessage_Encode(&request, encoded, sizeof(encoded));
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            lastReply(&reply, AdminInterfacesReplyMessage_Decode);
+
+            expect(reply.entries[1].tx_dropped).toBe((uint64_t)0);
         });
 
         it("lists the live peers with role and agent name", []() {

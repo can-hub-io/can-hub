@@ -26,9 +26,9 @@ fn status_reply(received: u64) -> Vec<u8> {
 }
 
 fn interfaces_reply(frames_received: u64) -> Vec<u8> {
-    let mut buffer = vec![0u8; 8 + 160];
+    let mut buffer = vec![0u8; 8 + 168];
     buffer[0] = 0x21; // ADMIN_INTERFACES_REPLY
-    buffer[2..4].copy_from_slice(&164u16.to_le_bytes());
+    buffer[2..4].copy_from_slice(&172u16.to_le_bytes());
     buffer[4] = 1; // count
     let base = 8;
     buffer[base..base + 4].copy_from_slice(&1u32.to_le_bytes()); // interface_id

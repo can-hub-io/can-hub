@@ -61,6 +61,7 @@
 #define INTERFACE_ENTRY_FRAMES_OFFSET 8
 #define INTERFACE_ENTRY_AGENT_NAME_OFFSET 16
 #define INTERFACE_ENTRY_INTERFACE_NAME_OFFSET 144
+#define INTERFACE_ENTRY_TX_DROPPED_OFFSET 160
 
 static size_t encodeFixedBody(uint8_t type, size_t body_size, uint8_t *buffer, size_t buffer_size, uint8_t **body);
 static bool isNameTerminated(const char *agent_name);
@@ -1050,6 +1051,7 @@ static void writeInterfaceEntry(uint8_t *destination, const AdminInterfacesReply
     Wire_WriteU64(destination + INTERFACE_ENTRY_FRAMES_OFFSET, entry->frames_received);
     memcpy(destination + INTERFACE_ENTRY_AGENT_NAME_OFFSET, entry->agent_name, strlen(entry->agent_name));
     memcpy(destination + INTERFACE_ENTRY_INTERFACE_NAME_OFFSET, entry->interface_name, strlen(entry->interface_name));
+    Wire_WriteU64(destination + INTERFACE_ENTRY_TX_DROPPED_OFFSET, entry->tx_dropped);
 }
 
 static void readInterfaceEntry(const uint8_t *source, AdminInterfacesReplyEntry *entry)
@@ -1061,4 +1063,5 @@ static void readInterfaceEntry(const uint8_t *source, AdminInterfacesReplyEntry 
     entry->agent_name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';
     memcpy(entry->interface_name, source + INTERFACE_ENTRY_INTERFACE_NAME_OFFSET, REGISTER_INTERFACE_NAME_SIZE);
     entry->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] = '\0';
+    entry->tx_dropped = Wire_ReadU64(source + INTERFACE_ENTRY_TX_DROPPED_OFFSET);
 }

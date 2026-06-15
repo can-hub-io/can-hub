@@ -186,6 +186,20 @@ class BenchKeywords:
         server.exec("tc", "qdisc", "replace", "dev", "eth0", "root", "tbf",
                     "rate", rate, "burst", "16kb", "latency", "50ms", check=False)
 
+    @keyword("Shape CAN Sink On ${server} ${interface} To ${rate}")
+    def shape_can_sink_on(self, server, interface, rate):
+        server.exec("ip", "link", "set", "dev", interface, "txqueuelen", "10", check=False)
+        server.exec("tc", "qdisc", "replace", "dev", interface, "root", "tbf",
+                    "rate", rate, "burst", "2kb", "latency", "20ms", check=False)
+
+    @keyword("TX Dropped On ${hub} For ${name}")
+    def tx_dropped_on(self, hub, name):
+        agent, _, interface = name.partition("/")
+        for row in hub.interfaces():
+            if row.agent == agent and row.interface == interface:
+                return row.tx_dropped
+        return 0
+
     @keyword("Flood ${interface} On ${server}")
     def flood_on(self, interface, server, gap_ms=0.05, count=120000, can_id="200"):
         return server.cangen(interface, float(gap_ms), int(count), can_id=can_id)

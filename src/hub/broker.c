@@ -10,6 +10,7 @@
 #include "protocol/frame_message.h"
 #include "protocol/hello_message.h"
 #include "protocol/ifconfig_message.h"
+#include "protocol/interface_status_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
 #include "protocol/subscribe_message.h"
@@ -56,6 +57,7 @@ static void handleAdminAclRevoke(Broker *self, HubPeer *peer, const MessageHeade
 static void handleAdminAclList(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminIfconfig(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleIfconfigReply(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleInterfaceStatus(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static bool rememberPendingIfconfig(Broker *self, uint32_t admin_peer_id, uint32_t agent_peer_id, const char *interface_name);
 static bool takePendingIfconfig(Broker *self, uint32_t agent_peer_id, const char *interface_name, uint32_t *admin_peer_id);
 static void releasePendingIfconfig(Broker *self, uint32_t peer_id);
@@ -101,6 +103,7 @@ static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
     [kMESSAGE_TYPE_ADMIN_ACL_LIST] = handleAdminAclList,
     [kMESSAGE_TYPE_ADMIN_IFCONFIG] = handleAdminIfconfig,
     [kMESSAGE_TYPE_IFCONFIG_REPLY] = handleIfconfigReply,
+    [kMESSAGE_TYPE_INTERFACE_STATUS] = handleInterfaceStatus,
 };
 
 /* ---------- public ---------- */
@@ -878,6 +881,28 @@ static void handleIfconfigReply(Broker *self, HubPeer *peer, const MessageHeader
 
     admin_reply.status = adminIfconfigStatus(reply.status);
     sendControl(self, admin, encoded, AdminIfconfigReplyMessage_Encode(&admin_reply, encoded, sizeof(encoded)));
+}
+
+static void handleInterfaceStatus(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    InterfaceStatusMessage status;
+    uint8_t i;
+
+    if (peer->role != kHUB_PEER_ROLE_AGENT) {
+        return;
+    }
+    if (!InterfaceStatusMessage_Decode(&status, payload, header->length)) {
+        return;
+    }
+
+    for(i=0; i<status.interface_count; i++) {
+        InterfaceRegistry_SetTxDropped(
+            &self->registry,
+            peer->peer_id,
+            status.entries[i].channel,
+            status.entries[i].tx_dropped
+        );
+    }
 }
 
 /* ---------- private: helpers ---------- */

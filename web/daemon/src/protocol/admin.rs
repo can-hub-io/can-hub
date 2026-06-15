@@ -78,6 +78,7 @@ pub struct InterfaceEntry {
     pub interface_id: u32,
     pub subscriber_count: u8,
     pub frames_received: u64,
+    pub tx_dropped: u64,
     pub agent_name: String,
     pub interface_name: String,
 }
@@ -374,14 +375,15 @@ pub fn decode_pins_reply(buffer: &[u8]) -> Result<Page<PinEntry>, DecodeError> {
     })
 }
 
-/// ADMIN_INTERFACES_REPLY (8 + count * 160).
+/// ADMIN_INTERFACES_REPLY (8 + count * 168).
 pub fn decode_interfaces_reply(buffer: &[u8]) -> Result<Page<InterfaceEntry>, DecodeError> {
-    decode_page(buffer, MessageType::AdminInterfacesReply, 160, |entry| InterfaceEntry {
+    decode_page(buffer, MessageType::AdminInterfacesReply, 168, |entry| InterfaceEntry {
         interface_id: read_u32(entry, 0),
         subscriber_count: entry[4],
         frames_received: read_u64(entry, 8),
         agent_name: read_fixed_str(entry, 16, AGENT_NAME_SIZE),
         interface_name: read_fixed_str(entry, 144, INTERFACE_NAME_SIZE),
+        tx_dropped: read_u64(entry, 160),
     })
 }
 
@@ -479,18 +481,19 @@ mod tests {
     #[test]
     fn interfaces_reply_decodes_entries_and_more_flag() {
         let count = 2usize;
-        let mut buffer = vec![0u8; 8 + count * 160];
-        Header::write(&mut buffer, MessageType::AdminInterfacesReply, 0, (4 + count * 160) as u16);
+        let mut buffer = vec![0u8; 8 + count * 168];
+        Header::write(&mut buffer, MessageType::AdminInterfacesReply, 0, (4 + count * 168) as u16);
         buffer[4] = count as u8;
         buffer[5] = 0x01; // more
         for index in 0..count {
-            let base = 8 + index * 160;
+            let base = 8 + index * 168;
             let id = (index as u32) + 1;
             buffer[base..base + 4].copy_from_slice(&id.to_le_bytes());
             buffer[base + 4] = (index as u8) + 1; // subscriber_count
             buffer[base + 8..base + 16].copy_from_slice(&((index as u64 + 1) * 100).to_le_bytes());
             write_fixed_str(&mut buffer, base + 16, AGENT_NAME_SIZE, "truck42");
             write_fixed_str(&mut buffer, base + 144, INTERFACE_NAME_SIZE, "can0");
+            buffer[base + 160..base + 168].copy_from_slice(&((index as u64 + 1) * 7).to_le_bytes());
         }
 
         let page = decode_interfaces_reply(&buffer).unwrap();
@@ -499,6 +502,7 @@ mod tests {
         assert_eq!(page.entries[0].interface_id, 1);
         assert_eq!(page.entries[0].subscriber_count, 1);
         assert_eq!(page.entries[1].frames_received, 200);
+        assert_eq!(page.entries[1].tx_dropped, 14);
         assert_eq!(page.entries[1].agent_name, "truck42");
         assert_eq!(page.entries[1].interface_name, "can0");
     }

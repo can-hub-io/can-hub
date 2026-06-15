@@ -168,6 +168,7 @@ pub(crate) struct InterfaceDto {
     pub interface_id: u32,
     pub subscriber_count: u8,
     pub frames_received: u64,
+    pub tx_dropped: u64,
     pub agent_name: String,
     pub interface_name: String,
 }
@@ -178,6 +179,7 @@ impl From<InterfaceEntry> for InterfaceDto {
             interface_id: entry.interface_id,
             subscriber_count: entry.subscriber_count,
             frames_received: entry.frames_received,
+            tx_dropped: entry.tx_dropped,
             agent_name: entry.agent_name,
             interface_name: entry.interface_name,
         }

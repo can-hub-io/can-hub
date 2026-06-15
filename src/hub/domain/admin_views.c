@@ -155,6 +155,7 @@ void AdminViews_Interfaces(
         entry->interface_id = interface_entry->interface_id;
         entry->subscriber_count = countSubscribers(directory, interface_entry->interface_id);
         entry->frames_received = interface_entry->frames_received;
+        entry->tx_dropped = interface_entry->tx_dropped;
         memcpy(entry->agent_name, interface_entry->agent_name, REGISTER_AGENT_NAME_SIZE);
         memcpy(entry->interface_name, interface_entry->interface_name, REGISTER_INTERFACE_NAME_SIZE);
     }
