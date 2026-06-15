@@ -298,6 +298,7 @@ static uint8_t storeList(void *context, uint16_t offset, IdentityPin *pins, uint
             *more = true;
             break;
         }
+        memset(&pins[count], 0, sizeof(pins[count]));
         snprintf(pins[count].agent_name, sizeof(pins[count].agent_name), "%s", (const char *)sqlite3_column_text(statement, 0));
         snprintf(pins[count].fingerprint_hex, sizeof(pins[count].fingerprint_hex), "%s", (const char *)sqlite3_column_text(statement, 1));
         count++;
@@ -472,6 +473,7 @@ static uint8_t aclList(void *context, uint16_t offset, AclEntry *entries, uint8_
             *more = true;
             break;
         }
+        memset(&entries[count], 0, sizeof(entries[count]));
         snprintf(entries[count].fingerprint_hex, sizeof(entries[count].fingerprint_hex), "%s", (const char *)sqlite3_column_text(statement, 0));
         snprintf(entries[count].agent_name, sizeof(entries[count].agent_name), "%s", (const char *)sqlite3_column_text(statement, 1));
         snprintf(entries[count].interface_name, sizeof(entries[count].interface_name), "%s", (const char *)sqlite3_column_text(statement, 2));
