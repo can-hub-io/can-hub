@@ -25,6 +25,16 @@ Python Bus Sends Onto The Bus
     Should Be True    ${result.ok}
     Candump ${candump} Should Capture 1A0#CAFE
 
+Python Bus Lists The Interfaces The Hub Exports
+    ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${CONNECT}    truck42/vcan0    list
+    Should Be True    ${result.ok}
+    Should Contain    ${result.stdout}    canhub truck42/vcan0
+
+Python Can Discovery Finds The Hub Interfaces From The Environment
+    ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${CONNECT}    truck42/vcan0    detect
+    Should Be True    ${result.ok}
+    Should Contain    ${result.stdout}    canhub truck42/vcan0
+
 Python Bus Refuses Unknown Interfaces
     ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${CONNECT}    truck42/nope    dump
     Should Not Be True    ${result.ok}

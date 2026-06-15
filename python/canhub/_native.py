@@ -126,3 +126,14 @@ lib.canhub_send.argtypes = [c_void_p, POINTER(CanHubFrame)]
 def last_error(session):
     detail = lib.canhub_last_error(session)
     return detail.decode("utf-8", errors="replace") if detail else "unknown error"
+
+
+def list_interfaces(session, timeout_ms, capacity=64):
+    while True:
+        buffer = (CanHubInterfaceInfo * capacity)()
+        count = lib.canhub_list(session, buffer, capacity, timeout_ms)
+        if count < 0:
+            raise OSError(last_error(session))
+        if count < capacity:
+            return [buffer[index] for index in range(count)]
+        capacity *= 2
