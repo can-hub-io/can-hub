@@ -6,6 +6,7 @@
 extern "C" {
 #include "client/client.h"
 #include "protocol/frame_message.h"
+#include "protocol/interface_status_message.h"
 #include "protocol/list_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
@@ -36,6 +37,7 @@ static void resetCallbackLog();
 static void connect();
 static void feedListReply(uint8_t flags, const char *agent, const char *iface, uint32_t interface_id);
 static void feedOpenAck(uint8_t status, uint8_t channel);
+static void feedPaceRate(uint8_t channel, uint32_t rate, uint64_t now_us);
 static void feedHubFrame(uint8_t channel, uint32_t can_id, uint8_t byte0);
 static void feedHubError(uint16_t code, const char *detail);
 static uint8_t sentMessageType(uint8_t slot);
@@ -188,12 +190,34 @@ describe("client", []() {
         frame.can_id = 0x321;
         frame.payload_length = 1;
         frame.payload[0] = 0xBE;
-        Client_SendFrame(&client, &frame);
+        Client_SendFrame(&client, &frame, 0);
         decodeSentFrame(&sent);
 
         expect(hub.frame_count).toBe(1);
         expect(sent.channel).toBe((uint8_t)9);
         expect(sent.can_id).toBe((uint32_t)0x321);
+    });
+
+    it("paces writes to the relayed rate, silently dropping the excess", []() {
+        FrameMessage frame;
+        int i;
+
+        Client_OpenById(&client, TEST_INTERFACE_ID, OPEN_FLAG_WANT_WRITE);
+        connect();
+        feedOpenAck(OPEN_STATUS_OK, 9);
+        feedPaceRate(9, 100000, 1000);
+
+        memset(&frame, 0, sizeof(frame));
+        frame.can_id = 0x321;
+        frame.payload_length = 64;
+        frame.frame_flags = FRAME_FLAG_FD;
+        for(i=0; i<16; i++) {
+            expect(Client_SendFrame(&client, &frame, 1000)).toBe(true);
+        }
+
+        expect(hub.frame_count > 0).toBe(true);
+        expect(hub.frame_count < 16).toBe(true);
+        expect(client.frames_paced_dropped > 0).toBe(true);
     });
 
     it("refuses to send frames before the channel is open", []() {
@@ -202,7 +226,7 @@ describe("client", []() {
         memset(&frame, 0, sizeof(frame));
         connect();
 
-        expect(Client_SendFrame(&client, &frame)).toBe(false);
+        expect(Client_SendFrame(&client, &frame, 0)).toBe(false);
         expect(hub.frame_count).toBe(0);
     });
 
@@ -300,6 +324,21 @@ static void feedOpenAck(uint8_t status, uint8_t channel)
     size_t size = OpenAckMessage_Encode(&ack, wire, sizeof(wire));
 
     hub_events.on_control(hub_events.context, wire, size, 1000);
+}
+
+static void feedPaceRate(uint8_t channel, uint32_t rate, uint64_t now_us)
+{
+    InterfaceStatusMessage status;
+    uint8_t wire[MESSAGE_HEADER_SIZE + INTERFACE_STATUS_BODY_SIZE];
+    size_t size;
+
+    memset(&status, 0, sizeof(status));
+    status.interface_count = 1;
+    status.entries[0].channel = channel;
+    status.entries[0].advertised_rate = rate;
+    size = InterfaceStatusMessage_Encode(&status, wire, sizeof(wire));
+
+    hub_events.on_control(hub_events.context, wire, size, now_us);
 }
 
 static void feedHubFrame(uint8_t channel, uint32_t can_id, uint8_t byte0)

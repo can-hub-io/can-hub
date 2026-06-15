@@ -1,4 +1,4 @@
-#include "hub/domain/egress_shaper.h"
+#include "shared/egress_shaper.h"
 
 #define MICROSECONDS_PER_SECOND 1000000
 

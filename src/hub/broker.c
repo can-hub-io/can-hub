@@ -61,6 +61,7 @@ static void handleAdminAclList(Broker *self, HubPeer *peer, const MessageHeader 
 static void handleAdminIfconfig(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleIfconfigReply(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleInterfaceStatus(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void relayPaceToClients(Broker *self, uint32_t interface_id, uint32_t pace_rate);
 static bool rememberPendingIfconfig(Broker *self, uint32_t admin_peer_id, uint32_t agent_peer_id, const char *interface_name);
 static bool takePendingIfconfig(Broker *self, uint32_t agent_peer_id, const char *interface_name, uint32_t *admin_peer_id);
 static void releasePendingIfconfig(Broker *self, uint32_t peer_id);
@@ -923,6 +924,7 @@ static void handleIfconfigReply(Broker *self, HubPeer *peer, const MessageHeader
 static void handleInterfaceStatus(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
 {
     InterfaceStatusMessage status;
+    const InterfaceEntry *entry;
     uint8_t i;
 
     if (peer->role != kHUB_PEER_ROLE_AGENT) {
@@ -947,6 +949,34 @@ static void handleInterfaceStatus(Broker *self, HubPeer *peer, const MessageHead
             status.entries[i].credit,
             self->now_us
         );
+        entry = InterfaceRegistry_FindByAgentChannel(&self->registry, peer->peer_id, status.entries[i].channel);
+        if (entry != NULL) {
+            relayPaceToClients(self, entry->interface_id, entry->shaper.rate_bits_per_s);
+        }
+    }
+}
+
+static void relayPaceToClients(Broker *self, uint32_t interface_id, uint32_t pace_rate)
+{
+    InterfaceStatusMessage status;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    HubPeer *peer;
+    uint8_t channel;
+    uint8_t i;
+
+    for(i=0; i<PEER_DIRECTORY_MAX; i++) {
+        peer = PeerDirectory_At(&self->directory, i);
+        if (peer == NULL || peer->role != kHUB_PEER_ROLE_CLIENT) {
+            continue;
+        }
+        if (!ClientSession_ChannelForInterface(&peer->session, interface_id, &channel)) {
+            continue;
+        }
+        memset(&status, 0, sizeof(status));
+        status.interface_count = 1;
+        status.entries[0].channel = channel;
+        status.entries[0].advertised_rate = pace_rate;
+        sendControl(self, peer, encoded, InterfaceStatusMessage_Encode(&status, encoded, sizeof(encoded)));
     }
 }
 

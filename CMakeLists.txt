@@ -52,6 +52,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/protocol/register_message.c
         src/protocol/subscribe_message.c
         src/protocol/interface_name.c
+        src/protocol/interface_status_message.c
+        src/shared/egress_shaper.c
         src/client/client.c
         src/platform/windows/clock/clock.c
         src/platform/linux/shared/connect_url.c
@@ -107,6 +109,7 @@ set(COMMON_SOURCES
     src/protocol/ifconfig_message.c
     src/protocol/interface_status_message.c
     src/protocol/interface_name.c
+    src/shared/egress_shaper.c
 )
 
 FetchContent_Declare(sqlite3
@@ -156,7 +159,6 @@ set(HUB_SOURCES
     src/hub/domain/admin_views.c
     src/hub/domain/client_session.c
     src/hub/domain/egress_queue.c
-    src/hub/domain/egress_shaper.c
     src/hub/domain/frame_routes.c
     src/hub/domain/hub_peer.c
     src/hub/domain/interface_registry.c

@@ -366,7 +366,7 @@ static bool parseHexPayload(const char *text, FrameMessage *frame)
 static void sendFrameAndQuit(void)
 {
     frame_to_send.timestamp_us = Clock_RealtimeUs();
-    if (!Client_SendFrame(&client, &frame_to_send)) {
+    if (!Client_SendFrame(&client, &frame_to_send, frame_to_send.timestamp_us)) {
         LOG_ERROR("could not send the frame");
         exit_code = 1;
         return;

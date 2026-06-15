@@ -1,7 +1,7 @@
 #include <cest>
 
 extern "C" {
-#include "hub/domain/egress_shaper.h"
+#include "shared/egress_shaper.h"
 }
 
 describe("egress_shaper", []() {
