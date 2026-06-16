@@ -26,6 +26,7 @@ typedef enum tegress_push_result_e {
 
 typedef struct {
     uint8_t data[EGRESS_FRAME_BYTES_MAX];
+    uint64_t enqueued_us;
     uint16_t size;
     uint8_t channel;
     uint16_t next;
@@ -51,10 +52,12 @@ TEGRESS_PUSH_RESULT EgressQueue_Push(
     uint8_t channel,
     const uint8_t *data,
     uint16_t size,
+    uint64_t now_us,
     uint8_t *evicted_channel
 );
 bool EgressQueue_HasPending(const EgressQueue *self);
 bool EgressQueue_ChannelPending(const EgressQueue *self, uint8_t channel);
 const uint8_t *EgressQueue_FrontOfChannel(const EgressQueue *self, uint8_t channel, uint16_t *size);
+uint64_t EgressQueue_FrontEnqueuedUs(const EgressQueue *self, uint8_t channel);
 void EgressQueue_PopChannel(EgressQueue *self, uint8_t channel);
 bool EgressQueue_NextPendingChannel(EgressQueue *self, uint8_t *channel);

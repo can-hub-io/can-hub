@@ -22,7 +22,7 @@ describe("egress_queue", []() {
         uint8_t evicted = 0;
         uint8_t payload[4] = {1, 2, 3, 4};
 
-        result = EgressQueue_Push(&queue, 5, payload, sizeof(payload), &evicted);
+        result = EgressQueue_Push(&queue, 5, payload, sizeof(payload), 0, &evicted);
 
         expect(result == kEGRESS_PUSH_QUEUED).toBe(true);
         expect(EgressQueue_HasPending(&queue)).toBe(true);
@@ -56,7 +56,7 @@ describe("egress_queue", []() {
         for(i=0; i<EGRESS_QUEUE_CHANNEL_CAP; i++) {
             pushChannel(5, (uint8_t)i);
         }
-        result = EgressQueue_Push(&queue, 5, payload, sizeof(payload), &evicted);
+        result = EgressQueue_Push(&queue, 5, payload, sizeof(payload), 0, &evicted);
 
         expect(result == kEGRESS_PUSH_EVICTED_SELF).toBe(true);
         expect(evicted).toBe((uint8_t)5);
@@ -76,7 +76,7 @@ describe("egress_queue", []() {
 
         expect(queue.used).toBe((uint16_t)EGRESS_QUEUE_SLOTS_MAX);
 
-        result = EgressQueue_Push(&queue, 3, payload, sizeof(payload), &evicted);
+        result = EgressQueue_Push(&queue, 3, payload, sizeof(payload), 0, &evicted);
 
         expect(result == kEGRESS_PUSH_EVICTED_OTHER).toBe(true);
         expect(EgressQueue_ChannelPending(&queue, 3)).toBe(true);
@@ -128,7 +128,7 @@ static uint16_t pushChannel(uint8_t channel, uint8_t marker)
 
     memset(payload, 0, sizeof(payload));
     payload[0] = marker;
-    EgressQueue_Push(&queue, channel, payload, 1, &evicted);
+    EgressQueue_Push(&queue, channel, payload, 1, 0, &evicted);
 
     return marker;
 }

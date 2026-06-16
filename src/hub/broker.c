@@ -25,6 +25,7 @@
 #define FRAME_BUFFER_SIZE (MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD)
 #define FRAME_PACE_OVERHEAD_BITS 64
 #define FRAME_PACE_BITS_PER_BYTE 10
+#define LIVE_EGRESS_MAX_AGE_US 50000
 
 typedef void (*TControlHandler)(
     Broker *self,
@@ -77,6 +78,7 @@ static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id,
 static uint64_t frameWireBits(const uint8_t *wire, uint16_t size);
 static void enqueueFrame(Broker *self, HubPeer *peer, uint8_t channel, const uint8_t *data, size_t size);
 static void drainPeer(Broker *self, HubPeer *peer);
+static bool liveFrameTooOld(const Broker *self, const HubPeer *peer, uint8_t channel);
 static void countForwarded(Broker *self, HubPeer *peer, uint8_t channel);
 static void countDropped(Broker *self, HubPeer *peer, uint8_t channel);
 static uint8_t injectionToken(Broker *self, const HubPeer *sender);
@@ -1226,7 +1228,7 @@ static void enqueueFrame(Broker *self, HubPeer *peer, uint8_t channel, const uin
     uint8_t evicted_channel = 0;
     TEGRESS_PUSH_RESULT result;
 
-    result = EgressQueue_Push(&peer->egress, channel, data, (uint16_t)size, &evicted_channel);
+    result = EgressQueue_Push(&peer->egress, channel, data, (uint16_t)size, self->now_us, &evicted_channel);
     if (result != kEGRESS_PUSH_QUEUED) {
         countDropped(self, peer, evicted_channel);
     }
@@ -1248,6 +1250,11 @@ static void drainPeer(Broker *self, HubPeer *peer)
             if (front == NULL) {
                 break;
             }
+            if (liveFrameTooOld(self, peer, channel)) {
+                EgressQueue_PopChannel(&peer->egress, channel);
+                countDropped(self, peer, channel);
+                continue;
+            }
             if (!InterfaceRegistry_TryEgress(&self->registry, peer->peer_id, channel, frameWireBits(front, size), self->now_us)) {
                 break;
             }
@@ -1258,6 +1265,18 @@ static void drainPeer(Broker *self, HubPeer *peer)
             countForwarded(self, peer, channel);
         }
     }
+}
+
+static bool liveFrameTooOld(const Broker *self, const HubPeer *peer, uint8_t channel)
+{
+    uint64_t enqueued_us;
+
+    if (peer->role != kHUB_PEER_ROLE_CLIENT) {
+        return false;
+    }
+    enqueued_us = EgressQueue_FrontEnqueuedUs(&peer->egress, channel);
+
+    return self->now_us > enqueued_us && self->now_us - enqueued_us > LIVE_EGRESS_MAX_AGE_US;
 }
 
 static uint64_t frameWireBits(const uint8_t *wire, uint16_t size)
