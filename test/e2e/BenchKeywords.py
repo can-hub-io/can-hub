@@ -18,6 +18,7 @@ from lib.binaries import BIN_DIR, binary
 from lib.rows import parse_candump
 
 CONSUME_SCRIPT = "/work/test/e2e/scripts/consume.py"
+PRODUCE_SCRIPT = "/work/test/e2e/scripts/produce.py"
 
 
 @library(scope="GLOBAL")
@@ -247,6 +248,13 @@ class BenchKeywords:
         names = channels if isinstance(channels, list) else [channels]
         return server.exec("python3", CONSUME_SCRIPT, host, str(port), str(seconds),
                            *names, background=True, log_name="consume")
+
+    @keyword("Burst ${count} Frames Through Socketcand On ${server} ${channel}")
+    def burst_through_socketcand(self, count, server, channel, hold=0.0, host="127.0.0.1", port="29536"):
+        process = server.exec("python3", PRODUCE_SCRIPT, host, str(port), channel, str(count),
+                              str(hold), background=True, log_name="produce")
+        process.wait(timeout=float(hold) + 30)
+        return json.loads(process.read_log().strip().splitlines()[-1])
 
     @keyword("Wait Until ${count} Channels Open On ${hub}")
     def wait_until_channels_open(self, count, hub, timeout=8):

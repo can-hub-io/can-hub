@@ -204,18 +204,26 @@ static void serverOnClientBytes(void *context, uint32_t connection_id, const uin
     SocketcandCommand command;
     char text[ASCII_BUFFER_SIZE];
     size_t length;
+    size_t offset = 0;
+    size_t taken;
 
     if (connection == NULL) {
         return;
     }
 
-    AsciiFramer_Push(&connection->framer, data, size);
-    while (AsciiFramer_Next(&connection->framer, text, sizeof(text), &length)) {
-        if (!SocketcandCodec_Parse(text, length, &command)) {
-            continue;
+    while (offset < size) {
+        taken = AsciiFramer_Push(&connection->framer, data + offset, size - offset);
+        offset += taken;
+        while (AsciiFramer_Next(&connection->framer, text, sizeof(text), &length)) {
+            if (!SocketcandCodec_Parse(text, length, &command)) {
+                continue;
+            }
+            if (!dispatchCommand(self, connection, &command)) {
+                return;
+            }
         }
-        if (!dispatchCommand(self, connection, &command)) {
-            return;
+        if (taken == 0) {
+            AsciiFramer_Reset(&connection->framer);
         }
     }
 }

@@ -7,23 +7,19 @@
 void AsciiFramer_Reset(AsciiFramer *self)
 {
     self->used = 0;
-    self->overflow = false;
 }
 
-bool AsciiFramer_Push(AsciiFramer *self, const uint8_t *data, size_t size)
+size_t AsciiFramer_Push(AsciiFramer *self, const uint8_t *data, size_t size)
 {
+    size_t available = ASCII_FRAMER_BUFFER_SIZE - self->used;
+    size_t taken = size < available ? size : available;
     size_t i;
 
-    for(i=0; i<size; i++) {
-        if (self->used >= ASCII_FRAMER_BUFFER_SIZE) {
-            self->used = 0;
-            self->overflow = true;
-            return false;
-        }
+    for(i=0; i<taken; i++) {
         self->buffer[self->used++] = data[i];
     }
 
-    return true;
+    return taken;
 }
 
 bool AsciiFramer_Next(AsciiFramer *self, char *command, size_t command_size, size_t *command_length)
