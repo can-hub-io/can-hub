@@ -59,7 +59,7 @@ void QuicControlChannel_MarkAcked(QuicControlChannel *self, uint64_t acked_end_o
     self->tx_base_offset += acked_bytes;
 }
 
-bool QuicControlChannel_QueueRx(QuicControlChannel *self, const uint8_t *data, size_t size)
+size_t QuicControlChannel_QueueRx(QuicControlChannel *self, const uint8_t *data, size_t size)
 {
     return MessageFramer_Push(&self->framer, data, size);
 }

@@ -15,7 +15,7 @@ static bool portSendControl(void *context, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, const uint8_t *data, size_t size);
 static bool connectTcp(TlsClientTransport *self, int32_t *connected_fd);
 static void pumpHandshake(TlsClientTransport *self);
-static void dispatchMessages(TlsClientTransport *self);
+static void dispatchMessage(void *context, const uint8_t *message, size_t size);
 static void closeConnection(TlsClientTransport *self, bool notify);
 
 /* ---------- public ---------- */
@@ -63,6 +63,8 @@ bool TlsClientTransport_WantsWritable(const TlsClientTransport *self)
 
 void TlsClientTransport_OnReadable(TlsClientTransport *self)
 {
+    MessageSink sink = { self, dispatchMessage };
+
     if (!TlsChannel_IsBound(&self->channel)) {
         return;
     }
@@ -72,13 +74,9 @@ void TlsClientTransport_OnReadable(TlsClientTransport *self)
         return;
     }
 
-    if (!TlsChannel_Receive(&self->channel)) {
-        dispatchMessages(self);
+    if (!TlsChannel_Receive(&self->channel, &sink)) {
         closeConnection(self, true);
-        return;
     }
-
-    dispatchMessages(self);
 }
 
 void TlsClientTransport_OnWritable(TlsClientTransport *self)
@@ -229,25 +227,16 @@ static void pumpHandshake(TlsClientTransport *self)
     }
 }
 
-static void dispatchMessages(TlsClientTransport *self)
+static void dispatchMessage(void *context, const uint8_t *message, size_t size)
 {
+    TlsClientTransport *self = context;
     MessageHeader header;
-    const uint8_t *message;
-    size_t message_size;
 
-    for (;;) {
-        message_size = MessageFramer_NextMessage(&self->channel.framer, &message);
-        if (message_size == 0) {
-            return;
-        }
-
-        MessageHeader_Decode(&header, message, message_size);
-        if (header.type == kMESSAGE_TYPE_FRAME) {
-            self->events.on_frame(self->events.context, message, message_size);
-        } else {
-            self->events.on_control(self->events.context, message, message_size, Clock_RealtimeUs());
-        }
-        MessageFramer_Consume(&self->channel.framer, message_size);
+    MessageHeader_Decode(&header, message, size);
+    if (header.type == kMESSAGE_TYPE_FRAME) {
+        self->events.on_frame(self->events.context, message, size);
+    } else {
+        self->events.on_control(self->events.context, message, size, Clock_RealtimeUs());
     }
 }
 

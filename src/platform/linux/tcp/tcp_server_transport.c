@@ -26,7 +26,12 @@ static void portClosePeer(void *context, uint32_t peer_id);
 static void initTransportBase(TcpServerTransport *self, uint32_t peer_id_base, const HubTransportEvents *events);
 static TcpServerPeer *findPeer(TcpServerTransport *self, uint32_t peer_id);
 static TcpServerPeer *findFreeSlot(TcpServerTransport *self);
-static void dispatchMessages(TcpServerTransport *self, TcpServerPeer *peer);
+typedef struct {
+    TcpServerTransport *transport;
+    TcpServerPeer *peer;
+} TcpServerDispatch;
+
+static void dispatchMessage(void *context, const uint8_t *message, size_t size);
 static void closePeer(TcpServerTransport *self, TcpServerPeer *peer, bool notify);
 
 /* ---------- public ---------- */
@@ -156,18 +161,16 @@ void TcpServerTransport_OnAcceptReady(TcpServerTransport *self)
 void TcpServerTransport_OnSlotReadable(TcpServerTransport *self, uint8_t slot)
 {
     TcpServerPeer *peer = &self->peers[slot];
+    TcpServerDispatch dispatch = { self, peer };
+    MessageSink sink = { &dispatch, dispatchMessage };
 
     if (!TcpChannel_IsBound(&peer->channel)) {
         return;
     }
 
-    if (!TcpChannel_Receive(&peer->channel)) {
-        dispatchMessages(self, peer);
+    if (!TcpChannel_Receive(&peer->channel, &sink)) {
         closePeer(self, peer, true);
-        return;
     }
-
-    dispatchMessages(self, peer);
 }
 
 void TcpServerTransport_OnSlotWritable(TcpServerTransport *self, uint8_t slot)
@@ -291,31 +294,24 @@ static TcpServerPeer *findFreeSlot(TcpServerTransport *self)
     return NULL;
 }
 
-static void dispatchMessages(TcpServerTransport *self, TcpServerPeer *peer)
+static void dispatchMessage(void *context, const uint8_t *message, size_t size)
 {
+    TcpServerDispatch *dispatch = context;
+    TcpServerTransport *self = dispatch->transport;
+    TcpServerPeer *peer = dispatch->peer;
     MessageHeader header;
-    const uint8_t *message;
-    size_t message_size;
 
-    for (;;) {
-        message_size = MessageFramer_NextMessage(&peer->channel.framer, &message);
-        if (message_size == 0) {
-            return;
-        }
-
-        MessageHeader_Decode(&header, message, message_size);
-        if (header.type == kMESSAGE_TYPE_FRAME) {
-            self->events.on_peer_frame(self->events.context, peer->peer_id, message, message_size);
-        } else {
-            self->events.on_peer_control(
-                self->events.context,
-                peer->peer_id,
-                message,
-                message_size,
-                Clock_RealtimeUs()
-            );
-        }
-        MessageFramer_Consume(&peer->channel.framer, message_size);
+    MessageHeader_Decode(&header, message, size);
+    if (header.type == kMESSAGE_TYPE_FRAME) {
+        self->events.on_peer_frame(self->events.context, peer->peer_id, message, size);
+    } else {
+        self->events.on_peer_control(
+            self->events.context,
+            peer->peer_id,
+            message,
+            size,
+            Clock_RealtimeUs()
+        );
     }
 }
 

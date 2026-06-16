@@ -576,17 +576,24 @@ static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, 
 {
     QuicServerPeer *peer = context;
 
+    size_t offset = 0;
+    size_t taken;
+
     if (peer->control.stream_id == QUIC_CONTROL_NO_STREAM) {
         peer->control.stream_id = stream_id;
     }
     if (stream_id != peer->control.stream_id) {
         return;
     }
-    if (!QuicControlChannel_QueueRx(&peer->control, data, size)) {
-        return;
-    }
 
-    dispatchControlMessages(peer->transport, peer);
+    while (offset < size) {
+        taken = QuicControlChannel_QueueRx(&peer->control, data + offset, size - offset);
+        offset += taken;
+        dispatchControlMessages(peer->transport, peer);
+        if (taken == 0) {
+            break;
+        }
+    }
     QuicConnection_ExtendStreamCredit(&peer->connection, stream_id, size);
 }
 

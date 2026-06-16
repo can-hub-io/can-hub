@@ -21,7 +21,7 @@ static bool portSendFrame(void *context, const uint8_t *data, size_t size);
 static void initTransportBase(TcpClientTransport *self, const TransportEvents *events);
 static bool connectTcp(TcpClientTransport *self, int32_t *connected_fd);
 static bool connectUnix(TcpClientTransport *self, int32_t *connected_fd);
-static void dispatchMessages(TcpClientTransport *self);
+static void dispatchMessage(void *context, const uint8_t *message, size_t size);
 static void closeConnection(TcpClientTransport *self, bool notify);
 
 /* ---------- public ---------- */
@@ -72,17 +72,15 @@ bool TcpClientTransport_WantsWritable(const TcpClientTransport *self)
 
 void TcpClientTransport_OnReadable(TcpClientTransport *self)
 {
+    MessageSink sink = { self, dispatchMessage };
+
     if (!TcpChannel_IsBound(&self->channel)) {
         return;
     }
 
-    if (!TcpChannel_Receive(&self->channel)) {
-        dispatchMessages(self);
+    if (!TcpChannel_Receive(&self->channel, &sink)) {
         closeConnection(self, true);
-        return;
     }
-
-    dispatchMessages(self);
 }
 
 void TcpClientTransport_OnWritable(TcpClientTransport *self)
@@ -254,25 +252,16 @@ static bool connectUnix(TcpClientTransport *self, int32_t *connected_fd)
     return true;
 }
 
-static void dispatchMessages(TcpClientTransport *self)
+static void dispatchMessage(void *context, const uint8_t *message, size_t size)
 {
+    TcpClientTransport *self = context;
     MessageHeader header;
-    const uint8_t *message;
-    size_t message_size;
 
-    for (;;) {
-        message_size = MessageFramer_NextMessage(&self->channel.framer, &message);
-        if (message_size == 0) {
-            return;
-        }
-
-        MessageHeader_Decode(&header, message, message_size);
-        if (header.type == kMESSAGE_TYPE_FRAME) {
-            self->events.on_frame(self->events.context, message, message_size);
-        } else {
-            self->events.on_control(self->events.context, message, message_size, Clock_RealtimeUs());
-        }
-        MessageFramer_Consume(&self->channel.framer, message_size);
+    MessageHeader_Decode(&header, message, size);
+    if (header.type == kMESSAGE_TYPE_FRAME) {
+        self->events.on_frame(self->events.context, message, size);
+    } else {
+        self->events.on_control(self->events.context, message, size, Clock_RealtimeUs());
     }
 }
 
