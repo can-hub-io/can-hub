@@ -33,6 +33,10 @@ static char client_key[TLS_IDENTITY_PATH_MAX];
 static bool startLoopbackPair(void);
 static bool pumpUntilEstablished(bool *client_failed);
 static void closeLoopbackPair(void);
+static void captureMessage(void *context, const uint8_t *message, size_t size);
+
+static uint8_t captured_message[256];
+static size_t captured_size;
 
 describe("tls_channel", []() {
     beforeEach([]() {
@@ -52,7 +56,7 @@ describe("tls_channel", []() {
 
     it("completes a loopback handshake and carries a message", []() {
         const uint8_t message[] = { 0x7F, 0x00, 0x00, 0x00 };
-        const uint8_t *received = NULL;
+        MessageSink sink = { NULL, captureMessage };
         bool client_failed = false;
         bool established;
 
@@ -62,9 +66,10 @@ describe("tls_channel", []() {
         expect(established).toBe(true);
         expect(TlsChannel_Queue(&client_channel, message, sizeof(message))).toBe(true);
         expect(TlsChannel_Flush(&client_channel)).toBe(true);
-        expect(TlsChannel_Receive(&server_channel)).toBe(true);
-        expect(MessageFramer_NextMessage(&server_channel.framer, &received)).toBe(sizeof(message));
-        expect(received).toEqualMemory(message, sizeof(message));
+        captured_size = 0;
+        expect(TlsChannel_Receive(&server_channel, &sink)).toBe(true);
+        expect(captured_size).toBe(sizeof(message));
+        expect((const uint8_t *)captured_message).toEqualMemory(message, sizeof(message));
     });
 
     it("exposes the client fingerprint to the server after the handshake", []() {
@@ -184,4 +189,11 @@ static void closeLoopbackPair(void)
     if (client_fd >= 0) {
         close(client_fd);
     }
+}
+
+static void captureMessage(void *context, const uint8_t *message, size_t size)
+{
+    (void)context;
+    memcpy(captured_message, message, size);
+    captured_size = size;
 }

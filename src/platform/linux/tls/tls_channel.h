@@ -42,7 +42,7 @@ void TlsChannel_Close(TlsChannel *self);
 bool TlsChannel_IsBound(const TlsChannel *self);
 bool TlsChannel_IsEstablished(const TlsChannel *self);
 bool TlsChannel_Pump(TlsChannel *self);
-bool TlsChannel_Receive(TlsChannel *self);
+bool TlsChannel_Receive(TlsChannel *self, const MessageSink *sink);
 size_t TlsChannel_FreeTxSpace(const TlsChannel *self);
 bool TlsChannel_Queue(TlsChannel *self, const uint8_t *data, size_t size);
 bool TlsChannel_Flush(TlsChannel *self);

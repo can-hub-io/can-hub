@@ -65,10 +65,12 @@ bool TlsChannel_Pump(TlsChannel *self)
     return handleSslError(self, SSL_get_error(self->ssl, result));
 }
 
-bool TlsChannel_Receive(TlsChannel *self)
+bool TlsChannel_Receive(TlsChannel *self, const MessageSink *sink)
 {
     uint8_t chunk[READ_CHUNK_SIZE];
     size_t bytes_received;
+    size_t offset;
+    size_t taken;
     int32_t result;
 
     if (self->state != kTLS_CHANNEL_STATE_ESTABLISHED) {
@@ -81,8 +83,17 @@ bool TlsChannel_Receive(TlsChannel *self)
             return handleSslError(self, SSL_get_error(self->ssl, result));
         }
 
-        if (!MessageFramer_Push(&self->framer, chunk, bytes_received)) {
-            return false;
+        offset = 0;
+        while (offset < bytes_received) {
+            taken = MessageFramer_Push(&self->framer, chunk + offset, bytes_received - offset);
+            offset += taken;
+            MessageFramer_Drain(&self->framer, sink);
+            if (!TlsChannel_IsBound(self)) {
+                return true;
+            }
+            if (taken == 0) {
+                return false;
+            }
         }
     }
 }

@@ -313,15 +313,21 @@ static void onDatagram(void *context, const uint8_t *data, size_t size)
 static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, size_t size)
 {
     QuicClientTransport *self = context;
+    size_t offset = 0;
+    size_t taken;
 
     if (stream_id != self->control.stream_id) {
         return;
     }
-    if (!QuicControlChannel_QueueRx(&self->control, data, size)) {
-        return;
-    }
 
-    dispatchControlMessages(self);
+    while (offset < size) {
+        taken = QuicControlChannel_QueueRx(&self->control, data + offset, size - offset);
+        offset += taken;
+        dispatchControlMessages(self);
+        if (taken == 0) {
+            break;
+        }
+    }
     QuicConnection_ExtendStreamCredit(&self->connection, stream_id, size);
 }
 

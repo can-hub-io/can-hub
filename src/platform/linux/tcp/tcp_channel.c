@@ -70,10 +70,12 @@ bool TcpChannel_HasPendingTx(const TcpChannel *self)
     return self->tx_used > 0;
 }
 
-bool TcpChannel_Receive(TcpChannel *self)
+bool TcpChannel_Receive(TcpChannel *self, const MessageSink *sink)
 {
     uint8_t chunk[READ_CHUNK_SIZE];
     ssize_t bytes_received;
+    size_t offset;
+    size_t taken;
 
     for (;;) {
         bytes_received = recv(self->fd, chunk, sizeof(chunk), 0);
@@ -84,8 +86,17 @@ bool TcpChannel_Receive(TcpChannel *self)
             return true;
         }
 
-        if (!MessageFramer_Push(&self->framer, chunk, (size_t)bytes_received)) {
-            return false;
+        offset = 0;
+        while (offset < (size_t)bytes_received) {
+            taken = MessageFramer_Push(&self->framer, chunk + offset, (size_t)bytes_received - offset);
+            offset += taken;
+            MessageFramer_Drain(&self->framer, sink);
+            if (!TcpChannel_IsBound(self)) {
+                return true;
+            }
+            if (taken == 0) {
+                return false;
+            }
         }
     }
 }

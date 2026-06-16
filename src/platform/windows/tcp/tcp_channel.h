@@ -29,4 +29,4 @@ size_t TcpChannel_FreeTxSpace(const TcpChannel *self);
 bool TcpChannel_Queue(TcpChannel *self, const uint8_t *data, size_t size);
 bool TcpChannel_Flush(TcpChannel *self);
 bool TcpChannel_HasPendingTx(const TcpChannel *self);
-bool TcpChannel_Receive(TcpChannel *self);
+bool TcpChannel_Receive(TcpChannel *self, const MessageSink *sink);
