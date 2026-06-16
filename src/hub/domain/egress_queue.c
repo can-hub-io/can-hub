@@ -7,7 +7,7 @@
 static uint16_t popChannelHead(EgressQueue *self, uint8_t channel);
 static void appendChannelTail(EgressQueue *self, uint8_t channel, uint16_t slot);
 static uint8_t fullestChannel(const EgressQueue *self);
-static void fillSlot(EgressSlot *slot, uint8_t channel, const uint8_t *data, uint16_t size);
+static void fillSlot(EgressSlot *slot, uint8_t channel, const uint8_t *data, uint16_t size, uint64_t now_us);
 
 /* ---------- public ---------- */
 
@@ -30,7 +30,7 @@ void EgressQueue_Reset(EgressQueue *self)
     }
 }
 
-TEGRESS_PUSH_RESULT EgressQueue_Push(EgressQueue *self, uint8_t channel, const uint8_t *data, uint16_t size, uint8_t *evicted_channel)
+TEGRESS_PUSH_RESULT EgressQueue_Push(EgressQueue *self, uint8_t channel, const uint8_t *data, uint16_t size, uint64_t now_us, uint8_t *evicted_channel)
 {
     uint8_t bully;
     uint16_t slot;
@@ -41,7 +41,7 @@ TEGRESS_PUSH_RESULT EgressQueue_Push(EgressQueue *self, uint8_t channel, const u
 
     if (self->channels[channel].count >= EGRESS_QUEUE_CHANNEL_CAP) {
         slot = popChannelHead(self, channel);
-        fillSlot(&self->slots[slot], channel, data, size);
+        fillSlot(&self->slots[slot], channel, data, size, now_us);
         appendChannelTail(self, channel, slot);
         *evicted_channel = channel;
         return kEGRESS_PUSH_EVICTED_SELF;
@@ -51,14 +51,14 @@ TEGRESS_PUSH_RESULT EgressQueue_Push(EgressQueue *self, uint8_t channel, const u
         slot = self->free_head;
         self->free_head = self->slots[slot].next;
         self->used++;
-        fillSlot(&self->slots[slot], channel, data, size);
+        fillSlot(&self->slots[slot], channel, data, size, now_us);
         appendChannelTail(self, channel, slot);
         return kEGRESS_PUSH_QUEUED;
     }
 
     bully = fullestChannel(self);
     slot = popChannelHead(self, bully);
-    fillSlot(&self->slots[slot], channel, data, size);
+    fillSlot(&self->slots[slot], channel, data, size, now_us);
     appendChannelTail(self, channel, slot);
     *evicted_channel = bully;
     return kEGRESS_PUSH_EVICTED_OTHER;
@@ -84,6 +84,17 @@ const uint8_t *EgressQueue_FrontOfChannel(const EgressQueue *self, uint8_t chann
 
     *size = self->slots[head].size;
     return self->slots[head].data;
+}
+
+uint64_t EgressQueue_FrontEnqueuedUs(const EgressQueue *self, uint8_t channel)
+{
+    uint16_t head = self->channels[channel].head;
+
+    if (head == EGRESS_SLOT_NIL) {
+        return 0;
+    }
+
+    return self->slots[head].enqueued_us;
 }
 
 void EgressQueue_PopChannel(EgressQueue *self, uint8_t channel)
@@ -160,9 +171,10 @@ static uint8_t fullestChannel(const EgressQueue *self)
     return (uint8_t)best;
 }
 
-static void fillSlot(EgressSlot *slot, uint8_t channel, const uint8_t *data, uint16_t size)
+static void fillSlot(EgressSlot *slot, uint8_t channel, const uint8_t *data, uint16_t size, uint64_t now_us)
 {
     slot->channel = channel;
     slot->size = size;
+    slot->enqueued_us = now_us;
     memcpy(slot->data, data, size);
 }

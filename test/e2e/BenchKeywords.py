@@ -19,6 +19,7 @@ from lib.rows import parse_candump
 
 CONSUME_SCRIPT = "/work/test/e2e/scripts/consume.py"
 PRODUCE_SCRIPT = "/work/test/e2e/scripts/produce.py"
+LATENCY_SEND_SCRIPT = "/work/test/e2e/scripts/latency_send.py"
 
 
 @library(scope="GLOBAL")
@@ -191,6 +192,34 @@ class BenchKeywords:
     def limit_egress_on(self, server, rate):
         server.exec("tc", "qdisc", "replace", "dev", "eth0", "root", "tbf",
                     "rate", rate, "burst", "16kb", "latency", "50ms", check=False)
+
+    @keyword("Throttle Egress On ${server} To ${rate}")
+    def throttle_egress_on(self, server, rate):
+        server.exec("tc", "qdisc", "replace", "dev", "eth0", "root", "tbf",
+                    "rate", rate, "burst", "3kb", "latency", "5ms", check=False)
+
+    @keyword("Stream Timestamped Frames On ${server} ${interface}")
+    def stream_timestamped_frames(self, server, interface, can_id="123", gap=0.001, duration=4.0):
+        process = server.exec("python3", LATENCY_SEND_SCRIPT, interface, can_id, str(gap), str(duration),
+                              background=True, log_name="latency_send")
+        process.wait(timeout=float(duration) + 30)
+        return int(process.read_log().strip().splitlines()[-1])
+
+    @keyword("Frame Age Stats Of ${capture} For ${can_id}")
+    def frame_age_stats(self, capture, can_id):
+        ages = sorted(
+            frame.timestamp - int(frame.data, 16) / 1_000_000
+            for frame in parse_candump(capture.read_log())
+            if frame.can_id == can_id.upper() and frame.data
+        )
+        if not ages:
+            return {"count": 0, "avg_ms": 0, "max_ms": 0, "p95_ms": 0}
+        return {
+            "count": len(ages),
+            "avg_ms": round(sum(ages) / len(ages) * 1000),
+            "max_ms": round(ages[-1] * 1000),
+            "p95_ms": round(ages[int(len(ages) * 0.95)] * 1000),
+        }
 
     @keyword("Shape CAN Sink On ${server} ${interface} To ${rate}")
     def shape_can_sink_on(self, server, interface, rate):
