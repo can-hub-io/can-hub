@@ -164,6 +164,14 @@ add_unit_test(test_quic_datagram_backlog
         ${ROOT_SRC_DIR}/platform/linux/quic/quic_datagram_backlog.c
 )
 
+add_unit_test(test_message_framer
+    SOURCES
+        platform/test_message_framer.cpp
+        ${ROOT_SRC_DIR}/platform/linux/shared/message_framer.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+
 add_unit_test(test_tls_channel
     SOURCES
         platform/test_tls_channel.cpp

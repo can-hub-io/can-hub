@@ -28,6 +28,6 @@ bool QuicControlChannel_QueueTx(QuicControlChannel *self, const uint8_t *data, s
 size_t QuicControlChannel_PendingTx(const QuicControlChannel *self, const uint8_t **data);
 void QuicControlChannel_MarkSent(QuicControlChannel *self, size_t size);
 void QuicControlChannel_MarkAcked(QuicControlChannel *self, uint64_t acked_end_offset);
-bool QuicControlChannel_QueueRx(QuicControlChannel *self, const uint8_t *data, size_t size);
+size_t QuicControlChannel_QueueRx(QuicControlChannel *self, const uint8_t *data, size_t size);
 size_t QuicControlChannel_NextMessage(const QuicControlChannel *self, const uint8_t **message);
 void QuicControlChannel_ConsumeMessage(QuicControlChannel *self, size_t size);

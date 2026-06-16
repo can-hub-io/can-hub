@@ -23,9 +23,14 @@ static bool portSendFrame(void *context, uint32_t peer_id, const uint8_t *data, 
 static void portClosePeer(void *context, uint32_t peer_id);
 static TlsServerPeer *findPeer(TlsServerTransport *self, uint32_t peer_id);
 static TlsServerPeer *findFreeSlot(TlsServerTransport *self);
+typedef struct {
+    TlsServerTransport *transport;
+    TlsServerPeer *peer;
+} TlsServerDispatch;
+
 static void pumpHandshake(TlsServerTransport *self, TlsServerPeer *peer);
 static void announcePeer(TlsServerTransport *self, TlsServerPeer *peer);
-static void dispatchMessages(TlsServerTransport *self, TlsServerPeer *peer);
+static void dispatchMessage(void *context, const uint8_t *message, size_t size);
 static void closePeer(TlsServerTransport *self, TlsServerPeer *peer, bool notify);
 static void formatOrigin(const struct sockaddr_in *address, char *out, size_t size);
 
@@ -140,6 +145,8 @@ void TlsServerTransport_OnAcceptReady(TlsServerTransport *self)
 void TlsServerTransport_OnSlotReadable(TlsServerTransport *self, uint8_t slot)
 {
     TlsServerPeer *peer = &self->peers[slot];
+    TlsServerDispatch dispatch = { self, peer };
+    MessageSink sink = { &dispatch, dispatchMessage };
 
     if (!TlsChannel_IsBound(&peer->channel)) {
         return;
@@ -150,13 +157,9 @@ void TlsServerTransport_OnSlotReadable(TlsServerTransport *self, uint8_t slot)
         return;
     }
 
-    if (!TlsChannel_Receive(&peer->channel)) {
-        dispatchMessages(self, peer);
+    if (!TlsChannel_Receive(&peer->channel, &sink)) {
         closePeer(self, peer, true);
-        return;
     }
-
-    dispatchMessages(self, peer);
 }
 
 void TlsServerTransport_OnSlotWritable(TlsServerTransport *self, uint8_t slot)
@@ -273,6 +276,8 @@ static void announcePeer(TlsServerTransport *self, TlsServerPeer *peer)
     char fingerprint_hex[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
     bool has_fingerprint = TlsChannel_PeerFingerprint(&peer->channel, fingerprint_hex);
     HubPeerConnectInfo info;
+    TlsServerDispatch dispatch = { self, peer };
+    MessageSink sink = { &dispatch, dispatchMessage };
 
     peer->announced = true;
     info.fingerprint_hex = has_fingerprint ? fingerprint_hex : NULL;
@@ -281,38 +286,29 @@ static void announcePeer(TlsServerTransport *self, TlsServerPeer *peer)
     info.local = false;
     self->events.on_peer_connected(self->events.context, peer->peer_id, &info, Clock_RealtimeUs());
 
-    if (!TlsChannel_Receive(&peer->channel)) {
+    if (!TlsChannel_Receive(&peer->channel, &sink)) {
         closePeer(self, peer, true);
-        return;
     }
-    dispatchMessages(self, peer);
 }
 
-static void dispatchMessages(TlsServerTransport *self, TlsServerPeer *peer)
+static void dispatchMessage(void *context, const uint8_t *message, size_t size)
 {
+    TlsServerDispatch *dispatch = context;
+    TlsServerTransport *self = dispatch->transport;
+    TlsServerPeer *peer = dispatch->peer;
     MessageHeader header;
-    const uint8_t *message;
-    size_t message_size;
 
-    for (;;) {
-        message_size = MessageFramer_NextMessage(&peer->channel.framer, &message);
-        if (message_size == 0) {
-            return;
-        }
-
-        MessageHeader_Decode(&header, message, message_size);
-        if (header.type == kMESSAGE_TYPE_FRAME) {
-            self->events.on_peer_frame(self->events.context, peer->peer_id, message, message_size);
-        } else {
-            self->events.on_peer_control(
-                self->events.context,
-                peer->peer_id,
-                message,
-                message_size,
-                Clock_RealtimeUs()
-            );
-        }
-        MessageFramer_Consume(&peer->channel.framer, message_size);
+    MessageHeader_Decode(&header, message, size);
+    if (header.type == kMESSAGE_TYPE_FRAME) {
+        self->events.on_peer_frame(self->events.context, peer->peer_id, message, size);
+    } else {
+        self->events.on_peer_control(
+            self->events.context,
+            peer->peer_id,
+            message,
+            size,
+            Clock_RealtimeUs()
+        );
     }
 }
 
