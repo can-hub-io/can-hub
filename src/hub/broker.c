@@ -1221,6 +1221,8 @@ static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id,
     if (route->reliable) {
         if (self->transport->send_frame(self->transport->context, route->peer_id, route->channel, forwarded, size)) {
             countForwarded(self, destination, route->channel);
+        } else {
+            countDropped(self, destination, route->channel);
         }
         return;
     }

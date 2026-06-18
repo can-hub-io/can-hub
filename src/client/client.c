@@ -383,7 +383,7 @@ static void sendHello(Client *self)
     uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size;
 
-    encoded_size = HelloMessage_Build(kPEER_ROLE_CLIENT, self->name, 0, encoded, sizeof(encoded));
+    encoded_size = HelloMessage_Build(kPEER_ROLE_CLIENT, self->name, HELLO_CAP_RELIABLE_CHANNELS, encoded, sizeof(encoded));
 
     if (encoded_size > 0) {
         self->hub->send_control(self->hub->context, encoded, encoded_size);
