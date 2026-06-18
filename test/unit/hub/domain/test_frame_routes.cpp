@@ -28,6 +28,9 @@ describe("frame_routes", []() {
         const InterfaceEntry *entry = InterfaceRegistry_FindByAgentChannel(&registry, 100, 1);
         ChannelOpenRequest request = {
             .interface_id = entry->interface_id,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
         };
         FrameRoute routes[FRAME_ROUTES_MAX];
         uint8_t client_channel = 0;
@@ -42,11 +45,35 @@ describe("frame_routes", []() {
         expect(routes[0].channel).toBe(client_channel);
     });
 
+    it("marks the route reliable when the destination binding is reliable", []() {
+        HubPeer *client = PeerDirectory_Find(&directory, 200);
+        const InterfaceEntry *entry = InterfaceRegistry_FindByAgentChannel(&registry, 100, 1);
+        ChannelOpenRequest request = {
+            .interface_id = entry->interface_id,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = true,
+        };
+        FrameRoute routes[FRAME_ROUTES_MAX];
+        uint8_t client_channel = 0;
+        uint8_t route_count;
+
+        ClientSession_OpenInterface(&client->session, &request, &client_channel);
+
+        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX);
+
+        expect(route_count).toBe(1);
+        expect(routes[0].reliable).toBe(true);
+    });
+
     it("routes an agent frame to every binding of a client that opened the interface twice", []() {
         HubPeer *client = PeerDirectory_Find(&directory, 200);
         const InterfaceEntry *entry = InterfaceRegistry_FindByAgentChannel(&registry, 100, 1);
         ChannelOpenRequest request = {
             .interface_id = entry->interface_id,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
         };
         FrameRoute routes[FRAME_ROUTES_MAX];
         uint8_t first_channel = 0;
@@ -70,6 +97,9 @@ describe("frame_routes", []() {
         const InterfaceEntry *entry = InterfaceRegistry_FindByAgentChannel(&registry, 100, 1);
         ChannelOpenRequest request = {
             .interface_id = entry->interface_id,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
         };
         FrameRoute routes[FRAME_ROUTES_MAX];
         uint8_t channel = 0;
@@ -106,6 +136,9 @@ describe("frame_routes", []() {
         const InterfaceEntry *entry = InterfaceRegistry_FindByAgentChannel(&registry, 100, 1);
         ChannelOpenRequest request = {
             .interface_id = entry->interface_id,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
         };
         FrameRoute routes[FRAME_ROUTES_MAX];
         uint8_t client_channel = 0;

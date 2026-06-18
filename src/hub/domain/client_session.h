@@ -39,6 +39,7 @@ typedef struct {
 void ClientSession_Reset(ClientSession *self);
 bool ClientSession_OpenInterface(ClientSession *self, const ChannelOpenRequest *request, uint8_t *channel);
 bool ClientSession_CanWrite(const ClientSession *self, uint8_t channel);
+bool ClientSession_ChannelReliable(const ClientSession *self, uint8_t channel);
 bool ClientSession_SetFilters(ClientSession *self, uint8_t channel, const CanFilter *filters, uint8_t count);
 bool ClientSession_ChannelAccepts(const ClientSession *self, uint8_t channel, uint32_t can_id);
 void ClientSession_CloseChannel(ClientSession *self, uint8_t channel);

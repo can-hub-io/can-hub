@@ -496,6 +496,7 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
         ack.status = OPEN_STATUS_OK;
         if (reliable) {
             self->transport->set_channel_mode(self->transport->context, peer->peer_id, ack.channel, true);
+            self->transport->set_channel_mode(self->transport->context, entry->agent_peer_id, entry->agent_channel, true);
         }
     }
 
@@ -1213,6 +1214,13 @@ static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id,
             self->metrics.frames_forwarded++;
         } else {
             self->metrics.frames_dropped++;
+        }
+        return;
+    }
+
+    if (route->reliable) {
+        if (self->transport->send_frame(self->transport->context, route->peer_id, route->channel, forwarded, size)) {
+            countForwarded(self, destination, route->channel);
         }
         return;
     }

@@ -44,6 +44,19 @@ bool ClientSession_CanWrite(const ClientSession *self, uint8_t channel)
     return false;
 }
 
+bool ClientSession_ChannelReliable(const ClientSession *self, uint8_t channel)
+{
+    uint8_t i;
+
+    for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
+        if (self->bindings[i].in_use && self->bindings[i].channel == channel) {
+            return self->bindings[i].reliable;
+        }
+    }
+
+    return false;
+}
+
 bool ClientSession_SetFilters(ClientSession *self, uint8_t channel, const CanFilter *filters, uint8_t count)
 {
     ChannelBinding *binding = findByChannel(self, channel);

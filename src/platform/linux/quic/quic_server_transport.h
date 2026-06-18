@@ -17,6 +17,7 @@
 #include "hub/ports/hub_transport_port.h"
 
 #define QUIC_SERVER_PEERS_MAX 64
+#define QUIC_SERVER_RELIABLE_STREAMS_MAX 8
 
 /*
  * QUIC server transport for the hub: one UDP socket multiplexing every
@@ -24,8 +25,19 @@
  * migration and NAT rebinding; the remote address follows the latest
  * packet), one shared expiry timer armed to the earliest deadline. Control
  * plane on the client-opened bidirectional stream, data plane on datagrams.
+ * Reliable channels ride dedicated bidirectional streams: the hub opens one
+ * per channel (set_channel_mode) for that channel's frames; an incoming
+ * stream that is neither the control nor a known reliable stream is adopted
+ * for receive (its frames carry their own channel).
  */
 typedef struct QuicServerTransport QuicServerTransport;
+
+typedef struct {
+    QuicControlChannel stream;
+    uint8_t channel;
+    bool in_use;
+    bool has_channel;
+} QuicReliableStream;
 
 typedef struct {
     QuicServerTransport *transport;
@@ -33,6 +45,7 @@ typedef struct {
     SSL *ssl;
     ngtcp2_crypto_ossl_ctx *tls_context;
     QuicControlChannel control;
+    QuicReliableStream reliable_streams[QUIC_SERVER_RELIABLE_STREAMS_MAX];
     ngtcp2_cid original_dcid;
     char fingerprint_hex[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
     struct sockaddr_storage remote_address;

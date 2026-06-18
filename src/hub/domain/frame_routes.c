@@ -37,6 +37,7 @@ uint8_t FrameRoutes_FromAgent(
             routes[route_count].peer_id = peer->peer_id;
             routes[route_count].channel = binding->channel;
             routes[route_count].suppress_echo = binding->suppress_echo;
+            routes[route_count].reliable = binding->reliable;
             route_count++;
         }
     }
@@ -70,6 +71,7 @@ uint8_t FrameRoutes_FromClient(
     routes[0].peer_id = entry->agent_peer_id;
     routes[0].channel = entry->agent_channel;
     routes[0].suppress_echo = false;
+    routes[0].reliable = ClientSession_ChannelReliable(&client_peer->session, client_channel);
 
     return 1;
 }

@@ -14,6 +14,9 @@ describe("client_session", []() {
     it("opens an interface under a unique channel", []() {
         ChannelOpenRequest request = {
             .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
         };
         uint8_t first_channel = 0;
         uint8_t second_channel = 0;
@@ -32,10 +35,14 @@ describe("client_session", []() {
     it("records the reliable flag on the binding", []() {
         ChannelOpenRequest reliable_request = {
             .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
             .reliable = true,
         };
         ChannelOpenRequest lossy_request = {
             .interface_id = 9,
+            .suppress_echo = false,
+            .can_write = false,
             .reliable = false,
         };
         uint8_t reliable_channel = 0;
@@ -51,6 +58,9 @@ describe("client_session", []() {
     it("maps channels to interfaces in both directions", []() {
         ChannelOpenRequest request = {
             .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
         };
         uint8_t channel = 0;
         uint8_t found_channel = 0;
@@ -72,6 +82,9 @@ describe("client_session", []() {
     it("forgets a closed channel", []() {
         ChannelOpenRequest request = {
             .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
         };
         uint8_t channel = 0;
         uint32_t found_interface = 0;
@@ -88,6 +101,9 @@ describe("client_session", []() {
     it("iterates every binding of an interface", []() {
         ChannelOpenRequest request = {
             .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
         };
         uint8_t first_channel = 0;
         uint8_t second_channel = 0;
@@ -115,6 +131,9 @@ describe("client_session", []() {
     it("iterates nothing for an interface that is not open", []() {
         ChannelOpenRequest request = {
             .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
         };
         uint8_t channel = 0;
         uint8_t iterator = 0;
@@ -130,6 +149,9 @@ describe("client_session", []() {
     it("removes every binding of an interface", []() {
         ChannelOpenRequest request = {
             .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
         };
         uint8_t channel = 0;
         bool channel_found;
@@ -146,6 +168,9 @@ describe("client_session", []() {
     it("accepts every frame on a channel with no filters", []() {
         ChannelOpenRequest request = {
             .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
         };
         uint8_t channel = 0;
 
@@ -158,6 +183,9 @@ describe("client_session", []() {
     it("accepts only frames matching a mask filter", []() {
         ChannelOpenRequest request = {
             .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
         };
         uint8_t channel = 0;
         CanFilter filters[1] = { { 0x100, 0x700 } };
@@ -175,6 +203,9 @@ describe("client_session", []() {
     it("accepts a frame matching any filter in the list", []() {
         ChannelOpenRequest request = {
             .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
         };
         uint8_t channel = 0;
         CanFilter filters[2] = { { 0x100, 0x7FF }, { 0x200, 0x7FF } };
@@ -190,6 +221,9 @@ describe("client_session", []() {
     it("clears filters back to pass-all on an empty set", []() {
         ChannelOpenRequest request = {
             .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
         };
         uint8_t channel = 0;
         CanFilter filters[1] = { { 0x100, 0x7FF } };
@@ -213,6 +247,9 @@ describe("client_session", []() {
     it("rejects opening beyond the binding capacity", []() {
         ChannelOpenRequest request = {
             .interface_id = 0,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
         };
         uint8_t channel = 0;
         bool opened = true;

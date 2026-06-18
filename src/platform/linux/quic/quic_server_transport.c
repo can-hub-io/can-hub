@@ -50,6 +50,12 @@ static void onHandshakeCompleted(void *context);
 static void onDatagram(void *context, const uint8_t *data, size_t size);
 static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, size_t size);
 static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_offset);
+static QuicReliableStream *findReliableStreamByChannel(QuicServerPeer *peer, uint8_t channel);
+static QuicReliableStream *findReliableStreamById(QuicServerPeer *peer, int64_t stream_id);
+static QuicReliableStream *openReliableStream(QuicServerPeer *peer, uint8_t channel);
+static QuicReliableStream *adoptReliableStream(QuicServerPeer *peer, int64_t stream_id);
+static void receiveControlData(QuicServerPeer *peer, const uint8_t *data, size_t size);
+static void receiveReliableData(QuicServerPeer *peer, QuicReliableStream *reliable, const uint8_t *data, size_t size);
 
 /* ---------- public ---------- */
 
@@ -238,22 +244,36 @@ static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, cons
 {
     QuicServerTransport *self = context;
     QuicServerPeer *peer = findPeerById(self, peer_id);
-
-    (void)channel;
+    QuicReliableStream *reliable;
 
     if (peer == NULL || !peer->connected || peer->close_pending) {
         return false;
     }
 
-    return flushPeer(self, peer, data, size);
+    reliable = findReliableStreamByChannel(peer, channel);
+    if (reliable == NULL) {
+        return flushPeer(self, peer, data, size);
+    }
+    if (!QuicControlChannel_QueueTx(&reliable->stream, data, size)) {
+        return false;
+    }
+    if (self->dispatching) {
+        return true;
+    }
+
+    return flushPeer(self, peer, NULL, 0);
 }
 
 static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable)
 {
-    (void)context;
-    (void)peer_id;
-    (void)channel;
-    (void)reliable;
+    QuicServerTransport *self = context;
+    QuicServerPeer *peer = findPeerById(self, peer_id);
+
+    if (peer == NULL || !peer->connected || !reliable) {
+        return;
+    }
+
+    openReliableStream(peer, channel);
 }
 
 static void portClosePeer(void *context, uint32_t peer_id)
@@ -401,6 +421,7 @@ static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer, const uin
 {
     QuicEgressSink sink = { peer, sendPacketToPeer };
     bool accepted = true;
+    uint8_t i;
 
     if (datagram != NULL) {
         if (!QuicEgress_FlushDatagram(&peer->connection, &sink, datagram, datagram_size, &accepted)) {
@@ -412,6 +433,16 @@ static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer, const uin
     if (!QuicEgress_Drain(&peer->connection, &peer->control, &sink)) {
         teardownPeer(self, peer, true);
         return false;
+    }
+
+    for(i=0; i<QUIC_SERVER_RELIABLE_STREAMS_MAX; i++) {
+        if (!peer->reliable_streams[i].in_use) {
+            continue;
+        }
+        if (!QuicEgress_Drain(&peer->connection, &peer->reliable_streams[i].stream, &sink)) {
+            teardownPeer(self, peer, true);
+            return false;
+        }
     }
 
     rearmTimer(self);
@@ -479,12 +510,16 @@ static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool n
 {
     bool was_connected = peer->connected;
     uint32_t peer_id = peer->peer_id;
+    uint8_t i;
 
     QuicServerSecurity_FreeSession(peer->ssl, peer->tls_context);
     QuicConnection_Close(&peer->connection);
     peer->ssl = NULL;
     peer->tls_context = NULL;
     QuicControlChannel_Reset(&peer->control);
+    for(i=0; i<QUIC_SERVER_RELIABLE_STREAMS_MAX; i++) {
+        peer->reliable_streams[i].in_use = false;
+    }
     peer->connected = false;
     peer->close_pending = false;
 
@@ -587,16 +622,47 @@ static void onDatagram(void *context, const uint8_t *data, size_t size)
 static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, size_t size)
 {
     QuicServerPeer *peer = context;
-
-    size_t offset = 0;
-    size_t taken;
+    QuicReliableStream *reliable;
 
     if (peer->control.stream_id == QUIC_CONTROL_NO_STREAM) {
         peer->control.stream_id = stream_id;
     }
-    if (stream_id != peer->control.stream_id) {
+    if (stream_id == peer->control.stream_id) {
+        receiveControlData(peer, data, size);
+        QuicConnection_ExtendStreamCredit(&peer->connection, stream_id, size);
         return;
     }
+
+    reliable = findReliableStreamById(peer, stream_id);
+    if (reliable == NULL) {
+        reliable = adoptReliableStream(peer, stream_id);
+    }
+    if (reliable != NULL) {
+        receiveReliableData(peer, reliable, data, size);
+    }
+    QuicConnection_ExtendStreamCredit(&peer->connection, stream_id, size);
+}
+
+static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_offset)
+{
+    QuicServerPeer *peer = context;
+    QuicReliableStream *reliable;
+
+    if (stream_id == peer->control.stream_id) {
+        QuicControlChannel_MarkAcked(&peer->control, acked_end_offset);
+        return;
+    }
+
+    reliable = findReliableStreamById(peer, stream_id);
+    if (reliable != NULL) {
+        QuicControlChannel_MarkAcked(&reliable->stream, acked_end_offset);
+    }
+}
+
+static void receiveControlData(QuicServerPeer *peer, const uint8_t *data, size_t size)
+{
+    size_t offset = 0;
+    size_t taken;
 
     while (offset < size) {
         taken = QuicControlChannel_QueueRx(&peer->control, data + offset, size - offset);
@@ -606,16 +672,109 @@ static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, 
             break;
         }
     }
-    QuicConnection_ExtendStreamCredit(&peer->connection, stream_id, size);
 }
 
-static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_offset)
+static void receiveReliableData(QuicServerPeer *peer, QuicReliableStream *reliable, const uint8_t *data, size_t size)
 {
-    QuicServerPeer *peer = context;
+    const uint8_t *message;
+    size_t message_size;
+    size_t offset = 0;
+    size_t taken;
 
-    if (stream_id != peer->control.stream_id) {
-        return;
+    while (offset < size) {
+        taken = QuicControlChannel_QueueRx(&reliable->stream, data + offset, size - offset);
+        offset += taken;
+        for (;;) {
+            message_size = QuicControlChannel_NextMessage(&reliable->stream, &message);
+            if (message_size == 0) {
+                break;
+            }
+            peer->transport->events.on_peer_frame(peer->transport->events.context, peer->peer_id, message, message_size);
+            QuicControlChannel_ConsumeMessage(&reliable->stream, message_size);
+        }
+        if (taken == 0) {
+            break;
+        }
+    }
+}
+
+static QuicReliableStream *findReliableStreamByChannel(QuicServerPeer *peer, uint8_t channel)
+{
+    QuicReliableStream *reliable;
+    uint8_t i;
+
+    for(i=0; i<QUIC_SERVER_RELIABLE_STREAMS_MAX; i++) {
+        reliable = &peer->reliable_streams[i];
+        if (reliable->in_use && reliable->has_channel && reliable->channel == channel) {
+            return reliable;
+        }
     }
 
-    QuicControlChannel_MarkAcked(&peer->control, acked_end_offset);
+    return NULL;
+}
+
+static QuicReliableStream *findReliableStreamById(QuicServerPeer *peer, int64_t stream_id)
+{
+    QuicReliableStream *reliable;
+    uint8_t i;
+
+    for(i=0; i<QUIC_SERVER_RELIABLE_STREAMS_MAX; i++) {
+        reliable = &peer->reliable_streams[i];
+        if (reliable->in_use && reliable->stream.stream_id == stream_id) {
+            return reliable;
+        }
+    }
+
+    return NULL;
+}
+
+static QuicReliableStream *openReliableStream(QuicServerPeer *peer, uint8_t channel)
+{
+    QuicReliableStream *reliable;
+    int64_t stream_id;
+    uint8_t i;
+
+    reliable = findReliableStreamByChannel(peer, channel);
+    if (reliable != NULL) {
+        return reliable;
+    }
+    if (!QuicConnection_OpenControlStream(&peer->connection, &stream_id)) {
+        return NULL;
+    }
+
+    for(i=0; i<QUIC_SERVER_RELIABLE_STREAMS_MAX; i++) {
+        reliable = &peer->reliable_streams[i];
+        if (reliable->in_use) {
+            continue;
+        }
+        QuicControlChannel_Reset(&reliable->stream);
+        reliable->stream.stream_id = stream_id;
+        reliable->channel = channel;
+        reliable->in_use = true;
+        reliable->has_channel = true;
+        return reliable;
+    }
+
+    return NULL;
+}
+
+static QuicReliableStream *adoptReliableStream(QuicServerPeer *peer, int64_t stream_id)
+{
+    QuicReliableStream *reliable;
+    uint8_t i;
+
+    for(i=0; i<QUIC_SERVER_RELIABLE_STREAMS_MAX; i++) {
+        reliable = &peer->reliable_streams[i];
+        if (reliable->in_use) {
+            continue;
+        }
+        QuicControlChannel_Reset(&reliable->stream);
+        reliable->stream.stream_id = stream_id;
+        reliable->channel = 0;
+        reliable->in_use = true;
+        reliable->has_channel = false;
+        return reliable;
+    }
+
+    return NULL;
 }

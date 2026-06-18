@@ -154,6 +154,9 @@ static uint8_t openInterfaceAt(HubPeer *client, uint8_t registry_index)
 {
     ChannelOpenRequest request = {
         .interface_id = registry.entries[registry_index].interface_id,
+        .suppress_echo = false,
+        .can_write = false,
+        .reliable = false,
     };
     uint8_t channel = 0;
 
