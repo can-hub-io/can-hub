@@ -11,7 +11,8 @@
 static bool portConnect(void *context);
 static void portDisconnect(void *context);
 static bool portSendControl(void *context, const uint8_t *data, size_t size);
-static bool portSendFrame(void *context, const uint8_t *data, size_t size);
+static bool portSendFrame(void *context, uint8_t channel, const uint8_t *data, size_t size);
+static void portSetChannelMode(void *context, uint8_t channel, bool reliable);
 static void teardown(QuicClientTransport *self, bool notify);
 static bool flushEgress(QuicClientTransport *self);
 static void sendPacket(void *context, const uint8_t *packet, size_t size);
@@ -46,6 +47,7 @@ bool QuicClientTransport_Init(
     self->port.disconnect = portDisconnect;
     self->port.send_control = portSendControl;
     self->port.send_frame = portSendFrame;
+    self->port.set_channel_mode = portSetChannelMode;
     self->events = *events;
     if (security_config != NULL) {
         self->security_config = *security_config;
@@ -197,9 +199,11 @@ static bool portSendControl(void *context, const uint8_t *data, size_t size)
     return flushEgress(self);
 }
 
-static bool portSendFrame(void *context, const uint8_t *data, size_t size)
+static bool portSendFrame(void *context, uint8_t channel, const uint8_t *data, size_t size)
 {
     QuicClientTransport *self = context;
+
+    (void)channel;
 
     if (!self->connected) {
         return false;
@@ -212,6 +216,13 @@ static bool portSendFrame(void *context, const uint8_t *data, size_t size)
     }
 
     return flushEgress(self);
+}
+
+static void portSetChannelMode(void *context, uint8_t channel, bool reliable)
+{
+    (void)context;
+    (void)channel;
+    (void)reliable;
 }
 
 /* ---------- private: lifecycle ---------- */

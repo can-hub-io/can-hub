@@ -165,7 +165,7 @@ void Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *
         return;
     }
 
-    self->transport->send_frame(self->transport->context, encoded, encoded_size);
+    self->transport->send_frame(self->transport->context, outgoing.channel, encoded, encoded_size);
 }
 
 void Agent_OnTransportFrame(Agent *self, const uint8_t *data, size_t size)

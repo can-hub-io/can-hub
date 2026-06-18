@@ -494,6 +494,9 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
     request.reliable = reliable;
     if (ClientSession_OpenInterface(&peer->session, &request, &ack.channel)) {
         ack.status = OPEN_STATUS_OK;
+        if (reliable) {
+            self->transport->set_channel_mode(self->transport->context, peer->peer_id, ack.channel, true);
+        }
     }
 
     sendControl(self, peer, encoded, OpenAckMessage_Encode(&ack, encoded, sizeof(encoded)));
@@ -1206,7 +1209,7 @@ static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id,
     forwarded[FRAME_ROUTE_FLAGS_OFFSET] = route_flags;
 
     if (destination == NULL) {
-        if (self->transport->send_frame(self->transport->context, route->peer_id, forwarded, size)) {
+        if (self->transport->send_frame(self->transport->context, route->peer_id, route->channel, forwarded, size)) {
             self->metrics.frames_forwarded++;
         } else {
             self->metrics.frames_dropped++;
@@ -1229,7 +1232,7 @@ static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id,
         return;
     }
 
-    if (self->transport->send_frame(self->transport->context, route->peer_id, forwarded, size)) {
+    if (self->transport->send_frame(self->transport->context, route->peer_id, route->channel, forwarded, size)) {
         countForwarded(self, destination, route->channel);
         return;
     }
@@ -1272,7 +1275,7 @@ static void drainPeer(Broker *self, HubPeer *peer)
             if (!InterfaceRegistry_TryEgress(&self->registry, peer->peer_id, channel, frameWireBits(front, size), self->now_us)) {
                 break;
             }
-            if (!self->transport->send_frame(self->transport->context, peer->peer_id, front, size)) {
+            if (!self->transport->send_frame(self->transport->context, peer->peer_id, channel, front, size)) {
                 return;
             }
             EgressQueue_PopChannel(&peer->egress, channel);

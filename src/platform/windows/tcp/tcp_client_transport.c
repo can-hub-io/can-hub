@@ -12,7 +12,8 @@
 static bool portConnect(void *context);
 static void portDisconnect(void *context);
 static bool portSendControl(void *context, const uint8_t *data, size_t size);
-static bool portSendFrame(void *context, const uint8_t *data, size_t size);
+static bool portSendFrame(void *context, uint8_t channel, const uint8_t *data, size_t size);
+static void portSetChannelMode(void *context, uint8_t channel, bool reliable);
 static void initTransportBase(TcpClientTransport *self, const TransportEvents *events);
 static bool connectTcp(TcpClientTransport *self, int32_t *connected_fd);
 static void dispatchMessage(void *context, const uint8_t *message, size_t size);
@@ -144,9 +145,11 @@ static bool portSendControl(void *context, const uint8_t *data, size_t size)
     return true;
 }
 
-static bool portSendFrame(void *context, const uint8_t *data, size_t size)
+static bool portSendFrame(void *context, uint8_t channel, const uint8_t *data, size_t size)
 {
     TcpClientTransport *self = context;
+
+    (void)channel;
 
     if (!self->connected) {
         return false;
@@ -156,6 +159,13 @@ static bool portSendFrame(void *context, const uint8_t *data, size_t size)
     }
 
     return portSendControl(context, data, size);
+}
+
+static void portSetChannelMode(void *context, uint8_t channel, bool reliable)
+{
+    (void)context;
+    (void)channel;
+    (void)reliable;
 }
 
 /* ---------- private ---------- */
@@ -168,6 +178,7 @@ static void initTransportBase(TcpClientTransport *self, const TransportEvents *e
     self->port.disconnect = portDisconnect;
     self->port.send_control = portSendControl;
     self->port.send_frame = portSendFrame;
+    self->port.set_channel_mode = portSetChannelMode;
     self->events = *events;
     TcpChannel_Unbind(&self->channel);
 }

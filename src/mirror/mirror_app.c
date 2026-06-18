@@ -73,7 +73,7 @@ void MirrorApp_OnCanFrame(MirrorApp *self, const FrameMessage *frame)
     outgoing.route_flags = 0;
     encoded_size = FrameMessage_Encode(&outgoing, encoded, sizeof(encoded));
     if (encoded_size > 0) {
-        self->hub->send_frame(self->hub->context, encoded, encoded_size);
+        self->hub->send_frame(self->hub->context, outgoing.channel, encoded, encoded_size);
     }
 }
 

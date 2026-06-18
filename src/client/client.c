@@ -143,7 +143,7 @@ bool Client_SendFrame(Client *self, FrameMessage *frame, uint64_t now_us)
         return false;
     }
 
-    return self->hub->send_frame(self->hub->context, encoded, encoded_size);
+    return self->hub->send_frame(self->hub->context, frame->channel, encoded, encoded_size);
 }
 
 uint8_t Client_State(const Client *self)

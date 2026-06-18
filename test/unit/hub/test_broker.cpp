@@ -424,6 +424,32 @@ describe("broker", []() {
             expect(openReliableStatus(CLIENT_PEER, interface_id)).toBe(OPEN_STATUS_OK);
         });
 
+        it("marks the client channel reliable on the transport after a reliable open", []() {
+            uint32_t interface_id;
+
+            BrokerDriver_ConnectAgentWithCapabilities(&events, &transport, AGENT_PEER, &truck_registration, HELLO_CAP_RELIABLE_CHANNELS);
+            BrokerDriver_ConnectClientWithCapabilities(&events, CLIENT_PEER, HELLO_CAP_RELIABLE_CHANNELS);
+            interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+
+            openReliableStatus(CLIENT_PEER, interface_id);
+
+            expect(transport.channel_mode_count).toBe((uint32_t)1);
+            expect(transport.last_channel_mode_peer).toBe((uint32_t)CLIENT_PEER);
+            expect(transport.last_channel_mode_reliable).toBe(true);
+        });
+
+        it("does not touch the channel mode on a lossy open", []() {
+            uint32_t interface_id;
+
+            BrokerDriver_ConnectAgentWithCapabilities(&events, &transport, AGENT_PEER, &truck_registration, HELLO_CAP_RELIABLE_CHANNELS);
+            BrokerDriver_ConnectClientWithCapabilities(&events, CLIENT_PEER, HELLO_CAP_RELIABLE_CHANNELS);
+            interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+
+            BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, 0);
+
+            expect(transport.channel_mode_count).toBe((uint32_t)0);
+        });
+
         it("rejects a reliable open when the client lacks the capability", []() {
             uint32_t interface_id;
 

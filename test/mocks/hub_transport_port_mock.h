@@ -15,10 +15,15 @@ typedef struct {
     size_t control_sizes[HUB_MOCK_CONTROL_LOG_MAX];
     int frame_count;
     uint32_t frame_peers[HUB_MOCK_FRAME_LOG_MAX];
+    uint8_t frame_channels[HUB_MOCK_FRAME_LOG_MAX];
     uint8_t frame_log[HUB_MOCK_FRAME_LOG_MAX][HUB_MOCK_FRAME_SIZE];
     size_t frame_sizes[HUB_MOCK_FRAME_LOG_MAX];
     int close_count;
     uint32_t last_closed_peer;
+    uint32_t channel_mode_count;
+    uint32_t last_channel_mode_peer;
+    uint8_t last_channel_mode_channel;
+    bool last_channel_mode_reliable;
     bool control_result;
     bool frame_result;
 } HubTransportPortMock;

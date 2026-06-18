@@ -20,7 +20,8 @@
 
 static void formatOrigin(const struct sockaddr_storage *address, char *out, size_t size);
 static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
-static bool portSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
+static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
+static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
 static void portClosePeer(void *context, uint32_t peer_id);
 static QuicServerPeer *findPeerById(QuicServerTransport *self, uint32_t peer_id);
 static QuicServerPeer *findPeerByDcid(QuicServerTransport *self, const uint8_t *packet, size_t packet_size);
@@ -69,6 +70,7 @@ bool QuicServerTransport_Init(
     self->port.context = self;
     self->port.send_control = portSendControl;
     self->port.send_frame = portSendFrame;
+    self->port.set_channel_mode = portSetChannelMode;
     self->port.close_peer = portClosePeer;
     self->events = *events;
     self->next_peer_id = peer_id_base;
@@ -232,16 +234,26 @@ static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data
     return flushPeer(self, peer, NULL, 0);
 }
 
-static bool portSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size)
+static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size)
 {
     QuicServerTransport *self = context;
     QuicServerPeer *peer = findPeerById(self, peer_id);
+
+    (void)channel;
 
     if (peer == NULL || !peer->connected || peer->close_pending) {
         return false;
     }
 
     return flushPeer(self, peer, data, size);
+}
+
+static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable)
+{
+    (void)context;
+    (void)peer_id;
+    (void)channel;
+    (void)reliable;
 }
 
 static void portClosePeer(void *context, uint32_t peer_id)
