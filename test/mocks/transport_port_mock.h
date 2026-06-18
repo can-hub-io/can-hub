@@ -17,6 +17,10 @@ typedef struct {
     int frame_count;
     uint8_t last_frame[MOCK_FRAME_BUFFER_SIZE];
     size_t last_frame_size;
+    uint8_t last_frame_channel;
+    uint32_t channel_mode_count;
+    uint8_t last_channel_mode_channel;
+    bool last_channel_mode_reliable;
 } TransportPortMock;
 
 void TransportPortMock_Reset(TransportPortMock *self);

@@ -10,14 +10,18 @@
 #define QUIC_CONTROL_NO_STREAM (-1)
 
 /*
- * Control-plane byte channel over one QUIC stream: TX retention until the
- * peer acknowledges (ngtcp2 does not copy stream data), RX reassembly of
- * length-delimited protocol messages. Pure buffer logic, no I/O.
+ * Byte channel over one QUIC stream: TX retention until the peer acknowledges
+ * (ngtcp2 does not copy stream data, so retained bytes must keep a stable
+ * address while in flight), RX reassembly of length-delimited protocol
+ * messages. The TX side is a ring buffer: acked bytes are reclaimed by
+ * advancing the head, never by moving the still-in-flight tail. Pure buffer
+ * logic, no I/O. Shared by the control plane and the reliable data streams.
  */
 typedef struct {
     int64_t stream_id;
     uint64_t tx_base_offset;
     uint8_t tx_buffer[QUIC_CONTROL_TX_BUFFER_SIZE];
+    size_t tx_head;
     size_t tx_used;
     size_t tx_sent;
     MessageFramer framer;

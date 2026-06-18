@@ -165,7 +165,7 @@ void Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *
         return;
     }
 
-    self->transport->send_frame(self->transport->context, encoded, encoded_size);
+    self->transport->send_frame(self->transport->context, outgoing.channel, encoded, encoded_size);
 }
 
 void Agent_OnTransportFrame(Agent *self, const uint8_t *data, size_t size)
@@ -283,7 +283,7 @@ static void sendHelloAndRegister(Agent *self)
     uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size;
 
-    encoded_size = HelloMessage_Build(kPEER_ROLE_AGENT, NULL, 0, encoded, sizeof(encoded));
+    encoded_size = HelloMessage_Build(kPEER_ROLE_AGENT, NULL, HELLO_CAP_RELIABLE_CHANNELS, encoded, sizeof(encoded));
     self->transport->send_control(self->transport->context, encoded, encoded_size);
 
     encoded_size = RegisterMessage_Encode(&self->registration, encoded, sizeof(encoded));

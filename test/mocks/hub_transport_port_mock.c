@@ -3,7 +3,8 @@
 #include <string.h>
 
 static bool mockSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
-static bool mockSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
+static bool mockSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
+static void mockSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
 static void mockClosePeer(void *context, uint32_t peer_id);
 
 /* ---------- public ---------- */
@@ -14,6 +15,7 @@ void HubTransportPortMock_Reset(HubTransportPortMock *self)
     self->port.context = self;
     self->port.send_control = mockSendControl;
     self->port.send_frame = mockSendFrame;
+    self->port.set_channel_mode = mockSetChannelMode;
     self->port.close_peer = mockClosePeer;
     self->control_result = true;
     self->frame_result = true;
@@ -40,7 +42,7 @@ static bool mockSendControl(void *context, uint32_t peer_id, const uint8_t *data
     return true;
 }
 
-static bool mockSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size)
+static bool mockSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size)
 {
     HubTransportPortMock *self = context;
 
@@ -52,11 +54,22 @@ static bool mockSendFrame(void *context, uint32_t peer_id, const uint8_t *data, 
     }
 
     self->frame_peers[self->frame_count] = peer_id;
+    self->frame_channels[self->frame_count] = channel;
     memcpy(self->frame_log[self->frame_count], data, size);
     self->frame_sizes[self->frame_count] = size;
     self->frame_count++;
 
     return true;
+}
+
+static void mockSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable)
+{
+    HubTransportPortMock *self = context;
+
+    self->channel_mode_count++;
+    self->last_channel_mode_peer = peer_id;
+    self->last_channel_mode_channel = channel;
+    self->last_channel_mode_reliable = reliable;
 }
 
 static void mockClosePeer(void *context, uint32_t peer_id)

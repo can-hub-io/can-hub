@@ -8,6 +8,8 @@
 #define HELLO_BODY_SIZE 72
 #define PROTOCOL_VERSION 0
 
+#define HELLO_CAP_RELIABLE_CHANNELS (1u << 0)
+
 typedef enum tpeer_role_e {
     kPEER_ROLE_AGENT = 1,
     kPEER_ROLE_CLIENT = 2,

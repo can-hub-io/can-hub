@@ -84,6 +84,7 @@ static void countDropped(Broker *self, HubPeer *peer, uint8_t channel);
 static uint8_t injectionToken(Broker *self, const HubPeer *sender);
 static bool clientCanRead(Broker *self, const HubPeer *peer, const InterfaceEntry *entry);
 static bool clientCanWrite(Broker *self, const HubPeer *peer, const InterfaceEntry *entry);
+static bool reliableEndpointsSupport(Broker *self, const HubPeer *client, const InterfaceEntry *entry);
 static uint32_t echoOriginatorPeerId(Broker *self, uint8_t route_flags);
 static void tickHelloDeadline(Broker *self, HubPeer *peer, uint64_t now_us);
 
@@ -369,6 +370,8 @@ static void handleHello(Broker *self, HubPeer *peer, const MessageHeader *header
         return;
     }
 
+    peer->capabilities = hello.capabilities;
+
     if (peer->role == kHUB_PEER_ROLE_CLIENT && hello.name[0] != '\0') {
         HubPeer_SetAgentName(peer, hello.name);
     }
@@ -442,8 +445,9 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
     OpenAckMessage ack;
     const InterfaceEntry *entry;
     uint8_t encoded[CONTROL_BUFFER_SIZE];
-    bool suppress_echo;
+    ChannelOpenRequest request;
     bool can_write;
+    bool reliable;
 
     if (peer->role != kHUB_PEER_ROLE_CLIENT) {
         return;
@@ -477,9 +481,22 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
         return;
     }
 
-    suppress_echo = (open.flags & OPEN_FLAG_SUPPRESS_OWN_ECHO) != 0;
-    if (ClientSession_OpenInterface(&peer->session, open.interface_id, suppress_echo, can_write, &ack.channel)) {
+    reliable = (open.flags & OPEN_FLAG_RELIABLE) != 0;
+    if (reliable && !reliableEndpointsSupport(self, peer, entry)) {
+        ack.status = OPEN_STATUS_RELIABLE_UNSUPPORTED;
+        sendControl(self, peer, encoded, OpenAckMessage_Encode(&ack, encoded, sizeof(encoded)));
+        return;
+    }
+
+    request.interface_id = open.interface_id;
+    request.suppress_echo = (open.flags & OPEN_FLAG_SUPPRESS_OWN_ECHO) != 0;
+    request.can_write = can_write;
+    request.reliable = reliable;
+    if (ClientSession_OpenInterface(&peer->session, &request, &ack.channel)) {
         ack.status = OPEN_STATUS_OK;
+        if (reliable) {
+            self->transport->set_channel_mode(self->transport->context, entry->agent_peer_id, entry->agent_channel, true);
+        }
     }
 
     sendControl(self, peer, encoded, OpenAckMessage_Encode(&ack, encoded, sizeof(encoded)));
@@ -1192,10 +1209,19 @@ static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id,
     forwarded[FRAME_ROUTE_FLAGS_OFFSET] = route_flags;
 
     if (destination == NULL) {
-        if (self->transport->send_frame(self->transport->context, route->peer_id, forwarded, size)) {
+        if (self->transport->send_frame(self->transport->context, route->peer_id, route->channel, forwarded, size)) {
             self->metrics.frames_forwarded++;
         } else {
             self->metrics.frames_dropped++;
+        }
+        return;
+    }
+
+    if (route->reliable) {
+        if (self->transport->send_frame(self->transport->context, route->peer_id, route->channel, forwarded, size)) {
+            countForwarded(self, destination, route->channel);
+        } else {
+            countDropped(self, destination, route->channel);
         }
         return;
     }
@@ -1215,7 +1241,7 @@ static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id,
         return;
     }
 
-    if (self->transport->send_frame(self->transport->context, route->peer_id, forwarded, size)) {
+    if (self->transport->send_frame(self->transport->context, route->peer_id, route->channel, forwarded, size)) {
         countForwarded(self, destination, route->channel);
         return;
     }
@@ -1258,7 +1284,7 @@ static void drainPeer(Broker *self, HubPeer *peer)
             if (!InterfaceRegistry_TryEgress(&self->registry, peer->peer_id, channel, frameWireBits(front, size), self->now_us)) {
                 break;
             }
-            if (!self->transport->send_frame(self->transport->context, peer->peer_id, front, size)) {
+            if (!self->transport->send_frame(self->transport->context, peer->peer_id, channel, front, size)) {
                 return;
             }
             EgressQueue_PopChannel(&peer->egress, channel);
@@ -1348,6 +1374,19 @@ static bool clientCanWrite(Broker *self, const HubPeer *peer, const InterfaceEnt
         entry->agent_name,
         entry->interface_name
     );
+}
+
+static bool reliableEndpointsSupport(Broker *self, const HubPeer *client, const InterfaceEntry *entry)
+{
+    const HubPeer *agent;
+
+    if ((client->capabilities & HELLO_CAP_RELIABLE_CHANNELS) == 0) {
+        return false;
+    }
+
+    agent = PeerDirectory_Find(&self->directory, entry->agent_peer_id);
+
+    return agent != NULL && (agent->capabilities & HELLO_CAP_RELIABLE_CHANNELS) != 0;
 }
 
 static uint8_t injectionToken(Broker *self, const HubPeer *sender)

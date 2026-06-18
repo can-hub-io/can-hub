@@ -16,7 +16,8 @@
 static bool portConnect(void *context);
 static void portDisconnect(void *context);
 static bool portSendControl(void *context, const uint8_t *data, size_t size);
-static bool portSendFrame(void *context, const uint8_t *data, size_t size);
+static bool portSendFrame(void *context, uint8_t channel, const uint8_t *data, size_t size);
+static void portSetChannelMode(void *context, uint8_t channel, bool reliable);
 static bool connectTcp(TlsClientTransport *self, int32_t *connected_fd);
 static void pumpHandshake(TlsClientTransport *self);
 static void dispatchMessage(void *context, const uint8_t *message, size_t size);
@@ -38,6 +39,7 @@ bool TlsClientTransport_Init(
     self->port.disconnect = portDisconnect;
     self->port.send_control = portSendControl;
     self->port.send_frame = portSendFrame;
+    self->port.set_channel_mode = portSetChannelMode;
     self->events = *events;
     snprintf(self->host, TLS_CLIENT_HOST_MAX, "%s", host);
     snprintf(self->port_text, TLS_CLIENT_PORT_TEXT_MAX, "%s", port);
@@ -166,9 +168,11 @@ static bool portSendControl(void *context, const uint8_t *data, size_t size)
     return true;
 }
 
-static bool portSendFrame(void *context, const uint8_t *data, size_t size)
+static bool portSendFrame(void *context, uint8_t channel, const uint8_t *data, size_t size)
 {
     TlsClientTransport *self = context;
+
+    (void)channel;
 
     if (!self->announced) {
         return false;
@@ -178,6 +182,13 @@ static bool portSendFrame(void *context, const uint8_t *data, size_t size)
     }
 
     return portSendControl(context, data, size);
+}
+
+static void portSetChannelMode(void *context, uint8_t channel, bool reliable)
+{
+    (void)context;
+    (void)channel;
+    (void)reliable;
 }
 
 /* ---------- private ---------- */

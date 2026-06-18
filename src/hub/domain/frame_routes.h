@@ -17,6 +17,7 @@ typedef struct {
     uint32_t peer_id;
     uint8_t channel;
     bool suppress_echo;
+    bool reliable;
 } FrameRoute;
 
 uint8_t FrameRoutes_FromAgent(

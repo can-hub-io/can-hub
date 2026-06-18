@@ -9,7 +9,7 @@ LICENSE) with a commercial option (see LICENSE.commercial).
 Binary protocol, little-endian. Two planes:
 
 - Control plane: reliable, ordered (QUIC bidirectional stream, or the TCP connection itself).
-- Data plane: unreliable, latest-wins (QUIC datagrams; over TCP it shares the control stream). CAN frame messages.
+- Data plane: unreliable, latest-wins by default (QUIC datagrams; over TCP it shares the control stream). CAN frame messages. A channel may opt in to **reliable** delivery at OPEN time (see [Reliable channels](#reliable-channels)): its frames move to a dedicated bidirectional QUIC stream — in-order and lossless — without head-of-line-blocking the lossy cyclic traffic.
 
 Design rules: every message has a fixed layout with fields at known offsets, naturally aligned (u32 on multiples of 4, u64 on multiples of 8, counting from the start of the message, header included), with explicit reserved padding zeroed by the sender. A 32-bit microcontroller agent decodes with a single bounds check and a packed-struct overlay — no parsing loops, no cursors. Strings are fixed-size char arrays, NUL-terminated and NUL-padded. Control messages are rare; their wire size does not matter. The only trailing variable part in the whole protocol is the FRAME payload.
 
@@ -99,7 +99,8 @@ HELLO (total 76)
 @4   version u8
 @5   role u8 (1 agent, 2 client, 3 admin)
 @6   reserved u16
-@8   capabilities u32
+@8   capabilities u32 (feature bitset; bit 0 reliable channels — see Reliable
+              channels. Unknown bits are ignored, never fatal.)
 @12  name char[64]   (optional client label; agents name themselves in REGISTER)
 
 ERROR (total 72)
@@ -148,11 +149,17 @@ OPEN (total 12)
               echoed back to it when they return from the bus.
               bit 1: want write — the client intends to inject; the hub
               rejects the OPEN up front if the client is not authorized to
-              write this interface, instead of silently dropping its frames)
+              write this interface, instead of silently dropping its frames.
+              bit 2: reliable — carry this channel on a dedicated reliable
+              QUIC stream instead of the lossy datagram plane (see Reliable
+              channels). Requires the reliable-channels capability advertised
+              in HELLO, else the OPEN is rejected with status 4.)
 @9   reserved u8[3]
 
 OPEN_ACK (total 12)
-@4   status u8 (0 ok, 1 rejected/unknown interface, 2 write denied, 3 read denied)
+@4   status u8 (0 ok, 1 rejected/unknown interface, 2 write denied, 3 read denied,
+              4 reliable unsupported: OPEN set the reliable flag but the peer
+              did not advertise the reliable-channels capability in HELLO)
 @5   channel u8
 @6   reserved u16
 @8   interface_id u32
@@ -445,6 +452,60 @@ channel with the suppress-own-echo flag.
 
 Multiple FRAME messages may be packed back-to-back in one datagram up to the path MTU.
 
+## Reliable channels
+
+The default data plane is lossy and latest-wins: correct for cyclic telemetry,
+wrong for ISOTP transfers, UDS sequences and firmware upgrades, which need every
+frame, in order. A channel may opt in to **reliable** delivery — in-order,
+lossless, both directions — without changing the default for any other channel.
+
+**Capability.** A peer advertises support with bit 0 of the HELLO `capabilities`
+bitset (reliable channels). The bit is per connection: the client declares it on
+its HELLO to the hub, the agent declares it on its REGISTER-time HELLO. Unknown
+capability bits are ignored, never fatal.
+
+**Activation is on-demand and per channel.** The client sets bit 2 (reliable) on
+the OPEN for the flow that needs it; every other channel on the same connection
+stays on the lossy datagram plane. Reliability is an attribute of the channel,
+fixed at OPEN, and applies to **both directions** of the channel — TX injections
+and the RX frames matching its SUBSCRIBE filters all ride the reliable path.
+SUBSCRIBE is unchanged and carries no reliability flag of its own.
+
+**Gating.** If an OPEN sets the reliable flag but the relevant peer did not
+advertise the capability, the hub rejects it with OPEN_ACK status 4 (reliable
+unsupported) rather than silently degrading to the lossy plane.
+
+**Transport.** A reliable channel maps to one dedicated **bidirectional QUIC
+stream**, distinct from the control stream and from the datagram plane:
+
+- client ↔ hub: the client opens a client-initiated bidirectional stream;
+- hub ↔ agent: the hub opens a server-initiated bidirectional stream (the hub is
+  the QUIC server on both connections).
+
+One stream per reliable channel isolates head-of-line blocking to that flow: a
+lost segment on the firmware stream stalls only that stream, never the cyclic
+datagrams nor another reliable channel. FRAME messages on a reliable stream are
+length-framed by the message header (a stream is a byte stream, so frames are not
+free-packed the way they are inside a single datagram).
+
+**Relay and backpressure.** The hub copies frames between the client-side and
+agent-side streams of the channel. Stream flow control then propagates
+backpressure end to end: if the agent's CAN-tx sink cannot keep up, its receive
+window closes, the hub stops reading the client stream, and the client's send
+window closes in turn — the flow paces itself to the bus with no datagram drops.
+For a reliable channel this flow control *is* the rate-matching the lossy plane
+gets from explicit pacing credit (INTERFACE_STATUS).
+
+**Lifecycle.** CLOSE on the channel tears down the dedicated stream on both legs;
+the channel id is freed as usual.
+
+**TCP / TLS fallback.** The fallback transports have no useful multistream: the
+whole connection is already one reliable, ordered byte stream shared by both
+planes. There the reliable flag is a no-op — the channel is already reliable, but
+with connection-wide head-of-line blocking. The HOL-isolation benefit is
+QUIC-only; this is the same documented fallback trade-off as the lossy plane
+losing latest-wins semantics over TCP.
+
 ## External protocol bridging
 
 This document specifies the can-hub wire protocol only. Foreign protocols are bridged outside it, not added to the message set. socketcand (its own ASCII protocol, separate spec) is bridged by `can-hub-client socketcand`, which terminates socketcand locally and speaks ordinary HELLO/LIST/OPEN/FRAME to the hub on the client's behalf — the hub sees a normal client. See doc/design.md "Compatibility adapters".
@@ -454,6 +515,5 @@ This document specifies the can-hub wire protocol only. Foreign protocols are br
 - Version negotiation details and capability bits in HELLO.
 - Flow control / backpressure signalling on the data plane.
 - P2P phase 2: endpoint exchange messages (OFFER/ANSWER pattern).
-- Reliable data plane: flows that need guaranteed in-order delivery (ISOTP transfers, UDS/firmware upgrades) mapped to dedicated QUIC streams instead of datagrams — reliable per flow without head-of-line blocking the cyclic traffic. Candidate signalling: a flag on OPEN/SUBSCRIBE selecting reliable transport for matching CAN ids.
 - Timestamp cost: u64 is the largest FRAME field. A u32 microsecond timestamp relative to a negotiated session base (wraps every ~71 min) would save 4 bytes per frame.
 - Interface configuration: only bitrate and link up/down ship today (admin-only). Bit timings and FD data parameters are not yet exposed.

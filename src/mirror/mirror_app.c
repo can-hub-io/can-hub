@@ -46,6 +46,11 @@ void MirrorApp_SetName(MirrorApp *self, const char *name)
     snprintf(self->name, sizeof(self->name), "%s", name);
 }
 
+void MirrorApp_SetReliable(MirrorApp *self, bool reliable)
+{
+    self->reliable = reliable;
+}
+
 TransportEvents MirrorApp_TransportEvents(MirrorApp *self)
 {
     TransportEvents events = {
@@ -73,7 +78,7 @@ void MirrorApp_OnCanFrame(MirrorApp *self, const FrameMessage *frame)
     outgoing.route_flags = 0;
     encoded_size = FrameMessage_Encode(&outgoing, encoded, sizeof(encoded));
     if (encoded_size > 0) {
-        self->hub->send_frame(self->hub->context, encoded, encoded_size);
+        self->hub->send_frame(self->hub->context, outgoing.channel, encoded, encoded_size);
     }
 }
 
@@ -192,9 +197,14 @@ static void handleListReply(MirrorApp *self, const uint8_t *body, uint16_t lengt
 
 static void openResolvedInterface(MirrorApp *self)
 {
+    uint8_t flags = OPEN_FLAGS_READ_WRITE;
+
+    if (self->reliable) {
+        flags |= OPEN_FLAG_RELIABLE;
+    }
     self->state = kMIRROR_OPENING;
     self->pending_write = true;
-    sendOpen(self, OPEN_FLAGS_READ_WRITE);
+    sendOpen(self, flags);
 }
 
 static void handleOpenAck(MirrorApp *self, const OpenAckMessage *ack)
@@ -207,6 +217,9 @@ static void handleOpenAck(MirrorApp *self, const OpenAckMessage *ack)
         self->channel = ack->channel;
         self->can_write = self->pending_write;
         self->state = kMIRROR_PUMPING;
+        if (self->reliable) {
+            self->hub->set_channel_mode(self->hub->context, self->channel, true);
+        }
         return;
     }
 
@@ -224,7 +237,7 @@ static void sendHello(MirrorApp *self)
     uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size;
 
-    encoded_size = HelloMessage_Build(kPEER_ROLE_CLIENT, self->name, 0, encoded, sizeof(encoded));
+    encoded_size = HelloMessage_Build(kPEER_ROLE_CLIENT, self->name, HELLO_CAP_RELIABLE_CHANNELS, encoded, sizeof(encoded));
     if (encoded_size > 0) {
         self->hub->send_control(self->hub->context, encoded, encoded_size);
     }

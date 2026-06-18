@@ -8,6 +8,7 @@
 #include "platform/linux/quic/quic_connection.h"
 #include "platform/linux/quic/quic_control_channel.h"
 #include "platform/linux/quic/quic_datagram_backlog.h"
+#include "platform/linux/quic/quic_reliable_streams.h"
 #include "platform/linux/quic/quic_udp_endpoint.h"
 #include "agent/ports/transport_events.h"
 #include "agent/ports/transport_port.h"
@@ -35,6 +36,7 @@ typedef struct {
     QuicClientSecurity security;
     QuicClientSecurityConfig security_config;
     QuicControlChannel control;
+    QuicReliableStreamSet reliable_streams;
     QuicConnection connection;
     QuicDatagramBacklog egress_backlog;
     bool connected;

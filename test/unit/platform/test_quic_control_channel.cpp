@@ -54,6 +54,25 @@ describe("quic_control_channel", []() {
         expect(channel.tx_base_offset).toBe((uint64_t)2);
     });
 
+    it("keeps sent-but-unacked bytes intact at their address after an earlier chunk is acked", []() {
+        uint8_t first_chunk[4] = { 0xA0, 0xA1, 0xA2, 0xA3 };
+        uint8_t second_chunk[4] = { 0xB0, 0xB1, 0xB2, 0xB3 };
+        uint8_t third_chunk[4] = { 0xC0, 0xC1, 0xC2, 0xC3 };
+        const uint8_t *in_flight;
+
+        QuicControlChannel_QueueTx(&channel, first_chunk, sizeof(first_chunk));
+        QuicControlChannel_MarkSent(&channel, 4);
+        QuicControlChannel_QueueTx(&channel, second_chunk, sizeof(second_chunk));
+        QuicControlChannel_MarkSent(&channel, 4);
+
+        in_flight = &channel.tx_buffer[4];
+
+        QuicControlChannel_MarkAcked(&channel, 4);
+        QuicControlChannel_QueueTx(&channel, third_chunk, sizeof(third_chunk));
+
+        expect(in_flight[0]).toBe((uint8_t)0xB0);
+    });
+
     it("rejects tx bytes beyond the buffer capacity", []() {
         uint8_t chunk[QUIC_CONTROL_TX_BUFFER_SIZE] = { 0 };
         bool first_queued;

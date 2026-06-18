@@ -15,6 +15,7 @@ typedef struct {
     bool in_use;
     bool suppress_echo;
     bool can_write;
+    bool reliable;
     uint32_t interface_id;
     uint8_t channel;
     uint8_t filter_count;
@@ -28,15 +29,17 @@ typedef struct {
     uint8_t next_channel;
 } ClientSession;
 
+typedef struct {
+    uint32_t interface_id;
+    bool suppress_echo;
+    bool can_write;
+    bool reliable;
+} ChannelOpenRequest;
+
 void ClientSession_Reset(ClientSession *self);
-bool ClientSession_OpenInterface(
-    ClientSession *self,
-    uint32_t interface_id,
-    bool suppress_echo,
-    bool can_write,
-    uint8_t *channel
-);
+bool ClientSession_OpenInterface(ClientSession *self, const ChannelOpenRequest *request, uint8_t *channel);
 bool ClientSession_CanWrite(const ClientSession *self, uint8_t channel);
+bool ClientSession_ChannelReliable(const ClientSession *self, uint8_t channel);
 bool ClientSession_SetFilters(ClientSession *self, uint8_t channel, const CanFilter *filters, uint8_t count);
 bool ClientSession_ChannelAccepts(const ClientSession *self, uint8_t channel, uint32_t can_id);
 void ClientSession_CloseChannel(ClientSession *self, uint8_t channel);

@@ -11,6 +11,7 @@
 
 #include "platform/linux/quic/quic_connection.h"
 #include "platform/linux/quic/quic_control_channel.h"
+#include "platform/linux/quic/quic_reliable_streams.h"
 #include "platform/linux/quic/quic_server_security.h"
 #include "platform/linux/shared/tls_identity.h"
 #include "hub/ports/hub_transport_events.h"
@@ -24,6 +25,10 @@
  * migration and NAT rebinding; the remote address follows the latest
  * packet), one shared expiry timer armed to the earliest deadline. Control
  * plane on the client-opened bidirectional stream, data plane on datagrams.
+ * Reliable channels ride dedicated bidirectional streams: the hub opens one
+ * per channel (set_channel_mode) for that channel's frames; an incoming
+ * stream that is neither the control nor a known reliable stream is adopted
+ * for receive (its frames carry their own channel).
  */
 typedef struct QuicServerTransport QuicServerTransport;
 
@@ -33,6 +38,7 @@ typedef struct {
     SSL *ssl;
     ngtcp2_crypto_ossl_ctx *tls_context;
     QuicControlChannel control;
+    QuicReliableStreamSet reliable_streams;
     ngtcp2_cid original_dcid;
     char fingerprint_hex[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
     struct sockaddr_storage remote_address;

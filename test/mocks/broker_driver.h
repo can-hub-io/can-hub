@@ -17,7 +17,19 @@ void BrokerDriver_ConnectAgent(
     uint32_t peer_id,
     const RegisterMessage *registration
 );
+void BrokerDriver_ConnectAgentWithCapabilities(
+    const HubTransportEvents *events,
+    HubTransportPortMock *transport,
+    uint32_t peer_id,
+    const RegisterMessage *registration,
+    uint32_t capabilities
+);
 void BrokerDriver_ConnectClient(const HubTransportEvents *events, uint32_t peer_id);
+void BrokerDriver_ConnectClientWithCapabilities(
+    const HubTransportEvents *events,
+    uint32_t peer_id,
+    uint32_t capabilities
+);
 void BrokerDriver_ConnectAdmin(const HubTransportEvents *events, uint32_t peer_id);
 uint32_t BrokerDriver_InterfaceIdAt(const HubTransportEvents *events, HubTransportPortMock *transport, uint8_t index);
 uint8_t BrokerDriver_OpenInterface(

@@ -29,10 +29,12 @@ typedef struct {
     uint8_t state;
     bool can_write;
     bool pending_write;
+    bool reliable;
 } MirrorApp;
 
 void MirrorApp_Init(MirrorApp *self, TransportPort *hub, CanPort *can, uint32_t interface_id, const char *interface_name);
 void MirrorApp_SetName(MirrorApp *self, const char *name);
+void MirrorApp_SetReliable(MirrorApp *self, bool reliable);
 TransportEvents MirrorApp_TransportEvents(MirrorApp *self);
 void MirrorApp_OnCanFrame(MirrorApp *self, const FrameMessage *frame);
 uint8_t MirrorApp_State(const MirrorApp *self);

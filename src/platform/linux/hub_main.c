@@ -81,7 +81,8 @@ static void importLegacyPinFile(void);
 static void applyDefaultListen(ListenAddress *listen_address, const char *bind_address, const char *port_text);
 static bool startListeners(const char *unix_path, const char *certificate, const char *key, bool explicit_listen);
 static bool muxSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
-static bool muxSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
+static bool muxSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
+static void muxSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
 static void muxClosePeer(void *context, uint32_t peer_id);
 static HubTransportPort *portForPeer(uint32_t peer_id);
 static bool registerStaticPollFds(void);
@@ -265,6 +266,7 @@ static bool startListeners(const char *unix_path, const char *certificate, const
     mux_port.context = NULL;
     mux_port.send_control = muxSendControl;
     mux_port.send_frame = muxSendFrame;
+    mux_port.set_channel_mode = muxSetChannelMode;
     mux_port.close_peer = muxClosePeer;
 
     if (tcp_listen.requested) {
@@ -400,13 +402,22 @@ static bool muxSendControl(void *context, uint32_t peer_id, const uint8_t *data,
     return destination->send_control(destination->context, peer_id, data, size);
 }
 
-static bool muxSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size)
+static bool muxSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size)
 {
     HubTransportPort *destination = portForPeer(peer_id);
 
     (void)context;
 
-    return destination->send_frame(destination->context, peer_id, data, size);
+    return destination->send_frame(destination->context, peer_id, channel, data, size);
+}
+
+static void muxSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable)
+{
+    HubTransportPort *destination = portForPeer(peer_id);
+
+    (void)context;
+
+    destination->set_channel_mode(destination->context, peer_id, channel, reliable);
 }
 
 static void muxClosePeer(void *context, uint32_t peer_id)

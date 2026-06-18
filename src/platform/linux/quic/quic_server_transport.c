@@ -20,7 +20,8 @@
 
 static void formatOrigin(const struct sockaddr_storage *address, char *out, size_t size);
 static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
-static bool portSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
+static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
+static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
 static void portClosePeer(void *context, uint32_t peer_id);
 static QuicServerPeer *findPeerById(QuicServerTransport *self, uint32_t peer_id);
 static QuicServerPeer *findPeerByDcid(QuicServerTransport *self, const uint8_t *packet, size_t packet_size);
@@ -49,6 +50,8 @@ static void onHandshakeCompleted(void *context);
 static void onDatagram(void *context, const uint8_t *data, size_t size);
 static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, size_t size);
 static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_offset);
+static void receiveControlData(QuicServerPeer *peer, const uint8_t *data, size_t size);
+static void serverFrameSink(void *context, const uint8_t *frame, size_t size);
 
 /* ---------- public ---------- */
 
@@ -69,6 +72,7 @@ bool QuicServerTransport_Init(
     self->port.context = self;
     self->port.send_control = portSendControl;
     self->port.send_frame = portSendFrame;
+    self->port.set_channel_mode = portSetChannelMode;
     self->port.close_peer = portClosePeer;
     self->events = *events;
     self->next_peer_id = peer_id_base;
@@ -232,16 +236,40 @@ static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data
     return flushPeer(self, peer, NULL, 0);
 }
 
-static bool portSendFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size)
+static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size)
 {
     QuicServerTransport *self = context;
     QuicServerPeer *peer = findPeerById(self, peer_id);
+    QuicReliableStream *reliable;
 
     if (peer == NULL || !peer->connected || peer->close_pending) {
         return false;
     }
 
-    return flushPeer(self, peer, data, size);
+    reliable = QuicReliableStreams_FindByChannel(&peer->reliable_streams, channel);
+    if (reliable == NULL) {
+        return flushPeer(self, peer, data, size);
+    }
+    if (!QuicControlChannel_QueueTx(&reliable->stream, data, size)) {
+        return false;
+    }
+    if (self->dispatching) {
+        return true;
+    }
+
+    return flushPeer(self, peer, NULL, 0);
+}
+
+static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable)
+{
+    QuicServerTransport *self = context;
+    QuicServerPeer *peer = findPeerById(self, peer_id);
+
+    if (peer == NULL || !peer->connected || !reliable) {
+        return;
+    }
+
+    QuicReliableStreams_Open(&peer->reliable_streams, &peer->connection, channel);
 }
 
 static void portClosePeer(void *context, uint32_t peer_id)
@@ -402,6 +430,11 @@ static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer, const uin
         return false;
     }
 
+    if (!QuicReliableStreams_Drain(&peer->reliable_streams, &peer->connection, &sink)) {
+        teardownPeer(self, peer, true);
+        return false;
+    }
+
     rearmTimer(self);
 
     return accepted;
@@ -473,6 +506,7 @@ static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool n
     peer->ssl = NULL;
     peer->tls_context = NULL;
     QuicControlChannel_Reset(&peer->control);
+    QuicReliableStreams_Reset(&peer->reliable_streams);
     peer->connected = false;
     peer->close_pending = false;
 
@@ -575,16 +609,47 @@ static void onDatagram(void *context, const uint8_t *data, size_t size)
 static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, size_t size)
 {
     QuicServerPeer *peer = context;
-
-    size_t offset = 0;
-    size_t taken;
+    QuicReliableStream *reliable;
 
     if (peer->control.stream_id == QUIC_CONTROL_NO_STREAM) {
         peer->control.stream_id = stream_id;
     }
-    if (stream_id != peer->control.stream_id) {
+    if (stream_id == peer->control.stream_id) {
+        receiveControlData(peer, data, size);
+        QuicConnection_ExtendStreamCredit(&peer->connection, stream_id, size);
         return;
     }
+
+    reliable = QuicReliableStreams_FindById(&peer->reliable_streams, stream_id);
+    if (reliable == NULL) {
+        reliable = QuicReliableStreams_Adopt(&peer->reliable_streams, stream_id);
+    }
+    if (reliable != NULL) {
+        QuicReliableStreams_Receive(reliable, data, size, serverFrameSink, peer);
+    }
+    QuicConnection_ExtendStreamCredit(&peer->connection, stream_id, size);
+}
+
+static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_offset)
+{
+    QuicServerPeer *peer = context;
+    QuicReliableStream *reliable;
+
+    if (stream_id == peer->control.stream_id) {
+        QuicControlChannel_MarkAcked(&peer->control, acked_end_offset);
+        return;
+    }
+
+    reliable = QuicReliableStreams_FindById(&peer->reliable_streams, stream_id);
+    if (reliable != NULL) {
+        QuicControlChannel_MarkAcked(&reliable->stream, acked_end_offset);
+    }
+}
+
+static void receiveControlData(QuicServerPeer *peer, const uint8_t *data, size_t size)
+{
+    size_t offset = 0;
+    size_t taken;
 
     while (offset < size) {
         taken = QuicControlChannel_QueueRx(&peer->control, data + offset, size - offset);
@@ -594,16 +659,11 @@ static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, 
             break;
         }
     }
-    QuicConnection_ExtendStreamCredit(&peer->connection, stream_id, size);
 }
 
-static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_offset)
+static void serverFrameSink(void *context, const uint8_t *frame, size_t size)
 {
     QuicServerPeer *peer = context;
 
-    if (stream_id != peer->control.stream_id) {
-        return;
-    }
-
-    QuicControlChannel_MarkAcked(&peer->control, acked_end_offset);
+    peer->transport->events.on_peer_frame(peer->transport->events.context, peer->peer_id, frame, size);
 }

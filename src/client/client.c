@@ -143,7 +143,7 @@ bool Client_SendFrame(Client *self, FrameMessage *frame, uint64_t now_us)
         return false;
     }
 
-    return self->hub->send_frame(self->hub->context, encoded, encoded_size);
+    return self->hub->send_frame(self->hub->context, frame->channel, encoded, encoded_size);
 }
 
 uint8_t Client_State(const Client *self)
@@ -339,6 +339,9 @@ static void handleOpenAck(Client *self, const uint8_t *body, uint16_t length)
 
     self->channel = ack.channel;
     self->state = kCLIENT_OPEN;
+    if (self->open_flags & OPEN_FLAG_RELIABLE) {
+        self->hub->set_channel_mode(self->hub->context, self->channel, true);
+    }
     if (self->filter_count > 0) {
         sendSubscribe(self);
     }
@@ -383,7 +386,7 @@ static void sendHello(Client *self)
     uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size;
 
-    encoded_size = HelloMessage_Build(kPEER_ROLE_CLIENT, self->name, 0, encoded, sizeof(encoded));
+    encoded_size = HelloMessage_Build(kPEER_ROLE_CLIENT, self->name, HELLO_CAP_RELIABLE_CHANNELS, encoded, sizeof(encoded));
 
     if (encoded_size > 0) {
         self->hub->send_control(self->hub->context, encoded, encoded_size);

@@ -5,7 +5,8 @@
 static bool mockConnect(void *context);
 static void mockDisconnect(void *context);
 static bool mockSendControl(void *context, const uint8_t *data, size_t size);
-static bool mockSendFrame(void *context, const uint8_t *data, size_t size);
+static bool mockSendFrame(void *context, uint8_t channel, const uint8_t *data, size_t size);
+static void mockSetChannelMode(void *context, uint8_t channel, bool reliable);
 
 /* ---------- public ---------- */
 
@@ -17,6 +18,7 @@ void TransportPortMock_Reset(TransportPortMock *self)
     self->port.disconnect = mockDisconnect;
     self->port.send_control = mockSendControl;
     self->port.send_frame = mockSendFrame;
+    self->port.set_channel_mode = mockSetChannelMode;
     self->connect_result = true;
 }
 
@@ -53,7 +55,7 @@ static bool mockSendControl(void *context, const uint8_t *data, size_t size)
     return true;
 }
 
-static bool mockSendFrame(void *context, const uint8_t *data, size_t size)
+static bool mockSendFrame(void *context, uint8_t channel, const uint8_t *data, size_t size)
 {
     TransportPortMock *self = context;
 
@@ -63,7 +65,17 @@ static bool mockSendFrame(void *context, const uint8_t *data, size_t size)
 
     memcpy(self->last_frame, data, size);
     self->last_frame_size = size;
+    self->last_frame_channel = channel;
     self->frame_count++;
 
     return true;
+}
+
+static void mockSetChannelMode(void *context, uint8_t channel, bool reliable)
+{
+    TransportPortMock *self = context;
+
+    self->channel_mode_count++;
+    self->last_channel_mode_channel = channel;
+    self->last_channel_mode_reliable = reliable;
 }
