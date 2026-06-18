@@ -26,11 +26,14 @@ describe("frame_routes", []() {
     it("routes an agent frame to every client with the interface open", []() {
         HubPeer *client = PeerDirectory_Find(&directory, 200);
         const InterfaceEntry *entry = InterfaceRegistry_FindByAgentChannel(&registry, 100, 1);
+        ChannelOpenRequest request = {
+            .interface_id = entry->interface_id,
+        };
         FrameRoute routes[FRAME_ROUTES_MAX];
         uint8_t client_channel = 0;
         uint8_t route_count;
 
-        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, false, &client_channel);
+        ClientSession_OpenInterface(&client->session, &request, &client_channel);
 
         route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX);
 
@@ -42,13 +45,16 @@ describe("frame_routes", []() {
     it("routes an agent frame to every binding of a client that opened the interface twice", []() {
         HubPeer *client = PeerDirectory_Find(&directory, 200);
         const InterfaceEntry *entry = InterfaceRegistry_FindByAgentChannel(&registry, 100, 1);
+        ChannelOpenRequest request = {
+            .interface_id = entry->interface_id,
+        };
         FrameRoute routes[FRAME_ROUTES_MAX];
         uint8_t first_channel = 0;
         uint8_t second_channel = 0;
         uint8_t route_count;
 
-        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, false, &first_channel);
-        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, false, &second_channel);
+        ClientSession_OpenInterface(&client->session, &request, &first_channel);
+        ClientSession_OpenInterface(&client->session, &request, &second_channel);
 
         route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX);
 
@@ -62,12 +68,15 @@ describe("frame_routes", []() {
     it("caps routes at the buffer capacity across bindings", []() {
         HubPeer *client = PeerDirectory_Find(&directory, 200);
         const InterfaceEntry *entry = InterfaceRegistry_FindByAgentChannel(&registry, 100, 1);
+        ChannelOpenRequest request = {
+            .interface_id = entry->interface_id,
+        };
         FrameRoute routes[FRAME_ROUTES_MAX];
         uint8_t channel = 0;
         uint8_t route_count;
 
-        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, false, &channel);
-        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, false, &channel);
+        ClientSession_OpenInterface(&client->session, &request, &channel);
+        ClientSession_OpenInterface(&client->session, &request, &channel);
 
         route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, 1);
 
@@ -95,11 +104,14 @@ describe("frame_routes", []() {
     it("routes a client frame to the owning agent with its channel", []() {
         HubPeer *client = PeerDirectory_Find(&directory, 200);
         const InterfaceEntry *entry = InterfaceRegistry_FindByAgentChannel(&registry, 100, 1);
+        ChannelOpenRequest request = {
+            .interface_id = entry->interface_id,
+        };
         FrameRoute routes[FRAME_ROUTES_MAX];
         uint8_t client_channel = 0;
         uint8_t route_count;
 
-        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, false, &client_channel);
+        ClientSession_OpenInterface(&client->session, &request, &client_channel);
 
         route_count = FrameRoutes_FromClient(&registry, client, client_channel, routes, FRAME_ROUTES_MAX);
 

@@ -445,7 +445,7 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
     OpenAckMessage ack;
     const InterfaceEntry *entry;
     uint8_t encoded[CONTROL_BUFFER_SIZE];
-    bool suppress_echo;
+    ChannelOpenRequest request;
     bool can_write;
     bool reliable;
 
@@ -488,8 +488,11 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
         return;
     }
 
-    suppress_echo = (open.flags & OPEN_FLAG_SUPPRESS_OWN_ECHO) != 0;
-    if (ClientSession_OpenInterface(&peer->session, open.interface_id, suppress_echo, can_write, reliable, &ack.channel)) {
+    request.interface_id = open.interface_id;
+    request.suppress_echo = (open.flags & OPEN_FLAG_SUPPRESS_OWN_ECHO) != 0;
+    request.can_write = can_write;
+    request.reliable = reliable;
+    if (ClientSession_OpenInterface(&peer->session, &request, &ack.channel)) {
         ack.status = OPEN_STATUS_OK;
     }
 

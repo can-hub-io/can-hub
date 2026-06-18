@@ -12,13 +12,17 @@ describe("client_session", []() {
     });
 
     it("opens an interface under a unique channel", []() {
+        ChannelOpenRequest request = {
+            .interface_id = 7,
+        };
         uint8_t first_channel = 0;
         uint8_t second_channel = 0;
         bool first_opened;
         bool second_opened;
 
-        first_opened = ClientSession_OpenInterface(&session, 7, false, false, false, &first_channel);
-        second_opened = ClientSession_OpenInterface(&session, 9, false, false, false, &second_channel);
+        first_opened = ClientSession_OpenInterface(&session, &request, &first_channel);
+        request.interface_id = 9;
+        second_opened = ClientSession_OpenInterface(&session, &request, &second_channel);
 
         expect(first_opened).toBe(true);
         expect(second_opened).toBe(true);
@@ -26,24 +30,35 @@ describe("client_session", []() {
     });
 
     it("records the reliable flag on the binding", []() {
+        ChannelOpenRequest reliable_request = {
+            .interface_id = 7,
+            .reliable = true,
+        };
+        ChannelOpenRequest lossy_request = {
+            .interface_id = 9,
+            .reliable = false,
+        };
         uint8_t reliable_channel = 0;
         uint8_t lossy_channel = 0;
 
-        ClientSession_OpenInterface(&session, 7, false, false, true, &reliable_channel);
-        ClientSession_OpenInterface(&session, 9, false, false, false, &lossy_channel);
+        ClientSession_OpenInterface(&session, &reliable_request, &reliable_channel);
+        ClientSession_OpenInterface(&session, &lossy_request, &lossy_channel);
 
         expect(ClientSession_BindingForChannel(&session, reliable_channel)->reliable).toBe(true);
         expect(ClientSession_BindingForChannel(&session, lossy_channel)->reliable).toBe(false);
     });
 
     it("maps channels to interfaces in both directions", []() {
+        ChannelOpenRequest request = {
+            .interface_id = 7,
+        };
         uint8_t channel = 0;
         uint8_t found_channel = 0;
         uint32_t found_interface = 0;
         bool channel_found;
         bool interface_found;
 
-        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
+        ClientSession_OpenInterface(&session, &request, &channel);
 
         interface_found = ClientSession_InterfaceForChannel(&session, channel, &found_interface);
         channel_found = ClientSession_ChannelForInterface(&session, 7, &found_channel);
@@ -55,11 +70,14 @@ describe("client_session", []() {
     });
 
     it("forgets a closed channel", []() {
+        ChannelOpenRequest request = {
+            .interface_id = 7,
+        };
         uint8_t channel = 0;
         uint32_t found_interface = 0;
         bool interface_found;
 
-        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
+        ClientSession_OpenInterface(&session, &request, &channel);
 
         ClientSession_CloseChannel(&session, channel);
         interface_found = ClientSession_InterfaceForChannel(&session, channel, &found_interface);
@@ -68,6 +86,9 @@ describe("client_session", []() {
     });
 
     it("iterates every binding of an interface", []() {
+        ChannelOpenRequest request = {
+            .interface_id = 7,
+        };
         uint8_t first_channel = 0;
         uint8_t second_channel = 0;
         uint8_t other_channel = 0;
@@ -76,9 +97,11 @@ describe("client_session", []() {
         const ChannelBinding *second_binding;
         const ChannelBinding *end_binding;
 
-        ClientSession_OpenInterface(&session, 7, false, false, false, &first_channel);
-        ClientSession_OpenInterface(&session, 9, false, false, false, &other_channel);
-        ClientSession_OpenInterface(&session, 7, false, false, false, &second_channel);
+        ClientSession_OpenInterface(&session, &request, &first_channel);
+        request.interface_id = 9;
+        ClientSession_OpenInterface(&session, &request, &other_channel);
+        request.interface_id = 7;
+        ClientSession_OpenInterface(&session, &request, &second_channel);
 
         first_binding = ClientSession_NextBindingForInterface(&session, 7, &iterator);
         second_binding = ClientSession_NextBindingForInterface(&session, 7, &iterator);
@@ -90,11 +113,14 @@ describe("client_session", []() {
     });
 
     it("iterates nothing for an interface that is not open", []() {
+        ChannelOpenRequest request = {
+            .interface_id = 7,
+        };
         uint8_t channel = 0;
         uint8_t iterator = 0;
         const ChannelBinding *binding;
 
-        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
+        ClientSession_OpenInterface(&session, &request, &channel);
 
         binding = ClientSession_NextBindingForInterface(&session, 9, &iterator);
 
@@ -102,11 +128,14 @@ describe("client_session", []() {
     });
 
     it("removes every binding of an interface", []() {
+        ChannelOpenRequest request = {
+            .interface_id = 7,
+        };
         uint8_t channel = 0;
         bool channel_found;
         uint8_t found_channel = 0;
 
-        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
+        ClientSession_OpenInterface(&session, &request, &channel);
 
         ClientSession_RemoveInterface(&session, 7);
         channel_found = ClientSession_ChannelForInterface(&session, 7, &found_channel);
@@ -115,20 +144,26 @@ describe("client_session", []() {
     });
 
     it("accepts every frame on a channel with no filters", []() {
+        ChannelOpenRequest request = {
+            .interface_id = 7,
+        };
         uint8_t channel = 0;
 
-        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
+        ClientSession_OpenInterface(&session, &request, &channel);
 
         expect(ClientSession_ChannelAccepts(&session, channel, 0x123)).toBe(true);
         expect(ClientSession_ChannelAccepts(&session, channel, 0x7AB)).toBe(true);
     });
 
     it("accepts only frames matching a mask filter", []() {
+        ChannelOpenRequest request = {
+            .interface_id = 7,
+        };
         uint8_t channel = 0;
         CanFilter filters[1] = { { 0x100, 0x700 } };
         bool set_ok;
 
-        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
+        ClientSession_OpenInterface(&session, &request, &channel);
         set_ok = ClientSession_SetFilters(&session, channel, filters, 1);
 
         expect(set_ok).toBe(true);
@@ -138,10 +173,13 @@ describe("client_session", []() {
     });
 
     it("accepts a frame matching any filter in the list", []() {
+        ChannelOpenRequest request = {
+            .interface_id = 7,
+        };
         uint8_t channel = 0;
         CanFilter filters[2] = { { 0x100, 0x7FF }, { 0x200, 0x7FF } };
 
-        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
+        ClientSession_OpenInterface(&session, &request, &channel);
         ClientSession_SetFilters(&session, channel, filters, 2);
 
         expect(ClientSession_ChannelAccepts(&session, channel, 0x100)).toBe(true);
@@ -150,10 +188,13 @@ describe("client_session", []() {
     });
 
     it("clears filters back to pass-all on an empty set", []() {
+        ChannelOpenRequest request = {
+            .interface_id = 7,
+        };
         uint8_t channel = 0;
         CanFilter filters[1] = { { 0x100, 0x7FF } };
 
-        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
+        ClientSession_OpenInterface(&session, &request, &channel);
         ClientSession_SetFilters(&session, channel, filters, 1);
         ClientSession_SetFilters(&session, channel, NULL, 0);
 
@@ -170,15 +211,20 @@ describe("client_session", []() {
     });
 
     it("rejects opening beyond the binding capacity", []() {
+        ChannelOpenRequest request = {
+            .interface_id = 0,
+        };
         uint8_t channel = 0;
         bool opened = true;
         uint8_t i;
 
         for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
-            ClientSession_OpenInterface(&session, i, false, false, false, &channel);
+            request.interface_id = i;
+            ClientSession_OpenInterface(&session, &request, &channel);
         }
 
-        opened = ClientSession_OpenInterface(&session, 100, false, false, false, &channel);
+        request.interface_id = 100;
+        opened = ClientSession_OpenInterface(&session, &request, &channel);
 
         expect(opened).toBe(false);
     });

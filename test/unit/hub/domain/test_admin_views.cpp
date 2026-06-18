@@ -152,9 +152,12 @@ static HubPeer *addClient(uint32_t peer_id)
 
 static uint8_t openInterfaceAt(HubPeer *client, uint8_t registry_index)
 {
+    ChannelOpenRequest request = {
+        .interface_id = registry.entries[registry_index].interface_id,
+    };
     uint8_t channel = 0;
 
-    ClientSession_OpenInterface(&client->session, registry.entries[registry_index].interface_id, false, false, false, &channel);
+    ClientSession_OpenInterface(&client->session, &request, &channel);
 
     return channel;
 }
