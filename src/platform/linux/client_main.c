@@ -193,7 +193,7 @@ int main(int argc, char **argv)
 static void printUsage(FILE *stream, const char *program)
 {
     fprintf(stream, "usage: %s [--connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>|unix://<path>]\n", program);
-    fprintf(stream, "       [--state-dir <path>] [--name <label>] list | dump [--no-echo] <interface> [<id>[:<mask>] ...]\n");
+    fprintf(stream, "       [--state-dir <path>] [--name <label>] list | dump [--no-echo] [--reliable] <interface> [<id>[:<mask>] ...]\n");
     fprintf(stream, "       | send <interface> <can-id>#<hex-payload>   (cansend syntax, e.g. 123#DEADBEEF)\n");
     fprintf(stream, "       | socketcand [--listen [<bind-ip>:]<port>] [--no-beacon]\n");
     fprintf(stream, "                                           local socketcand server (default 127.0.0.1:" SOCKETCAND_DEFAULT_PORT_TEXT ")\n");
@@ -221,6 +221,8 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
             i++;
         } else if (strcmp(argv[i], "--no-echo") == 0) {
             open_flags |= OPEN_FLAG_SUPPRESS_OWN_ECHO;
+        } else if (strcmp(argv[i], "--reliable") == 0) {
+            open_flags |= OPEN_FLAG_RELIABLE;
         } else if (strcmp(argv[i], "--no-beacon") == 0) {
             beacon_enabled = false;
         } else if (strcmp(argv[i], "--listen") == 0 && i + 1 < argc) {
