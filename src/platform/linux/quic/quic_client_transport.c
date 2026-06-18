@@ -18,6 +18,8 @@ static bool flushEgress(QuicClientTransport *self);
 static void sendPacket(void *context, const uint8_t *packet, size_t size);
 static void rearmTimer(QuicClientTransport *self);
 static void dispatchControlMessages(QuicClientTransport *self);
+static void receiveControlData(QuicClientTransport *self, const uint8_t *data, size_t size);
+static void clientFrameSink(void *context, const uint8_t *frame, size_t size);
 static void onHandshakeCompleted(void *context);
 static void onDatagram(void *context, const uint8_t *data, size_t size);
 static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, size_t size);
@@ -202,15 +204,21 @@ static bool portSendControl(void *context, const uint8_t *data, size_t size)
 static bool portSendFrame(void *context, uint8_t channel, const uint8_t *data, size_t size)
 {
     QuicClientTransport *self = context;
-
-    (void)channel;
+    QuicReliableStream *reliable;
 
     if (!self->connected) {
         return false;
     }
-    if (!QuicDatagramBacklog_Push(&self->egress_backlog, data, size)) {
+
+    reliable = QuicReliableStreams_FindByChannel(&self->reliable_streams, channel);
+    if (reliable != NULL) {
+        if (!QuicControlChannel_QueueTx(&reliable->stream, data, size)) {
+            return false;
+        }
+    } else if (!QuicDatagramBacklog_Push(&self->egress_backlog, data, size)) {
         return false;
     }
+
     if (self->dispatching) {
         return true;
     }
@@ -236,6 +244,7 @@ static void teardown(QuicClientTransport *self, bool notify)
     QuicClientSecurity_Free(&self->security);
     QuicConnection_Close(&self->connection);
     QuicControlChannel_Reset(&self->control);
+    QuicReliableStreams_Reset(&self->reliable_streams);
     QuicUdpEndpoint_DisarmTimer(&self->udp);
     self->connected = false;
     self->disconnect_pending = false;
@@ -272,6 +281,11 @@ static bool flushEgress(QuicClientTransport *self)
     }
 
     if (!QuicEgress_Drain(&self->connection, &self->control, &sink)) {
+        teardown(self, true);
+        return false;
+    }
+
+    if (!QuicReliableStreams_Drain(&self->reliable_streams, &self->connection, &sink)) {
         teardown(self, true);
         return false;
     }
@@ -340,12 +354,28 @@ static void onDatagram(void *context, const uint8_t *data, size_t size)
 static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, size_t size)
 {
     QuicClientTransport *self = context;
-    size_t offset = 0;
-    size_t taken;
+    QuicReliableStream *reliable;
 
-    if (stream_id != self->control.stream_id) {
+    if (stream_id == self->control.stream_id) {
+        receiveControlData(self, data, size);
+        QuicConnection_ExtendStreamCredit(&self->connection, stream_id, size);
         return;
     }
+
+    reliable = QuicReliableStreams_FindById(&self->reliable_streams, stream_id);
+    if (reliable == NULL) {
+        reliable = QuicReliableStreams_Adopt(&self->reliable_streams, stream_id);
+    }
+    if (reliable != NULL) {
+        QuicReliableStreams_Receive(reliable, data, size, clientFrameSink, self);
+    }
+    QuicConnection_ExtendStreamCredit(&self->connection, stream_id, size);
+}
+
+static void receiveControlData(QuicClientTransport *self, const uint8_t *data, size_t size)
+{
+    size_t offset = 0;
+    size_t taken;
 
     while (offset < size) {
         taken = QuicControlChannel_QueueRx(&self->control, data + offset, size - offset);
@@ -355,16 +385,27 @@ static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, 
             break;
         }
     }
-    QuicConnection_ExtendStreamCredit(&self->connection, stream_id, size);
 }
 
 static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_offset)
 {
     QuicClientTransport *self = context;
+    QuicReliableStream *reliable;
 
-    if (stream_id != self->control.stream_id) {
+    if (stream_id == self->control.stream_id) {
+        QuicControlChannel_MarkAcked(&self->control, acked_end_offset);
         return;
     }
 
-    QuicControlChannel_MarkAcked(&self->control, acked_end_offset);
+    reliable = QuicReliableStreams_FindById(&self->reliable_streams, stream_id);
+    if (reliable != NULL) {
+        QuicControlChannel_MarkAcked(&reliable->stream, acked_end_offset);
+    }
+}
+
+static void clientFrameSink(void *context, const uint8_t *frame, size_t size)
+{
+    QuicClientTransport *self = context;
+
+    self->events.on_frame(self->events.context, frame, size);
 }

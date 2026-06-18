@@ -66,6 +66,7 @@ QuicReliableStream *QuicReliableStreams_Open(QuicReliableStreamSet *self, QuicCo
     reliable->channel = channel;
     reliable->in_use = true;
     reliable->has_channel = true;
+    QuicControlChannel_QueueTx(&reliable->stream, &channel, 1);
 
     return reliable;
 }
@@ -99,6 +100,15 @@ void QuicReliableStreams_Receive(
     size_t message_size;
     size_t offset = 0;
     size_t taken;
+
+    if (!reliable->has_channel) {
+        if (size == 0) {
+            return;
+        }
+        reliable->channel = data[0];
+        reliable->has_channel = true;
+        offset = 1;
+    }
 
     while (offset < size) {
         taken = QuicControlChannel_QueueRx(&reliable->stream, data + offset, size - offset);

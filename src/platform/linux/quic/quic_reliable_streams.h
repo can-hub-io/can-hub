@@ -14,9 +14,11 @@
  * shared by the client and server transports. Each channel that opts in to
  * reliable delivery (OPEN flag, gated by the HELLO capability) gets one
  * stream with its own TX-retention + RX-framer (a QuicControlChannel). The
- * local side opens one per channel for its own egress; a stream the peer
- * opened arrives as "incoming" and is adopted for receive only — its frames
- * carry their own channel, so no channel id has to be learned to relay them.
+ * opener writes the channel id as a one-byte header before any frame, which
+ * both identifies the stream and materializes it on the peer immediately (an
+ * empty QUIC stream is invisible until data flows). The peer adopts the
+ * incoming stream and reads that first byte to bind it to its channel; from
+ * there the stream is bidirectional and lossless from byte zero.
  */
 
 #define QUIC_RELIABLE_STREAMS_MAX 8
