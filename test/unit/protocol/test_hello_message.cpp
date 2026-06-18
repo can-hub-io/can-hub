@@ -26,6 +26,21 @@ describe("hello_message", []() {
         expect((const char *)decoded.name).toBe("dashboard");
     });
 
+    it("round-trips the reliable-channels capability bit", []() {
+        HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, HELLO_CAP_RELIABLE_CHANNELS, "dashboard" };
+        HelloMessage decoded;
+        uint8_t buffer[128];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = HelloMessage_Encode(&hello, buffer, sizeof(buffer));
+        decoded_ok = HelloMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, HELLO_BODY_SIZE);
+
+        expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + HELLO_BODY_SIZE));
+        expect(decoded_ok).toBe(true);
+        expect((decoded.capabilities & HELLO_CAP_RELIABLE_CHANNELS) != 0).toBe(true);
+    });
+
     it("builds and round-trips from role, name and capabilities", []() {
         HelloMessage decoded;
         uint8_t buffer[128];
