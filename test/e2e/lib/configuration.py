@@ -60,6 +60,7 @@ class ClientConfig:
     connect: str | None = None
     args: list[str] = field(default_factory=list)
     no_echo: bool = False
+    reliable: bool = False
     state_dir: str | None = None
     extra: list[str] = field(default_factory=list)
 
@@ -69,7 +70,9 @@ class ClientConfig:
             argv += ["--connect", self.connect]
         if self.state_dir:
             argv += ["--state-dir", self.state_dir]
-        argv += [self.command]
         if self.no_echo:
             argv += ["--no-echo"]
+        if self.reliable:
+            argv += ["--reliable"]
+        argv += [self.command]
         return argv + list(self.extra) + list(self.args)

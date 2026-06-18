@@ -222,9 +222,13 @@ static bool portSendFrame(void *context, uint8_t channel, const uint8_t *data, s
 
 static void portSetChannelMode(void *context, uint8_t channel, bool reliable)
 {
-    (void)context;
-    (void)channel;
-    (void)reliable;
+    QuicClientTransport *self = context;
+
+    if (!self->connected || !reliable) {
+        return;
+    }
+
+    QuicReliableStreams_Open(&self->reliable_streams, &self->connection, channel);
 }
 
 /* ---------- private: lifecycle ---------- */

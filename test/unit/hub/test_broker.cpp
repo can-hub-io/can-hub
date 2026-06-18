@@ -424,7 +424,7 @@ describe("broker", []() {
             expect(openReliableStatus(CLIENT_PEER, interface_id)).toBe(OPEN_STATUS_OK);
         });
 
-        it("marks both client and owning-agent channels reliable after a reliable open", []() {
+        it("marks the owning-agent channel reliable after a reliable open", []() {
             uint32_t interface_id;
 
             BrokerDriver_ConnectAgentWithCapabilities(&events, &transport, AGENT_PEER, &truck_registration, HELLO_CAP_RELIABLE_CHANNELS);
@@ -433,7 +433,7 @@ describe("broker", []() {
 
             openReliableStatus(CLIENT_PEER, interface_id);
 
-            expect(transport.channel_mode_count).toBe((uint32_t)2);
+            expect(transport.channel_mode_count).toBe((uint32_t)1);
             expect(transport.last_channel_mode_peer).toBe((uint32_t)AGENT_PEER);
             expect(transport.last_channel_mode_reliable).toBe(true);
         });

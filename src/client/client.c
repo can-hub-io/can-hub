@@ -339,6 +339,9 @@ static void handleOpenAck(Client *self, const uint8_t *body, uint16_t length)
 
     self->channel = ack.channel;
     self->state = kCLIENT_OPEN;
+    if (self->open_flags & OPEN_FLAG_RELIABLE) {
+        self->hub->set_channel_mode(self->hub->context, self->channel, true);
+    }
     if (self->filter_count > 0) {
         sendSubscribe(self);
     }

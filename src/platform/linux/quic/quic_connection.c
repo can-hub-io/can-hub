@@ -14,6 +14,7 @@
 #define HANDSHAKE_TIMEOUT (10 * NGTCP2_SECONDS)
 #define INITIAL_MAX_DATA (1024 * 1024)
 #define INITIAL_MAX_STREAM_DATA (64 * 1024)
+#define INITIAL_MAX_STREAMS_BIDI 16
 
 static ngtcp2_conn *getConnection(ngtcp2_crypto_conn_ref *connection_ref);
 static void buildCallbacks(ngtcp2_callbacks *callbacks, bool is_server);
@@ -363,7 +364,7 @@ static void buildParams(ngtcp2_transport_params *params)
     params->initial_max_data = INITIAL_MAX_DATA;
     params->initial_max_stream_data_bidi_local = INITIAL_MAX_STREAM_DATA;
     params->initial_max_stream_data_bidi_remote = INITIAL_MAX_STREAM_DATA;
-    params->initial_max_streams_bidi = 1;
+    params->initial_max_streams_bidi = INITIAL_MAX_STREAMS_BIDI;
     params->max_idle_timeout = IDLE_TIMEOUT;
     params->max_datagram_frame_size = MAX_DATAGRAM_FRAME_SIZE;
 }

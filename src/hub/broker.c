@@ -495,7 +495,6 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
     if (ClientSession_OpenInterface(&peer->session, &request, &ack.channel)) {
         ack.status = OPEN_STATUS_OK;
         if (reliable) {
-            self->transport->set_channel_mode(self->transport->context, peer->peer_id, ack.channel, true);
             self->transport->set_channel_mode(self->transport->context, entry->agent_peer_id, entry->agent_channel, true);
         }
     }

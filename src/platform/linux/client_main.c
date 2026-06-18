@@ -889,6 +889,7 @@ static int32_t runAttach(const char *host, const char *port_text)
         );
     }
     MirrorApp_SetName(&mirror_app, client_name);
+    MirrorApp_SetReliable(&mirror_app, (open_flags & OPEN_FLAG_RELIABLE) != 0);
 
     if (!active_port->connect(active_port->context)) {
         LOG_ERROR("could not connect to %s", host);
