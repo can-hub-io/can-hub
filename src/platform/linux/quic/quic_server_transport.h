@@ -11,13 +11,13 @@
 
 #include "platform/linux/quic/quic_connection.h"
 #include "platform/linux/quic/quic_control_channel.h"
+#include "platform/linux/quic/quic_reliable_streams.h"
 #include "platform/linux/quic/quic_server_security.h"
 #include "platform/linux/shared/tls_identity.h"
 #include "hub/ports/hub_transport_events.h"
 #include "hub/ports/hub_transport_port.h"
 
 #define QUIC_SERVER_PEERS_MAX 64
-#define QUIC_SERVER_RELIABLE_STREAMS_MAX 8
 
 /*
  * QUIC server transport for the hub: one UDP socket multiplexing every
@@ -33,19 +33,12 @@
 typedef struct QuicServerTransport QuicServerTransport;
 
 typedef struct {
-    QuicControlChannel stream;
-    uint8_t channel;
-    bool in_use;
-    bool has_channel;
-} QuicReliableStream;
-
-typedef struct {
     QuicServerTransport *transport;
     QuicConnection connection;
     SSL *ssl;
     ngtcp2_crypto_ossl_ctx *tls_context;
     QuicControlChannel control;
-    QuicReliableStream reliable_streams[QUIC_SERVER_RELIABLE_STREAMS_MAX];
+    QuicReliableStreamSet reliable_streams;
     ngtcp2_cid original_dcid;
     char fingerprint_hex[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
     struct sockaddr_storage remote_address;
