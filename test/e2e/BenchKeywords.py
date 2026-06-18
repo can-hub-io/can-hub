@@ -198,6 +198,24 @@ class BenchKeywords:
         server.exec("tc", "qdisc", "replace", "dev", "eth0", "root", "tbf",
                     "rate", rate, "burst", "3kb", "latency", "5ms", check=False)
 
+    @keyword("Set Link Jitter On ${server} ${delay} ${jitter}")
+    def set_link_jitter(self, server, delay, jitter):
+        server.exec("tc", "qdisc", "replace", "dev", "eth0", "root",
+                    "netem", "delay", delay, jitter, check=False)
+
+    @keyword("Set Link Loss On ${server} To ${percent}")
+    def set_link_loss(self, server, percent):
+        server.exec("tc", "qdisc", "replace", "dev", "eth0", "root",
+                    "netem", "loss", f"{percent}%", check=False)
+
+    @keyword("Sequence Integrity Of ${capture} Over ${count} Frames")
+    def sequence_integrity(self, capture, count, can_id="123"):
+        values = [int(frame.data, 16) for frame in parse_candump(capture.read_log())
+                  if frame.can_id == can_id.upper() and frame.data]
+        in_order = all(values[i] < values[i + 1] for i in range(len(values) - 1))
+        complete = sorted(values) == list(range(int(count)))
+        return {"received": len(values), "in_order": in_order, "complete": complete}
+
     @keyword("Stream Timestamped Frames On ${server} ${interface}")
     def stream_timestamped_frames(self, server, interface, can_id="123", gap=0.001, duration=4.0):
         process = server.exec("python3", LATENCY_SEND_SCRIPT, interface, can_id, str(gap), str(duration),
