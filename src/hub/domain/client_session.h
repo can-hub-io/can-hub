@@ -15,6 +15,7 @@ typedef struct {
     bool in_use;
     bool suppress_echo;
     bool can_write;
+    bool reliable;
     uint32_t interface_id;
     uint8_t channel;
     uint8_t filter_count;
@@ -34,6 +35,7 @@ bool ClientSession_OpenInterface(
     uint32_t interface_id,
     bool suppress_echo,
     bool can_write,
+    bool reliable,
     uint8_t *channel
 );
 bool ClientSession_CanWrite(const ClientSession *self, uint8_t channel);

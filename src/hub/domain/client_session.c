@@ -18,6 +18,7 @@ bool ClientSession_OpenInterface(
     uint32_t interface_id,
     bool suppress_echo,
     bool can_write,
+    bool reliable,
     uint8_t *channel
 )
 {
@@ -30,6 +31,7 @@ bool ClientSession_OpenInterface(
     binding->in_use = true;
     binding->suppress_echo = suppress_echo;
     binding->can_write = can_write;
+    binding->reliable = reliable;
     binding->interface_id = interface_id;
     binding->channel = *channel;
 

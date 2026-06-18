@@ -8,7 +8,7 @@
 #define DRIVER_BUFFER_SIZE 512
 #define DRIVER_LIST_PEER 999
 
-static void sendHello(const HubTransportEvents *events, uint32_t peer_id, uint8_t role);
+static void sendHello(const HubTransportEvents *events, uint32_t peer_id, uint8_t role, uint32_t capabilities);
 static void connectPeer(const HubTransportEvents *events, uint32_t peer_id, bool local);
 
 /* ---------- public ---------- */
@@ -20,11 +20,22 @@ void BrokerDriver_ConnectAgent(
     const RegisterMessage *registration
 )
 {
+    BrokerDriver_ConnectAgentWithCapabilities(events, transport, peer_id, registration, 0);
+}
+
+void BrokerDriver_ConnectAgentWithCapabilities(
+    const HubTransportEvents *events,
+    HubTransportPortMock *transport,
+    uint32_t peer_id,
+    const RegisterMessage *registration,
+    uint32_t capabilities
+)
+{
     uint8_t encoded[DRIVER_BUFFER_SIZE];
     size_t encoded_size;
 
     connectPeer(events, peer_id, false);
-    sendHello(events, peer_id, kPEER_ROLE_AGENT);
+    sendHello(events, peer_id, kPEER_ROLE_AGENT, capabilities);
     encoded_size = RegisterMessage_Encode(registration, encoded, sizeof(encoded));
     events->on_peer_control(events->context, peer_id, encoded, encoded_size, 0);
 
@@ -33,14 +44,23 @@ void BrokerDriver_ConnectAgent(
 
 void BrokerDriver_ConnectClient(const HubTransportEvents *events, uint32_t peer_id)
 {
+    BrokerDriver_ConnectClientWithCapabilities(events, peer_id, 0);
+}
+
+void BrokerDriver_ConnectClientWithCapabilities(
+    const HubTransportEvents *events,
+    uint32_t peer_id,
+    uint32_t capabilities
+)
+{
     connectPeer(events, peer_id, false);
-    sendHello(events, peer_id, kPEER_ROLE_CLIENT);
+    sendHello(events, peer_id, kPEER_ROLE_CLIENT, capabilities);
 }
 
 void BrokerDriver_ConnectAdmin(const HubTransportEvents *events, uint32_t peer_id)
 {
     connectPeer(events, peer_id, true);
-    sendHello(events, peer_id, kPEER_ROLE_ADMIN);
+    sendHello(events, peer_id, kPEER_ROLE_ADMIN, 0);
 }
 
 uint32_t BrokerDriver_InterfaceIdAt(const HubTransportEvents *events, HubTransportPortMock *transport, uint8_t index)
@@ -95,12 +115,12 @@ uint8_t BrokerDriver_OpenInterface(
 
 /* ---------- private ---------- */
 
-static void sendHello(const HubTransportEvents *events, uint32_t peer_id, uint8_t role)
+static void sendHello(const HubTransportEvents *events, uint32_t peer_id, uint8_t role, uint32_t capabilities)
 {
     uint8_t encoded[DRIVER_BUFFER_SIZE];
     size_t encoded_size;
 
-    encoded_size = HelloMessage_Build(role, NULL, 0, encoded, sizeof(encoded));
+    encoded_size = HelloMessage_Build(role, NULL, capabilities, encoded, sizeof(encoded));
     events->on_peer_control(events->context, peer_id, encoded, encoded_size, 0);
 }
 

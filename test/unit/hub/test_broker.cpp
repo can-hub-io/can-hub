@@ -113,6 +113,19 @@ static void sendControlFrom(uint32_t peer_id, const uint8_t *encoded, size_t enc
     events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
 }
 
+static uint8_t openReliableStatus(uint32_t peer_id, uint32_t interface_id)
+{
+    OpenMessage open = { interface_id, OPEN_FLAG_RELIABLE };
+    OpenAckMessage ack;
+    uint8_t encoded[128];
+    size_t encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
+
+    events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
+    lastReply(&ack, OpenAckMessage_Decode);
+
+    return ack.status;
+}
+
 describe("broker", []() {
     describe("agent registration", []() {
         beforeEach([]() {
@@ -391,6 +404,44 @@ describe("broker", []() {
             OpenAckMessage_Decode(&ack, transport.control_log[0] + MESSAGE_HEADER_SIZE, header.length);
 
             expect(ack.status).toBe(1);
+        });
+    });
+
+    describe("reliable channels", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            events = Broker_Events(&broker);
+        });
+
+        it("acknowledges a reliable open when both peers advertise the capability", []() {
+            uint32_t interface_id;
+
+            BrokerDriver_ConnectAgentWithCapabilities(&events, &transport, AGENT_PEER, &truck_registration, HELLO_CAP_RELIABLE_CHANNELS);
+            BrokerDriver_ConnectClientWithCapabilities(&events, CLIENT_PEER, HELLO_CAP_RELIABLE_CHANNELS);
+            interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+
+            expect(openReliableStatus(CLIENT_PEER, interface_id)).toBe(OPEN_STATUS_OK);
+        });
+
+        it("rejects a reliable open when the client lacks the capability", []() {
+            uint32_t interface_id;
+
+            BrokerDriver_ConnectAgentWithCapabilities(&events, &transport, AGENT_PEER, &truck_registration, HELLO_CAP_RELIABLE_CHANNELS);
+            BrokerDriver_ConnectClientWithCapabilities(&events, CLIENT_PEER, 0);
+            interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+
+            expect(openReliableStatus(CLIENT_PEER, interface_id)).toBe(OPEN_STATUS_RELIABLE_UNSUPPORTED);
+        });
+
+        it("rejects a reliable open when the owning agent lacks the capability", []() {
+            uint32_t interface_id;
+
+            BrokerDriver_ConnectAgentWithCapabilities(&events, &transport, AGENT_PEER, &truck_registration, 0);
+            BrokerDriver_ConnectClientWithCapabilities(&events, CLIENT_PEER, HELLO_CAP_RELIABLE_CHANNELS);
+            interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+
+            expect(openReliableStatus(CLIENT_PEER, interface_id)).toBe(OPEN_STATUS_RELIABLE_UNSUPPORTED);
         });
     });
 

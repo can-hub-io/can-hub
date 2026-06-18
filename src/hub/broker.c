@@ -84,6 +84,7 @@ static void countDropped(Broker *self, HubPeer *peer, uint8_t channel);
 static uint8_t injectionToken(Broker *self, const HubPeer *sender);
 static bool clientCanRead(Broker *self, const HubPeer *peer, const InterfaceEntry *entry);
 static bool clientCanWrite(Broker *self, const HubPeer *peer, const InterfaceEntry *entry);
+static bool reliableEndpointsSupport(Broker *self, const HubPeer *client, const InterfaceEntry *entry);
 static uint32_t echoOriginatorPeerId(Broker *self, uint8_t route_flags);
 static void tickHelloDeadline(Broker *self, HubPeer *peer, uint64_t now_us);
 
@@ -369,6 +370,8 @@ static void handleHello(Broker *self, HubPeer *peer, const MessageHeader *header
         return;
     }
 
+    peer->capabilities = hello.capabilities;
+
     if (peer->role == kHUB_PEER_ROLE_CLIENT && hello.name[0] != '\0') {
         HubPeer_SetAgentName(peer, hello.name);
     }
@@ -444,6 +447,7 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
     uint8_t encoded[CONTROL_BUFFER_SIZE];
     bool suppress_echo;
     bool can_write;
+    bool reliable;
 
     if (peer->role != kHUB_PEER_ROLE_CLIENT) {
         return;
@@ -477,8 +481,15 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
         return;
     }
 
+    reliable = (open.flags & OPEN_FLAG_RELIABLE) != 0;
+    if (reliable && !reliableEndpointsSupport(self, peer, entry)) {
+        ack.status = OPEN_STATUS_RELIABLE_UNSUPPORTED;
+        sendControl(self, peer, encoded, OpenAckMessage_Encode(&ack, encoded, sizeof(encoded)));
+        return;
+    }
+
     suppress_echo = (open.flags & OPEN_FLAG_SUPPRESS_OWN_ECHO) != 0;
-    if (ClientSession_OpenInterface(&peer->session, open.interface_id, suppress_echo, can_write, &ack.channel)) {
+    if (ClientSession_OpenInterface(&peer->session, open.interface_id, suppress_echo, can_write, reliable, &ack.channel)) {
         ack.status = OPEN_STATUS_OK;
     }
 
@@ -1348,6 +1359,19 @@ static bool clientCanWrite(Broker *self, const HubPeer *peer, const InterfaceEnt
         entry->agent_name,
         entry->interface_name
     );
+}
+
+static bool reliableEndpointsSupport(Broker *self, const HubPeer *client, const InterfaceEntry *entry)
+{
+    const HubPeer *agent;
+
+    if ((client->capabilities & HELLO_CAP_RELIABLE_CHANNELS) == 0) {
+        return false;
+    }
+
+    agent = PeerDirectory_Find(&self->directory, entry->agent_peer_id);
+
+    return agent != NULL && (agent->capabilities & HELLO_CAP_RELIABLE_CHANNELS) != 0;
 }
 
 static uint8_t injectionToken(Broker *self, const HubPeer *sender)

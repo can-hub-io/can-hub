@@ -30,6 +30,7 @@ typedef struct {
     bool local;
     bool send_failed;
     uint32_t peer_id;
+    uint32_t capabilities;
     uint8_t role;
     uint8_t transport_kind;
     uint64_t hello_deadline_us;

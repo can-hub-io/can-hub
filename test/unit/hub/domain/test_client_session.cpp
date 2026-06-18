@@ -17,12 +17,23 @@ describe("client_session", []() {
         bool first_opened;
         bool second_opened;
 
-        first_opened = ClientSession_OpenInterface(&session, 7, false, false, &first_channel);
-        second_opened = ClientSession_OpenInterface(&session, 9, false, false, &second_channel);
+        first_opened = ClientSession_OpenInterface(&session, 7, false, false, false, &first_channel);
+        second_opened = ClientSession_OpenInterface(&session, 9, false, false, false, &second_channel);
 
         expect(first_opened).toBe(true);
         expect(second_opened).toBe(true);
         expect(first_channel == second_channel).toBe(false);
+    });
+
+    it("records the reliable flag on the binding", []() {
+        uint8_t reliable_channel = 0;
+        uint8_t lossy_channel = 0;
+
+        ClientSession_OpenInterface(&session, 7, false, false, true, &reliable_channel);
+        ClientSession_OpenInterface(&session, 9, false, false, false, &lossy_channel);
+
+        expect(ClientSession_BindingForChannel(&session, reliable_channel)->reliable).toBe(true);
+        expect(ClientSession_BindingForChannel(&session, lossy_channel)->reliable).toBe(false);
     });
 
     it("maps channels to interfaces in both directions", []() {
@@ -32,7 +43,7 @@ describe("client_session", []() {
         bool channel_found;
         bool interface_found;
 
-        ClientSession_OpenInterface(&session, 7, false, false, &channel);
+        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
 
         interface_found = ClientSession_InterfaceForChannel(&session, channel, &found_interface);
         channel_found = ClientSession_ChannelForInterface(&session, 7, &found_channel);
@@ -48,7 +59,7 @@ describe("client_session", []() {
         uint32_t found_interface = 0;
         bool interface_found;
 
-        ClientSession_OpenInterface(&session, 7, false, false, &channel);
+        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
 
         ClientSession_CloseChannel(&session, channel);
         interface_found = ClientSession_InterfaceForChannel(&session, channel, &found_interface);
@@ -65,9 +76,9 @@ describe("client_session", []() {
         const ChannelBinding *second_binding;
         const ChannelBinding *end_binding;
 
-        ClientSession_OpenInterface(&session, 7, false, false, &first_channel);
-        ClientSession_OpenInterface(&session, 9, false, false, &other_channel);
-        ClientSession_OpenInterface(&session, 7, false, false, &second_channel);
+        ClientSession_OpenInterface(&session, 7, false, false, false, &first_channel);
+        ClientSession_OpenInterface(&session, 9, false, false, false, &other_channel);
+        ClientSession_OpenInterface(&session, 7, false, false, false, &second_channel);
 
         first_binding = ClientSession_NextBindingForInterface(&session, 7, &iterator);
         second_binding = ClientSession_NextBindingForInterface(&session, 7, &iterator);
@@ -83,7 +94,7 @@ describe("client_session", []() {
         uint8_t iterator = 0;
         const ChannelBinding *binding;
 
-        ClientSession_OpenInterface(&session, 7, false, false, &channel);
+        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
 
         binding = ClientSession_NextBindingForInterface(&session, 9, &iterator);
 
@@ -95,7 +106,7 @@ describe("client_session", []() {
         bool channel_found;
         uint8_t found_channel = 0;
 
-        ClientSession_OpenInterface(&session, 7, false, false, &channel);
+        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
 
         ClientSession_RemoveInterface(&session, 7);
         channel_found = ClientSession_ChannelForInterface(&session, 7, &found_channel);
@@ -106,7 +117,7 @@ describe("client_session", []() {
     it("accepts every frame on a channel with no filters", []() {
         uint8_t channel = 0;
 
-        ClientSession_OpenInterface(&session, 7, false, false, &channel);
+        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
 
         expect(ClientSession_ChannelAccepts(&session, channel, 0x123)).toBe(true);
         expect(ClientSession_ChannelAccepts(&session, channel, 0x7AB)).toBe(true);
@@ -117,7 +128,7 @@ describe("client_session", []() {
         CanFilter filters[1] = { { 0x100, 0x700 } };
         bool set_ok;
 
-        ClientSession_OpenInterface(&session, 7, false, false, &channel);
+        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
         set_ok = ClientSession_SetFilters(&session, channel, filters, 1);
 
         expect(set_ok).toBe(true);
@@ -130,7 +141,7 @@ describe("client_session", []() {
         uint8_t channel = 0;
         CanFilter filters[2] = { { 0x100, 0x7FF }, { 0x200, 0x7FF } };
 
-        ClientSession_OpenInterface(&session, 7, false, false, &channel);
+        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
         ClientSession_SetFilters(&session, channel, filters, 2);
 
         expect(ClientSession_ChannelAccepts(&session, channel, 0x100)).toBe(true);
@@ -142,7 +153,7 @@ describe("client_session", []() {
         uint8_t channel = 0;
         CanFilter filters[1] = { { 0x100, 0x7FF } };
 
-        ClientSession_OpenInterface(&session, 7, false, false, &channel);
+        ClientSession_OpenInterface(&session, 7, false, false, false, &channel);
         ClientSession_SetFilters(&session, channel, filters, 1);
         ClientSession_SetFilters(&session, channel, NULL, 0);
 
@@ -164,10 +175,10 @@ describe("client_session", []() {
         uint8_t i;
 
         for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
-            ClientSession_OpenInterface(&session, i, false, false, &channel);
+            ClientSession_OpenInterface(&session, i, false, false, false, &channel);
         }
 
-        opened = ClientSession_OpenInterface(&session, 100, false, false, &channel);
+        opened = ClientSession_OpenInterface(&session, 100, false, false, false, &channel);
 
         expect(opened).toBe(false);
     });

@@ -30,7 +30,7 @@ describe("frame_routes", []() {
         uint8_t client_channel = 0;
         uint8_t route_count;
 
-        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, &client_channel);
+        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, false, &client_channel);
 
         route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX);
 
@@ -47,8 +47,8 @@ describe("frame_routes", []() {
         uint8_t second_channel = 0;
         uint8_t route_count;
 
-        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, &first_channel);
-        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, &second_channel);
+        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, false, &first_channel);
+        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, false, &second_channel);
 
         route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX);
 
@@ -66,8 +66,8 @@ describe("frame_routes", []() {
         uint8_t channel = 0;
         uint8_t route_count;
 
-        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, &channel);
-        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, &channel);
+        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, false, &channel);
+        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, false, &channel);
 
         route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, 1);
 
@@ -99,7 +99,7 @@ describe("frame_routes", []() {
         uint8_t client_channel = 0;
         uint8_t route_count;
 
-        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, &client_channel);
+        ClientSession_OpenInterface(&client->session, entry->interface_id, false, false, false, &client_channel);
 
         route_count = FrameRoutes_FromClient(&registry, client, client_channel, routes, FRAME_ROUTES_MAX);
 
