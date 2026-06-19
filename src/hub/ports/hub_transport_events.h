@@ -32,6 +32,6 @@ typedef struct {
     void (*on_peer_connected)(void *context, uint32_t peer_id, const HubPeerConnectInfo *info, uint64_t now_us);
     void (*on_peer_disconnected)(void *context, uint32_t peer_id, uint64_t now_us);
     void (*on_peer_control)(void *context, uint32_t peer_id, const uint8_t *data, size_t size, uint64_t now_us);
-    void (*on_peer_frame)(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
+    bool (*on_peer_frame)(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
     void (*on_peer_writable)(void *context, uint32_t peer_id);
 } HubTransportEvents;

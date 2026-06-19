@@ -37,7 +37,7 @@ typedef void (*TControlHandler)(
 static void onPeerConnected(void *context, uint32_t peer_id, const HubPeerConnectInfo *info, uint64_t now_us);
 static void onPeerDisconnected(void *context, uint32_t peer_id, uint64_t now_us);
 static void onPeerControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size, uint64_t now_us);
-static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
+static bool onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static void onPeerWritable(void *context, uint32_t peer_id);
 static void handleHello(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
@@ -74,7 +74,7 @@ static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const Regi
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
 static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size);
 static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char *detail);
-static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id, const uint8_t *data, size_t size, uint8_t route_flags);
+static bool forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id, const uint8_t *data, size_t size, uint8_t route_flags);
 static uint64_t frameWireBits(const uint8_t *wire, uint16_t size);
 static void enqueueFrame(Broker *self, HubPeer *peer, uint8_t channel, const uint8_t *data, size_t size);
 static void drainPeer(Broker *self, HubPeer *peer);
@@ -275,7 +275,7 @@ static void onPeerControl(void *context, uint32_t peer_id, const uint8_t *data, 
     }
 }
 
-static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size)
+static bool onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size)
 {
     Broker *self = context;
     HubPeer *peer = PeerDirectory_Find(&self->directory, peer_id);
@@ -285,22 +285,23 @@ static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
     uint32_t echo_originator_peer_id = 0;
     uint8_t forwarded_route_flags = 0;
     uint8_t route_count = 0;
+    bool accepted = true;
     uint8_t i;
 
     if (peer == NULL || size > FRAME_BUFFER_SIZE) {
-        return;
+        return true;
     }
     if (!MessageHeader_Decode(&header, data, size)) {
-        return;
+        return true;
     }
     if (header.type != kMESSAGE_TYPE_FRAME || size < (size_t)MESSAGE_HEADER_SIZE + header.length) {
-        return;
+        return true;
     }
     if (!FrameMessage_Decode(&frame, data + MESSAGE_HEADER_SIZE, header.length)) {
-        return;
+        return true;
     }
     if (peer->role != kHUB_PEER_ROLE_AGENT && peer->role != kHUB_PEER_ROLE_CLIENT) {
-        return;
+        return true;
     }
 
     self->metrics.frames_received++;
@@ -320,7 +321,7 @@ static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
     } else {
         if (!ClientSession_CanWrite(&peer->session, frame.channel)) {
             self->metrics.frames_dropped++;
-            return;
+            return true;
         }
         route_count = FrameRoutes_FromClient(&self->registry, peer, frame.channel, routes, FRAME_ROUTES_MAX);
         forwarded_route_flags = (uint8_t)(injectionToken(self, peer) << FRAME_ROUTE_TOKEN_SHIFT);
@@ -328,15 +329,19 @@ static void onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
 
     if (route_count == 0) {
         self->metrics.frames_unroutable++;
-        return;
+        return true;
     }
 
     for(i=0; i<route_count; i++) {
         if (routes[i].suppress_echo && routes[i].peer_id == echo_originator_peer_id) {
             continue;
         }
-        forwardFrame(self, &routes[i], frame.can_id, data, size, forwarded_route_flags);
+        if (!forwardFrame(self, &routes[i], frame.can_id, data, size, forwarded_route_flags)) {
+            accepted = false;
+        }
     }
+
+    return accepted;
 }
 
 static void onPeerWritable(void *context, uint32_t peer_id)
@@ -1192,7 +1197,7 @@ static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char 
     self->transport->send_control(self->transport->context, peer_id, encoded, encoded_size);
 }
 
-static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id, const uint8_t *data, size_t size, uint8_t route_flags)
+static bool forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id, const uint8_t *data, size_t size, uint8_t route_flags)
 {
     uint8_t forwarded[FRAME_BUFFER_SIZE];
     HubPeer *destination;
@@ -1201,7 +1206,7 @@ static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id,
     if (destination != NULL
         && destination->role == kHUB_PEER_ROLE_CLIENT
         && !ClientSession_ChannelAccepts(&destination->session, route->channel, can_id)) {
-        return;
+        return true;
     }
 
     memcpy(forwarded, data, size);
@@ -1214,21 +1219,22 @@ static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id,
         } else {
             self->metrics.frames_dropped++;
         }
-        return;
+        return true;
     }
 
     if (route->reliable) {
-        if (self->transport->send_frame(self->transport->context, route->peer_id, route->channel, forwarded, size)) {
-            countForwarded(self, destination, route->channel);
-        } else {
-            countDropped(self, destination, route->channel);
+        /* A full destination ring is backpressure, not loss: report not-accepted so
+         * the receiver withholds the sender's credit and retries, never dropping. */
+        if (!self->transport->send_frame(self->transport->context, route->peer_id, route->channel, forwarded, size)) {
+            return false;
         }
-        return;
+        countForwarded(self, destination, route->channel);
+        return true;
     }
 
     if (EgressQueue_ChannelPending(&destination->egress, route->channel)) {
         enqueueFrame(self, destination, route->channel, forwarded, size);
-        return;
+        return true;
     }
 
     if (!InterfaceRegistry_TryEgress(
@@ -1238,15 +1244,17 @@ static void forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id,
             frameWireBits(forwarded, (uint16_t)size),
             self->now_us)) {
         enqueueFrame(self, destination, route->channel, forwarded, size);
-        return;
+        return true;
     }
 
     if (self->transport->send_frame(self->transport->context, route->peer_id, route->channel, forwarded, size)) {
         countForwarded(self, destination, route->channel);
-        return;
+        return true;
     }
 
     enqueueFrame(self, destination, route->channel, forwarded, size);
+
+    return true;
 }
 
 static void enqueueFrame(Broker *self, HubPeer *peer, uint8_t channel, const uint8_t *data, size_t size)

@@ -31,6 +31,9 @@ typedef struct {
 
 void QuicControlChannel_Reset(QuicControlChannel *self);
 void QuicControlChannel_AdoptBuffer(QuicControlChannel *self, uint8_t *buffer, size_t capacity);
+void QuicControlChannel_AdoptRxBuffer(QuicControlChannel *self, uint8_t *buffer, size_t capacity);
+bool QuicControlChannel_CanQueue(const QuicControlChannel *self, size_t size);
+size_t QuicControlChannel_RxPending(const QuicControlChannel *self);
 bool QuicControlChannel_QueueTx(QuicControlChannel *self, const uint8_t *data, size_t size);
 size_t QuicControlChannel_PendingTx(const QuicControlChannel *self, const uint8_t **data);
 void QuicControlChannel_MarkSent(QuicControlChannel *self, size_t size);

@@ -3,6 +3,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "platform/linux/quic/quic_udp_gso.h"
+
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/timerfd.h>
@@ -57,6 +59,11 @@ bool QuicUdpEndpoint_ConnectTo(QuicUdpEndpoint *self, const char *host, const ch
 ssize_t QuicUdpEndpoint_Send(QuicUdpEndpoint *self, const uint8_t *data, size_t size)
 {
     return send(self->udp_fd, data, size, 0);
+}
+
+void QuicUdpEndpoint_SendSegmented(QuicUdpEndpoint *self, const uint8_t *data, size_t size, size_t segment_size)
+{
+    QuicUdpGso_Send(self->udp_fd, NULL, 0, data, size, segment_size, &self->gso_unsupported);
 }
 
 ssize_t QuicUdpEndpoint_Receive(QuicUdpEndpoint *self, uint8_t *buffer, size_t buffer_size)

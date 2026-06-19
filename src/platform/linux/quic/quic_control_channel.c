@@ -26,6 +26,21 @@ void QuicControlChannel_AdoptBuffer(QuicControlChannel *self, uint8_t *buffer, s
     self->tx_sent = 0;
 }
 
+void QuicControlChannel_AdoptRxBuffer(QuicControlChannel *self, uint8_t *buffer, size_t capacity)
+{
+    MessageFramer_AdoptBuffer(&self->framer, buffer, capacity);
+}
+
+bool QuicControlChannel_CanQueue(const QuicControlChannel *self, size_t size)
+{
+    return self->tx_used + size <= self->tx_capacity;
+}
+
+size_t QuicControlChannel_RxPending(const QuicControlChannel *self)
+{
+    return MessageFramer_Pending(&self->framer);
+}
+
 bool QuicControlChannel_QueueTx(QuicControlChannel *self, const uint8_t *data, size_t size)
 {
     uint8_t *buffer = txBuffer(self);

@@ -15,11 +15,11 @@ static bool portSendFrame(void *context, uint8_t channel, const uint8_t *data, s
 static void portSetChannelMode(void *context, uint8_t channel, bool reliable);
 static void teardown(QuicClientTransport *self, bool notify);
 static bool flushEgress(QuicClientTransport *self, const uint8_t *datagram, size_t datagram_size);
-static void sendPacket(void *context, const uint8_t *packet, size_t size);
+static void sendPacket(void *context, const uint8_t *data, size_t size, size_t segment_size);
 static void rearmTimer(QuicClientTransport *self);
 static void dispatchControlMessages(QuicClientTransport *self);
 static void receiveControlData(QuicClientTransport *self, const uint8_t *data, size_t size);
-static void clientFrameSink(void *context, const uint8_t *frame, size_t size);
+static bool clientFrameSink(void *context, const uint8_t *frame, size_t size);
 static void onHandshakeCompleted(void *context);
 static void onDatagram(void *context, const uint8_t *data, size_t size);
 static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, size_t size);
@@ -283,11 +283,19 @@ static bool flushEgress(QuicClientTransport *self, const uint8_t *datagram, size
     return datagram_accepted;
 }
 
-static void sendPacket(void *context, const uint8_t *packet, size_t size)
+static void sendPacket(void *context, const uint8_t *data, size_t size, size_t segment_size)
 {
     QuicClientTransport *self = context;
+    size_t offset;
+    size_t chunk;
 
-    QuicUdpEndpoint_Send(&self->udp, packet, size);
+    for(offset=0; offset<size; offset+=segment_size) {
+        chunk = size - offset;
+        if (chunk > segment_size) {
+            chunk = segment_size;
+        }
+        QuicUdpEndpoint_Send(&self->udp, data + offset, chunk);
+    }
 }
 
 static void rearmTimer(QuicClientTransport *self)
@@ -355,7 +363,8 @@ static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, 
         reliable = QuicReliableStreams_Adopt(&self->reliable_streams, stream_id);
     }
     if (reliable != NULL) {
-        QuicReliableStreams_Receive(reliable, data, size, clientFrameSink, self);
+        QuicReliableStreams_Receive(reliable, &self->connection, data, size, clientFrameSink, self);
+        return;
     }
     QuicConnection_ExtendStreamCredit(&self->connection, stream_id, size);
 }
@@ -391,9 +400,11 @@ static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_o
     }
 }
 
-static void clientFrameSink(void *context, const uint8_t *frame, size_t size)
+static bool clientFrameSink(void *context, const uint8_t *frame, size_t size)
 {
     QuicClientTransport *self = context;
 
     self->events.on_frame(self->events.context, frame, size);
+
+    return true;
 }

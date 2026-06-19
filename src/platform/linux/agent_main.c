@@ -53,6 +53,8 @@ static char known_hubs_path[KNOWN_HUBS_PATH_MAX];
 static char pin_key[PIN_KEY_MAX];
 static TransportEvents agent_core_events;
 static uint32_t hub_connect_count;
+static FrameMessage pending_can_frame[REGISTER_INTERFACES_MAX];
+static bool can_interface_paused[REGISTER_INTERFACES_MAX];
 
 static void printUsage(FILE *stream, const char *program);
 static bool parseArguments(int argc, char **argv, char *host, char *port_text);
@@ -70,6 +72,7 @@ static bool registerStaticPollFds(void);
 static void syncStreamRegistration(void);
 static void dispatchEvent(const struct epoll_event *event, const CanEvents *can_events);
 static void drainCanInterface(uint8_t interface_index, const CanEvents *can_events);
+static void resumePausedCanInterfaces(const CanEvents *can_events);
 static int32_t showIdentity(void);
 
 int main(int argc, char **argv)
@@ -136,6 +139,7 @@ int main(int argc, char **argv)
             dispatchEvent(&events[i], &can_events);
         }
 
+        resumePausedCanInterfaces(&can_events);
         AgentApp_Tick(&app, Clock_RealtimeUs());
     }
 
@@ -476,10 +480,35 @@ static void dispatchEvent(const struct epoll_event *event, const CanEvents *can_
 
 static void drainCanInterface(uint8_t interface_index, const CanEvents *can_events)
 {
-    FrameMessage frame;
+    int32_t fd;
 
-    while (SocketCanAdapter_ReadFrame(&can_adapter, interface_index, &frame)) {
-        can_events->on_frame(can_events->context, interface_index, &frame);
+    while (SocketCanAdapter_ReadFrame(&can_adapter, interface_index, &pending_can_frame[interface_index])) {
+        if (can_events->on_frame(can_events->context, interface_index, &pending_can_frame[interface_index])) {
+            continue;
+        }
+        can_interface_paused[interface_index] = true;
+        fd = SocketCanAdapter_Fd(&can_adapter, interface_index);
+        EpollRegistry_SetStaticInterest(&poll_registry, fd, 0, (uint32_t)fd);
+        return;
+    }
+}
+
+static void resumePausedCanInterfaces(const CanEvents *can_events)
+{
+    uint8_t interface_index;
+    int32_t fd;
+
+    for(interface_index=0; interface_index<registration.interface_count; interface_index++) {
+        if (!can_interface_paused[interface_index]) {
+            continue;
+        }
+        if (!can_events->on_frame(can_events->context, interface_index, &pending_can_frame[interface_index])) {
+            continue;
+        }
+        can_interface_paused[interface_index] = false;
+        fd = SocketCanAdapter_Fd(&can_adapter, interface_index);
+        EpollRegistry_SetStaticInterest(&poll_registry, fd, EPOLLIN, (uint32_t)fd);
+        drainCanInterface(interface_index, can_events);
     }
 }
 
