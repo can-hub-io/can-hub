@@ -98,7 +98,7 @@ class Bench:
         self._ns(ns, "ip", "link", "set", "eth0", "up")
         if spec.latency_ms > 0:
             self._ns(ns, "tc", "qdisc", "add", "dev", "eth0", "root",
-                     "netem", "delay", f"{spec.latency_ms}ms")
+                     "netem", "delay", f"{spec.latency_ms}ms", "limit", "200000")
 
     def _ns(self, ns: str, *argv: str) -> None:
         run(["ip", "netns", "exec", ns, *argv])
