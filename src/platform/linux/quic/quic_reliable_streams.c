@@ -1,6 +1,9 @@
 #include "platform/linux/quic/quic_reliable_streams.h"
 
+#include <stdlib.h>
+
 static QuicReliableStream *findFree(QuicReliableStreamSet *self);
+static bool attachStorage(QuicReliableStream *reliable);
 
 /* ---------- public ---------- */
 
@@ -9,6 +12,8 @@ void QuicReliableStreams_Reset(QuicReliableStreamSet *self)
     uint8_t i;
 
     for(i=0; i<QUIC_RELIABLE_STREAMS_MAX; i++) {
+        free(self->streams[i].tx_storage);
+        self->streams[i].tx_storage = NULL;
         self->streams[i].in_use = false;
     }
 }
@@ -62,6 +67,9 @@ QuicReliableStream *QuicReliableStreams_Open(QuicReliableStreamSet *self, QuicCo
     }
 
     QuicControlChannel_Reset(&reliable->stream);
+    if (!attachStorage(reliable)) {
+        return NULL;
+    }
     reliable->stream.stream_id = stream_id;
     reliable->channel = channel;
     reliable->in_use = true;
@@ -80,6 +88,9 @@ QuicReliableStream *QuicReliableStreams_Adopt(QuicReliableStreamSet *self, int64
     }
 
     QuicControlChannel_Reset(&reliable->stream);
+    if (!attachStorage(reliable)) {
+        return NULL;
+    }
     reliable->stream.stream_id = stream_id;
     reliable->channel = 0;
     reliable->in_use = true;
@@ -156,4 +167,17 @@ static QuicReliableStream *findFree(QuicReliableStreamSet *self)
     }
 
     return NULL;
+}
+
+static bool attachStorage(QuicReliableStream *reliable)
+{
+    free(reliable->tx_storage);
+    reliable->tx_storage = malloc(QUIC_RELIABLE_TX_BUFFER_SIZE);
+    if (reliable->tx_storage == NULL) {
+        return false;
+    }
+
+    QuicControlChannel_AdoptBuffer(&reliable->stream, reliable->tx_storage, QUIC_RELIABLE_TX_BUFFER_SIZE);
+
+    return true;
 }

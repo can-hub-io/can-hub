@@ -65,7 +65,7 @@ describe("quic_control_channel", []() {
         QuicControlChannel_QueueTx(&channel, second_chunk, sizeof(second_chunk));
         QuicControlChannel_MarkSent(&channel, 4);
 
-        in_flight = &channel.tx_buffer[4];
+        in_flight = &channel.tx_inline[4];
 
         QuicControlChannel_MarkAcked(&channel, 4);
         QuicControlChannel_QueueTx(&channel, third_chunk, sizeof(third_chunk));

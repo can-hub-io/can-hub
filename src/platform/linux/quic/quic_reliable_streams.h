@@ -23,8 +23,19 @@
 
 #define QUIC_RELIABLE_STREAMS_MAX 8
 
+/*
+ * The reliable data plane carries bulk traffic, not the small control messages
+ * the inline 4 KiB ring was sized for. On a high-RTT link the in-flight window
+ * (bounded by the TX ring) caps throughput to ring/RTT, so a 4 KiB ring throttles
+ * the stream and overflows under a burst (frames dropped on QueueTx failure).
+ * Each reliable stream therefore gets a large heap-allocated TX ring, adopted by
+ * its QuicControlChannel at open and freed on reset.
+ */
+#define QUIC_RELIABLE_TX_BUFFER_SIZE (256 * 1024)
+
 typedef struct {
     QuicControlChannel stream;
+    uint8_t *tx_storage;
     uint8_t channel;
     bool in_use;
     bool has_channel;

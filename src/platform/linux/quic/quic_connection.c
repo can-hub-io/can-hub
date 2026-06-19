@@ -12,8 +12,13 @@
 #define IDLE_TIMEOUT (30 * NGTCP2_SECONDS)
 #define KEEP_ALIVE_TIMEOUT (10 * NGTCP2_SECONDS)
 #define HANDSHAKE_TIMEOUT (10 * NGTCP2_SECONDS)
-#define INITIAL_MAX_DATA (1024 * 1024)
-#define INITIAL_MAX_STREAM_DATA (64 * 1024)
+/* Flow-control windows sized for the reliable data plane: on a high-RTT link
+ * peak stream throughput is the in-flight window / RTT, so a small window
+ * throttles bulk transfers far below TCP, whose receive window autotunes to the
+ * bandwidth-delay product. The per-stream window matches the reliable TX ring;
+ * the connection window covers several concurrent reliable streams. */
+#define INITIAL_MAX_DATA (4 * 1024 * 1024)
+#define INITIAL_MAX_STREAM_DATA (256 * 1024)
 #define INITIAL_MAX_STREAMS_BIDI 16
 
 static ngtcp2_conn *getConnection(ngtcp2_crypto_conn_ref *connection_ref);
