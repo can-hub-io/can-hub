@@ -157,12 +157,15 @@ void QuicServerTransport_OnUdpReadable(QuicServerTransport *self)
 
         makePeerPath(self, peer, &path);
         self->dispatching = true;
+        self->dispatching_peer = peer;
         if (!QuicConnection_ReadPacket(&peer->connection, &path, packet, (size_t)bytes_received)) {
             self->dispatching = false;
+            self->dispatching_peer = NULL;
             teardownPeer(self, peer, true);
             continue;
         }
         self->dispatching = false;
+        self->dispatching_peer = NULL;
 
         if (peer->close_pending) {
             flushPeer(self, peer, NULL, 0);
@@ -197,12 +200,15 @@ void QuicServerTransport_OnTimer(QuicServerTransport *self)
             continue;
         }
         self->dispatching = true;
+        self->dispatching_peer = peer;
         if (!QuicConnection_HandleExpiry(&peer->connection)) {
             self->dispatching = false;
+            self->dispatching_peer = NULL;
             teardownPeer(self, peer, true);
             continue;
         }
         self->dispatching = false;
+        self->dispatching_peer = NULL;
 
         if (peer->close_pending) {
             flushPeer(self, peer, NULL, 0);
@@ -253,7 +259,7 @@ static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, cons
     if (!QuicControlChannel_QueueTx(&reliable->stream, data, size)) {
         return false;
     }
-    if (self->dispatching) {
+    if (self->dispatching && peer == self->dispatching_peer) {
         return true;
     }
 
