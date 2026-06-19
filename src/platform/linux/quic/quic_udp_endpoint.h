@@ -21,11 +21,13 @@ typedef struct {
     socklen_t local_address_length;
     struct sockaddr_storage remote_address;
     socklen_t remote_address_length;
+    bool gso_unsupported;
 } QuicUdpEndpoint;
 
 bool QuicUdpEndpoint_Open(QuicUdpEndpoint *self);
 bool QuicUdpEndpoint_ConnectTo(QuicUdpEndpoint *self, const char *host, const char *port);
 ssize_t QuicUdpEndpoint_Send(QuicUdpEndpoint *self, const uint8_t *data, size_t size);
+void QuicUdpEndpoint_SendSegmented(QuicUdpEndpoint *self, const uint8_t *data, size_t size, size_t segment_size);
 ssize_t QuicUdpEndpoint_Receive(QuicUdpEndpoint *self, uint8_t *buffer, size_t buffer_size);
 void QuicUdpEndpoint_MakePath(QuicUdpEndpoint *self, ngtcp2_path *path);
 void QuicUdpEndpoint_ArmTimerAt(QuicUdpEndpoint *self, uint64_t expiry_ns);

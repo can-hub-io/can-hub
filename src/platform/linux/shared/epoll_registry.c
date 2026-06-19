@@ -25,6 +25,15 @@ bool EpollRegistry_AddStatic(EpollRegistry *self, int32_t fd, uint32_t event_dat
     return epoll_ctl(self->epoll_fd, EPOLL_CTL_ADD, fd, &event) == 0;
 }
 
+void EpollRegistry_SetStaticInterest(EpollRegistry *self, int32_t fd, uint32_t mask, uint32_t event_data)
+{
+    struct epoll_event event;
+
+    event.events = mask;
+    event.data.u32 = event_data;
+    epoll_ctl(self->epoll_fd, EPOLL_CTL_MOD, fd, &event);
+}
+
 void EpollRegistry_SyncSlot(
     EpollRegistry *self,
     uint8_t slot,

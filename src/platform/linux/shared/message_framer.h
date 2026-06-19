@@ -16,7 +16,9 @@
  * buffer is the only thing that cannot make progress (Push returns 0).
  */
 typedef struct {
-    uint8_t buffer[MESSAGE_FRAMER_BUFFER_SIZE];
+    uint8_t inline_buffer[MESSAGE_FRAMER_BUFFER_SIZE];
+    uint8_t *buffer;
+    size_t capacity;
     size_t used;
 } MessageFramer;
 
@@ -27,6 +29,8 @@ typedef struct {
 } MessageSink;
 
 void MessageFramer_Reset(MessageFramer *self);
+void MessageFramer_AdoptBuffer(MessageFramer *self, uint8_t *buffer, size_t capacity);
+size_t MessageFramer_Pending(const MessageFramer *self);
 size_t MessageFramer_Push(MessageFramer *self, const uint8_t *data, size_t size);
 size_t MessageFramer_NextMessage(const MessageFramer *self, const uint8_t **message);
 void MessageFramer_Consume(MessageFramer *self, size_t size);

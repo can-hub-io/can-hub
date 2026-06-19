@@ -55,7 +55,7 @@ void Agent_Tick(Agent *self, uint64_t now_us);
 void Agent_OnConnected(Agent *self);
 void Agent_OnDisconnected(Agent *self, uint64_t now_us);
 void Agent_OnControlMessage(Agent *self, const uint8_t *data, size_t size, uint64_t now_us);
-void Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *frame);
+bool Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *frame);
 void Agent_OnTransportFrame(Agent *self, const uint8_t *data, size_t size);
 uint8_t Agent_State(const Agent *self);
 uint32_t Agent_PendingReconnectDelayMs(const Agent *self);

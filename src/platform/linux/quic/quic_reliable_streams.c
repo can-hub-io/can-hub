@@ -1,6 +1,10 @@
 #include "platform/linux/quic/quic_reliable_streams.h"
 
+#include <stdlib.h>
+
 static QuicReliableStream *findFree(QuicReliableStreamSet *self);
+static bool attachStorage(QuicReliableStream *reliable);
+static void drainAndCredit(QuicReliableStream *reliable, QuicConnection *connection, QuicReliableFrameSink sink, void *context);
 
 /* ---------- public ---------- */
 
@@ -9,6 +13,10 @@ void QuicReliableStreams_Reset(QuicReliableStreamSet *self)
     uint8_t i;
 
     for(i=0; i<QUIC_RELIABLE_STREAMS_MAX; i++) {
+        free(self->streams[i].tx_storage);
+        free(self->streams[i].rx_storage);
+        self->streams[i].tx_storage = NULL;
+        self->streams[i].rx_storage = NULL;
         self->streams[i].in_use = false;
     }
 }
@@ -62,6 +70,9 @@ QuicReliableStream *QuicReliableStreams_Open(QuicReliableStreamSet *self, QuicCo
     }
 
     QuicControlChannel_Reset(&reliable->stream);
+    if (!attachStorage(reliable)) {
+        return NULL;
+    }
     reliable->stream.stream_id = stream_id;
     reliable->channel = channel;
     reliable->in_use = true;
@@ -80,6 +91,9 @@ QuicReliableStream *QuicReliableStreams_Adopt(QuicReliableStreamSet *self, int64
     }
 
     QuicControlChannel_Reset(&reliable->stream);
+    if (!attachStorage(reliable)) {
+        return NULL;
+    }
     reliable->stream.stream_id = stream_id;
     reliable->channel = 0;
     reliable->in_use = true;
@@ -90,14 +104,13 @@ QuicReliableStream *QuicReliableStreams_Adopt(QuicReliableStreamSet *self, int64
 
 void QuicReliableStreams_Receive(
     QuicReliableStream *reliable,
+    QuicConnection *connection,
     const uint8_t *data,
     size_t size,
     QuicReliableFrameSink sink,
     void *context
 )
 {
-    const uint8_t *message;
-    size_t message_size;
     size_t offset = 0;
     size_t taken;
 
@@ -108,21 +121,31 @@ void QuicReliableStreams_Receive(
         reliable->channel = data[0];
         reliable->has_channel = true;
         offset = 1;
+        QuicConnection_ExtendStreamCredit(connection, reliable->stream.stream_id, 1);
     }
 
     while (offset < size) {
         taken = QuicControlChannel_QueueRx(&reliable->stream, data + offset, size - offset);
         offset += taken;
-        for (;;) {
-            message_size = QuicControlChannel_NextMessage(&reliable->stream, &message);
-            if (message_size == 0) {
-                break;
-            }
-            sink(context, message, message_size);
-            QuicControlChannel_ConsumeMessage(&reliable->stream, message_size);
-        }
+        drainAndCredit(reliable, connection, sink, context);
         if (taken == 0) {
             break;
+        }
+    }
+}
+
+void QuicReliableStreams_RetryDrain(
+    QuicReliableStreamSet *self,
+    QuicConnection *connection,
+    QuicReliableFrameSink sink,
+    void *context
+)
+{
+    uint8_t i;
+
+    for(i=0; i<QUIC_RELIABLE_STREAMS_MAX; i++) {
+        if (self->streams[i].in_use && QuicControlChannel_RxPending(&self->streams[i].stream) > 0) {
+            drainAndCredit(&self->streams[i], connection, sink, context);
         }
     }
 }
@@ -156,4 +179,47 @@ static QuicReliableStream *findFree(QuicReliableStreamSet *self)
     }
 
     return NULL;
+}
+
+static bool attachStorage(QuicReliableStream *reliable)
+{
+    free(reliable->tx_storage);
+    free(reliable->rx_storage);
+    reliable->tx_storage = malloc(QUIC_RELIABLE_TX_BUFFER_SIZE);
+    reliable->rx_storage = malloc(QUIC_RELIABLE_RX_BUFFER_SIZE);
+    if (reliable->tx_storage == NULL || reliable->rx_storage == NULL) {
+        free(reliable->tx_storage);
+        free(reliable->rx_storage);
+        reliable->tx_storage = NULL;
+        reliable->rx_storage = NULL;
+        return false;
+    }
+
+    QuicControlChannel_AdoptBuffer(&reliable->stream, reliable->tx_storage, QUIC_RELIABLE_TX_BUFFER_SIZE);
+    QuicControlChannel_AdoptRxBuffer(&reliable->stream, reliable->rx_storage, QUIC_RELIABLE_RX_BUFFER_SIZE);
+
+    return true;
+}
+
+static void drainAndCredit(QuicReliableStream *reliable, QuicConnection *connection, QuicReliableFrameSink sink, void *context)
+{
+    const uint8_t *message;
+    size_t message_size;
+    size_t credited = 0;
+
+    for (;;) {
+        message_size = QuicControlChannel_NextMessage(&reliable->stream, &message);
+        if (message_size == 0) {
+            break;
+        }
+        if (!sink(context, message, message_size)) {
+            break;
+        }
+        QuicControlChannel_ConsumeMessage(&reliable->stream, message_size);
+        credited += message_size;
+    }
+
+    if (credited > 0) {
+        QuicConnection_ExtendStreamCredit(connection, reliable->stream.stream_id, credited);
+    }
 }

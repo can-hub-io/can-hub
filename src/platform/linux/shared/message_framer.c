@@ -8,12 +8,26 @@
 
 void MessageFramer_Reset(MessageFramer *self)
 {
+    self->buffer = self->inline_buffer;
+    self->capacity = MESSAGE_FRAMER_BUFFER_SIZE;
     self->used = 0;
+}
+
+void MessageFramer_AdoptBuffer(MessageFramer *self, uint8_t *buffer, size_t capacity)
+{
+    self->buffer = buffer;
+    self->capacity = capacity;
+    self->used = 0;
+}
+
+size_t MessageFramer_Pending(const MessageFramer *self)
+{
+    return self->used;
 }
 
 size_t MessageFramer_Push(MessageFramer *self, const uint8_t *data, size_t size)
 {
-    size_t available = MESSAGE_FRAMER_BUFFER_SIZE - self->used;
+    size_t available = self->capacity - self->used;
     size_t taken = size < available ? size : available;
 
     memcpy(self->buffer + self->used, data, taken);

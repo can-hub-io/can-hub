@@ -17,7 +17,7 @@ static void eventConnected(void *context);
 static void eventDisconnected(void *context, uint64_t now_us);
 static void eventControl(void *context, const uint8_t *data, size_t size, uint64_t now_us);
 static void eventTransportFrame(void *context, const uint8_t *data, size_t size);
-static void eventCanFrame(void *context, uint8_t interface_index, const FrameMessage *frame);
+static bool eventCanFrame(void *context, uint8_t interface_index, const FrameMessage *frame);
 static void tryConnect(Agent *self, uint64_t now_us);
 static void tickRegistering(Agent *self, uint64_t now_us);
 static void tickRunning(Agent *self, uint64_t now_us);
@@ -137,7 +137,7 @@ void Agent_OnControlMessage(Agent *self, const uint8_t *data, size_t size, uint6
     control_handlers[header.type](self, &header, data + MESSAGE_HEADER_SIZE, now_us);
 }
 
-void Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *frame)
+bool Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *frame)
 {
     FrameMessage outgoing = *frame;
     uint8_t encoded[MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD];
@@ -145,10 +145,10 @@ void Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *
     uint8_t token;
 
     if (self->state != kAGENT_STATE_RUNNING) {
-        return;
+        return true;
     }
     if (!ChannelMap_ChannelForInterface(&self->channel_map, interface_index, &outgoing.channel)) {
-        return;
+        return true;
     }
 
     if (frame->route_flags & FRAME_ROUTE_FLAG_ECHO) {
@@ -162,10 +162,10 @@ void Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *
 
     encoded_size = FrameMessage_Encode(&outgoing, encoded, sizeof(encoded));
     if (encoded_size == 0) {
-        return;
+        return true;
     }
 
-    self->transport->send_frame(self->transport->context, outgoing.channel, encoded, encoded_size);
+    return self->transport->send_frame(self->transport->context, outgoing.channel, encoded, encoded_size);
 }
 
 void Agent_OnTransportFrame(Agent *self, const uint8_t *data, size_t size)
@@ -231,9 +231,9 @@ static void eventTransportFrame(void *context, const uint8_t *data, size_t size)
     Agent_OnTransportFrame(context, data, size);
 }
 
-static void eventCanFrame(void *context, uint8_t interface_index, const FrameMessage *frame)
+static bool eventCanFrame(void *context, uint8_t interface_index, const FrameMessage *frame)
 {
-    Agent_OnCanFrame(context, interface_index, frame);
+    return Agent_OnCanFrame(context, interface_index, frame);
 }
 
 static void tryConnect(Agent *self, uint64_t now_us)

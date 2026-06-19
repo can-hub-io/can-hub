@@ -56,6 +56,8 @@ struct QuicServerTransport {
     int32_t timer_fd;
     uint32_t next_peer_id;
     bool dispatching;
+    bool gso_unsupported;
+    QuicServerPeer *dispatching_peer;
     struct sockaddr_storage local_address;
     socklen_t local_address_length;
     QuicServerPeer peers[QUIC_SERVER_PEERS_MAX];

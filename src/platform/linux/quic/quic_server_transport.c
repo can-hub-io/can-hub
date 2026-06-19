@@ -12,6 +12,7 @@
 
 #include "platform/linux/clock/clock.h"
 #include "platform/linux/quic/quic_egress.h"
+#include "platform/linux/quic/quic_udp_gso.h"
 #include "protocol/message_header.h"
 
 #define UDP_PACKET_BUFFER_SIZE 1452
@@ -40,8 +41,8 @@ static QuicServerPeer *acceptPeer(
 static void makePeerPath(QuicServerTransport *self, QuicServerPeer *peer, ngtcp2_path *path);
 static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *datagram, size_t datagram_size);
 static void notifyWritable(QuicServerTransport *self, QuicServerPeer *peer);
-static void sendPacketToPeer(void *context, const uint8_t *packet, size_t size);
-static void sendToPeer(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *packet, size_t size);
+static void sendPacketToPeer(void *context, const uint8_t *data, size_t size, size_t segment_size);
+static void sendToPeer(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *data, size_t size, size_t segment_size);
 static void rearmTimer(QuicServerTransport *self);
 static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool notify);
 static void dispatchControlMessages(QuicServerTransport *self, QuicServerPeer *peer);
@@ -51,7 +52,8 @@ static void onDatagram(void *context, const uint8_t *data, size_t size);
 static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, size_t size);
 static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_offset);
 static void receiveControlData(QuicServerPeer *peer, const uint8_t *data, size_t size);
-static void serverFrameSink(void *context, const uint8_t *frame, size_t size);
+static bool serverFrameSink(void *context, const uint8_t *frame, size_t size);
+static void retryStalledReliableStreams(QuicServerTransport *self);
 
 /* ---------- public ---------- */
 
@@ -157,12 +159,15 @@ void QuicServerTransport_OnUdpReadable(QuicServerTransport *self)
 
         makePeerPath(self, peer, &path);
         self->dispatching = true;
+        self->dispatching_peer = peer;
         if (!QuicConnection_ReadPacket(&peer->connection, &path, packet, (size_t)bytes_received)) {
             self->dispatching = false;
+            self->dispatching_peer = NULL;
             teardownPeer(self, peer, true);
             continue;
         }
         self->dispatching = false;
+        self->dispatching_peer = NULL;
 
         if (peer->close_pending) {
             flushPeer(self, peer, NULL, 0);
@@ -173,6 +178,7 @@ void QuicServerTransport_OnUdpReadable(QuicServerTransport *self)
         notifyWritable(self, peer);
     }
 
+    retryStalledReliableStreams(self);
     rearmTimer(self);
 }
 
@@ -197,12 +203,15 @@ void QuicServerTransport_OnTimer(QuicServerTransport *self)
             continue;
         }
         self->dispatching = true;
+        self->dispatching_peer = peer;
         if (!QuicConnection_HandleExpiry(&peer->connection)) {
             self->dispatching = false;
+            self->dispatching_peer = NULL;
             teardownPeer(self, peer, true);
             continue;
         }
         self->dispatching = false;
+        self->dispatching_peer = NULL;
 
         if (peer->close_pending) {
             flushPeer(self, peer, NULL, 0);
@@ -213,6 +222,7 @@ void QuicServerTransport_OnTimer(QuicServerTransport *self)
         notifyWritable(self, peer);
     }
 
+    retryStalledReliableStreams(self);
     rearmTimer(self);
 }
 
@@ -253,7 +263,7 @@ static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, cons
     if (!QuicControlChannel_QueueTx(&reliable->stream, data, size)) {
         return false;
     }
-    if (self->dispatching) {
+    if (self->dispatching && peer == self->dispatching_peer) {
         return true;
     }
 
@@ -440,6 +450,22 @@ static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer, const uin
     return accepted;
 }
 
+static void retryStalledReliableStreams(QuicServerTransport *self)
+{
+    uint8_t i;
+
+    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
+        if (QuicConnection_IsOpen(&self->peers[i].connection)) {
+            QuicReliableStreams_RetryDrain(&self->peers[i].reliable_streams, &self->peers[i].connection, serverFrameSink, &self->peers[i]);
+        }
+    }
+    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
+        if (QuicConnection_IsOpen(&self->peers[i].connection)) {
+            flushPeer(self, &self->peers[i], NULL, 0);
+        }
+    }
+}
+
 static void notifyWritable(QuicServerTransport *self, QuicServerPeer *peer)
 {
     if (self->events.on_peer_writable == NULL || !peer->connected || peer->close_pending) {
@@ -449,22 +475,23 @@ static void notifyWritable(QuicServerTransport *self, QuicServerPeer *peer)
     self->events.on_peer_writable(self->events.context, peer->peer_id);
 }
 
-static void sendPacketToPeer(void *context, const uint8_t *packet, size_t size)
+static void sendPacketToPeer(void *context, const uint8_t *data, size_t size, size_t segment_size)
 {
     QuicServerPeer *peer = context;
 
-    sendToPeer(peer->transport, peer, packet, size);
+    sendToPeer(peer->transport, peer, data, size, segment_size);
 }
 
-static void sendToPeer(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *packet, size_t size)
+static void sendToPeer(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *data, size_t size, size_t segment_size)
 {
-    sendto(
+    QuicUdpGso_Send(
         self->udp_fd,
-        packet,
-        size,
-        0,
         (const struct sockaddr *)&peer->remote_address,
-        peer->remote_address_length
+        peer->remote_address_length,
+        data,
+        size,
+        segment_size,
+        &self->gso_unsupported
     );
 }
 
@@ -625,7 +652,10 @@ static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, 
         reliable = QuicReliableStreams_Adopt(&peer->reliable_streams, stream_id);
     }
     if (reliable != NULL) {
-        QuicReliableStreams_Receive(reliable, data, size, serverFrameSink, peer);
+        /* Receive extends credit only for relayed bytes; un-relayable bytes stay
+         * framed and withhold credit, backpressuring the sender instead of dropping. */
+        QuicReliableStreams_Receive(reliable, &peer->connection, data, size, serverFrameSink, peer);
+        return;
     }
     QuicConnection_ExtendStreamCredit(&peer->connection, stream_id, size);
 }
@@ -661,9 +691,9 @@ static void receiveControlData(QuicServerPeer *peer, const uint8_t *data, size_t
     }
 }
 
-static void serverFrameSink(void *context, const uint8_t *frame, size_t size)
+static bool serverFrameSink(void *context, const uint8_t *frame, size_t size)
 {
     QuicServerPeer *peer = context;
 
-    peer->transport->events.on_peer_frame(peer->transport->events.context, peer->peer_id, frame, size);
+    return peer->transport->events.on_peer_frame(peer->transport->events.context, peer->peer_id, frame, size);
 }

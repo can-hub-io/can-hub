@@ -12,9 +12,16 @@
 #define IDLE_TIMEOUT (30 * NGTCP2_SECONDS)
 #define KEEP_ALIVE_TIMEOUT (10 * NGTCP2_SECONDS)
 #define HANDSHAKE_TIMEOUT (10 * NGTCP2_SECONDS)
+/* Flow-control windows sized for the reliable data plane: on a high-RTT link
+ * peak stream throughput is the in-flight window / RTT, so a small window
+ * throttles bulk transfers far below TCP, whose receive window autotunes to the
+ * bandwidth-delay product. The per-stream window matches the reliable TX ring;
+ * the connection window covers several concurrent reliable streams. */
 #define INITIAL_MAX_DATA (1024 * 1024)
 #define INITIAL_MAX_STREAM_DATA (64 * 1024)
 #define INITIAL_MAX_STREAMS_BIDI 16
+#define INITIAL_RTT (50 * NGTCP2_MILLISECONDS)
+#define MAX_TX_UDP_PAYLOAD 1452
 
 static ngtcp2_conn *getConnection(ngtcp2_crypto_conn_ref *connection_ref);
 static void buildCallbacks(ngtcp2_callbacks *callbacks, bool is_server);
@@ -356,6 +363,14 @@ static void buildSettings(ngtcp2_settings *settings)
     ngtcp2_settings_default(settings);
     settings->initial_ts = Clock_MonotonicNs();
     settings->handshake_timeout = HANDSHAKE_TIMEOUT;
+    /* The 333 ms default initial_rtt seeds loss detection and the pacer ~6x too
+     * high for these links, so early loss is recovered late (tail spikes) and the
+     * pacer ramps slowly. Seed a network-scale RTT; ngtcp2 adapts on the first
+     * sample. Fix the UDP payload at the Ethernet MSS and disable size shaping so
+     * stream packets are full-MSS and uniform (required for GSO coalescing). */
+    settings->initial_rtt = INITIAL_RTT;
+    settings->max_tx_udp_payload_size = MAX_TX_UDP_PAYLOAD;
+    settings->no_tx_udp_payload_size_shaping = 1;
 }
 
 static void buildParams(ngtcp2_transport_params *params)

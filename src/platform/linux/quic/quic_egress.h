@@ -12,10 +12,15 @@
  * Shared egress pump for QUIC transports: writes pending control stream
  * data and protocol packets into UDP-sized packets and hands them to the
  * sink. On false the connection is broken; the caller tears it down.
+ *
+ * The pump coalesces consecutive equal-sized packets into one buffer and
+ * passes it with a segment_size so the sink can send them in a single UDP GSO
+ * sendmsg; segment_size == size means a lone packet. Every segment but the
+ * last is segment_size bytes, so the kernel splits on the boundaries.
  */
 typedef struct QuicEgressSink {
     void *context;
-    void (*send)(void *context, const uint8_t *packet, size_t size);
+    void (*send)(void *context, const uint8_t *data, size_t size, size_t segment_size);
 } QuicEgressSink;
 
 bool QuicEgress_FlushDatagram(

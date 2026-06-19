@@ -22,6 +22,7 @@ typedef struct EpollRegistry {
 
 bool EpollRegistry_Open(EpollRegistry *self);
 bool EpollRegistry_AddStatic(EpollRegistry *self, int32_t fd, uint32_t event_data);
+void EpollRegistry_SetStaticInterest(EpollRegistry *self, int32_t fd, uint32_t mask, uint32_t event_data);
 void EpollRegistry_SyncSlot(
     EpollRegistry *self,
     uint8_t slot,

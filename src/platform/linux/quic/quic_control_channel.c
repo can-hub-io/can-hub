@@ -4,31 +4,60 @@
 
 #include "protocol/message_header.h"
 
+static uint8_t *txBuffer(const QuicControlChannel *self);
+
 /* ---------- public ---------- */
 
 void QuicControlChannel_Reset(QuicControlChannel *self)
 {
     memset(self, 0, sizeof(*self));
     self->stream_id = QUIC_CONTROL_NO_STREAM;
+    self->tx_external = NULL;
+    self->tx_capacity = QUIC_CONTROL_TX_BUFFER_SIZE;
     MessageFramer_Reset(&self->framer);
+}
+
+void QuicControlChannel_AdoptBuffer(QuicControlChannel *self, uint8_t *buffer, size_t capacity)
+{
+    self->tx_external = buffer;
+    self->tx_capacity = capacity;
+    self->tx_head = 0;
+    self->tx_used = 0;
+    self->tx_sent = 0;
+}
+
+void QuicControlChannel_AdoptRxBuffer(QuicControlChannel *self, uint8_t *buffer, size_t capacity)
+{
+    MessageFramer_AdoptBuffer(&self->framer, buffer, capacity);
+}
+
+bool QuicControlChannel_CanQueue(const QuicControlChannel *self, size_t size)
+{
+    return self->tx_used + size <= self->tx_capacity;
+}
+
+size_t QuicControlChannel_RxPending(const QuicControlChannel *self)
+{
+    return MessageFramer_Pending(&self->framer);
 }
 
 bool QuicControlChannel_QueueTx(QuicControlChannel *self, const uint8_t *data, size_t size)
 {
+    uint8_t *buffer = txBuffer(self);
     size_t write_index;
     size_t first_span;
 
-    if (self->tx_used + size > QUIC_CONTROL_TX_BUFFER_SIZE) {
+    if (self->tx_used + size > self->tx_capacity) {
         return false;
     }
 
-    write_index = (self->tx_head + self->tx_used) % QUIC_CONTROL_TX_BUFFER_SIZE;
-    first_span = QUIC_CONTROL_TX_BUFFER_SIZE - write_index;
+    write_index = (self->tx_head + self->tx_used) % self->tx_capacity;
+    first_span = self->tx_capacity - write_index;
     if (first_span >= size) {
-        memcpy(self->tx_buffer + write_index, data, size);
+        memcpy(buffer + write_index, data, size);
     } else {
-        memcpy(self->tx_buffer + write_index, data, first_span);
-        memcpy(self->tx_buffer, data + first_span, size - first_span);
+        memcpy(buffer + write_index, data, first_span);
+        memcpy(buffer, data + first_span, size - first_span);
     }
     self->tx_used += size;
 
@@ -37,11 +66,11 @@ bool QuicControlChannel_QueueTx(QuicControlChannel *self, const uint8_t *data, s
 
 size_t QuicControlChannel_PendingTx(const QuicControlChannel *self, const uint8_t **data)
 {
-    size_t start = (self->tx_head + self->tx_sent) % QUIC_CONTROL_TX_BUFFER_SIZE;
+    size_t start = (self->tx_head + self->tx_sent) % self->tx_capacity;
     size_t available = self->tx_used - self->tx_sent;
-    size_t contiguous = QUIC_CONTROL_TX_BUFFER_SIZE - start;
+    size_t contiguous = self->tx_capacity - start;
 
-    *data = self->tx_buffer + start;
+    *data = txBuffer(self) + start;
     if (available < contiguous) {
         return available;
     }
@@ -70,7 +99,7 @@ void QuicControlChannel_MarkAcked(QuicControlChannel *self, uint64_t acked_end_o
         acked_bytes = self->tx_used;
     }
 
-    self->tx_head = (self->tx_head + acked_bytes) % QUIC_CONTROL_TX_BUFFER_SIZE;
+    self->tx_head = (self->tx_head + acked_bytes) % self->tx_capacity;
     self->tx_used -= acked_bytes;
     if (acked_bytes > self->tx_sent) {
         self->tx_sent = 0;
@@ -93,4 +122,15 @@ size_t QuicControlChannel_NextMessage(const QuicControlChannel *self, const uint
 void QuicControlChannel_ConsumeMessage(QuicControlChannel *self, size_t size)
 {
     MessageFramer_Consume(&self->framer, size);
+}
+
+/* ---------- private ---------- */
+
+static uint8_t *txBuffer(const QuicControlChannel *self)
+{
+    if (self->tx_external != NULL) {
+        return self->tx_external;
+    }
+
+    return (uint8_t *)self->tx_inline;
 }
