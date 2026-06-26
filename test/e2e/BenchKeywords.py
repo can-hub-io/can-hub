@@ -215,6 +215,10 @@ class BenchKeywords:
         server.exec("tc", "qdisc", "replace", "dev", "eth0", "root",
                     "netem", "loss", f"{percent}%", check=False)
 
+    @keyword("Set Link MTU On ${server} To ${mtu}")
+    def set_link_mtu(self, server, mtu):
+        server.exec("ip", "link", "set", "eth0", "mtu", str(mtu), check=False)
+
     @keyword("Bring Link Down On ${server}")
     def bring_link_down(self, server):
         server.exec("ip", "link", "set", "eth0", "down", check=False)

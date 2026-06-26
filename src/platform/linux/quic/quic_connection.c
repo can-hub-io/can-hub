@@ -366,11 +366,12 @@ static void buildSettings(ngtcp2_settings *settings)
     /* The 333 ms default initial_rtt seeds loss detection and the pacer ~6x too
      * high for these links, so early loss is recovered late (tail spikes) and the
      * pacer ramps slowly. Seed a network-scale RTT; ngtcp2 adapts on the first
-     * sample. Fix the UDP payload at the Ethernet MSS and disable size shaping so
-     * stream packets are full-MSS and uniform (required for GSO coalescing). */
+     * sample. Cap the payload at the Ethernet MSS but keep size shaping on so the
+     * connection starts at the conservative 1200-byte size and PMTUD grows it to
+     * the cap: a path whose MTU is below 1500 (tunnels, 1450-MTU links) would
+     * otherwise blackhole every full-MSS packet and stall the handshake. */
     settings->initial_rtt = INITIAL_RTT;
     settings->max_tx_udp_payload_size = MAX_TX_UDP_PAYLOAD;
-    settings->no_tx_udp_payload_size_shaping = 1;
 }
 
 static void buildParams(ngtcp2_transport_params *params)
