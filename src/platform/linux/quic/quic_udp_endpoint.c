@@ -11,22 +11,32 @@
 
 #define UDP_SOCKET_BUFFER_BYTES (4 * 1024 * 1024)
 
+static int32_t openSocket(void);
+
 /* ---------- public ---------- */
 
 bool QuicUdpEndpoint_Open(QuicUdpEndpoint *self)
 {
-    int32_t buffer_bytes = UDP_SOCKET_BUFFER_BYTES;
-
     memset(self, 0, sizeof(*self));
-    self->udp_fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
+    self->udp_fd = openSocket();
     self->timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
 
-    if (self->udp_fd >= 0) {
-        setsockopt(self->udp_fd, SOL_SOCKET, SO_RCVBUF, &buffer_bytes, sizeof(buffer_bytes));
-        setsockopt(self->udp_fd, SOL_SOCKET, SO_SNDBUF, &buffer_bytes, sizeof(buffer_bytes));
-    }
-
     return self->udp_fd >= 0 && self->timer_fd >= 0;
+}
+
+bool QuicUdpEndpoint_ReopenSocket(QuicUdpEndpoint *self)
+{
+    int32_t previous_fd = self->udp_fd;
+
+    self->udp_fd = openSocket();
+    if (previous_fd >= 0) {
+        close(previous_fd);
+    }
+    self->gso_unsupported = false;
+    self->local_address_length = 0;
+    self->remote_address_length = 0;
+
+    return self->udp_fd >= 0;
 }
 
 bool QuicUdpEndpoint_ConnectTo(QuicUdpEndpoint *self, const char *host, const char *port)
@@ -105,4 +115,22 @@ void QuicUdpEndpoint_ClearTimerEvent(QuicUdpEndpoint *self)
 
     bytes_read = read(self->timer_fd, &expiration_count, sizeof(expiration_count));
     (void)bytes_read;
+}
+
+/* ---------- private ---------- */
+
+static int32_t openSocket(void)
+{
+    int32_t buffer_bytes = UDP_SOCKET_BUFFER_BYTES;
+    int32_t fd;
+
+    fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
+    if (fd < 0) {
+        return fd;
+    }
+
+    setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &buffer_bytes, sizeof(buffer_bytes));
+    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buffer_bytes, sizeof(buffer_bytes));
+
+    return fd;
 }

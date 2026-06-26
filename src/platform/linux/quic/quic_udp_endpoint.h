@@ -11,8 +11,10 @@
 
 /*
  * UDP socket + ngtcp2 expiry timer for one QUIC connection. Both fds are
- * non-blocking and live for the whole transport lifetime (stable for epoll);
- * reconnects reuse them.
+ * non-blocking. The timer fd is stable for the transport lifetime; the udp fd
+ * is recreated on every reconnect (ReopenSocket) so it rebinds to the current
+ * local address after the interface or IP changes, so the main loop must
+ * re-register the live udp fd with epoll rather than treat it as static.
  */
 typedef struct {
     int32_t udp_fd;
@@ -25,6 +27,7 @@ typedef struct {
 } QuicUdpEndpoint;
 
 bool QuicUdpEndpoint_Open(QuicUdpEndpoint *self);
+bool QuicUdpEndpoint_ReopenSocket(QuicUdpEndpoint *self);
 bool QuicUdpEndpoint_ConnectTo(QuicUdpEndpoint *self, const char *host, const char *port);
 ssize_t QuicUdpEndpoint_Send(QuicUdpEndpoint *self, const uint8_t *data, size_t size);
 void QuicUdpEndpoint_SendSegmented(QuicUdpEndpoint *self, const uint8_t *data, size_t size, size_t segment_size);

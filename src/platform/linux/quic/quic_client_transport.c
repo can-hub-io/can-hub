@@ -250,6 +250,7 @@ static void teardown(QuicClientTransport *self, bool notify)
     QuicControlChannel_Reset(&self->control);
     QuicReliableStreams_Reset(&self->reliable_streams);
     QuicUdpEndpoint_DisarmTimer(&self->udp);
+    QuicUdpEndpoint_ReopenSocket(&self->udp);
     self->connected = false;
     self->disconnect_pending = false;
 

@@ -215,6 +215,16 @@ class BenchKeywords:
         server.exec("tc", "qdisc", "replace", "dev", "eth0", "root",
                     "netem", "loss", f"{percent}%", check=False)
 
+    @keyword("Bring Link Down On ${server}")
+    def bring_link_down(self, server):
+        server.exec("ip", "link", "set", "eth0", "down", check=False)
+
+    @keyword("Bring Link Up On ${server} With Octet ${octet}")
+    def bring_link_up_with_octet(self, server, octet):
+        server.exec("ip", "addr", "flush", "dev", "eth0", check=False)
+        server.exec("ip", "addr", "add", f"10.0.0.{octet}/24", "dev", "eth0", check=False)
+        server.exec("ip", "link", "set", "eth0", "up", check=False)
+
     @keyword("Sequence Integrity Of ${capture} Over ${count} Frames")
     def sequence_integrity(self, capture, count, can_id="123"):
         values = [int(frame.data, 16) for frame in parse_candump(capture.read_log())

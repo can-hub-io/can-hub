@@ -28,7 +28,7 @@
 
 #define MAX_EPOLL_EVENTS 16
 #define TICK_PERIOD_MS 100
-#define TCP_SLOT 0
+#define TRANSPORT_SLOT 0
 #define IDENTITY_NAME "agent"
 #define KNOWN_HUBS_FILE "known_hubs"
 #define KNOWN_HUBS_PATH_MAX (TLS_IDENTITY_PATH_MAX + sizeof(KNOWN_HUBS_FILE))
@@ -389,10 +389,6 @@ static bool registerStaticPollFds(void)
     }
 
     if (transport_scheme == kCONNECT_SCHEME_QUIC) {
-        fd = QuicClientTransport_UdpFd(&quic_transport);
-        if (!EpollRegistry_AddStatic(&poll_registry, fd, (uint32_t)fd)) {
-            return false;
-        }
         fd = QuicClientTransport_TimerFd(&quic_transport);
         if (!EpollRegistry_AddStatic(&poll_registry, fd, (uint32_t)fd)) {
             return false;
@@ -414,7 +410,9 @@ static void syncStreamRegistration(void)
     int32_t current_fd;
     uint32_t wanted_mask = EPOLLIN;
 
-    if (transport_scheme == kCONNECT_SCHEME_TCP) {
+    if (transport_scheme == kCONNECT_SCHEME_QUIC) {
+        current_fd = QuicClientTransport_UdpFd(&quic_transport);
+    } else if (transport_scheme == kCONNECT_SCHEME_TCP) {
         current_fd = TcpClientTransport_Fd(&tcp_transport);
         if (TcpClientTransport_WantsWritable(&tcp_transport)) {
             wanted_mask |= EPOLLOUT;
@@ -428,7 +426,7 @@ static void syncStreamRegistration(void)
         return;
     }
 
-    EpollRegistry_SyncSlot(&poll_registry, TCP_SLOT, current_fd, wanted_mask, (uint32_t)current_fd);
+    EpollRegistry_SyncSlot(&poll_registry, TRANSPORT_SLOT, current_fd, wanted_mask, (uint32_t)current_fd);
 }
 
 static void dispatchEvent(const struct epoll_event *event, const CanEvents *can_events)
