@@ -9,8 +9,8 @@
 #define NO_STREAM (-1)
 #define LOCAL_CID_LIST_MAX 32
 #define MAX_DATAGRAM_FRAME_SIZE 1350
-#define IDLE_TIMEOUT (30 * NGTCP2_SECONDS)
-#define KEEP_ALIVE_TIMEOUT (10 * NGTCP2_SECONDS)
+#define IDLE_TIMEOUT (6 * NGTCP2_SECONDS)
+#define KEEP_ALIVE_TIMEOUT (2 * NGTCP2_SECONDS)
 #define HANDSHAKE_TIMEOUT (10 * NGTCP2_SECONDS)
 /* Flow-control windows sized for the reliable data plane: on a high-RTT link
  * peak stream throughput is the in-flight window / RTT, so a small window
