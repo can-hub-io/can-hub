@@ -45,6 +45,7 @@ class CanHubBus(BusABC):
         hub_fingerprint: Optional[str] = None,
         state_dir: Optional[str] = None,
         receive_own_messages: bool = False,
+        reliable: bool = False,
         **kwargs,
     ):
         self._session = None
@@ -58,7 +59,7 @@ class CanHubBus(BusABC):
         if not self._session:
             raise CanInitializationError(f"could not connect to {url or 'the local can-hub socket'}")
 
-        self._open(str(channel), receive_own_messages)
+        self._open(str(channel), receive_own_messages, reliable)
         self.channel_info = f"canhub {channel} via {url or 'unix socket'}"
         super().__init__(channel=channel, **kwargs)
 
@@ -178,10 +179,12 @@ class CanHubBus(BusABC):
         result = native.lib.canhub_set_filters(self._session, native_filters, len(filters))
         self._hardware_filtered = result == native.OK
 
-    def _open(self, channel: str, receive_own_messages: bool) -> None:
+    def _open(self, channel: str, receive_own_messages: bool, reliable: bool) -> None:
         flags = native.OPEN_FLAG_WRITE
         if not receive_own_messages:
             flags |= native.OPEN_FLAG_NO_ECHO
+        if reliable:
+            flags |= native.OPEN_FLAG_RELIABLE
 
         result = native.lib.canhub_open(self._session, channel.encode(), flags, DEFAULT_TIMEOUT_MS)
         if result == native.ERR_WRITE_DENIED:

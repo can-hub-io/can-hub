@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--cert")
     parser.add_argument("--key")
     parser.add_argument("--hub-fingerprint")
+    parser.add_argument("--reliable", action="store_true")
     arguments = parser.parse_args()
 
     if arguments.action == "list":
@@ -44,6 +45,7 @@ def main():
         identity_cert=arguments.cert,
         identity_key=arguments.key,
         hub_fingerprint=arguments.hub_fingerprint,
+        reliable=arguments.reliable,
     )
 
     if arguments.action == "send":
