@@ -255,6 +255,9 @@ int32_t canhub_open(CanHubSession *session, const char *interface_name, uint32_t
     if ((flags & CANHUB_OPEN_FLAG_WRITE) != 0) {
         open_flags |= OPEN_FLAG_WANT_WRITE;
     }
+    if ((flags & CANHUB_OPEN_FLAG_RELIABLE) != 0) {
+        open_flags |= OPEN_FLAG_RELIABLE;
+    }
 
     session->open_done = false;
     session->open_result = CANHUB_OK;
@@ -572,6 +575,9 @@ static int32_t openResultFromStatus(uint8_t status)
     }
     if (status == OPEN_STATUS_READ_DENIED) {
         return CANHUB_ERR_READ_DENIED;
+    }
+    if (status == OPEN_STATUS_RELIABLE_UNSUPPORTED) {
+        return CANHUB_ERR_RELIABLE_UNSUPPORTED;
     }
 
     return CANHUB_ERR_OPEN_REJECTED;

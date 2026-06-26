@@ -9,6 +9,7 @@ Suite Teardown    Teardown Bench    ${BENCH}
 *** Variables ***
 ${CONNECT}        tcp://127.0.0.1:7228
 ${TLS_CONNECT}    tls://127.0.0.1:7227
+${QUIC_CONNECT}    quic://127.0.0.1:7227
 ${PROBE}          /work/test/e2e/scripts/pycan_probe.py
 ${WRONG_FINGERPRINT}    deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
 
@@ -18,6 +19,12 @@ Python Bus Receives Frames From The Bus
     Log Of ${dump} Should Contain dumping truck42/vcan0
     Inject CAN Frame On ${LOCAL_SERVER}    vcan0    123#DEADBEEF
     Log Of ${dump} Should Contain 123#DEADBEEF
+
+Python Bus Receives Frames Over Reliable QUIC
+    ${dump}=    Start Python ${PROBE} On ${LOCAL_SERVER}    ${QUIC_CONNECT}    truck42/vcan0    dump    --reliable
+    Log Of ${dump} Should Contain dumping truck42/vcan0
+    Inject CAN Frame On ${LOCAL_SERVER}    vcan0    456#FEEDFACE
+    Log Of ${dump} Should Contain 456#FEEDFACE
 
 Python Bus Sends Onto The Bus
     ${candump}=    Start Candump On ${LOCAL_SERVER}

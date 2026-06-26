@@ -33,6 +33,7 @@ extern "C" {
 
 #define CANHUB_OPEN_FLAG_NO_ECHO (1u << 0)
 #define CANHUB_OPEN_FLAG_WRITE (1u << 1)
+#define CANHUB_OPEN_FLAG_RELIABLE (1u << 2)
 
 #define CANHUB_OK 0
 #define CANHUB_RECEIVED 1
@@ -46,6 +47,7 @@ extern "C" {
 #define CANHUB_ERR_STATE (-8)
 #define CANHUB_ERR_TRANSPORT (-9)
 #define CANHUB_ERR_HUB (-10)
+#define CANHUB_ERR_RELIABLE_UNSUPPORTED (-11)
 
 typedef struct CanHubSession CanHubSession;
 

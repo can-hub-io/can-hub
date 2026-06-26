@@ -24,6 +24,9 @@ for message in bus:
 - `url`: omit to connect to the local hub unix socket.
 - `state_dir`: client TLS identity + pin store location (tls/quic).
 - `receive_own_messages`: standard python-can echo semantics.
+- `reliable`: carry the channel on a dedicated reliable QUIC stream (lossless,
+  ordered) instead of the lossy datagram plane. Needs a `quic://` url and a hub
+  that advertises the capability; otherwise the open fails.
 
 Write access follows the hub client ACLs: if the ACL grants read-only, the
 bus opens read-only and `send()` raises.
