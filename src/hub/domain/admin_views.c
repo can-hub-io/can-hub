@@ -71,6 +71,8 @@ void AdminViews_Clients(
     const HubPeer *peer;
     const ChannelBinding *binding;
     const InterfaceEntry *interface_entry;
+    const char *agent_name;
+    const char *interface_name;
     bool filtered = agent_name_filter[0] != '\0';
     uint16_t skipped = 0;
     uint8_t peer_index;
@@ -100,10 +102,14 @@ void AdminViews_Clients(
                 continue;
             }
             interface_entry = InterfaceRegistry_FindById(registry, binding->interface_id);
-            if (interface_entry == NULL) {
-                continue;
+            if (interface_entry != NULL) {
+                agent_name = interface_entry->agent_name;
+                interface_name = interface_entry->interface_name;
+            } else {
+                agent_name = binding->agent_name;
+                interface_name = binding->interface_name;
             }
-            if (filtered && strcmp(interface_entry->agent_name, agent_name_filter) != 0) {
+            if (filtered && strcmp(agent_name, agent_name_filter) != 0) {
                 continue;
             }
             if (!appendClientRow(
@@ -113,8 +119,8 @@ void AdminViews_Clients(
                     peer->peer_id,
                     binding->interface_id,
                     binding->channel,
-                    interface_entry->agent_name,
-                    interface_entry->interface_name,
+                    agent_name,
+                    interface_name,
                     binding->frames_forwarded,
                     binding->frames_dropped
                 )) {

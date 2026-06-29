@@ -72,6 +72,7 @@ static void disconnectPeer(Broker *self, uint32_t peer_id);
 static bool displaceGhostPeer(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
 static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
+static void reattachClientsToAgent(Broker *self, uint32_t agent_peer_id);
 static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size);
 static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char *detail);
 static bool forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id, const uint8_t *data, size_t size, uint8_t route_flags);
@@ -428,6 +429,7 @@ static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *hea
     }
 
     HubPeer_SetAgentName(peer, registration.agent_name);
+    reattachClientsToAgent(self, peer->peer_id);
 }
 
 static void handleList(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
@@ -497,6 +499,8 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
     request.suppress_echo = (open.flags & OPEN_FLAG_SUPPRESS_OWN_ECHO) != 0;
     request.can_write = can_write;
     request.reliable = reliable;
+    request.agent_name = entry->agent_name;
+    request.interface_name = entry->interface_name;
     if (ClientSession_OpenInterface(&peer->session, &request, &ack.channel)) {
         ack.status = OPEN_STATUS_OK;
         if (reliable) {
@@ -1164,12 +1168,45 @@ static void detachAgent(Broker *self, uint32_t agent_peer_id)
         for(peer_index=0; peer_index<PEER_DIRECTORY_MAX; peer_index++) {
             peer = PeerDirectory_At(&self->directory, peer_index);
             if (peer != NULL && peer->role == kHUB_PEER_ROLE_CLIENT) {
-                ClientSession_RemoveInterface(&peer->session, entry->interface_id);
+                ClientSession_DetachInterface(&peer->session, entry->interface_id);
             }
         }
     }
 
     InterfaceRegistry_RemovePeer(&self->registry, agent_peer_id);
+}
+
+static void reattachClientsToAgent(Broker *self, uint32_t agent_peer_id)
+{
+    const InterfaceEntry *entry;
+    HubPeer *peer;
+    uint32_t entry_index;
+    uint8_t peer_index;
+    uint8_t channel;
+
+    for(entry_index=0; entry_index<INTERFACE_REGISTRY_MAX; entry_index++) {
+        entry = &self->registry.entries[entry_index];
+        if (!entry->in_use || entry->agent_peer_id != agent_peer_id) {
+            continue;
+        }
+        for(peer_index=0; peer_index<PEER_DIRECTORY_MAX; peer_index++) {
+            peer = PeerDirectory_At(&self->directory, peer_index);
+            if (peer == NULL || peer->role != kHUB_PEER_ROLE_CLIENT) {
+                continue;
+            }
+            if (!ClientSession_ReattachInterface(&peer->session, entry->agent_name, entry->interface_name, entry->interface_id)) {
+                continue;
+            }
+            if (!clientCanRead(self, peer, entry)) {
+                ClientSession_RemoveInterface(&peer->session, entry->interface_id);
+                continue;
+            }
+            if (ClientSession_ChannelForInterface(&peer->session, entry->interface_id, &channel)
+                && ClientSession_ChannelReliable(&peer->session, channel)) {
+                self->transport->set_channel_mode(self->transport->context, entry->agent_peer_id, entry->agent_channel, true);
+            }
+        }
+    }
 }
 
 static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size)

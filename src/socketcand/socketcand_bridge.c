@@ -42,7 +42,6 @@ static void sendListPage(SocketcandBridge *self, uint16_t offset);
 static void sendOpen(SocketcandBridge *self, uint32_t interface_id, uint8_t flags);
 static void sendClose(SocketcandBridge *self, uint8_t channel);
 static void emitBeacon(SocketcandBridge *self);
-static void reattachRenewedInterfaces(SocketcandBridge *self);
 static void closeAllConnections(SocketcandBridge *self);
 static void closeConnection(SocketcandBridge *self, SocketcandConnection *connection, const char *detail);
 static void sendAscii(SocketcandBridge *self, uint32_t connection_id, const char *text, size_t length);
@@ -280,7 +279,6 @@ static void handleListReply(SocketcandBridge *self, const uint8_t *body, uint16_
 
     self->listing_active = false;
     self->next_list_at_us = now_us + LIST_REFRESH_INTERVAL_US;
-    reattachRenewedInterfaces(self);
 }
 
 static void handleOpenAck(SocketcandBridge *self, const OpenAckMessage *ack)
@@ -298,10 +296,6 @@ static void handleOpenAck(SocketcandBridge *self, const OpenAckMessage *ack)
         connection->channel_valid = true;
         connection->can_write = (connection->open_state == kSOCKETCAND_OPEN_PENDING_WRITE);
         connection->open_state = kSOCKETCAND_OPEN_DONE;
-        if (connection->reattaching) {
-            connection->reattaching = false;
-            return;
-        }
         connection->mode = kSOCKETCAND_MODE_BCM;
         length = SocketcandCodec_RenderOk(ascii, sizeof(ascii));
         sendAscii(self, connection->connection_id, ascii, length);
@@ -408,9 +402,6 @@ static void handleSend(SocketcandBridge *self, SocketcandConnection *connection,
     size_t encoded_size;
     size_t length;
 
-    if (connection->reattaching) {
-        return;
-    }
     if (!connection->channel_valid) {
         length = SocketcandCodec_RenderError(ascii, sizeof(ascii), "no bus open");
         sendAscii(self, connection->connection_id, ascii, length);
@@ -481,36 +472,6 @@ static void emitBeacon(SocketcandBridge *self)
 
     if (length > 0) {
         self->server->send_beacon(self->server->context, (const uint8_t *)buffer, length);
-    }
-}
-
-static void reattachRenewedInterfaces(SocketcandBridge *self)
-{
-    SocketcandConnection *connection;
-    uint32_t new_interface_id;
-    uint8_t i;
-
-    for(i=0; i<SOCKETCAND_CONNECTIONS_MAX; i++) {
-        connection = &self->connections.connections[i];
-        if (!connection->in_use || connection->open_state != kSOCKETCAND_OPEN_DONE) {
-            continue;
-        }
-        if (connection->bus[0] == '\0') {
-            continue;
-        }
-        if (!InterfaceCatalogue_FindByName(&self->catalogue, connection->bus, &new_interface_id)) {
-            continue;
-        }
-        if (new_interface_id == connection->interface_id) {
-            continue;
-        }
-
-        connection->interface_id = new_interface_id;
-        connection->open_state = kSOCKETCAND_OPEN_PENDING_WRITE;
-        connection->open_seq = ConnectionTable_NextOpenSeq(&self->connections);
-        connection->reattaching = true;
-        connection->channel_valid = false;
-        sendOpen(self, new_interface_id, OPEN_FLAGS_READ_WRITE);
     }
 }
 
