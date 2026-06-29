@@ -539,6 +539,26 @@ describe("broker", []() {
             expect(transport.frame_count).toBe(0);
         });
 
+        it("resumes routing to the same channel once after the agent reconnects", []() {
+            FrameMessage frame = { 0x123, 1000, 1, 1, 0, 0, { 0x55 } };
+            FrameMessage routed;
+            MessageHeader header;
+            uint8_t encoded[128];
+            size_t encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+
+            events.on_peer_disconnected(events.context, AGENT_PEER, 0);
+            BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
+            HubTransportPortMock_Reset(&transport);
+
+            events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
+
+            expect(transport.frame_count).toBe(1);
+            expect(transport.frame_peers[0]).toBe((uint32_t)CLIENT_PEER);
+            MessageHeader_Decode(&header, transport.frame_log[0], transport.frame_sizes[0]);
+            FrameMessage_Decode(&routed, transport.frame_log[0] + MESSAGE_HEADER_SIZE, header.length);
+            expect(routed.channel).toBe(client_channel);
+        });
+
         it("paces writes to a rate-limited agent interface, parking the excess", []() {
             InterfaceStatusMessage status;
             FrameMessage frame = { 0x456, 2000, client_channel, 64, FRAME_FLAG_FD, 0, { 0x55 } };

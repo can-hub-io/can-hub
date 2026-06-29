@@ -45,7 +45,6 @@ typedef struct {
     uint8_t channel;
     bool channel_valid;
     bool can_write;
-    bool reattaching;
     char bus[SOCKETCAND_BUS_NAME_SIZE];
 } SocketcandConnection;
 

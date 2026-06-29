@@ -277,57 +277,23 @@ describe("socketcand_bridge", []() {
         expect(strstr(server.last_beacon, "<Bus name=\"truck42/can0\"/>") != nullptr).toBe(true);
     });
 
-    it("re-opens against the new interface id when the agent renews", []() {
+    it("opens an interface of an agent that connects after the client", []() {
         MessageHeader header;
-        OpenMessage reopen;
+        OpenMessage open;
+        uint8_t before;
 
         bringUpReady();
-        openRawAndAck(1);
+        relistOneBus("newcar", "can0", 42, 6000000);
 
-        relistOneBus("truck42", "can0", 99, 6000000);
+        before = hub.control_count;
+        server_events.on_client_connected(server_events.context, 2);
+        clientBytes(2, "< open newcar/can0 >");
 
-        expect(hub.control_count).toBe(5);
-        MessageHeader_Decode(&header, hub.control_log[4], hub.control_sizes[4]);
-        OpenMessage_Decode(&reopen, hub.control_log[4] + MESSAGE_HEADER_SIZE, header.length);
+        expect(hub.control_count).toBe((uint8_t)(before + 1));
+        MessageHeader_Decode(&header, hub.control_log[before], hub.control_sizes[before]);
         expect(header.type).toBe((uint8_t)kMESSAGE_TYPE_OPEN);
-        expect(reopen.interface_id).toBe((uint32_t)99);
-        expect((reopen.flags & OPEN_FLAG_WANT_WRITE) != 0).toBe(true);
+        OpenMessage_Decode(&open, hub.control_log[before] + MESSAGE_HEADER_SIZE, header.length);
+        expect(open.interface_id).toBe((uint32_t)42);
     });
 
-    it("reattaches transparently without re-sending ok or dropping the client", []() {
-        bringUpReady();
-        openRawAndAck(1);
-
-        relistOneBus("truck42", "can0", 99, 6000000);
-        SocketcandServerPortMock_Reset(&server);
-        feedOpenAckFor(OPEN_STATUS_OK, 8, 99);
-
-        expect(strstr(SocketcandServerPortMock_Written(&server, 1), "< ok >") == nullptr).toBe(true);
-        expect(SocketcandServerPortMock_Closed(&server, 1)).toBe(false);
-
-        feedFrameOnChannel(8);
-        expect(strstr(SocketcandServerPortMock_Written(&server, 1), "< frame 123 1.000000 DEAD >") != nullptr).toBe(true);
-    });
-
-    it("does not reattach while the renewed interface is absent", []() {
-        bringUpReady();
-        openRawAndAck(1);
-
-        relistOneBus("truck42", "can9", 99, 6000000);
-
-        expect(hub.control_count).toBe(4);
-        expect(SocketcandServerPortMock_Closed(&server, 1)).toBe(false);
-    });
-
-    it("drops client sends silently during the reattach window", []() {
-        bringUpReady();
-        openRawAndAck(1);
-
-        relistOneBus("truck42", "can0", 99, 6000000);
-        SocketcandServerPortMock_Reset(&server);
-        clientBytes(1, "< send 123 1 ff >");
-
-        expect(hub.frame_count).toBe(0);
-        expect(SocketcandServerPortMock_Written(&server, 1)[0]).toBe('\0');
-    });
 });
