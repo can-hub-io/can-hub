@@ -538,7 +538,7 @@ static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool n
     peer->close_pending = false;
 
     if (notify && was_connected) {
-        self->events.on_peer_disconnected(self->events.context, peer_id, Clock_RealtimeUs());
+        self->events.on_peer_disconnected(self->events.context, peer_id, Clock_MonotonicUs());
     }
 }
 
@@ -599,7 +599,7 @@ static void dispatchControlMessages(QuicServerTransport *self, QuicServerPeer *p
             peer->peer_id,
             message,
             message_size,
-            Clock_RealtimeUs()
+            Clock_MonotonicUs()
         );
         QuicControlChannel_ConsumeMessage(&peer->control, message_size);
     }
@@ -622,7 +622,7 @@ static void onHandshakeCompleted(void *context)
         peer->transport->events.context,
         peer->peer_id,
         &info,
-        Clock_RealtimeUs()
+        Clock_MonotonicUs()
     );
 }
 

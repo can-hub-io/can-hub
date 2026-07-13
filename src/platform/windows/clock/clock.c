@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #define NANOSECONDS_PER_SECOND 1000000000ULL
+#define NANOSECONDS_PER_MICROSECOND 1000ULL
 #define FILETIME_UNITS_PER_MICROSECOND 10ULL
 #define FILETIME_EPOCH_OFFSET 116444736000000000ULL
 
@@ -17,6 +18,11 @@ uint64_t Clock_MonotonicNs(void)
     QueryPerformanceCounter(&counter);
 
     return (uint64_t)((double)counter.QuadPart * NANOSECONDS_PER_SECOND / (double)frequency.QuadPart);
+}
+
+uint64_t Clock_MonotonicUs(void)
+{
+    return Clock_MonotonicNs() / NANOSECONDS_PER_MICROSECOND;
 }
 
 uint64_t Clock_RealtimeUs(void)

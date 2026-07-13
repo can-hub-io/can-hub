@@ -140,7 +140,7 @@ int main(int argc, char **argv)
         }
 
         resumePausedCanInterfaces(&can_events);
-        AgentApp_Tick(&app, Clock_RealtimeUs());
+        AgentApp_Tick(&app, Clock_MonotonicUs());
     }
 
     transportPort()->disconnect(transportPort()->context);

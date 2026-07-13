@@ -147,7 +147,7 @@ int main(int argc, char **argv)
             dispatchEvent(&events[i]);
         }
 
-        HubApp_Tick(&app, Clock_RealtimeUs());
+        HubApp_Tick(&app, Clock_MonotonicUs());
     }
 }
 
