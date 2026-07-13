@@ -855,7 +855,7 @@ static int32_t runSocketcandLoop(void)
         for(i=0; i<event_count; i++) {
             dispatchSocketcandEvent(&events[i]);
         }
-        SocketcandApp_Tick(&socketcand_app, Clock_RealtimeUs());
+        SocketcandApp_Tick(&socketcand_app, Clock_MonotonicUs());
     }
 }
 

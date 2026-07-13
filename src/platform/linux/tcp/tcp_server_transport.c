@@ -155,7 +155,7 @@ void TcpServerTransport_OnAcceptReady(TcpServerTransport *self)
         info.origin = self->local ? NULL : origin;
         info.transport_kind = self->local ? kPEER_TRANSPORT_UNIX : kPEER_TRANSPORT_TCP;
         info.local = self->local;
-        self->events.on_peer_connected(self->events.context, peer->peer_id, &info, Clock_RealtimeUs());
+        self->events.on_peer_connected(self->events.context, peer->peer_id, &info, Clock_MonotonicUs());
     }
 }
 
@@ -322,7 +322,7 @@ static void dispatchMessage(void *context, const uint8_t *message, size_t size)
             peer->peer_id,
             message,
             size,
-            Clock_RealtimeUs()
+            Clock_MonotonicUs()
         );
     }
 }
@@ -335,6 +335,6 @@ static void closePeer(TcpServerTransport *self, TcpServerPeer *peer, bool notify
     TcpChannel_Unbind(&peer->channel);
 
     if (notify) {
-        self->events.on_peer_disconnected(self->events.context, peer_id, Clock_RealtimeUs());
+        self->events.on_peer_disconnected(self->events.context, peer_id, Clock_MonotonicUs());
     }
 }

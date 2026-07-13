@@ -296,7 +296,7 @@ static void announcePeer(TlsServerTransport *self, TlsServerPeer *peer)
     info.origin = peer->origin;
     info.transport_kind = kPEER_TRANSPORT_TLS;
     info.local = false;
-    self->events.on_peer_connected(self->events.context, peer->peer_id, &info, Clock_RealtimeUs());
+    self->events.on_peer_connected(self->events.context, peer->peer_id, &info, Clock_MonotonicUs());
 
     if (!TlsChannel_Receive(&peer->channel, &sink)) {
         closePeer(self, peer, true);
@@ -319,7 +319,7 @@ static void dispatchMessage(void *context, const uint8_t *message, size_t size)
             peer->peer_id,
             message,
             size,
-            Clock_RealtimeUs()
+            Clock_MonotonicUs()
         );
     }
 }
@@ -335,7 +335,7 @@ static void closePeer(TlsServerTransport *self, TlsServerPeer *peer, bool notify
     peer->announced = false;
 
     if (notify && was_announced) {
-        self->events.on_peer_disconnected(self->events.context, peer_id, Clock_RealtimeUs());
+        self->events.on_peer_disconnected(self->events.context, peer_id, Clock_MonotonicUs());
     }
 }
 

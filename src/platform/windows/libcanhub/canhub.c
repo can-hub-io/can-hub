@@ -331,7 +331,7 @@ int32_t canhub_send(CanHubSession *session, const CanHubFrame *frame)
     message.frame_flags = frame->flags;
     memcpy(message.payload, frame->payload, frame->length);
 
-    if (!Client_SendFrame(&session->client, &message, Clock_RealtimeUs())) {
+    if (!Client_SendFrame(&session->client, &message, Clock_MonotonicUs())) {
         setError(session, "send failed: no open writable channel");
         return CANHUB_ERR_STATE;
     }

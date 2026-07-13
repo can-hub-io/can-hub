@@ -20,6 +20,11 @@ uint64_t Clock_MonotonicNs(void)
     );
 }
 
+uint64_t Clock_MonotonicUs(void)
+{
+    return Clock_MonotonicNs() / NANOSECONDS_PER_MICROSECOND;
+}
+
 uint64_t Clock_RealtimeUs(void)
 {
     struct timespec time_point;

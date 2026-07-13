@@ -247,7 +247,7 @@ static void dispatchMessage(void *context, const uint8_t *message, size_t size)
     if (header.type == kMESSAGE_TYPE_FRAME) {
         self->events.on_frame(self->events.context, message, size);
     } else {
-        self->events.on_control(self->events.context, message, size, Clock_RealtimeUs());
+        self->events.on_control(self->events.context, message, size, Clock_MonotonicUs());
     }
 }
 
@@ -266,6 +266,6 @@ static void closeConnection(TlsClientTransport *self, bool notify)
     self->announced = false;
 
     if (notify) {
-        self->events.on_disconnected(self->events.context, Clock_RealtimeUs());
+        self->events.on_disconnected(self->events.context, Clock_MonotonicUs());
     }
 }

@@ -248,7 +248,7 @@ static void teardown(QuicClientTransport *self, bool notify)
     self->disconnect_pending = false;
 
     if (notify) {
-        self->events.on_disconnected(self->events.context, Clock_RealtimeUs());
+        self->events.on_disconnected(self->events.context, Clock_MonotonicUs());
     }
 }
 
@@ -323,7 +323,7 @@ static void dispatchControlMessages(QuicClientTransport *self)
             return;
         }
 
-        self->events.on_control(self->events.context, message, message_size, Clock_RealtimeUs());
+        self->events.on_control(self->events.context, message, message_size, Clock_MonotonicUs());
         QuicControlChannel_ConsumeMessage(&self->control, message_size);
     }
 }
