@@ -36,7 +36,7 @@ set(ENABLE_STATIC_LIB ON CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(ngtcp2
     GIT_REPOSITORY https://github.com/ngtcp2/ngtcp2.git
-    GIT_TAG v1.23.0
+    GIT_TAG 454390edaf6c954a101aa77961a939dd9e338ad2 # v1.23.0
 )
 FetchContent_MakeAvailable(ngtcp2)
 
