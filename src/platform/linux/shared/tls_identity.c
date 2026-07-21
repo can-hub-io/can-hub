@@ -1,5 +1,6 @@
 #include "platform/linux/shared/tls_identity.h"
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -241,20 +242,30 @@ static bool writePemWithMode(const char *path, BIO *pem, mode_t mode)
     char *data = NULL;
     long size;
     size_t written;
+    int32_t fd;
 
     size = BIO_get_mem_data(pem, &data);
     if (size <= 0) {
         return false;
     }
 
-    file = fopen(path, "w");
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, mode);
+    if (fd < 0) {
+        return false;
+    }
+    if (fchmod(fd, mode) != 0) {
+        close(fd);
+        return false;
+    }
+
+    file = fdopen(fd, "w");
     if (file == NULL) {
+        close(fd);
         return false;
     }
 
     written = fwrite(data, 1, (size_t)size, file);
     fclose(file);
-    chmod(path, mode);
 
     return written == (size_t)size;
 }
