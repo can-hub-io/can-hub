@@ -1194,7 +1194,7 @@ static void reattachClientsToAgent(Broker *self, uint32_t agent_peer_id)
             if (peer == NULL || peer->role != kHUB_PEER_ROLE_CLIENT) {
                 continue;
             }
-            if (!ClientSession_ReattachInterface(&peer->session, entry->agent_name, entry->interface_name, entry->interface_id)) {
+            if (!ClientSession_ReattachInterface(&peer->session, entry->agent_name, entry->interface_name, entry->interface_id, clientCanWrite(self, peer, entry))) {
                 continue;
             }
             if (!clientCanRead(self, peer, entry)) {

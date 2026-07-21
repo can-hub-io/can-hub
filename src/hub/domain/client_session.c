@@ -188,7 +188,8 @@ bool ClientSession_ReattachInterface(
     ClientSession *self,
     const char *agent_name,
     const char *interface_name,
-    uint32_t interface_id
+    uint32_t interface_id,
+    bool can_write
 )
 {
     bool reattached = false;
@@ -206,6 +207,7 @@ bool ClientSession_ReattachInterface(
         }
 
         self->bindings[i].interface_id = interface_id;
+        self->bindings[i].can_write = can_write;
         self->bindings[i].dormant = false;
         reattached = true;
     }

@@ -66,5 +66,6 @@ bool ClientSession_ReattachInterface(
     ClientSession *self,
     const char *agent_name,
     const char *interface_name,
-    uint32_t interface_id
+    uint32_t interface_id,
+    bool can_write
 );
