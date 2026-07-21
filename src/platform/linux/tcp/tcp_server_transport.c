@@ -11,6 +11,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 
 #include "platform/linux/clock/clock.h"
@@ -72,6 +73,7 @@ bool TcpServerTransport_Init(
 bool TcpServerTransport_InitUnix(
     TcpServerTransport *self,
     const char *socket_path,
+    mode_t socket_mode,
     uint32_t peer_id_base,
     const HubTransportEvents *events
 )
@@ -95,6 +97,9 @@ bool TcpServerTransport_InitUnix(
     snprintf(address.sun_path, sizeof(address.sun_path), "%s", socket_path);
     unlink(socket_path);
     if (bind(self->listen_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        return false;
+    }
+    if (chmod(socket_path, socket_mode) != 0) {
         return false;
     }
 

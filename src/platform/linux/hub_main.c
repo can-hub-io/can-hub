@@ -25,6 +25,7 @@
 #define MAX_EPOLL_EVENTS 32
 #define POLL_PERIOD_MS 100
 #define DEFAULT_UNIX_SOCKET_DIRECTORY_MODE 0755
+#define DEFAULT_UNIX_SOCKET_MODE 0660
 #define IDENTITY_NAME "hub"
 #define DATABASE_FILE "hub.db"
 #define KNOWN_AGENTS_FILE "known_agents"
@@ -339,7 +340,7 @@ static bool startListeners(const char *unix_path, const char *certificate, const
         unix_path = HUB_DEFAULT_UNIX_SOCKET_PATH;
         mkdir(HUB_DEFAULT_UNIX_SOCKET_DIRECTORY, DEFAULT_UNIX_SOCKET_DIRECTORY_MODE);
     }
-    if (TcpServerTransport_InitUnix(&unix_transport, unix_path, UNIX_PEER_ID_BASE, &transport_events)) {
+    if (TcpServerTransport_InitUnix(&unix_transport, unix_path, DEFAULT_UNIX_SOCKET_MODE, UNIX_PEER_ID_BASE, &transport_events)) {
         unix_enabled = true;
     } else {
         LOG_ERROR("could not open unix socket listener on %s", unix_path);
