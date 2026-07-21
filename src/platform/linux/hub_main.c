@@ -74,7 +74,8 @@ static bool database_open;
 
 static void printUsage(FILE *stream, const char *program);
 static bool parseArguments(int argc, char **argv);
-static bool loadIdentity(const char *state_directory_override);
+static bool resolveStateDirectory(const char *state_directory_override);
+static bool loadIdentity(void);
 static IdentityStorePort *identityStore(void);
 static AuthorizationPort *authorizationStore(void);
 static void importLegacyPinFile(void);
@@ -224,8 +225,10 @@ static bool parseArguments(int argc, char **argv)
         applyDefaultListen(&tls_listen, HUB_LISTEN_ANY_ADDRESS, HUB_DEFAULT_PORT_TEXT);
     }
 
+    resolveStateDirectory(state_directory_override);
+
     if ((quic_listen.requested || tls_listen.requested) && (certificate == NULL || key == NULL)) {
-        if (loadIdentity(state_directory_override)) {
+        if (state_directory[0] != '\0' && loadIdentity()) {
             certificate = identity_certificate_path;
             key = identity_key_path;
         } else {
@@ -248,12 +251,19 @@ static void applyDefaultListen(ListenAddress *listen_address, const char *bind_a
     snprintf(listen_address->port_text, sizeof(listen_address->port_text), "%s", port_text);
 }
 
-static bool loadIdentity(const char *state_directory_override)
+static bool resolveStateDirectory(const char *state_directory_override)
 {
-    if (!TlsIdentity_ResolveStateDirectory(state_directory_override, state_directory)) {
-        return false;
+    if (TlsIdentity_ResolveStateDirectory(state_directory_override, state_directory)) {
+        return true;
     }
 
+    state_directory[0] = '\0';
+    LOG_WARN("agent pinning and client ACLs disabled: could not resolve state directory");
+    return false;
+}
+
+static bool loadIdentity(void)
+{
     return TlsIdentity_LoadOrCreate(state_directory, IDENTITY_NAME, identity_certificate_path, identity_key_path);
 }
 
