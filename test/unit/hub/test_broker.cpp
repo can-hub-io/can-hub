@@ -1189,6 +1189,28 @@ describe("broker", []() {
             expect(transport.frame_peers[0]).toBe((uint32_t)AGENT_PEER);
         });
 
+        it("re-checks write on agent reattach so a revoked grant stops forwarding", []() {
+            uint8_t channel;
+            FrameMessage frame;
+            uint8_t encoded[128];
+            size_t encoded_size;
+
+            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true, true);
+            connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
+            channel = openInterface(CLIENT_PEER, can0_interface_id, 0);
+
+            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true, false);
+            events.on_peer_disconnected(events.context, AGENT_PEER, 0);
+            BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
+            HubTransportPortMock_Reset(&transport);
+
+            frame = { 0x123, 1000, channel, 1, 0, 0, { 0x55 } };
+            encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+            events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
+
+            expect(transport.frame_count).toBe(0);
+        });
+
         it("rejects OPEN with want_write when the client has no grant", []() {
             OpenMessage open = { can0_interface_id, OPEN_FLAG_WANT_WRITE };
             OpenAckMessage ack;
