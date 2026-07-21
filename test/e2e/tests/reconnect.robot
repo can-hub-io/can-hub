@@ -34,6 +34,31 @@ Agent Reconnects After WAN Uplink Drop
 
     Log Of ${agent.process} Should Contain reconnected to hub    120
 
+Agent Reconnects After Uplink Drop With Datagrams Queued
+    Create VCAN On ${WAN_SERVER}    vcan0
+    Create VCAN On ${LOCAL_SERVER}    vcan1
+
+    ${hub_cfg}=    Hub Configuration
+    ${hub}=    Start CAN HUB On ${LOCAL_SERVER} With ${hub_cfg}
+
+    ${agent_cfg}=    Agent Configuration    quic://local:7227    truck43    vcan0
+    ${agent}=    Start CAN Agent On ${WAN_SERVER} With ${agent_cfg}
+    Wait Until Agent ${agent} Registered On ${hub}
+
+    ${client_cfg}=    Client Configuration    dump    truck43/vcan0    connect=unix://${hub.unix_socket}    reliable=${False}
+    ${client}=    Start CAN Client On ${LOCAL_SERVER} With ${client_cfg}
+    Wait Until Client ${client} Has Open Channel    ${hub}
+
+    Inject CAN Frame On ${WAN_SERVER}    vcan0    123#DEADBEEF
+    Client ${client} Should Receive 123#DEADBEEF
+
+    Set Link Loss On ${WAN_SERVER} To 100
+    Burst 500 Frames On ${WAN_SERVER} vcan0
+    Sleep    40s
+    Set Link Loss On ${WAN_SERVER} To 0
+
+    Log Of ${agent.process} Should Contain reconnected to hub    120
+
 Agent Reconnects After WAN Uplink Drop And IP Change
     Create VCAN On ${WAN_SERVER}    vcan0
 
