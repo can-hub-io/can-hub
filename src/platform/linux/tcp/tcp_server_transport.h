@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <sys/types.h>
+
 #include "platform/linux/tcp/tcp_channel.h"
 #include "hub/ports/hub_transport_events.h"
 #include "hub/ports/hub_transport_port.h"
@@ -40,6 +42,7 @@ bool TcpServerTransport_Init(
 bool TcpServerTransport_InitUnix(
     TcpServerTransport *self,
     const char *socket_path,
+    mode_t socket_mode,
     uint32_t peer_id_base,
     const HubTransportEvents *events
 );

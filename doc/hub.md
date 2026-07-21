@@ -30,6 +30,12 @@ Rules:
 - The admin role is accepted only on the unix socket; an admin HELLO over
   TCP or QUIC is disconnected. Filesystem permissions on the socket are the
   admin access control.
+- The socket is created mode `0660` (owner + group read/write), group-owned by
+  the process group (the `can-hub` group under the Debian package). **Any user
+  in that group can use the socket, and the socket carries the full admin plane
+  with no per-client identity — so group membership grants unrestricted CAN
+  read/write and hub administration (pins, ACLs, kick).** Treat adding a user to
+  the `can-hub` group like granting sudo: `usermod -aG can-hub <user>`.
 
 Note: the Debian package overrides these defaults via `/etc/can-hub/hub.conf`
 (QUIC + unix socket only) — see [installation](installation.md#hub).
