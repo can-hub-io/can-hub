@@ -6,19 +6,20 @@
 #include "platform/linux/quic/quic_udp_gso.h"
 
 #include <netdb.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/timerfd.h>
 
 #define UDP_SOCKET_BUFFER_BYTES (4 * 1024 * 1024)
 
-static int32_t openSocket(void);
+static int32_t openSocket(int32_t *address_family);
 
 /* ---------- public ---------- */
 
 bool QuicUdpEndpoint_Open(QuicUdpEndpoint *self)
 {
     memset(self, 0, sizeof(*self));
-    self->udp_fd = openSocket();
+    self->udp_fd = openSocket(&self->address_family);
     self->timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
 
     return self->udp_fd >= 0 && self->timer_fd >= 0;
@@ -28,7 +29,7 @@ bool QuicUdpEndpoint_ReopenSocket(QuicUdpEndpoint *self)
 {
     int32_t previous_fd = self->udp_fd;
 
-    self->udp_fd = openSocket();
+    self->udp_fd = openSocket(&self->address_family);
     if (previous_fd >= 0) {
         close(previous_fd);
     }
@@ -43,22 +44,33 @@ bool QuicUdpEndpoint_ConnectTo(QuicUdpEndpoint *self, const char *host, const ch
 {
     struct addrinfo hints;
     struct addrinfo *resolved;
+    struct addrinfo *candidate;
+    bool connected;
 
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
+    hints.ai_family = self->address_family;
     hints.ai_socktype = SOCK_DGRAM;
+    if (self->address_family == AF_INET6) {
+        hints.ai_flags = AI_V4MAPPED | AI_ALL;
+    }
     if (getaddrinfo(host, port, &hints, &resolved) != 0) {
         return false;
     }
 
-    if (connect(self->udp_fd, resolved->ai_addr, resolved->ai_addrlen) < 0) {
-        freeaddrinfo(resolved);
+    connected = false;
+    for(candidate=resolved; candidate!=NULL; candidate=candidate->ai_next) {
+        if (connect(self->udp_fd, candidate->ai_addr, candidate->ai_addrlen) < 0) {
+            continue;
+        }
+        memcpy(&self->remote_address, candidate->ai_addr, candidate->ai_addrlen);
+        self->remote_address_length = candidate->ai_addrlen;
+        connected = true;
+        break;
+    }
+    freeaddrinfo(resolved);
+    if (!connected) {
         return false;
     }
-
-    memcpy(&self->remote_address, resolved->ai_addr, resolved->ai_addrlen);
-    self->remote_address_length = resolved->ai_addrlen;
-    freeaddrinfo(resolved);
 
     self->local_address_length = sizeof(self->local_address);
     getsockname(self->udp_fd, (struct sockaddr *)&self->local_address, &self->local_address_length);
@@ -119,14 +131,23 @@ void QuicUdpEndpoint_ClearTimerEvent(QuicUdpEndpoint *self)
 
 /* ---------- private ---------- */
 
-static int32_t openSocket(void)
+static int32_t openSocket(int32_t *address_family)
 {
     int32_t buffer_bytes = UDP_SOCKET_BUFFER_BYTES;
+    int32_t dual_stack = 0;
     int32_t fd;
 
-    fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
+    *address_family = AF_INET6;
+    fd = socket(AF_INET6, SOCK_DGRAM | SOCK_NONBLOCK, 0);
+    if (fd < 0) {
+        *address_family = AF_INET;
+        fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
+    }
     if (fd < 0) {
         return fd;
+    }
+    if (*address_family == AF_INET6) {
+        setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &dual_stack, sizeof(dual_stack));
     }
 
     setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &buffer_bytes, sizeof(buffer_bytes));

@@ -19,6 +19,7 @@
 typedef struct {
     int32_t udp_fd;
     int32_t timer_fd;
+    int32_t address_family;
     struct sockaddr_storage local_address;
     socklen_t local_address_length;
     struct sockaddr_storage remote_address;
