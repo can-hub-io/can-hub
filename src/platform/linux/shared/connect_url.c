@@ -39,6 +39,7 @@ bool ConnectUrl_Parse(const char *url, uint8_t *scheme, char *host, char *port_t
 {
     const char *address;
     const char *separator;
+    const char *close_bracket;
     size_t host_length;
 
     if (!ConnectUrl_ParseScheme(url, scheme, &address)) {
@@ -51,6 +52,21 @@ bool ConnectUrl_Parse(const char *url, uint8_t *scheme, char *host, char *port_t
         }
         snprintf(host, CONNECT_URL_HOST_MAX, "%s", address);
         port_text[0] = '\0';
+        return true;
+    }
+
+    if (address[0] == '[') {
+        close_bracket = strchr(address, ']');
+        if (close_bracket == NULL || close_bracket[1] != ':' || close_bracket[2] == '\0') {
+            return false;
+        }
+        host_length = (size_t)(close_bracket - address - 1);
+        if (host_length == 0 || host_length >= CONNECT_URL_HOST_MAX) {
+            return false;
+        }
+        memcpy(host, address + 1, host_length);
+        host[host_length] = '\0';
+        snprintf(port_text, CONNECT_URL_PORT_TEXT_MAX, "%s", close_bracket + 2);
         return true;
     }
 
@@ -73,9 +89,26 @@ bool ConnectUrl_Parse(const char *url, uint8_t *scheme, char *host, char *port_t
 
 bool ConnectUrl_SplitListenAddress(const char *remainder, char *bind_address, char *port_text)
 {
-    const char *separator = strrchr(remainder, ':');
+    const char *separator;
+    const char *close_bracket;
     size_t bind_length;
 
+    if (remainder[0] == '[') {
+        close_bracket = strchr(remainder, ']');
+        if (close_bracket == NULL || close_bracket[1] != ':' || close_bracket[2] == '\0') {
+            return false;
+        }
+        bind_length = (size_t)(close_bracket - remainder - 1);
+        if (bind_length == 0 || bind_length >= CONNECT_URL_HOST_MAX) {
+            return false;
+        }
+        memcpy(bind_address, remainder + 1, bind_length);
+        bind_address[bind_length] = '\0';
+        snprintf(port_text, CONNECT_URL_PORT_TEXT_MAX, "%s", close_bracket + 2);
+        return true;
+    }
+
+    separator = strrchr(remainder, ':');
     if (separator == NULL) {
         if (remainder[0] == '\0') {
             return false;

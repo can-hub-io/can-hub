@@ -13,6 +13,7 @@
 #include <sys/socket.h>
 
 #include "platform/linux/clock/clock.h"
+#include "platform/linux/shared/listen_endpoint.h"
 #include "platform/linux/shared/tls_identity.h"
 #include "protocol/message_header.h"
 
@@ -33,7 +34,6 @@ static void pumpHandshake(TlsServerTransport *self, TlsServerPeer *peer);
 static void announcePeer(TlsServerTransport *self, TlsServerPeer *peer);
 static void dispatchMessage(void *context, const uint8_t *message, size_t size);
 static void closePeer(TlsServerTransport *self, TlsServerPeer *peer, bool notify);
-static void formatOrigin(const struct sockaddr_in *address, char *out, size_t size);
 
 /* ---------- public ---------- */
 
@@ -47,7 +47,9 @@ bool TlsServerTransport_Init(
     const HubTransportEvents *events
 )
 {
-    struct sockaddr_in address;
+    struct sockaddr_storage address;
+    socklen_t address_length;
+    int32_t address_family;
     int32_t reuse = 1;
     uint8_t slot;
 
@@ -67,19 +69,16 @@ bool TlsServerTransport_Init(
         return false;
     }
 
-    self->listen_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+    self->listen_fd = ListenEndpoint_OpenSocket(SOCK_STREAM, &address_family);
     if (self->listen_fd < 0) {
         return false;
     }
     setsockopt(self->listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 
-    memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_port = htons((uint16_t)atoi(port));
-    if (inet_pton(AF_INET, bind_address, &address.sin_addr) != 1) {
+    if (!ListenEndpoint_BuildSockaddr(address_family, bind_address, port, &address, &address_length)) {
         return false;
     }
-    if (bind(self->listen_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+    if (bind(self->listen_fd, (struct sockaddr *)&address, address_length) < 0) {
         return false;
     }
 
@@ -114,7 +113,7 @@ void TlsServerTransport_OnAcceptReady(TlsServerTransport *self)
 {
     TlsServerPeer *peer;
     SSL *ssl;
-    struct sockaddr_in remote;
+    struct sockaddr_storage remote;
     socklen_t remote_size = sizeof(remote);
     int32_t peer_fd;
     int32_t nodelay = 1;
@@ -139,7 +138,7 @@ void TlsServerTransport_OnAcceptReady(TlsServerTransport *self)
         TlsChannel_Bind(&peer->channel, peer_fd, ssl);
         peer->peer_id = self->next_peer_id++;
         peer->announced = false;
-        formatOrigin(&remote, peer->origin, sizeof(peer->origin));
+        ListenEndpoint_FormatOrigin(&remote, peer->origin, sizeof(peer->origin));
         pumpHandshake(self, peer);
     }
 }
@@ -337,15 +336,4 @@ static void closePeer(TlsServerTransport *self, TlsServerPeer *peer, bool notify
     if (notify && was_announced) {
         self->events.on_peer_disconnected(self->events.context, peer_id, Clock_MonotonicUs());
     }
-}
-
-static void formatOrigin(const struct sockaddr_in *address, char *out, size_t size)
-{
-    char ip[INET_ADDRSTRLEN];
-
-    if (inet_ntop(AF_INET, &address->sin_addr, ip, sizeof(ip)) == NULL) {
-        out[0] = '\0';
-        return;
-    }
-    snprintf(out, size, "%s:%u", ip, ntohs(address->sin_port));
 }

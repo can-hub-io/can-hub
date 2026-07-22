@@ -22,6 +22,12 @@ Rules:
 
 - `--listen <scheme>://[<bind-ip>:]<port>` — bind-ip defaults to 0.0.0.0
   (plain tcp: 127.0.0.1). `--listen unix://<path>` moves the socket.
+- Listeners are dual-stack: the `0.0.0.0` default binds both IPv4 and IPv6, so
+  clients reach the hub over either family. Bind a specific address with an IPv4
+  literal (`--listen quic://192.0.2.1:7227`) or a bracketed IPv6 literal
+  (`--listen quic://[2001:db8::1]:7227`, `[::1]` for IPv6 loopback). On a host
+  without IPv6 the listener falls back to IPv4-only. Clients resolve hostnames to
+  either family, so an AAAA-only FQDN connects.
 - Any explicit network `--listen` **replaces all network defaults**, so
   disabling a transport is listing the ones you want:
   `can-hub --listen tls://7227 --listen quic://7227` runs without plain TCP.

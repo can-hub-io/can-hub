@@ -158,6 +158,12 @@ add_unit_test(test_connect_url
         ${ROOT_SRC_DIR}/platform/linux/shared/connect_url.c
 )
 
+add_unit_test(test_listen_endpoint
+    SOURCES
+        platform/test_listen_endpoint.cpp
+        ${ROOT_SRC_DIR}/platform/linux/shared/listen_endpoint.c
+)
+
 add_unit_test(test_quic_datagram_backlog
     SOURCES
         platform/test_quic_datagram_backlog.cpp
