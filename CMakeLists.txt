@@ -169,6 +169,7 @@ set(HUB_SOURCES
     src/platform/linux/clock/clock.c
     src/platform/linux/shared/connect_url.c
     src/platform/linux/shared/epoll_registry.c
+    src/platform/linux/shared/listen_endpoint.c
     src/platform/linux/shared/pin_store.c
     src/platform/linux/shared/tls_defaults.c
     src/platform/linux/shared/tls_identity.c

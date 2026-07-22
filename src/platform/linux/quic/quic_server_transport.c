@@ -13,13 +13,13 @@
 #include "platform/linux/clock/clock.h"
 #include "platform/linux/quic/quic_egress.h"
 #include "platform/linux/quic/quic_udp_gso.h"
+#include "platform/linux/shared/listen_endpoint.h"
 #include "protocol/message_header.h"
 
 #define UDP_PACKET_BUFFER_SIZE 1452
 #define UDP_SOCKET_BUFFER_BYTES (4 * 1024 * 1024)
 #define QUIC_SERVER_ORIGIN_SIZE 56
 
-static void formatOrigin(const struct sockaddr_storage *address, char *out, size_t size);
 static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
 static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
@@ -67,7 +67,9 @@ bool QuicServerTransport_Init(
     const HubTransportEvents *events
 )
 {
-    struct sockaddr_in address;
+    struct sockaddr_storage address;
+    socklen_t address_length;
+    int32_t address_family;
     int32_t buffer_bytes;
 
     memset(self, 0, sizeof(*self));
@@ -83,7 +85,7 @@ bool QuicServerTransport_Init(
         return false;
     }
 
-    self->udp_fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
+    self->udp_fd = ListenEndpoint_OpenSocket(SOCK_DGRAM, &address_family);
     self->timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
     if (self->udp_fd < 0 || self->timer_fd < 0) {
         return false;
@@ -93,13 +95,10 @@ bool QuicServerTransport_Init(
     setsockopt(self->udp_fd, SOL_SOCKET, SO_RCVBUF, &buffer_bytes, sizeof(buffer_bytes));
     setsockopt(self->udp_fd, SOL_SOCKET, SO_SNDBUF, &buffer_bytes, sizeof(buffer_bytes));
 
-    memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_port = htons((uint16_t)atoi(port));
-    if (inet_pton(AF_INET, bind_address, &address.sin_addr) != 1) {
+    if (!ListenEndpoint_BuildSockaddr(address_family, bind_address, port, &address, &address_length)) {
         return false;
     }
-    if (bind(self->udp_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+    if (bind(self->udp_fd, (struct sockaddr *)&address, address_length) < 0) {
         return false;
     }
 
@@ -544,28 +543,6 @@ static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool n
 
 /* ---------- private: connection events ---------- */
 
-static void formatOrigin(const struct sockaddr_storage *address, char *out, size_t size)
-{
-    const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)address;
-    const struct sockaddr_in *in = (const struct sockaddr_in *)address;
-    char ip[INET6_ADDRSTRLEN];
-
-    if (address->ss_family == AF_INET6) {
-        if (inet_ntop(AF_INET6, &in6->sin6_addr, ip, sizeof(ip)) == NULL) {
-            out[0] = '\0';
-            return;
-        }
-        snprintf(out, size, "[%s]:%u", ip, ntohs(in6->sin6_port));
-        return;
-    }
-
-    if (inet_ntop(AF_INET, &in->sin_addr, ip, sizeof(ip)) == NULL) {
-        out[0] = '\0';
-        return;
-    }
-    snprintf(out, size, "%s:%u", ip, ntohs(in->sin_port));
-}
-
 static void capturePeerFingerprint(QuicServerPeer *peer)
 {
     X509 *certificate = SSL_get0_peer_certificate(peer->ssl);
@@ -613,7 +590,7 @@ static void onHandshakeCompleted(void *context)
 
     capturePeerFingerprint(peer);
     peer->connected = true;
-    formatOrigin(&peer->remote_address, origin, sizeof(origin));
+    ListenEndpoint_FormatOrigin(&peer->remote_address, origin, sizeof(origin));
     info.fingerprint_hex = peer->fingerprint_hex[0] != '\0' ? peer->fingerprint_hex : NULL;
     info.origin = origin;
     info.transport_kind = kPEER_TRANSPORT_QUIC;

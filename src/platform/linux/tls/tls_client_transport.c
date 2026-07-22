@@ -197,28 +197,34 @@ static bool connectTcp(TlsClientTransport *self, int32_t *connected_fd)
 {
     struct addrinfo hints;
     struct addrinfo *resolved;
+    struct addrinfo *candidate;
     int32_t tcp_fd;
     int32_t connect_result;
     int32_t nodelay = 1;
 
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
+    hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     if (getaddrinfo(self->host, self->port_text, &hints, &resolved) != 0) {
         return false;
     }
 
-    tcp_fd = socket(resolved->ai_family, resolved->ai_socktype | SOCK_NONBLOCK, 0);
-    if (tcp_fd < 0) {
-        freeaddrinfo(resolved);
-        return false;
-    }
-    setsockopt(tcp_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
-
-    connect_result = connect(tcp_fd, resolved->ai_addr, resolved->ai_addrlen);
-    freeaddrinfo(resolved);
-    if (connect_result < 0 && errno != EINPROGRESS) {
+    tcp_fd = -1;
+    for(candidate=resolved; candidate!=NULL; candidate=candidate->ai_next) {
+        tcp_fd = socket(candidate->ai_family, candidate->ai_socktype | SOCK_NONBLOCK, 0);
+        if (tcp_fd < 0) {
+            continue;
+        }
+        setsockopt(tcp_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+        connect_result = connect(tcp_fd, candidate->ai_addr, candidate->ai_addrlen);
+        if (connect_result == 0 || errno == EINPROGRESS) {
+            break;
+        }
         close(tcp_fd);
+        tcp_fd = -1;
+    }
+    freeaddrinfo(resolved);
+    if (tcp_fd < 0) {
         return false;
     }
 

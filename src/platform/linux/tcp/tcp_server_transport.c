@@ -15,12 +15,12 @@
 #include <sys/un.h>
 
 #include "platform/linux/clock/clock.h"
+#include "platform/linux/shared/listen_endpoint.h"
 #include "protocol/message_header.h"
 
 #define LISTEN_BACKLOG 8
 #define ORIGIN_TEXT_SIZE 56
 
-static void formatOrigin(const struct sockaddr_in *address, char *out, size_t size);
 static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
 static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
@@ -46,24 +46,23 @@ bool TcpServerTransport_Init(
     const HubTransportEvents *events
 )
 {
-    struct sockaddr_in address;
+    struct sockaddr_storage address;
+    socklen_t address_length;
+    int32_t address_family;
     int32_t reuse = 1;
 
     initTransportBase(self, peer_id_base, events);
 
-    self->listen_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+    self->listen_fd = ListenEndpoint_OpenSocket(SOCK_STREAM, &address_family);
     if (self->listen_fd < 0) {
         return false;
     }
     setsockopt(self->listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 
-    memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_port = htons((uint16_t)atoi(port));
-    if (inet_pton(AF_INET, bind_address, &address.sin_addr) != 1) {
+    if (!ListenEndpoint_BuildSockaddr(address_family, bind_address, port, &address, &address_length)) {
         return false;
     }
-    if (bind(self->listen_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+    if (bind(self->listen_fd, (struct sockaddr *)&address, address_length) < 0) {
         return false;
     }
 
@@ -130,7 +129,7 @@ void TcpServerTransport_OnAcceptReady(TcpServerTransport *self)
 {
     TcpServerPeer *peer;
     HubPeerConnectInfo info;
-    struct sockaddr_in remote;
+    struct sockaddr_storage remote;
     socklen_t remote_size = sizeof(remote);
     char origin[ORIGIN_TEXT_SIZE];
     int32_t peer_fd;
@@ -154,7 +153,7 @@ void TcpServerTransport_OnAcceptReady(TcpServerTransport *self)
 
         origin[0] = '\0';
         if (!self->local) {
-            formatOrigin(&remote, origin, sizeof(origin));
+            ListenEndpoint_FormatOrigin(&remote, origin, sizeof(origin));
         }
         info.fingerprint_hex = NULL;
         info.origin = self->local ? NULL : origin;
@@ -195,19 +194,6 @@ void TcpServerTransport_OnSlotWritable(TcpServerTransport *self, uint8_t slot)
     if (self->events.on_peer_writable != NULL) {
         self->events.on_peer_writable(self->events.context, peer->peer_id);
     }
-}
-
-/* ---------- private ---------- */
-
-static void formatOrigin(const struct sockaddr_in *address, char *out, size_t size)
-{
-    char ip[INET_ADDRSTRLEN];
-
-    if (inet_ntop(AF_INET, &address->sin_addr, ip, sizeof(ip)) == NULL) {
-        out[0] = '\0';
-        return;
-    }
-    snprintf(out, size, "%s:%u", ip, ntohs(address->sin_port));
 }
 
 /* ---------- private: hub transport port ---------- */
