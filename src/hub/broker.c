@@ -808,6 +808,9 @@ static void handleAdminAclList(Broker *self, HubPeer *peer, const MessageHeader 
             ADMIN_ACL_LIST_REPLY_ENTRIES_MAX,
             &more
         );
+        if (reply.count > ADMIN_ACL_LIST_REPLY_ENTRIES_MAX) {
+            reply.count = ADMIN_ACL_LIST_REPLY_ENTRIES_MAX;
+        }
         for(i=0; i<reply.count; i++) {
             memcpy(reply.entries[i].agent_name, entries[i].agent_name, REGISTER_AGENT_NAME_SIZE);
             memcpy(reply.entries[i].interface_name, entries[i].interface_name, REGISTER_INTERFACE_NAME_SIZE);
@@ -848,6 +851,9 @@ static void handleAdminPins(Broker *self, HubPeer *peer, const MessageHeader *he
             ADMIN_PINS_REPLY_ENTRIES_MAX,
             &more
         );
+        if (reply.count > ADMIN_PINS_REPLY_ENTRIES_MAX) {
+            reply.count = ADMIN_PINS_REPLY_ENTRIES_MAX;
+        }
         for(i=0; i<reply.count; i++) {
             memcpy(reply.entries[i].agent_name, pins[i].agent_name, REGISTER_AGENT_NAME_SIZE);
             memcpy(reply.entries[i].fingerprint_hex, pins[i].fingerprint_hex, IDENTITY_FINGERPRINT_HEX_SIZE);

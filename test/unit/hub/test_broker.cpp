@@ -28,6 +28,8 @@ static Broker broker;
 static HubTransportPortMock transport;
 static IdentityStoreMock identity_store;
 static AuthorizationMock authorization;
+static AuthorizationPort overreporting_authorization;
+static IdentityStorePort overreporting_identity_store;
 static HubTransportEvents events;
 static uint8_t client_channel;
 static const RegisterMessage truck_registration = { "truck42", 2, { "can0", "can1" } };
@@ -111,6 +113,41 @@ static uint8_t lastReply(TMessage *message, bool (*decode)(TMessage *, const uin
 static void sendControlFrom(uint32_t peer_id, const uint8_t *encoded, size_t encoded_size)
 {
     events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
+}
+
+static uint8_t overreportingAclList(void *context, uint16_t offset, AclEntry *entries, uint8_t max_entries, bool *more)
+{
+    uint8_t i;
+
+    (void)context;
+    (void)offset;
+    for(i=0; i<max_entries; i++) {
+        memset(&entries[i], 0, sizeof(entries[i]));
+        strcpy(entries[i].agent_name, "truck42");
+        strcpy(entries[i].interface_name, "can0");
+        strcpy(entries[i].fingerprint_hex, TRUCK_FINGERPRINT);
+        entries[i].can_read = true;
+        entries[i].can_write = true;
+    }
+    *more = false;
+
+    return 0xFF;
+}
+
+static uint8_t overreportingPinList(void *context, uint16_t offset, IdentityPin *pins, uint8_t max_pins, bool *more)
+{
+    uint8_t i;
+
+    (void)context;
+    (void)offset;
+    for(i=0; i<max_pins; i++) {
+        memset(&pins[i], 0, sizeof(pins[i]));
+        strcpy(pins[i].agent_name, "truck42");
+        strcpy(pins[i].fingerprint_hex, TRUCK_FINGERPRINT);
+    }
+    *more = false;
+
+    return 0xFF;
 }
 
 static uint8_t openReliableStatus(uint32_t peer_id, uint32_t interface_id)
@@ -1353,6 +1390,47 @@ describe("broker", []() {
             expect(reply.count).toBe(1);
             expect((const char *)reply.entries[0].interface_name).toBe("can0");
             expect(reply.entries[0].can_write).toBe(1);
+        });
+    });
+
+    describe("admin replies from an overreporting port", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            memset(&overreporting_authorization, 0, sizeof(overreporting_authorization));
+            memset(&overreporting_identity_store, 0, sizeof(overreporting_identity_store));
+            overreporting_authorization.list = overreportingAclList;
+            overreporting_identity_store.list = overreportingPinList;
+            Broker_Init(&broker, &transport.port, &overreporting_identity_store, &overreporting_authorization, false);
+            events = Broker_Events(&broker);
+            BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
+        });
+
+        it("clamps an acl list reply to the entries the port could fill", []() {
+            AdminAclListMessage request = { 0 };
+            AdminAclListReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[128];
+            size_t encoded_size = AdminAclListMessage_Encode(&request, encoded, sizeof(encoded));
+
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminAclListReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_ACL_LIST_REPLY);
+            expect(reply.count).toBe(ADMIN_ACL_LIST_REPLY_ENTRIES_MAX);
+        });
+
+        it("clamps a pins reply to the entries the port could fill", []() {
+            AdminPinsMessage request = { 0 };
+            AdminPinsReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[128];
+            size_t encoded_size = AdminPinsMessage_Encode(&request, encoded, sizeof(encoded));
+
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminPinsReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_PINS_REPLY);
+            expect(reply.count).toBe(ADMIN_PINS_REPLY_ENTRIES_MAX);
         });
     });
 
