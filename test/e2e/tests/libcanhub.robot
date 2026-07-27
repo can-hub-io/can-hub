@@ -1,6 +1,7 @@
 *** Settings ***
 Documentation     libcanhub C ABI driven through the canhub-dump example:
-...               list, blocking recv from the bus, send onto the bus.
+...               list, blocking recv from the bus, send onto the bus, and
+...               the connect failures reported through canhub_last_error(NULL).
 Library           BenchKeywords
 Variables         bench_variables.py
 Suite Setup       Start Bus Hub And Agent
@@ -31,6 +32,16 @@ Library Reports Unknown Interfaces
     ${result}=    Run Binary canhub-dump On ${LOCAL_SERVER}    ${CONNECT}    dump    truck42/nope
     Should Not Be True    ${result.ok}
     Should Contain    ${result.stderr}    not found
+
+Library Explains A Failed Connection
+    ${result}=    Run Binary canhub-dump On ${LOCAL_SERVER}    tcp://127.0.0.1:7    list
+    Should Not Be True    ${result.ok}
+    Should Contain    ${result.stderr}    the hub refused or closed the connection
+
+Library Explains A Malformed Url
+    ${result}=    Run Binary canhub-dump On ${LOCAL_SERVER}    not-a-url    list
+    Should Not Be True    ${result.ok}
+    Should Contain    ${result.stderr}    could not parse the hub url
 
 *** Keywords ***
 Start Bus Hub And Agent

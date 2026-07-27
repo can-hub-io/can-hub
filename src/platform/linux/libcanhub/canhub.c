@@ -28,8 +28,8 @@
 
 #define MAX_EPOLL_EVENTS 8
 #define PUMP_SLICE_MS 50
-#define DEFAULT_OPERATION_TIMEOUT_MS 5000
 #define LAST_ERROR_SIZE 256
+#define NO_CONNECT_ERROR "no connect failure recorded"
 #define FRAME_RING_SIZE 512
 
 #define STREAM_SLOT 0
@@ -76,9 +76,9 @@ static void dispatchEvent(CanHubSession *self, const struct epoll_event *event);
 static void syncStreamSlot(CanHubSession *self);
 static uint64_t deadlineFrom(int32_t timeout_ms);
 static int32_t remainingMs(uint64_t deadline_us);
-static int32_t effectiveTimeout(int32_t timeout_ms);
 static int32_t openResultFromStatus(uint8_t status);
 static void setError(CanHubSession *self, const char *message);
+static void setConnectError(const char *message);
 static void pushFrame(CanHubSession *self, const FrameMessage *message);
 static bool popFrame(CanHubSession *self, CanHubFrame *frame);
 static void onListReply(void *context, const ListReplyMessage *reply);
@@ -86,6 +86,8 @@ static void onOpenResult(void *context, uint8_t status, uint8_t channel, uint32_
 static void onFrame(void *context, const FrameMessage *message);
 static void onError(void *context, uint16_t code, const char *detail);
 static void onDisconnected(void *context);
+
+static _Thread_local char connect_error[LAST_ERROR_SIZE] = NO_CONNECT_ERROR;
 
 /* ---------- public ---------- */
 
@@ -102,7 +104,14 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
     TransportEvents transport_events;
     ClientEvents client_events;
 
-    if (config == NULL || config->struct_size != sizeof(*config)) {
+    setConnectError(NO_CONNECT_ERROR);
+
+    if (config == NULL) {
+        setConnectError("connect config required");
+        return NULL;
+    }
+    if (config->struct_size != sizeof(*config)) {
+        setConnectError("connect config struct_size does not match this library");
         return NULL;
     }
 
@@ -110,6 +119,7 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
 
     self = calloc(1, sizeof(*self));
     if (self == NULL) {
+        setConnectError("out of memory");
         return NULL;
     }
 
@@ -118,6 +128,7 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
         snprintf(host, sizeof(host), "%s", HUB_DEFAULT_UNIX_SOCKET_PATH);
         port_text[0] = '\0';
     } else if (!ConnectUrl_Parse(config->url, &self->scheme, host, port_text)) {
+        setConnectError("could not parse the hub url");
         free(self);
         return NULL;
     }
@@ -133,11 +144,13 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
 
     if (self->scheme == kCONNECT_SCHEME_TLS || self->scheme == kCONNECT_SCHEME_QUIC) {
         if (!prepareSecurityMaterial(self, config, host, port_text)) {
+            setConnectError("could not load the client identity or the hub pin");
             free(self);
             return NULL;
         }
     }
     if (!initTransport(self, host, port_text, &transport_events)) {
+        setConnectError("could not resolve the host or create the socket");
         free(self);
         return NULL;
     }
@@ -145,6 +158,7 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
     Client_Init(&self->client, self->port, &client_events);
 
     if (!EpollRegistry_Open(&self->poll_registry)) {
+        setConnectError("could not create the event loop");
         free(self);
         return NULL;
     }
@@ -154,6 +168,7 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
     }
 
     if (!self->port->connect(self->port->context)) {
+        setConnectError("could not reach the hub");
         canhub_close(self);
         return NULL;
     }
@@ -183,6 +198,10 @@ void canhub_close(CanHubSession *session)
 
 const char *canhub_last_error(const CanHubSession *session)
 {
+    if (session == NULL) {
+        return connect_error;
+    }
+
     return session->last_error;
 }
 
@@ -193,7 +212,7 @@ int32_t canhub_list(
     int32_t timeout_ms
 )
 {
-    uint64_t deadline = deadlineFrom(effectiveTimeout(timeout_ms));
+    uint64_t deadline = deadlineFrom(timeout_ms);
 
     if (interfaces == NULL || interfaces_max == 0) {
         setError(session, "interfaces buffer required");
@@ -214,7 +233,7 @@ int32_t canhub_list(
     Client_RequestList(&session->client, 0);
 
     while (!session->list_done && session->hub_error == 0 && !session->disconnected) {
-        if (remainingMs(deadline) == 0) {
+        if (timeout_ms >= 0 && remainingMs(deadline) == 0) {
             session->list_out = NULL;
             setError(session, "list timed out");
             return CANHUB_ERR_TIMEOUT;
@@ -235,7 +254,7 @@ int32_t canhub_list(
 
 int32_t canhub_open(CanHubSession *session, const char *interface_name, uint32_t flags, int32_t timeout_ms)
 {
-    uint64_t deadline = deadlineFrom(effectiveTimeout(timeout_ms));
+    uint64_t deadline = deadlineFrom(timeout_ms);
     uint8_t open_flags = 0;
     char *number_end = NULL;
     uint32_t interface_id;
@@ -271,7 +290,7 @@ int32_t canhub_open(CanHubSession *session, const char *interface_name, uint32_t
     }
 
     while (!session->open_done && session->hub_error == 0 && !session->disconnected) {
-        if (remainingMs(deadline) == 0) {
+        if (timeout_ms >= 0 && remainingMs(deadline) == 0) {
             setError(session, "open timed out");
             return CANHUB_ERR_TIMEOUT;
         }
@@ -453,16 +472,22 @@ static bool prepareIdentity(CanHubSession *self, const CanHubConnectConfig *conf
 
 static bool waitForConnection(CanHubSession *self, int32_t timeout_ms)
 {
-    uint64_t deadline = deadlineFrom(effectiveTimeout(timeout_ms));
+    uint64_t deadline = deadlineFrom(timeout_ms);
 
     while (Client_State(&self->client) == kCLIENT_DISCONNECTED && !self->disconnected) {
-        if (remainingMs(deadline) == 0) {
+        if (timeout_ms >= 0 && remainingMs(deadline) == 0) {
+            setConnectError("the handshake timed out");
             return false;
         }
         pumpOnce(self, remainingMs(deadline));
     }
 
-    return !self->disconnected;
+    if (self->disconnected) {
+        setConnectError("the hub refused or closed the connection");
+        return false;
+    }
+
+    return true;
 }
 
 static void pumpOnce(CanHubSession *self, int32_t timeout_ms)
@@ -560,11 +585,6 @@ static int32_t remainingMs(uint64_t deadline_us)
     return (int32_t)((deadline_us - now_us) / 1000) + 1;
 }
 
-static int32_t effectiveTimeout(int32_t timeout_ms)
-{
-    return (timeout_ms <= 0) ? DEFAULT_OPERATION_TIMEOUT_MS : timeout_ms;
-}
-
 static int32_t openResultFromStatus(uint8_t status)
 {
     if (status == OPEN_STATUS_OK) {
@@ -586,6 +606,11 @@ static int32_t openResultFromStatus(uint8_t status)
 static void setError(CanHubSession *self, const char *message)
 {
     snprintf(self->last_error, sizeof(self->last_error), "%s", message);
+}
+
+static void setConnectError(const char *message)
+{
+    snprintf(connect_error, sizeof(connect_error), "%s", message);
 }
 
 static void pushFrame(CanHubSession *self, const FrameMessage *message)

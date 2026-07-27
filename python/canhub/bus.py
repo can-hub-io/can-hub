@@ -57,7 +57,8 @@ class CanHubBus(BusABC):
 
         self._session = native.lib.canhub_connect(ctypes.byref(config))
         if not self._session:
-            raise CanInitializationError(f"could not connect to {url or 'the local can-hub socket'}")
+            detail = native.last_error(None)
+            raise CanInitializationError(f"could not connect to {url or 'the local can-hub socket'}: {detail}")
 
         self._open(str(channel), receive_own_messages, reliable)
         self.channel_info = f"canhub {channel} via {url or 'unix socket'}"
@@ -87,7 +88,8 @@ class CanHubBus(BusABC):
 
         session = native.lib.canhub_connect(ctypes.byref(config))
         if not session:
-            raise CanInitializationError(f"could not connect to {url or 'the local can-hub socket'}")
+            detail = native.last_error(None)
+            raise CanInitializationError(f"could not connect to {url or 'the local can-hub socket'}: {detail}")
 
         try:
             interfaces = native.list_interfaces(session, timeout_ms)
