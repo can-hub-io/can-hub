@@ -390,6 +390,42 @@ describe("admin_acl_message", []() {
         expect((const char *)decoded.entries[0].fingerprint_hex).toBe(FINGERPRINT);
         expect(decoded.entries[0].can_write).toBe(1);
     });
+
+    it("rejects encoding an acl list entry with an unterminated agent name", []() {
+        AdminAclListReplyMessage reply = { 1, 0, { { "truck42", "can0", FINGERPRINT, 1, 1 } } };
+        uint8_t buffer[512];
+        size_t encoded_size;
+
+        memset(reply.entries[0].agent_name, 'a', REGISTER_AGENT_NAME_SIZE);
+
+        encoded_size = AdminAclListReplyMessage_Encode(&reply, buffer, sizeof(buffer));
+
+        expect(encoded_size).toBe((size_t)0);
+    });
+
+    it("rejects encoding an acl list entry with an unterminated interface name", []() {
+        AdminAclListReplyMessage reply = { 1, 0, { { "truck42", "can0", FINGERPRINT, 1, 1 } } };
+        uint8_t buffer[512];
+        size_t encoded_size;
+
+        memset(reply.entries[0].interface_name, 'a', REGISTER_INTERFACE_NAME_SIZE);
+
+        encoded_size = AdminAclListReplyMessage_Encode(&reply, buffer, sizeof(buffer));
+
+        expect(encoded_size).toBe((size_t)0);
+    });
+
+    it("rejects encoding an acl list entry with an unterminated fingerprint", []() {
+        AdminAclListReplyMessage reply = { 1, 0, { { "truck42", "can0", FINGERPRINT, 1, 1 } } };
+        uint8_t buffer[512];
+        size_t encoded_size;
+
+        memset(reply.entries[0].fingerprint_hex, 'a', ADMIN_FINGERPRINT_HEX_SIZE);
+
+        encoded_size = AdminAclListReplyMessage_Encode(&reply, buffer, sizeof(buffer));
+
+        expect(encoded_size).toBe((size_t)0);
+    });
 });
 
 describe("admin_interfaces_message", []() {
