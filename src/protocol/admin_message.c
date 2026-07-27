@@ -91,6 +91,8 @@ static void writeAgentEntry(uint8_t *destination, const AdminAgentsReplyEntry *e
 static void readAgentEntry(const uint8_t *source, AdminAgentsReplyEntry *entry);
 static void writeClientEntry(uint8_t *destination, const AdminClientsReplyEntry *entry);
 static void readClientEntry(const uint8_t *source, AdminClientsReplyEntry *entry);
+static void writeAclEntry(uint8_t *destination, const AdminAclListReplyEntry *entry);
+static void readAclEntry(const uint8_t *source, AdminAclListReplyEntry *entry);
 static void writeInterfaceEntry(uint8_t *destination, const AdminInterfacesReplyEntry *entry);
 static void readInterfaceEntry(const uint8_t *source, AdminInterfacesReplyEntry *entry);
 
@@ -682,10 +684,20 @@ size_t AdminAclListReplyMessage_Encode(const AdminAclListReplyMessage *self, uin
     size_t body_size;
     size_t total_size;
     uint8_t i;
-    uint8_t *entry;
 
     if (self->count > ADMIN_ACL_LIST_REPLY_ENTRIES_MAX) {
         return 0;
+    }
+    for(i=0; i<self->count; i++) {
+        if (!isNameTerminated(self->entries[i].agent_name)) {
+            return 0;
+        }
+        if (self->entries[i].interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] != '\0') {
+            return 0;
+        }
+        if (self->entries[i].fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] != '\0') {
+            return 0;
+        }
     }
 
     body_size = ADMIN_ACL_LIST_REPLY_FIXED_FIELDS_SIZE + (size_t)self->count * ADMIN_ACL_LIST_REPLY_ENTRY_SIZE;
@@ -697,12 +709,7 @@ size_t AdminAclListReplyMessage_Encode(const AdminAclListReplyMessage *self, uin
     body[COUNT_OFFSET] = self->count;
     body[FLAGS_OFFSET] = self->flags;
     for(i=0; i<self->count; i++) {
-        entry = body + ENTRIES_OFFSET + i * ADMIN_ACL_LIST_REPLY_ENTRY_SIZE;
-        memcpy(entry + ACL_AGENT_NAME_OFFSET, self->entries[i].agent_name, strlen(self->entries[i].agent_name));
-        memcpy(entry + ACL_INTERFACE_NAME_OFFSET, self->entries[i].interface_name, strlen(self->entries[i].interface_name));
-        memcpy(entry + ACL_FINGERPRINT_OFFSET, self->entries[i].fingerprint_hex, strlen(self->entries[i].fingerprint_hex));
-        entry[ACL_CAN_READ_OFFSET] = self->entries[i].can_read;
-        entry[ACL_CAN_WRITE_OFFSET] = self->entries[i].can_write;
+        writeAclEntry(body + ENTRIES_OFFSET + i * ADMIN_ACL_LIST_REPLY_ENTRY_SIZE, &self->entries[i]);
     }
 
     return total_size;
@@ -710,7 +717,6 @@ size_t AdminAclListReplyMessage_Encode(const AdminAclListReplyMessage *self, uin
 
 bool AdminAclListReplyMessage_Decode(AdminAclListReplyMessage *self, const uint8_t *payload, size_t payload_length)
 {
-    const uint8_t *entry;
     uint8_t i;
 
     if (payload_length < ADMIN_ACL_LIST_REPLY_FIXED_FIELDS_SIZE) {
@@ -727,15 +733,7 @@ bool AdminAclListReplyMessage_Decode(AdminAclListReplyMessage *self, const uint8
     }
 
     for(i=0; i<self->count; i++) {
-        entry = payload + ENTRIES_OFFSET + i * ADMIN_ACL_LIST_REPLY_ENTRY_SIZE;
-        memcpy(self->entries[i].agent_name, entry + ACL_AGENT_NAME_OFFSET, REGISTER_AGENT_NAME_SIZE);
-        self->entries[i].agent_name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';
-        memcpy(self->entries[i].interface_name, entry + ACL_INTERFACE_NAME_OFFSET, REGISTER_INTERFACE_NAME_SIZE);
-        self->entries[i].interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] = '\0';
-        memcpy(self->entries[i].fingerprint_hex, entry + ACL_FINGERPRINT_OFFSET, ADMIN_FINGERPRINT_HEX_SIZE);
-        self->entries[i].fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] = '\0';
-        self->entries[i].can_read = entry[ACL_CAN_READ_OFFSET];
-        self->entries[i].can_write = entry[ACL_CAN_WRITE_OFFSET];
+        readAclEntry(payload + ENTRIES_OFFSET + i * ADMIN_ACL_LIST_REPLY_ENTRY_SIZE, &self->entries[i]);
     }
 
     return true;
@@ -1042,6 +1040,27 @@ static void readClientEntry(const uint8_t *source, AdminClientsReplyEntry *entry
     entry->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] = '\0';
     entry->frames_forwarded = Wire_ReadU32(source + CLIENT_ENTRY_FRAMES_FORWARDED_OFFSET);
     entry->frames_dropped = Wire_ReadU32(source + CLIENT_ENTRY_FRAMES_DROPPED_OFFSET);
+}
+
+static void writeAclEntry(uint8_t *destination, const AdminAclListReplyEntry *entry)
+{
+    memcpy(destination + ACL_AGENT_NAME_OFFSET, entry->agent_name, strlen(entry->agent_name));
+    memcpy(destination + ACL_INTERFACE_NAME_OFFSET, entry->interface_name, strlen(entry->interface_name));
+    memcpy(destination + ACL_FINGERPRINT_OFFSET, entry->fingerprint_hex, strlen(entry->fingerprint_hex));
+    destination[ACL_CAN_READ_OFFSET] = entry->can_read;
+    destination[ACL_CAN_WRITE_OFFSET] = entry->can_write;
+}
+
+static void readAclEntry(const uint8_t *source, AdminAclListReplyEntry *entry)
+{
+    memcpy(entry->agent_name, source + ACL_AGENT_NAME_OFFSET, REGISTER_AGENT_NAME_SIZE);
+    entry->agent_name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';
+    memcpy(entry->interface_name, source + ACL_INTERFACE_NAME_OFFSET, REGISTER_INTERFACE_NAME_SIZE);
+    entry->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] = '\0';
+    memcpy(entry->fingerprint_hex, source + ACL_FINGERPRINT_OFFSET, ADMIN_FINGERPRINT_HEX_SIZE);
+    entry->fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] = '\0';
+    entry->can_read = source[ACL_CAN_READ_OFFSET];
+    entry->can_write = source[ACL_CAN_WRITE_OFFSET];
 }
 
 static void writeInterfaceEntry(uint8_t *destination, const AdminInterfacesReplyEntry *entry)
