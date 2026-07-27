@@ -35,7 +35,38 @@ describe("interface_registry", []() {
         second_registered = InterfaceRegistry_RegisterAgent(&registry, 200, &truck_registration, &second_ack);
 
         expect(second_registered).toBe(false);
-        expect(second_ack.status).toBe(1);
+        expect(second_ack.status).toBe(REGISTER_STATUS_REJECTED);
+    });
+
+    it("rejects a second registration from an already registered peer", []() {
+        RegisterMessage extra_registration = { "truck42", 1, { "can2" } };
+        RegisterAckMessage ack;
+        const InterfaceEntry *extra_entry;
+        uint16_t count;
+        bool second_registered;
+
+        InterfaceRegistry_RegisterAgent(&registry, 100, &truck_registration, &ack);
+
+        second_registered = InterfaceRegistry_RegisterAgent(&registry, 100, &extra_registration, &ack);
+        extra_entry = InterfaceRegistry_FindByName(&registry, "truck42", "can2");
+        count = InterfaceRegistry_Count(&registry);
+
+        expect(second_registered).toBe(false);
+        expect(ack.status).toBe(REGISTER_STATUS_REJECTED);
+        expect(extra_entry == NULL).toBe(true);
+        expect(count).toBe((uint16_t)2);
+    });
+
+    it("registers the same peer again after it was removed", []() {
+        RegisterAckMessage ack;
+        bool registered_again;
+
+        InterfaceRegistry_RegisterAgent(&registry, 100, &truck_registration, &ack);
+
+        InterfaceRegistry_RemovePeer(&registry, 100);
+        registered_again = InterfaceRegistry_RegisterAgent(&registry, 100, &truck_registration, &ack);
+
+        expect(registered_again).toBe(true);
     });
 
     it("accepts the same interface names under another agent name", []() {

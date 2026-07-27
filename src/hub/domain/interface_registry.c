@@ -5,6 +5,7 @@
 #define PACE_EFFECTIVE_PERCENT 80
 #define PACE_BURST_BITS 8192
 
+static bool isPeerRegistered(const InterfaceRegistry *self, uint32_t agent_peer_id);
 static bool isRegistrationColliding(const InterfaceRegistry *self, const RegisterMessage *registration);
 static InterfaceEntry *findFreeEntry(InterfaceRegistry *self);
 static InterfaceEntry *findMutableByAgentChannel(InterfaceRegistry *self, uint32_t agent_peer_id, uint8_t agent_channel);
@@ -31,8 +32,13 @@ bool InterfaceRegistry_RegisterAgent(
     memset(ack, 0, sizeof(*ack));
     ack->interface_count = registration->interface_count;
 
+    if (isPeerRegistered(self, agent_peer_id)) {
+        ack->status = REGISTER_STATUS_REJECTED;
+        return false;
+    }
+
     if (isRegistrationColliding(self, registration)) {
-        ack->status = 1;
+        ack->status = REGISTER_STATUS_REJECTED;
         return false;
     }
 
@@ -40,7 +46,7 @@ bool InterfaceRegistry_RegisterAgent(
         entry = findFreeEntry(self);
         if (entry == NULL) {
             InterfaceRegistry_RemovePeer(self, agent_peer_id);
-            ack->status = 1;
+            ack->status = REGISTER_STATUS_REJECTED;
             return false;
         }
 
@@ -279,6 +285,19 @@ uint16_t InterfaceRegistry_Count(const InterfaceRegistry *self)
 }
 
 /* ---------- private ---------- */
+
+static bool isPeerRegistered(const InterfaceRegistry *self, uint32_t agent_peer_id)
+{
+    uint32_t i;
+
+    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
+        if (self->entries[i].in_use && self->entries[i].agent_peer_id == agent_peer_id) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 static bool isRegistrationColliding(const InterfaceRegistry *self, const RegisterMessage *registration)
 {
