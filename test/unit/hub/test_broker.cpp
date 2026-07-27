@@ -213,9 +213,28 @@ describe("broker", []() {
             MessageHeader_Decode(&header, transport.control_log[0], transport.control_sizes[0]);
             RegisterAckMessage_Decode(&ack, transport.control_log[0] + MESSAGE_HEADER_SIZE, header.length);
 
-            expect(ack.status).toBe(1);
+            expect(ack.status).toBe(REGISTER_STATUS_REJECTED);
             expect(transport.close_count).toBe(1);
             expect(transport.last_closed_peer).toBe((uint32_t)101);
+        });
+
+        it("rejects and disconnects a second registration from the same agent", []() {
+            RegisterMessage extra_registration = { "truck42", 1, { "can2" } };
+            RegisterAckMessage ack;
+            uint8_t encoded[512];
+            size_t encoded_size;
+            uint8_t reply_type;
+
+            BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
+            encoded_size = RegisterMessage_Encode(&extra_registration, encoded, sizeof(encoded));
+
+            sendControlFrom(AGENT_PEER, encoded, encoded_size);
+            reply_type = lastReply(&ack, RegisterAckMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_REGISTER_ACK);
+            expect(ack.status).toBe(REGISTER_STATUS_REJECTED);
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)AGENT_PEER);
         });
     });
 
