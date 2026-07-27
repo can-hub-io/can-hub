@@ -28,11 +28,11 @@ int main(int argc, char **argv)
 
     config.struct_size = sizeof(config);
     config.url = argv[1];
-    config.connect_timeout_ms = -1;
+    config.connect_timeout_ms = 5000;
 
     session = canhub_connect(&config);
     if (session == NULL) {
-        fprintf(stderr, "could not connect to %s\n", argv[1]);
+        fprintf(stderr, "could not connect to %s: %s\n", argv[1], canhub_last_error(NULL));
         return 1;
     }
 

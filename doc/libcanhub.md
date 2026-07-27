@@ -45,12 +45,21 @@ canhub_close(session);
 | `canhub_set_filters(session, filters, count)` | hub-side CAN id mask filters, replace semantics, max 16 |
 | `canhub_recv(session, frame, timeout_ms)` | `CANHUB_RECEIVED`, `CANHUB_ERR_TIMEOUT`, or a failure |
 | `canhub_send(session, frame)` | needs an open writable channel |
-| `canhub_last_error(session)` | human-readable detail for the last failure |
+| `canhub_last_error(session)` | human-readable detail for the last failure; pass `NULL` for why the last `canhub_connect` on this thread failed |
 | `canhub_api_version()` | `CANHUB_API_VERSION` of the linked library |
+
+Every `timeout_ms` follows `poll(2)`: `-1` blocks until the operation
+finishes, `0` returns immediately, and a positive value is a deadline in
+milliseconds. `CANHUB_ERR_TIMEOUT` when it expires.
 
 Errors are negative `CANHUB_ERR_*` codes (`canhub.h`); ACL denials surface
 as `CANHUB_ERR_READ_DENIED`/`CANHUB_ERR_WRITE_DENIED`. Without a write flag
 or grant a session can still read — same baseline as every client.
+
+`canhub_connect` returns NULL for every failure, so there is no session to
+ask. `canhub_last_error(NULL)` returns the reason for the last failed
+connect on the calling thread — bad url, unreadable identity, unreachable
+hub, handshake timeout.
 
 ## Example
 

@@ -57,6 +57,12 @@ class TestListInterfaces:
         with pytest.raises(CanInitializationError):
             CanHubBus.list_interfaces(url="tcp://h:1")
 
+    def test_it_reports_why_the_connection_failed(self, monkeypatch):
+        given_unreachable_hub(monkeypatch, "could not parse the hub url")
+
+        with pytest.raises(CanInitializationError, match="could not parse the hub url"):
+            CanHubBus.list_interfaces(url="tcp://h:1")
+
     def test_it_closes_the_session_when_listing_fails(self, monkeypatch):
         closed = given_listing_fails(monkeypatch, "nope")
 
@@ -111,8 +117,9 @@ def given_connected_hub(monkeypatch, interfaces):
     return closed
 
 
-def given_unreachable_hub(monkeypatch):
+def given_unreachable_hub(monkeypatch, detail="could not reach the hub"):
     monkeypatch.setattr(native.lib, "canhub_connect", lambda config: None)
+    monkeypatch.setattr(native.lib, "canhub_last_error", lambda session: detail.encode())
 
 
 def given_listing_fails(monkeypatch, message):
