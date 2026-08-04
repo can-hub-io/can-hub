@@ -389,7 +389,11 @@ int32_t canhub_send(CanHubSession *session, const CanHubFrame *frame)
 
 int32_t canhub_stats(CanHubSession *session, CanHubStats *stats)
 {
-    if (session == NULL || stats == NULL || stats->struct_size != sizeof(*stats)) {
+    if (session == NULL) {
+        return CANHUB_ERR_ARGUMENT;
+    }
+    if (stats == NULL || stats->struct_size != sizeof(*stats)) {
+        setError(session, "stats buffer required with struct_size set");
         return CANHUB_ERR_ARGUMENT;
     }
 
