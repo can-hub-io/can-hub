@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  Cable, ChevronRight, Cpu, Fingerprint, LayoutDashboard, Lock, Plug, ScrollText, Share2,
+  Cable, ChevronRight, Cpu, Fingerprint, LayoutDashboard, Lock, Menu, Plug, ScrollText, Share2,
   Users as UsersIcon, type LucideIcon,
 } from 'lucide-react'
 import { api, PERMISSION, setUnauthorizedHandler, type AuthState } from './api'
@@ -52,6 +52,7 @@ function Console({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) 
     return allowed.find((item) => item.id === fromHash)?.id ?? allowed[0]?.id ?? 'dashboard'
   })
   const [changingPassword, setChangingPassword] = useState(false)
+  const [navOpen, setNavOpen] = useState(false)
 
   useEffect(() => {
     window.location.hash = tab
@@ -74,15 +75,27 @@ function Console({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) 
         user={auth.user}
         onChangePassword={() => setChangingPassword(true)}
         onLogout={logout}
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
       />
       <main className="flex-1 overflow-y-auto">
-        <div className="sticky top-0 z-30 border-b border-gray-200 bg-gray-50 px-8 pb-4 pt-3">
+        <div className="sticky top-0 z-30 border-b border-gray-200 bg-gray-50 px-6 pb-4 pt-3">
           <div className="mb-1 flex items-center gap-1 text-xs text-gray-400">
             <span>can-hub</span>
             <ChevronRight size={12} />
             <span className="text-gray-600">{current?.label ?? 'Admin'}</span>
           </div>
-          <h1 className="text-xl font-semibold text-gray-900">{current?.label ?? 'can-hub'}</h1>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-label="Open the navigation"
+              className="-ml-1 rounded-md p-1.5 text-gray-600 hover:bg-gray-200 md:hidden"
+              onClick={() => setNavOpen(true)}
+            >
+              <Menu size={20} />
+            </button>
+            <h1 className="text-xl font-semibold text-gray-900">{current?.label ?? 'can-hub'}</h1>
+          </div>
         </div>
         <div className="max-w-[1600px] px-6 py-6">
           {allowed.length === 0 ? (
