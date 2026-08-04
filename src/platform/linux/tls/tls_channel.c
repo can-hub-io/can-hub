@@ -149,22 +149,7 @@ bool TlsChannel_WantsWrite(const TlsChannel *self)
 
 bool TlsChannel_PeerFingerprint(const TlsChannel *self, char *fingerprint_hex)
 {
-    X509 *certificate = SSL_get0_peer_certificate(self->ssl);
-    uint8_t *der = NULL;
-    int der_size;
-    bool computed = false;
-
-    if (certificate == NULL) {
-        return false;
-    }
-
-    der_size = i2d_X509(certificate, &der);
-    if (der_size > 0) {
-        computed = TlsIdentity_FingerprintOfDer(der, (size_t)der_size, fingerprint_hex);
-        OPENSSL_free(der);
-    }
-
-    return computed;
+    return TlsIdentity_FingerprintOfPeer(self->ssl, fingerprint_hex);
 }
 
 /* ---------- private ---------- */

@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #include <openssl/ssl.h>
-#include <ngtcp2/ngtcp2_crypto_ossl.h>
+#include "platform/linux/quic/quic_tls_backend.h"
 
 #include <sys/socket.h>
 
@@ -36,7 +36,7 @@ typedef struct {
     QuicServerTransport *transport;
     QuicConnection connection;
     SSL *ssl;
-    ngtcp2_crypto_ossl_ctx *tls_context;
+    QuicTlsContext *tls_context;
     QuicControlChannel control;
     QuicReliableStreamSet reliable_streams;
     ngtcp2_cid original_dcid;

@@ -23,6 +23,11 @@ bool QuicServerSecurity_Init(QuicServerSecurity *self, const char *certificate_f
         return false;
     }
     TlsDefaults_ConfigureServerContext(self->context);
+    if (!QuicTlsBackend_ConfigureServerContext(self->context)) {
+        SSL_CTX_free(self->context);
+        self->context = NULL;
+        return false;
+    }
 
     return true;
 }
@@ -30,7 +35,7 @@ bool QuicServerSecurity_Init(QuicServerSecurity *self, const char *certificate_f
 bool QuicServerSecurity_NewSession(
     QuicServerSecurity *self,
     SSL **ssl,
-    ngtcp2_crypto_ossl_ctx **tls_context,
+    QuicTlsContext **tls_context,
     ngtcp2_crypto_conn_ref *connection_ref
 )
 {
@@ -40,12 +45,7 @@ bool QuicServerSecurity_NewSession(
         return false;
     }
 
-    if (ngtcp2_crypto_ossl_ctx_new(tls_context, *ssl) != 0) {
-        SSL_free(*ssl);
-        *ssl = NULL;
-        return false;
-    }
-    if (ngtcp2_crypto_ossl_configure_server_session(*ssl) != 0) {
+    if (!QuicTlsBackend_NewSession(tls_context, *ssl, true)) {
         QuicServerSecurity_FreeSession(*ssl, *tls_context);
         *ssl = NULL;
         *tls_context = NULL;
@@ -58,10 +58,10 @@ bool QuicServerSecurity_NewSession(
     return true;
 }
 
-void QuicServerSecurity_FreeSession(SSL *ssl, ngtcp2_crypto_ossl_ctx *tls_context)
+void QuicServerSecurity_FreeSession(SSL *ssl, QuicTlsContext *tls_context)
 {
     if (tls_context != NULL) {
-        ngtcp2_crypto_ossl_ctx_del(tls_context);
+        QuicTlsBackend_FreeSession(tls_context);
     }
     if (ssl != NULL) {
         SSL_free(ssl);
@@ -72,11 +72,5 @@ void QuicServerSecurity_FreeSession(SSL *ssl, ngtcp2_crypto_ossl_ctx *tls_contex
 
 static bool cryptoBackendReady(void)
 {
-    static bool initialized;
-
-    if (!initialized) {
-        initialized = ngtcp2_crypto_ossl_init() == 0;
-    }
-
-    return initialized;
+    return QuicTlsBackend_Ready();
 }

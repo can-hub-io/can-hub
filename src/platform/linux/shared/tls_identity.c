@@ -28,6 +28,7 @@ static bool directoryUsable(const char *directory);
 static bool makeDirectoryPath(const char *directory);
 static bool filesExist(const char *first_path, const char *second_path);
 static bool generateIdentity(const char *certificate_path, const char *key_path, const char *common_name);
+static EVP_PKEY *generateEd25519Key(void);
 static X509 *buildSelfSignedCertificate(EVP_PKEY *key, const char *common_name);
 static bool exportPrivateKeyPem(EVP_PKEY *key, const char *path);
 static bool exportCertificatePem(X509 *certificate, const char *path);
@@ -73,6 +74,30 @@ bool TlsIdentity_LoadOrCreate(
     }
 
     return generateIdentity(certificate_path, key_path, name);
+}
+
+// SSL_get_peer_certificate is the one spelling both stacks answer to: OpenSSL
+// keeps it as the deprecated alias of get1, wolfSSL maps it natively. Both
+// return a counted reference, hence the X509_free the get0 form did not need.
+bool TlsIdentity_FingerprintOfPeer(SSL *ssl, char *fingerprint_hex)
+{
+    X509 *certificate = SSL_get_peer_certificate(ssl);
+    uint8_t *der = NULL;
+    int der_size;
+    bool computed = false;
+
+    if (certificate == NULL) {
+        return false;
+    }
+
+    der_size = i2d_X509(certificate, &der);
+    if (der_size > 0) {
+        computed = TlsIdentity_FingerprintOfDer(der, (size_t)der_size, fingerprint_hex);
+        OPENSSL_free(der);
+    }
+    X509_free(certificate);
+
+    return computed;
 }
 
 bool TlsIdentity_FingerprintOfDer(const uint8_t *certificate_der, size_t der_size, char *fingerprint_hex)
@@ -125,6 +150,27 @@ bool TlsIdentity_FingerprintOfFile(const char *certificate_path, char *fingerpri
 
 /* ---------- private ---------- */
 
+// EVP_PKEY_Q_keygen is an OpenSSL 3.x convenience with no counterpart in the
+// wolfSSL compatibility layer; the context form works on both. NID_ED25519 is
+// the identifier both stacks agree on (EVP_PKEY_ED25519 is OpenSSL-only, and
+// is the same value).
+static EVP_PKEY *generateEd25519Key(void)
+{
+    EVP_PKEY_CTX *context = EVP_PKEY_CTX_new_id(NID_ED25519, NULL);
+    EVP_PKEY *key = NULL;
+
+    if (context == NULL) {
+        return NULL;
+    }
+    if (EVP_PKEY_keygen_init(context) <= 0 || EVP_PKEY_keygen(context, &key) <= 0) {
+        EVP_PKEY_CTX_free(context);
+        return NULL;
+    }
+    EVP_PKEY_CTX_free(context);
+
+    return key;
+}
+
 static bool directoryUsable(const char *directory)
 {
     return access(directory, W_OK | X_OK) == 0;
@@ -158,7 +204,7 @@ static bool generateIdentity(const char *certificate_path, const char *key_path,
     X509 *certificate;
     bool generated = false;
 
-    key = EVP_PKEY_Q_keygen(NULL, NULL, "ED25519");
+    key = generateEd25519Key();
     if (key == NULL) {
         return false;
     }

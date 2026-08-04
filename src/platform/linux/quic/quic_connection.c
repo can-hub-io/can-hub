@@ -78,7 +78,7 @@ ngtcp2_crypto_conn_ref *QuicConnection_Ref(QuicConnection *self)
     return &self->connection_ref;
 }
 
-bool QuicConnection_Open(QuicConnection *self, ngtcp2_crypto_ossl_ctx *tls_context, const ngtcp2_path *path)
+bool QuicConnection_Open(QuicConnection *self, QuicTlsContext *tls_context, const ngtcp2_path *path)
 {
     ngtcp2_callbacks callbacks;
     ngtcp2_settings settings;
@@ -117,7 +117,7 @@ bool QuicConnection_Open(QuicConnection *self, ngtcp2_crypto_ossl_ctx *tls_conte
 
 bool QuicConnection_OpenServer(
     QuicConnection *self,
-    ngtcp2_crypto_ossl_ctx *tls_context,
+    QuicTlsContext *tls_context,
     const ngtcp2_path *path,
     const ngtcp2_pkt_hd *initial_header
 )

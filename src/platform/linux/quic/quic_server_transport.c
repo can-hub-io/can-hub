@@ -545,19 +545,7 @@ static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool n
 
 static void capturePeerFingerprint(QuicServerPeer *peer)
 {
-    X509 *certificate = SSL_get0_peer_certificate(peer->ssl);
-    uint8_t *der = NULL;
-    int der_size;
-
-    if (certificate == NULL) {
-        return;
-    }
-
-    der_size = i2d_X509(certificate, &der);
-    if (der_size > 0) {
-        TlsIdentity_FingerprintOfDer(der, (size_t)der_size, peer->fingerprint_hex);
-        OPENSSL_free(der);
-    }
+    TlsIdentity_FingerprintOfPeer(peer->ssl, peer->fingerprint_hex);
 }
 
 static void dispatchControlMessages(QuicServerTransport *self, QuicServerPeer *peer)

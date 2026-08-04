@@ -25,6 +25,10 @@ bool QuicClientSecurity_Init(
     if (self->context == NULL) {
         return false;
     }
+    if (!QuicTlsBackend_ConfigureClientContext(self->context)) {
+        QuicClientSecurity_Free(self);
+        return false;
+    }
     if (!loadClientIdentity(self, config)) {
         QuicClientSecurity_Free(self);
         return false;
@@ -40,11 +44,7 @@ bool QuicClientSecurity_Init(
         QuicClientSecurity_Free(self);
         return false;
     }
-    if (ngtcp2_crypto_ossl_ctx_new(&self->tls_context, self->ssl) != 0) {
-        QuicClientSecurity_Free(self);
-        return false;
-    }
-    if (ngtcp2_crypto_ossl_configure_client_session(self->ssl) != 0) {
+    if (!QuicTlsBackend_NewSession(&self->tls_context, self->ssl, false)) {
         QuicClientSecurity_Free(self);
         return false;
     }
@@ -58,7 +58,7 @@ bool QuicClientSecurity_Init(
 void QuicClientSecurity_Free(QuicClientSecurity *self)
 {
     if (self->tls_context != NULL) {
-        ngtcp2_crypto_ossl_ctx_del(self->tls_context);
+        QuicTlsBackend_FreeSession(self->tls_context);
         self->tls_context = NULL;
     }
     if (self->ssl != NULL) {
@@ -84,11 +84,5 @@ static bool loadClientIdentity(QuicClientSecurity *self, const QuicClientSecurit
 
 static bool cryptoBackendReady(void)
 {
-    static bool initialized;
-
-    if (!initialized) {
-        initialized = ngtcp2_crypto_ossl_init() == 0;
-    }
-
-    return initialized;
+    return QuicTlsBackend_Ready();
 }
