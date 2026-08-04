@@ -1,6 +1,7 @@
 import { api, PERMISSION } from '../api'
 import { useAction, usePolling } from '../hooks'
-import { can, peerId, shortFp, transportOf } from '../lib'
+import { can, peerId, transportOf } from '../lib'
+import { Fingerprint } from './ui/fingerprint'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { ConfirmButton } from './ui/confirm'
@@ -41,7 +42,7 @@ export function Agents({ permissions }: { permissions: string[] }) {
                 <Td className="font-mono">{peerId(a.peerId)}</Td>
                 <Td><Badge variant="outline">{transportOf(a.peerId)}</Badge></Td>
                 <Td className="text-right tabular-nums">{a.interfaceCount}</Td>
-                <Td className="font-mono text-xs">{a.fingerprintHex ? shortFp(a.fingerprintHex) : '—'}</Td>
+                <Td><Fingerprint value={a.fingerprintHex} /></Td>
                 <Td>
                   {isPinned ? <Badge variant="success">pinned</Badge> : <Badge variant="secondary">unpinned</Badge>}
                 </Td>
