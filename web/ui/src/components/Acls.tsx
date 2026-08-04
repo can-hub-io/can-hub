@@ -27,7 +27,10 @@ export function Acls() {
 
   const grant = (event: React.FormEvent) => {
     event.preventDefault()
-    action.run(() => api.aclSet(fingerprint || '*', agent || '*', iface || '*', level))
+    action.run(
+      () => api.aclSet(fingerprint || '*', agent || '*', iface || '*', level),
+      `Granted ${level} on ${agent || '*'}/${iface || '*'}`,
+    )
   }
 
   return (
@@ -43,7 +46,7 @@ export function Acls() {
           <option value="ro">ro</option>
           <option value="rw">rw</option>
         </select>
-        <Button type="submit">Grant</Button>
+        <Button type="submit" disabled={action.pending}>{action.pending ? 'Granting…' : 'Grant'}</Button>
       </form>
 
       <Table>

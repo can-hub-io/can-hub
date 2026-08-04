@@ -20,7 +20,10 @@ export function Interfaces({ permissions }: { permissions: string[] }) {
   const apply = () => {
     const iface = (data ?? []).find((i) => `${i.agentName}/${i.interfaceName}` === selected)
     if (!iface) return action.setError('select an interface')
-    action.run(() => api.interfaceConfig(iface.agentName, iface.interfaceName, op, bitrate))
+    action.run(
+      () => api.interfaceConfig(iface.agentName, iface.interfaceName, op, bitrate),
+      `${iface.agentName}/${iface.interfaceName} reconfigured`,
+    )
   }
 
   return (

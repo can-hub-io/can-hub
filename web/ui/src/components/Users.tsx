@@ -35,7 +35,7 @@ export function Users({ currentUser }: { currentUser: string | null }) {
       await api.createManagedUser(userName, userPassword)
       setUserName('')
       setUserPassword('')
-    })
+    }, `User ${userName} created`)
   }
 
   const addGroup = (event: React.FormEvent) => {
@@ -44,7 +44,7 @@ export function Users({ currentUser }: { currentUser: string | null }) {
     action.run(async () => {
       await api.createManagedGroup(groupName)
       setGroupName('')
-    })
+    }, `Group ${groupName} created`)
   }
 
   return (
@@ -55,7 +55,7 @@ export function Users({ currentUser }: { currentUser: string | null }) {
         <h2 className="text-base font-semibold text-gray-900">Groups</h2>
         <form className="flex flex-wrap items-center gap-2" onSubmit={addGroup}>
           <Input className="w-56" placeholder="group name" value={groupName} onChange={(e) => setGroupName(e.target.value)} />
-          <Button type="submit">Add group</Button>
+          <Button type="submit" disabled={action.pending}>{action.pending ? 'Adding…' : 'Add group'}</Button>
         </form>
         <Table>
           <Thead>
@@ -112,7 +112,7 @@ export function Users({ currentUser }: { currentUser: string | null }) {
             value={userPassword}
             onChange={(e) => setUserPassword(e.target.value)}
           />
-          <Button type="submit">Add user</Button>
+          <Button type="submit" disabled={action.pending}>{action.pending ? 'Adding…' : 'Add user'}</Button>
         </form>
         <Table>
           <Thead>
@@ -181,13 +181,13 @@ export function Users({ currentUser }: { currentUser: string | null }) {
 function EditGroup({ group, permissions, run, onClose }: {
   group: ManagedGroup
   permissions: string[]
-  run: (action: () => Promise<void>) => void
+  run: (action: () => Promise<void>, done?: string) => void
   onClose: () => void
 }) {
   const [selected, setSelected] = useState<string[]>(group.permissions)
   const toggle = (p: string) => setSelected((s) => (s.includes(p) ? s.filter((x) => x !== p) : [...s, p]))
   const save = () => {
-    run(() => api.setGroupPermissions(group.id, selected))
+    run(() => api.setGroupPermissions(group.id, selected), `Group ${group.name} saved`)
     onClose()
   }
   return (
@@ -285,7 +285,7 @@ function EditUser({ user, groups, isSelf, run, onClose }: {
         if (after && !before) await api.addMembership(user.id, g.id)
         if (!after && before) await api.removeMembership(user.id, g.id)
       }
-    })
+    }, `User ${user.name} saved`)
     onClose()
   }
 
