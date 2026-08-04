@@ -49,6 +49,12 @@ FetchContent_MakeAvailable(ngtcp2)
 
 # One name for "the TLS stack and its ngtcp2 backend", so the link lines below
 # do not have to know which one is in play.
+if(CAN_HUB_TLS_BACKEND STREQUAL "wolfssl")
+    set(CAN_HUB_TLS_IDENTITY_SOURCE src/platform/linux/shared/tls_identity_wolfssl.c)
+else()
+    set(CAN_HUB_TLS_IDENTITY_SOURCE src/platform/linux/shared/tls_identity_openssl.c)
+endif()
+
 add_library(can_hub_tls INTERFACE)
 if(CAN_HUB_TLS_BACKEND STREQUAL "wolfssl")
     target_link_libraries(can_hub_tls INTERFACE ngtcp2_crypto_wolfssl_static wolfssl m)
@@ -154,6 +160,7 @@ set(AGENT_SOURCES
     src/platform/linux/shared/pinned_server_verifier.c
     src/platform/linux/shared/tls_defaults.c
     src/platform/linux/shared/tls_identity.c
+    ${CAN_HUB_TLS_IDENTITY_SOURCE}
     src/platform/linux/shared/message_framer.c
     src/platform/linux/socketcan/socketcan_adapter.c
     src/platform/linux/socketcan/can_netlink.c
@@ -190,6 +197,7 @@ set(HUB_SOURCES
     src/platform/linux/shared/pin_store.c
     src/platform/linux/shared/tls_defaults.c
     src/platform/linux/shared/tls_identity.c
+    ${CAN_HUB_TLS_IDENTITY_SOURCE}
     src/platform/linux/shared/message_framer.c
     src/platform/linux/tcp/tcp_channel.c
     src/platform/linux/tcp/tcp_server_transport.c
@@ -231,6 +239,7 @@ set(CLIENT_TLS_SOURCES
     src/platform/linux/shared/pinned_server_verifier.c
     src/platform/linux/shared/tls_defaults.c
     src/platform/linux/shared/tls_identity.c
+    ${CAN_HUB_TLS_IDENTITY_SOURCE}
     src/platform/linux/tls/tls_channel.c
     src/platform/linux/tls/tls_client_security.c
     src/platform/linux/tls/tls_client_transport.c

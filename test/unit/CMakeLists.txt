@@ -188,6 +188,7 @@ add_unit_test(test_tls_channel
         ${ROOT_SRC_DIR}/platform/linux/shared/pinned_server_verifier.c
         ${ROOT_SRC_DIR}/platform/linux/shared/tls_defaults.c
         ${ROOT_SRC_DIR}/platform/linux/shared/tls_identity.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/tls_identity_openssl.c
         ${ROOT_SRC_DIR}/platform/linux/shared/message_framer.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/wire.c
