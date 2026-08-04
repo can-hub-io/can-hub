@@ -8,6 +8,7 @@ behind NAT: it dials out but is not reachable inbound from LOCAL/LAN).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import shutil
 from pathlib import Path
 
 from .server import Server
@@ -52,6 +53,7 @@ class Bench:
         if self._ready:
             return
         self.work_dir.mkdir(parents=True, exist_ok=True)
+        self._clear_state()
         run(["modprobe", "vcan"], check=False)
         self._reset()
         run(["ip", "link", "add", BRIDGE, "type", "bridge"])
@@ -105,6 +107,15 @@ class Bench:
 
     def _give_root_namespace_a_bridge_address(self) -> None:
         run(["ip", "addr", "add", f"{SUBNET}.1/24", "dev", BRIDGE], check=False)
+
+    # Identities and the hub pin database outlive a suite, so a later suite
+    # reusing an agent name with a fresh key is rejected as a pinned-fingerprint
+    # mismatch. Logs are kept: they are the diagnostics for the run.
+    def _clear_state(self) -> None:
+        for server in self.servers.values():
+            for name in ("hub-state", "agent-state", "client-state"):
+                shutil.rmtree(server.work_dir / name, ignore_errors=True)
+            (server.work_dir / "web.db").unlink(missing_ok=True)
 
     def _reset(self) -> None:
         for spec in self.specs:
