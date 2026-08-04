@@ -2,8 +2,10 @@
 
 export const peerId = (id: number) => `0x${id.toString(16)}`
 
-export const shortFp = (fp: string) =>
-  fp === '*' ? '* (any)' : fp.length > 16 ? fp.slice(0, 16) + '…' : fp
+// Fingerprints are compared by eye from both ends, so keep the head and the
+// tail rather than the first half.
+export const middleFp = (fp: string) =>
+  fp === '*' ? '* (any)' : fp.length > 20 ? `${fp.slice(0, 8)}…${fp.slice(-8)}` : fp
 
 // The hub encodes the transport in the top two bits of the peer id (see
 // hub_main.c peer_id ranges): tcp, unix, quic, tls.

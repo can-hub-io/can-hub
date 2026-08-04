@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { api } from '../api'
 import { useAction, usePolling } from '../hooks'
-import { shortFp } from '../lib'
+import { Fingerprint } from './ui/fingerprint'
 import { Button } from './ui/button'
 import { ConfirmButton } from './ui/confirm'
 import { Input } from './ui/input'
@@ -41,7 +41,7 @@ export function Pins() {
           {(data ?? []).map((p) => (
             <Tr key={p.agentName}>
               <Td className="font-medium text-gray-900">{p.agentName}</Td>
-              <Td className="font-mono text-xs">{shortFp(p.fingerprintHex)}</Td>
+              <Td><Fingerprint value={p.fingerprintHex} /></Td>
               <Td>
                 <div className="flex justify-end">
                   <ConfirmButton

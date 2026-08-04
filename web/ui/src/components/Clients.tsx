@@ -1,6 +1,7 @@
 import { api } from '../api'
 import { usePolling } from '../hooks'
-import { peerId, shortFp } from '../lib'
+import { peerId } from '../lib'
+import { Fingerprint } from './ui/fingerprint'
 import { Badge } from './ui/badge'
 import { Table, Tbody, Td, Th, Thead, Tr } from './ui/table'
 
@@ -27,7 +28,7 @@ export function Clients() {
           return (
             <Tr key={`${c.peerId}-${c.interfaceId}-${c.channel}`}>
               <Td className="font-mono">{peerId(c.peerId)}</Td>
-              <Td className="font-mono text-xs">{fingerprint ? shortFp(fingerprint) : '—'}</Td>
+              <Td><Fingerprint value={fingerprint} /></Td>
               <Td>{c.agentName ? `${c.agentName}/${c.interfaceName}` : '—'}</Td>
               <Td>{c.channel ?? <Badge variant="secondary">idle</Badge>}</Td>
               <Td className="text-right tabular-nums">{c.framesForwarded.toLocaleString()}</Td>

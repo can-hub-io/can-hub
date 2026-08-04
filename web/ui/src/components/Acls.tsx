@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { api, type AclLevel } from '../api'
 import { useAction, usePolling } from '../hooks'
-import { shortFp } from '../lib'
+import { middleFp } from '../lib'
+import { Fingerprint } from './ui/fingerprint'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { ConfirmButton } from './ui/confirm'
@@ -56,7 +57,7 @@ export function Acls() {
         <Tbody>
           {(data ?? []).map((a) => (
             <Tr key={`${a.fingerprintHex}-${a.agentName}-${a.interfaceName}`}>
-              <Td className="font-mono text-xs">{shortFp(a.fingerprintHex)}</Td>
+              <Td><Fingerprint value={a.fingerprintHex} /></Td>
               <Td>{a.agentName}/{a.interfaceName}</Td>
               <Td><Badge variant={levelVariant[a.level] ?? 'secondary'}>{a.level}</Badge></Td>
               <Td>
@@ -66,7 +67,7 @@ export function Acls() {
                     size="sm"
                     disabled={action.pending}
                     title="Revoke this grant?"
-                    description={`${shortFp(a.fingerprintHex)} on ${a.agentName}/${a.interfaceName}. Live sessions keep the access they opened with.`}
+                    description={`${middleFp(a.fingerprintHex)} on ${a.agentName}/${a.interfaceName}. Live sessions keep the access they opened with.`}
                     confirmLabel="Revoke"
                     destructive
                     onConfirm={() => action.run(() => api.aclRevoke(a.fingerprintHex, a.agentName, a.interfaceName), 'Grant revoked')}
