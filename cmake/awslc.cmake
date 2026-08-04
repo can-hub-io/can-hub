@@ -29,9 +29,16 @@ if(NOT EXISTS "${CAN_HUB_AWSLC_PREFIX}/lib/libssl.a")
                 -DCMAKE_INSTALL_LIBDIR=lib
                 -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
                 -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+                # One section per symbol so the final link can garbage-collect
+                # everything the binaries never call.
+                "-DCMAKE_C_FLAGS=-ffunction-sections -fdata-sections"
+                "-DCMAKE_CXX_FLAGS=-ffunction-sections -fdata-sections"
                 -DBUILD_SHARED_LIBS=OFF
                 -DBUILD_TESTING=OFF
                 -DBUILD_TOOL=OFF
+                # Drops the precomputed tables and the AVX-512 paths: slower on
+                # a server, but this is about fitting on a device.
+                -DOPENSSL_SMALL=ON
                 -DDISABLE_GO=ON
                 -DDISABLE_PERL=ON
         RESULT_VARIABLE _awslc_configure_result
