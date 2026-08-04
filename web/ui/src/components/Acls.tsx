@@ -1,16 +1,14 @@
 import { useState } from 'react'
 import { api, type AclLevel } from '../api'
 import { useAction, usePolling } from '../hooks'
-import { middleFp } from '../lib'
+import { middleFp, selectClass, unknownObject } from '../lib'
 import { Fingerprint } from './ui/fingerprint'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { ConfirmButton } from './ui/confirm'
 import { Input } from './ui/input'
 import { Table, Tbody, Td, Th, Thead, Tr } from './ui/table'
-
-const selectClass =
-  'h-9 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40'
+import { AgentOptions, InterfaceOptions, SubjectOptions } from './ui/acl-fields'
 
 const levelVariant: Record<string, 'secondary' | 'primary' | 'warning'> = {
   none: 'secondary',
@@ -20,6 +18,8 @@ const levelVariant: Record<string, 'secondary' | 'primary' | 'warning'> = {
 
 export function Acls() {
   const { data, error, refresh } = usePolling(api.acls)
+  const interfaces = usePolling(api.interfaces)
+  const peers = usePolling(api.peers)
   const action = useAction(refresh)
   const [fingerprint, setFingerprint] = useState('*')
   const [agent, setAgent] = useState('*')
@@ -39,9 +39,30 @@ export function Acls() {
       {error && <p className="text-sm text-red-600">{error}</p>}
       {action.error && <p className="text-sm text-red-600">{action.error}</p>}
       <form className="flex flex-wrap items-center gap-2" onSubmit={grant}>
-        <Input className="w-64" placeholder="fingerprint or *" value={fingerprint} onChange={(e) => setFingerprint(e.target.value)} />
-        <Input className="w-40" placeholder="agent or *" value={agent} onChange={(e) => setAgent(e.target.value)} />
-        <Input className="w-40" placeholder="iface or *" value={iface} onChange={(e) => setIface(e.target.value)} />
+        <Input
+          className="w-64"
+          list="acl-subjects"
+          placeholder="fingerprint or *"
+          value={fingerprint}
+          onChange={(e) => setFingerprint(e.target.value)}
+        />
+        <SubjectOptions id="acl-subjects" peers={peers.data} />
+        <Input
+          className="w-40"
+          list="acl-agents"
+          placeholder="agent or *"
+          value={agent}
+          onChange={(e) => setAgent(e.target.value)}
+        />
+        <AgentOptions id="acl-agents" interfaces={interfaces.data} />
+        <Input
+          className="w-40"
+          list="acl-interfaces"
+          placeholder="iface or *"
+          value={iface}
+          onChange={(e) => setIface(e.target.value)}
+        />
+        <InterfaceOptions id="acl-interfaces" interfaces={interfaces.data} agent={agent} />
         <select className={selectClass} value={level} onChange={(e) => setLevel(e.target.value as AclLevel)}>
           <option value="none">none</option>
           <option value="ro">ro</option>
@@ -49,6 +70,12 @@ export function Acls() {
         </select>
         <Button type="submit" disabled={action.pending}>{action.pending ? 'Granting…' : 'Grant'}</Button>
       </form>
+      {unknownObject(interfaces.data, agent, iface) && (
+        <p className="text-sm text-amber-700">
+          No interface called {agent}/{iface} is connected right now. The grant still applies if one appears — check the
+          spelling if you did not mean to pre-authorise it.
+        </p>
+      )}
 
       <Table>
         <Thead>

@@ -105,7 +105,7 @@ function Console({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) 
               {tab === 'dashboard' && <Dashboard />}
               {tab === 'peers' && <Peers permissions={auth.permissions} />}
               {tab === 'agents' && <Agents permissions={auth.permissions} />}
-              {tab === 'clients' && <Clients />}
+              {tab === 'clients' && <Clients permissions={auth.permissions} />}
               {tab === 'interfaces' && <Interfaces permissions={auth.permissions} />}
               {tab === 'pins' && <Pins />}
               {tab === 'acls' && <Acls />}

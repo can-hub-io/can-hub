@@ -7,6 +7,10 @@ import { ConfirmButton } from './ui/confirm'
 import { Input } from './ui/input'
 import { Table, Tbody, Td, Th, Thead, Tr } from './ui/table'
 
+const FINGERPRINT_HEX_LENGTH = 64
+
+const isFingerprint = (text: string) => new RegExp(`^[0-9a-f]{${FINGERPRINT_HEX_LENGTH}}$`).test(text.toLowerCase())
+
 export function Pins() {
   const { data, error, refresh } = usePolling(api.pins)
   const action = useAction(refresh)
@@ -16,6 +20,9 @@ export function Pins() {
   const add = (event: React.FormEvent) => {
     event.preventDefault()
     if (!name || !fingerprint) return action.setError('name and fingerprint required')
+    if (!isFingerprint(fingerprint)) {
+      return action.setError(`a fingerprint is ${FINGERPRINT_HEX_LENGTH} hex characters; this one has ${fingerprint.length}`)
+    }
     action.run(async () => {
       await api.pinAdd(name, fingerprint)
       setName('')
@@ -32,6 +39,9 @@ export function Pins() {
         <Input className="w-80" placeholder="fingerprint (sha256 hex)" value={fingerprint} onChange={(e) => setFingerprint(e.target.value)} />
         <Button type="submit" disabled={action.pending}>{action.pending ? 'Adding…' : 'Add pin'}</Button>
       </form>
+      <p className="text-xs text-gray-500">
+        Pin an agent you have not seen yet. For one that is already connected, use the Pin button on its Agents row.
+      </p>
 
       <Table>
         <Thead>

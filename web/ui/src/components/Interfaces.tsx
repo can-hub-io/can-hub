@@ -1,18 +1,18 @@
 import { useState } from 'react'
-import { api, PERMISSION, type IfconfigOp } from '../api'
+import { api, PERMISSION, type IfconfigOp, type Interface } from '../api'
 import { useAction, usePolling } from '../hooks'
-import { can } from '../lib'
+import { can, selectClass } from '../lib'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Table, Tbody, Td, Th, Thead, Tr } from './ui/table'
-
-const selectClass =
-  'h-9 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40'
+import { GrantDialog } from './GrantDialog'
 
 export function Interfaces({ permissions }: { permissions: string[] }) {
   const { data, error, refresh } = usePolling(api.interfaces)
   const action = useAction(refresh)
   const allowConfig = can(permissions, PERMISSION.interfacesConfig)
+  const allowAcl = can(permissions, PERMISSION.aclManage)
+  const [granting, setGranting] = useState<Interface | null>(null)
   const [selected, setSelected] = useState('')
   const [op, setOp] = useState<IfconfigOp>('bitrate')
   const [bitrate, setBitrate] = useState(500000)
@@ -55,6 +55,7 @@ export function Interfaces({ permissions }: { permissions: string[] }) {
         <Thead>
           <Tr className="hover:bg-transparent">
             <Th>Interface</Th><Th className="text-right">Subscribers</Th><Th className="text-right">Frames</Th><Th className="text-right">TX dropped</Th>
+            {allowAcl && <Th></Th>}
           </Tr>
         </Thead>
         <Tbody>
@@ -64,13 +65,28 @@ export function Interfaces({ permissions }: { permissions: string[] }) {
               <Td className="text-right tabular-nums">{i.subscriberCount}</Td>
               <Td className="text-right tabular-nums">{i.framesReceived.toLocaleString()}</Td>
               <Td className="text-right tabular-nums">{i.txDropped.toLocaleString()}</Td>
+              {allowAcl && (
+                <Td>
+                  <div className="flex justify-end">
+                    <Button variant="outline" size="sm" onClick={() => setGranting(i)}>Grant</Button>
+                  </div>
+                </Td>
+              )}
             </Tr>
           ))}
           {data && data.length === 0 && (
-            <Tr className="hover:bg-transparent"><Td className="text-gray-500" colSpan={4}>None.</Td></Tr>
+            <Tr className="hover:bg-transparent"><Td className="text-gray-500" colSpan={allowAcl ? 5 : 4}>None.</Td></Tr>
           )}
         </Tbody>
       </Table>
+
+      {granting && (
+        <GrantDialog
+          agentName={granting.agentName}
+          interfaceName={granting.interfaceName}
+          onClose={() => setGranting(null)}
+        />
+      )}
     </div>
   )
 }
