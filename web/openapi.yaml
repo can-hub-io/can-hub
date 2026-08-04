@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: can-hub-web REST API
-  version: 0.1.0
+  version: 0.3.0
   description: >
     REST API of the `can-hub-web` admin daemon. The daemon is a local admin
     client of the hub unix socket and an HTTP server towards browsers; this is
