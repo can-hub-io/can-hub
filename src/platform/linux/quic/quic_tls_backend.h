@@ -14,7 +14,45 @@
 
 #include <openssl/ssl.h>
 
-#if defined(CAN_HUB_TLS_WOLFSSL)
+#if defined(CAN_HUB_TLS_BORINGSSL)
+
+/* AWS-LC and BoringSSL share ngtcp2's boringssl backend, which has the same
+   shape as the wolfssl one: configure the context, and the native handle is
+   the SSL itself. */
+
+typedef SSL QuicTlsContext;
+
+#include <ngtcp2/ngtcp2_crypto_boringssl.h>
+
+static inline bool QuicTlsBackend_Ready(void)
+{
+    return true;
+}
+
+static inline bool QuicTlsBackend_ConfigureClientContext(SSL_CTX *context)
+{
+    return ngtcp2_crypto_boringssl_configure_client_context(context) == 0;
+}
+
+static inline bool QuicTlsBackend_ConfigureServerContext(SSL_CTX *context)
+{
+    return ngtcp2_crypto_boringssl_configure_server_context(context) == 0;
+}
+
+static inline bool QuicTlsBackend_NewSession(QuicTlsContext **tls_context, SSL *ssl, bool server)
+{
+    (void)server;
+    *tls_context = ssl;
+
+    return true;
+}
+
+static inline void QuicTlsBackend_FreeSession(QuicTlsContext *tls_context)
+{
+    (void)tls_context;
+}
+
+#elif defined(CAN_HUB_TLS_WOLFSSL)
 
 typedef SSL QuicTlsContext;
 
