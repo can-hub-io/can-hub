@@ -110,17 +110,20 @@ e2e: release web-daemon e2e-image
 	    $(_E2E_IMAGE) \
 	    robot --outputdir /work/build/e2e tests
 
-# Single source of the project version is three ecosystem manifests that must
-# agree (C/CMake, Python wheel, Rust web daemon). Keep them in lockstep here so
-# a release tag never ships a stale wheel version.
+# Single source of the project version is the manifests that must agree
+# (C/CMake, Python wheel, Rust web daemon and its lock, and the OpenAPI contract
+# the daemon serves). Keep them in lockstep here so a release tag never ships a
+# stale wheel version or a spec that claims an older API.
 bump:
 	@test -n "$(VERSION)" || { echo "usage: make bump VERSION=x.y.z"; exit 1; }
 	sed -i 's/\(project(can_hub VERSION \)[0-9.]\+/\1$(VERSION)/' CMakeLists.txt
 	sed -i 's/^version = ".*"/version = "$(VERSION)"/' python/pyproject.toml
 	sed -i 's/^version = ".*"/version = "$(VERSION)"/' web/daemon/Cargo.toml
 	perl -0pi -e 's/(name = "can-hub-web"\nversion = ")[0-9.]+(")/$${1}$(VERSION)$${2}/' web/daemon/Cargo.lock
+	perl -0pi -e 's/(info:\n(?:.*\n)*?  version: )[0-9.]+/$${1}$(VERSION)/' web/openapi.yaml
 	@echo "version set to $(VERSION):"
 	@grep -nE 'project\(can_hub VERSION|^version = ' CMakeLists.txt python/pyproject.toml web/daemon/Cargo.toml
+	@grep -nE '^  version: ' web/openapi.yaml
 
 clean:
 	rm -rf build/
