@@ -8,17 +8,33 @@ export interface NavItem {
   icon: LucideIcon
 }
 
-export function Sidebar({ items, active, onSelect, user, onChangePassword, onLogout }: {
+export function Sidebar({ items, active, onSelect, user, onChangePassword, onLogout, open, onClose }: {
   items: NavItem[]
   active: string
   onSelect: (id: string) => void
   user: string | null
   onChangePassword: () => void
   onLogout: () => void
+  open: boolean
+  onClose: () => void
 }) {
   const initials = (user ?? '?').slice(0, 2).toUpperCase()
   return (
-    <aside className="flex h-screen w-56 shrink-0 flex-col border-r border-gray-200 bg-white">
+    <>
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 md:hidden"
+          aria-hidden="true"
+          onClick={onClose}
+        />
+      )}
+      <aside
+        className={cn(
+          'fixed inset-y-0 left-0 z-50 flex h-screen w-56 shrink-0 flex-col border-r border-gray-200 bg-white transition-transform',
+          'md:static md:translate-x-0',
+          open ? 'translate-x-0' : '-translate-x-full',
+        )}
+      >
       <div className="flex items-center gap-2 border-b border-gray-100 px-5 py-4">
         <Logo size={28} />
         <div className="font-semibold tracking-tight text-gray-900">can-hub</div>
@@ -28,7 +44,10 @@ export function Sidebar({ items, active, onSelect, user, onChangePassword, onLog
         {items.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
-            onClick={() => onSelect(id)}
+            onClick={() => {
+              onSelect(id)
+              onClose()
+            }}
             className={cn(
               'flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
               id === active
@@ -51,7 +70,10 @@ export function Sidebar({ items, active, onSelect, user, onChangePassword, onLog
         </div>
         <div className="mt-1 flex flex-col gap-0.5">
           <button
-            onClick={onChangePassword}
+            onClick={() => {
+              onChangePassword()
+              onClose()
+            }}
             className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900"
           >
             <KeyRound size={15} /> Change password
@@ -64,6 +86,7 @@ export function Sidebar({ items, active, onSelect, user, onChangePassword, onLog
           </button>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }
