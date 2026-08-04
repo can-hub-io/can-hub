@@ -22,6 +22,8 @@ if(CAN_HUB_STATIC)
     set(OPENSSL_ROOT_DIR "$ENV{CAN_HUB_SYSROOT}")
     set(OPENSSL_USE_STATIC_LIBS TRUE)
     find_package(OpenSSL REQUIRED)
+elseif(CAN_HUB_TLS_BACKEND STREQUAL "wolfssl")
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/wolfssl.cmake)
 else()
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/openssl.cmake)
 endif()
@@ -30,7 +32,12 @@ include_directories(src)
 
 include(FetchContent)
 set(ENABLE_GNUTLS OFF CACHE BOOL "" FORCE)
-set(ENABLE_OPENSSL ON CACHE BOOL "" FORCE)
+if(CAN_HUB_TLS_BACKEND STREQUAL "wolfssl")
+    set(ENABLE_OPENSSL OFF CACHE BOOL "" FORCE)
+    set(ENABLE_WOLFSSL ON CACHE BOOL "" FORCE)
+else()
+    set(ENABLE_OPENSSL ON CACHE BOOL "" FORCE)
+endif()
 set(ENABLE_SHARED_LIB OFF CACHE BOOL "" FORCE)
 set(ENABLE_STATIC_LIB ON CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
@@ -39,6 +46,15 @@ FetchContent_Declare(ngtcp2
     GIT_TAG 454390edaf6c954a101aa77961a939dd9e338ad2 # v1.23.0
 )
 FetchContent_MakeAvailable(ngtcp2)
+
+# One name for "the TLS stack and its ngtcp2 backend", so the link lines below
+# do not have to know which one is in play.
+add_library(can_hub_tls INTERFACE)
+if(CAN_HUB_TLS_BACKEND STREQUAL "wolfssl")
+    target_link_libraries(can_hub_tls INTERFACE ngtcp2_crypto_wolfssl_static wolfssl m)
+else()
+    target_link_libraries(can_hub_tls INTERFACE ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto)
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(LIBCANHUB_WINDOWS_SOURCES
@@ -80,11 +96,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 
     add_library(canhub STATIC ${LIBCANHUB_WINDOWS_SOURCES})
     target_include_directories(canhub PUBLIC include)
-    target_link_libraries(canhub PUBLIC ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto ${CAN_HUB_WINDOWS_LIBRARIES})
+    target_link_libraries(canhub PUBLIC ngtcp2_static can_hub_tls ${CAN_HUB_WINDOWS_LIBRARIES})
 
     add_library(canhub_shared SHARED ${LIBCANHUB_WINDOWS_SOURCES})
     target_include_directories(canhub_shared PUBLIC include)
-    target_link_libraries(canhub_shared PRIVATE ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto ${CAN_HUB_WINDOWS_LIBRARIES})
+    target_link_libraries(canhub_shared PRIVATE ngtcp2_static can_hub_tls ${CAN_HUB_WINDOWS_LIBRARIES})
     set_target_properties(canhub_shared PROPERTIES OUTPUT_NAME canhub C_VISIBILITY_PRESET hidden)
 
     add_executable(canhub-dump examples/canhub_dump.c)
@@ -190,9 +206,9 @@ set(HUB_SOURCES
 )
 
 add_executable(can-hub src/platform/linux/hub_main.c ${COMMON_SOURCES} ${HUB_SOURCES})
-target_link_libraries(can-hub PRIVATE ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto sqlite3)
+target_link_libraries(can-hub PRIVATE ngtcp2_static can_hub_tls sqlite3)
 add_executable(can-hub-agent src/platform/linux/agent_main.c ${COMMON_SOURCES} ${AGENT_SOURCES})
-target_link_libraries(can-hub-agent PRIVATE ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(can-hub-agent PRIVATE ngtcp2_static can_hub_tls)
 set(CLIENT_SOURCES
     src/client/client.c
     src/platform/linux/clock/clock.c
@@ -241,7 +257,7 @@ set(SOCKETCAND_SOURCES
 )
 
 add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES} ${CLIENT_ATTACH_SOURCES} ${CLIENT_TLS_SOURCES} ${SOCKETCAND_SOURCES})
-target_link_libraries(can-hub-client PRIVATE ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(can-hub-client PRIVATE ngtcp2_static can_hub_tls)
 add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES})
 
 set(LIBCANHUB_SOURCES
@@ -252,12 +268,12 @@ set(LIBCANHUB_SOURCES
 
 add_library(canhub STATIC ${COMMON_SOURCES} ${LIBCANHUB_SOURCES})
 target_include_directories(canhub PUBLIC include)
-target_link_libraries(canhub PUBLIC ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(canhub PUBLIC ngtcp2_static can_hub_tls)
 
 if(NOT CAN_HUB_STATIC)
     add_library(canhub_shared SHARED ${COMMON_SOURCES} ${LIBCANHUB_SOURCES})
     target_include_directories(canhub_shared PUBLIC include)
-    target_link_libraries(canhub_shared PRIVATE ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto)
+    target_link_libraries(canhub_shared PRIVATE ngtcp2_static can_hub_tls)
     set_target_properties(canhub_shared PROPERTIES
         OUTPUT_NAME canhub
         C_VISIBILITY_PRESET hidden
