@@ -75,16 +75,11 @@ bool TlsIdentity_LoadOrCreate(
     return generateIdentity(certificate_path, key_path, name);
 }
 
-// Both spellings return a counted reference, hence the X509_free the get0 form
-// did not need. OpenSSL and AWS-LC use the modern name; wolfSSL only maps the
-// pre-3.0 one. Naming it per backend is what lets OpenSSL be built no-deprecated.
+// get1 returns a counted reference, hence the X509_free the get0 form did not
+// need. Using the modern name is also what lets OpenSSL be built no-deprecated.
 bool TlsIdentity_FingerprintOfPeer(SSL *ssl, char *fingerprint_hex)
 {
-#if defined(CAN_HUB_TLS_WOLFSSL)
-    X509 *certificate = SSL_get_peer_certificate(ssl);
-#else
     X509 *certificate = SSL_get1_peer_certificate(ssl);
-#endif
     uint8_t *der = NULL;
     int der_size;
     bool computed = false;

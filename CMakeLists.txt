@@ -22,8 +22,6 @@ if(CAN_HUB_STATIC)
     set(OPENSSL_ROOT_DIR "$ENV{CAN_HUB_SYSROOT}")
     set(OPENSSL_USE_STATIC_LIBS TRUE)
     find_package(OpenSSL REQUIRED)
-elseif(CAN_HUB_TLS_BACKEND STREQUAL "wolfssl")
-    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/wolfssl.cmake)
 elseif(CAN_HUB_TLS_BACKEND STREQUAL "awslc")
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/awslc.cmake)
 else()
@@ -34,10 +32,7 @@ include_directories(src)
 
 include(FetchContent)
 set(ENABLE_GNUTLS OFF CACHE BOOL "" FORCE)
-if(CAN_HUB_TLS_BACKEND STREQUAL "wolfssl")
-    set(ENABLE_OPENSSL OFF CACHE BOOL "" FORCE)
-    set(ENABLE_WOLFSSL ON CACHE BOOL "" FORCE)
-elseif(CAN_HUB_TLS_BACKEND STREQUAL "awslc")
+if(CAN_HUB_TLS_BACKEND STREQUAL "awslc")
     set(ENABLE_OPENSSL OFF CACHE BOOL "" FORCE)
     set(ENABLE_BORINGSSL ON CACHE BOOL "" FORCE)
 else()
@@ -54,19 +49,8 @@ FetchContent_MakeAvailable(ngtcp2)
 
 # One name for "the TLS stack and its ngtcp2 backend", so the link lines below
 # do not have to know which one is in play.
-if(CAN_HUB_TLS_BACKEND STREQUAL "wolfssl")
-    set(CAN_HUB_TLS_IDENTITY_SOURCE src/platform/linux/shared/tls_identity_wolfssl.c)
-elseif(CAN_HUB_TLS_BACKEND STREQUAL "awslc")
-    set(CAN_HUB_TLS_IDENTITY_SOURCE src/platform/linux/shared/tls_identity_openssl.c)
-else()
-    set(CAN_HUB_TLS_IDENTITY_SOURCE src/platform/linux/shared/tls_identity_openssl.c)
-endif()
-
 add_library(can_hub_tls INTERFACE)
-if(CAN_HUB_TLS_BACKEND STREQUAL "wolfssl")
-    target_link_libraries(can_hub_tls INTERFACE ngtcp2_crypto_wolfssl_static wolfssl m)
-    target_compile_definitions(can_hub_tls INTERFACE CAN_HUB_TLS_WOLFSSL)
-elseif(CAN_HUB_TLS_BACKEND STREQUAL "awslc")
+if(CAN_HUB_TLS_BACKEND STREQUAL "awslc")
     target_link_libraries(can_hub_tls INTERFACE ngtcp2_crypto_boringssl_static awslc)
     target_compile_definitions(can_hub_tls INTERFACE CAN_HUB_TLS_BORINGSSL)
 else()
@@ -170,7 +154,7 @@ set(AGENT_SOURCES
     src/platform/linux/shared/pinned_server_verifier.c
     src/platform/linux/shared/tls_defaults.c
     src/platform/linux/shared/tls_identity.c
-    ${CAN_HUB_TLS_IDENTITY_SOURCE}
+    src/platform/linux/shared/tls_identity_openssl.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/socketcan/socketcan_adapter.c
     src/platform/linux/socketcan/can_netlink.c
@@ -207,7 +191,7 @@ set(HUB_SOURCES
     src/platform/linux/shared/pin_store.c
     src/platform/linux/shared/tls_defaults.c
     src/platform/linux/shared/tls_identity.c
-    ${CAN_HUB_TLS_IDENTITY_SOURCE}
+    src/platform/linux/shared/tls_identity_openssl.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/tcp/tcp_channel.c
     src/platform/linux/tcp/tcp_server_transport.c
@@ -249,7 +233,7 @@ set(CLIENT_TLS_SOURCES
     src/platform/linux/shared/pinned_server_verifier.c
     src/platform/linux/shared/tls_defaults.c
     src/platform/linux/shared/tls_identity.c
-    ${CAN_HUB_TLS_IDENTITY_SOURCE}
+    src/platform/linux/shared/tls_identity_openssl.c
     src/platform/linux/tls/tls_channel.c
     src/platform/linux/tls/tls_client_security.c
     src/platform/linux/tls/tls_client_transport.c
