@@ -13,6 +13,20 @@ set(CMAKE_C_FLAGS_DEBUG "-O0 -g")
 add_compile_options(-Wall -Wextra)
 
 option(CAN_HUB_STATIC "Fully static binaries against a static OpenSSL stack" OFF)
+
+# openssl (default) or awslc. AWS-LC is Apache-2.0/ISC and yields a far smaller
+# binary; see cmake/awslc.cmake. Reject anything else rather than silently
+# falling back, and say so when a combination is not wired up yet.
+set(CAN_HUB_TLS_BACKEND "openssl" CACHE STRING "TLS backend: openssl | awslc")
+if(NOT CAN_HUB_TLS_BACKEND MATCHES "^(openssl|awslc)$")
+    message(FATAL_ERROR "CAN_HUB_TLS_BACKEND must be openssl or awslc, got '${CAN_HUB_TLS_BACKEND}'")
+endif()
+if(CAN_HUB_STATIC AND CAN_HUB_TLS_BACKEND STREQUAL "awslc")
+    message(FATAL_ERROR "CAN_HUB_STATIC builds against the sysroot OpenSSL; the awslc backend is not wired into it yet")
+endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND CAN_HUB_TLS_BACKEND STREQUAL "awslc")
+    message(FATAL_ERROR "the awslc backend is not wired into the windows build yet")
+endif()
 if(CAN_HUB_STATIC)
     add_compile_options(-ffunction-sections -fdata-sections)
     # 64K segment alignment so the static binaries load on kernels with any page
