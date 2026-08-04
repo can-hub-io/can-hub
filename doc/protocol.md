@@ -35,7 +35,7 @@ offset  size  field
 0x01  HELLO        version negotiation, role (agent | client | admin)
 0x02  REGISTER     agent: name + interface list
 0x03  REGISTER_ACK status + assigned channels
-0x04  LIST         query interfaces/agents (filter by name, fingerprint)
+0x04  LIST         client: the interface catalogue, paginated
 0x05  LIST_REPLY
 0x06  OPEN         client opens an interface by global id, returns a channel
 0x07  CLOSE
@@ -122,7 +122,9 @@ REGISTER (total 392)
 @136 interface_names char[16][16]
 
 REGISTER_ACK (total 24)
-@4   status u8 (0 ok, 1 rejected, 2 identity mismatch: name pinned to another fingerprint)
+@4   status u8 (0 ok, 1 rejected, 2 identity mismatch: name pinned to another
+              fingerprint, 3 unknown agent: fingerprint not in the hub allowlist,
+              only sent by a hub started with --require-known-agents)
 @5   interface_count u8
 @6   reserved u16
 @8   channels u8[16]   (same order as the REGISTER names)
@@ -343,17 +345,18 @@ ADMIN_INTERFACES (total 8)
 @4   offset u16        (pagination start index)
 @6   reserved u16
 
-ADMIN_INTERFACES_REPLY (total 8 + count * 160)
+ADMIN_INTERFACES_REPLY (total 8 + count * 168)
 @4   count u8          (0-16 entries in this reply)
 @5   flags u8          (bit 0: more entries beyond offset + count)
 @6   reserved u16
-@8   entries, each 160 bytes:
+@8   entries, each 168 bytes:
      +0   interface_id u32
      +4   subscriber_count u8  (clients holding the interface open right now)
      +5   reserved u8[3]
      +8   frames_received u64  (frames seen on the interface, both directions)
      +16  agent_name char[128]
      +144 interface_name char[16]
+     +160 tx_dropped u64       (latest INTERFACE_STATUS value for the interface)
 
 ADMIN_CLIENTS_REPLY (total 8 + count * 164)
 @4   count u8          (0-16 entries in this reply)
