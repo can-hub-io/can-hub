@@ -52,6 +52,7 @@ struct CanHubSession {
     CanHubFrame frame_ring[FRAME_RING_SIZE];
     uint16_t ring_head;
     uint16_t ring_count;
+    uint64_t frames_ring_dropped;
 };
 
 static bool startWinsock(void);
@@ -335,6 +336,7 @@ int32_t canhub_recv(CanHubSession *session, CanHubFrame *frame, int32_t timeout_
 int32_t canhub_send(CanHubSession *session, const CanHubFrame *frame)
 {
     FrameMessage message;
+    TCLIENT_SEND_RESULT result;
 
     if (frame == NULL || frame->length > CANHUB_FRAME_PAYLOAD_MAX) {
         setError(session, "invalid frame");
@@ -352,11 +354,32 @@ int32_t canhub_send(CanHubSession *session, const CanHubFrame *frame)
     message.frame_flags = frame->flags;
     memcpy(message.payload, frame->payload, frame->length);
 
-    if (!Client_SendFrame(&session->client, &message, Clock_MonotonicUs())) {
+    result = Client_SendFrame(&session->client, &message, Clock_MonotonicUs());
+    if (result == kCLIENT_SEND_FAILED) {
         setError(session, "send failed: no open writable channel");
         return CANHUB_ERR_STATE;
     }
+    if (result == kCLIENT_SEND_RATE_LIMITED) {
+        setError(session, "frame dropped: the local pacer has no budget for this interface");
+        return CANHUB_ERR_RATE_LIMITED;
+    }
     pumpOnce(session, 0);
+
+    return CANHUB_OK;
+}
+
+int32_t canhub_stats(CanHubSession *session, CanHubStats *stats)
+{
+    if (session == NULL) {
+        return CANHUB_ERR_ARGUMENT;
+    }
+    if (stats == NULL || stats->struct_size != sizeof(*stats)) {
+        setError(session, "stats buffer required with struct_size set");
+        return CANHUB_ERR_ARGUMENT;
+    }
+
+    stats->frames_rate_limited = Client_FramesPacedDropped(&session->client);
+    stats->frames_ring_dropped = session->frames_ring_dropped;
 
     return CANHUB_OK;
 }
@@ -636,6 +659,7 @@ static void pushFrame(CanHubSession *self, const FrameMessage *message)
     if (self->ring_count == FRAME_RING_SIZE) {
         self->ring_head = (uint16_t)((self->ring_head + 1) % FRAME_RING_SIZE);
         self->ring_count--;
+        self->frames_ring_dropped++;
     }
 
     tail = (uint16_t)((self->ring_head + self->ring_count) % FRAME_RING_SIZE);

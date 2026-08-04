@@ -39,6 +39,7 @@ ERR_STATE = -8
 ERR_TRANSPORT = -9
 ERR_HUB = -10
 ERR_RELIABLE_UNSUPPORTED = -11
+ERR_RATE_LIMITED = -12
 
 
 class CanHubFrame(Structure):
@@ -64,6 +65,14 @@ class CanHubFilter(Structure):
     _fields_ = [
         ("can_id", c_uint32),
         ("can_mask", c_uint32),
+    ]
+
+
+class CanHubStats(Structure):
+    _fields_ = [
+        ("struct_size", c_uint32),
+        ("frames_rate_limited", c_uint64),
+        ("frames_ring_dropped", c_uint64),
     ]
 
 
@@ -124,10 +133,21 @@ lib.canhub_recv.argtypes = [c_void_p, POINTER(CanHubFrame), c_int32]
 lib.canhub_send.restype = c_int32
 lib.canhub_send.argtypes = [c_void_p, POINTER(CanHubFrame)]
 
+lib.canhub_stats.restype = c_int32
+lib.canhub_stats.argtypes = [c_void_p, POINTER(CanHubStats)]
+
 
 def last_error(session):
     detail = lib.canhub_last_error(session)
     return detail.decode("utf-8", errors="replace") if detail else "unknown error"
+
+
+def drop_counters(session):
+    stats = CanHubStats()
+    stats.struct_size = ctypes.sizeof(stats)
+    if lib.canhub_stats(session, ctypes.byref(stats)) != OK:
+        raise OSError(last_error(session))
+    return {"rate_limited": stats.frames_rate_limited, "ring_dropped": stats.frames_ring_dropped}
 
 
 def list_interfaces(session, timeout_ms, capacity=64):

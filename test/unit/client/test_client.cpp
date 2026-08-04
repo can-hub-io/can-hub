@@ -198,8 +198,9 @@ describe("client", []() {
         expect(sent.can_id).toBe((uint32_t)0x321);
     });
 
-    it("paces writes to the relayed rate, silently dropping the excess", []() {
+    it("paces writes to the relayed rate, reporting the dropped excess", []() {
         FrameMessage frame;
+        int rate_limited = 0;
         int i;
 
         Client_OpenById(&client, TEST_INTERFACE_ID, OPEN_FLAG_WANT_WRITE);
@@ -212,12 +213,50 @@ describe("client", []() {
         frame.payload_length = 64;
         frame.frame_flags = FRAME_FLAG_FD;
         for(i=0; i<16; i++) {
-            expect(Client_SendFrame(&client, &frame, 1000)).toBe(true);
+            if (Client_SendFrame(&client, &frame, 1000) == kCLIENT_SEND_RATE_LIMITED) {
+                rate_limited++;
+            }
         }
 
         expect(hub.frame_count > 0).toBe(true);
         expect(hub.frame_count < 16).toBe(true);
-        expect(client.frames_paced_dropped > 0).toBe(true);
+        expect(rate_limited > 0).toBe(true);
+    });
+
+    it("counts every frame the pacer dropped", []() {
+        FrameMessage frame;
+        uint64_t dropped;
+        int i;
+
+        Client_OpenById(&client, TEST_INTERFACE_ID, OPEN_FLAG_WANT_WRITE);
+        connect();
+        feedOpenAck(OPEN_STATUS_OK, 9);
+        feedPaceRate(9, 100000, 1000);
+
+        memset(&frame, 0, sizeof(frame));
+        frame.can_id = 0x321;
+        frame.payload_length = 64;
+        frame.frame_flags = FRAME_FLAG_FD;
+        for(i=0; i<16; i++) {
+            Client_SendFrame(&client, &frame, 1000);
+        }
+        dropped = Client_FramesPacedDropped(&client);
+
+        expect(dropped).toBe((uint64_t)(16 - hub.frame_count));
+    });
+
+    it("reports a sent frame as sent", []() {
+        FrameMessage frame;
+        TCLIENT_SEND_RESULT result;
+
+        Client_OpenById(&client, TEST_INTERFACE_ID, OPEN_FLAG_WANT_WRITE);
+        connect();
+        feedOpenAck(OPEN_STATUS_OK, 9);
+        memset(&frame, 0, sizeof(frame));
+
+        result = Client_SendFrame(&client, &frame, 0);
+
+        expect(result).toBe(kCLIENT_SEND_SENT);
     });
 
     it("refuses to send frames before the channel is open", []() {
@@ -226,7 +265,7 @@ describe("client", []() {
         memset(&frame, 0, sizeof(frame));
         connect();
 
-        expect(Client_SendFrame(&client, &frame, 0)).toBe(false);
+        expect(Client_SendFrame(&client, &frame, 0)).toBe(kCLIENT_SEND_FAILED);
         expect(hub.frame_count).toBe(0);
     });
 

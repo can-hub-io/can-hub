@@ -367,8 +367,16 @@ static bool parseHexPayload(const char *text, FrameMessage *frame)
 
 static void sendFrameAndQuit(void)
 {
+    TCLIENT_SEND_RESULT result;
+
     frame_to_send.timestamp_us = Clock_RealtimeUs();
-    if (!Client_SendFrame(&client, &frame_to_send, frame_to_send.timestamp_us)) {
+    result = Client_SendFrame(&client, &frame_to_send, frame_to_send.timestamp_us);
+    if (result == kCLIENT_SEND_RATE_LIMITED) {
+        LOG_ERROR("the frame was dropped: the local pacer has no budget for this interface");
+        exit_code = 1;
+        return;
+    }
+    if (result == kCLIENT_SEND_FAILED) {
         LOG_ERROR("could not send the frame");
         exit_code = 1;
         return;

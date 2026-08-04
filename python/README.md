@@ -31,6 +31,18 @@ for message in bus:
 Write access follows the hub client ACLs: if the ACL grants read-only, the
 bus opens read-only and `send()` raises.
 
+## Drop counters
+
+Two drops happen inside the library and never reach the hub, so the hub's own
+counters cannot show them: `send()` raises when the pace relayed by the hub
+leaves no budget for the frame, and the receive ring overwrites its oldest
+entry when you read slower than the bus produces. `drop_counters()` returns
+both as monotonic totals, so a quiet bus is distinguishable from a lossy one:
+
+```python
+bus.drop_counters()     # {"rate_limited": 0, "ring_dropped": 12}
+```
+
 ## Listing interfaces
 
 `CanHubBus.list_interfaces()` asks a hub for the interfaces it exports. Each

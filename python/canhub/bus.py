@@ -159,6 +159,9 @@ class CanHubBus(BusABC):
         if result != native.OK:
             raise CanOperationError(native.last_error(self._session))
 
+    def drop_counters(self) -> dict:
+        return native.drop_counters(self._session)
+
     def shutdown(self) -> None:
         super().shutdown()
         if self._session:

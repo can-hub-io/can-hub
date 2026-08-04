@@ -27,6 +27,35 @@ class TestListInterfaces:
             native.list_interfaces(object(), timeout_ms=1000)
 
 
+class TestDropCounters:
+    def test_it_reports_the_two_local_drop_counters(self, monkeypatch):
+        given_drop_counters(monkeypatch, rate_limited=7, ring_dropped=3)
+
+        counters = native.drop_counters(object())
+
+        assert counters == {"rate_limited": 7, "ring_dropped": 3}
+
+    def test_it_raises_when_the_library_rejects_the_call(self, monkeypatch):
+        given_stats_error(monkeypatch, b"nope")
+
+        with pytest.raises(OSError, match="nope"):
+            native.drop_counters(object())
+
+
+def given_drop_counters(monkeypatch, rate_limited, ring_dropped):
+    def fake_canhub_stats(session, stats):
+        stats._obj.frames_rate_limited = rate_limited
+        stats._obj.frames_ring_dropped = ring_dropped
+        return native.OK
+
+    monkeypatch.setattr(native.lib, "canhub_stats", fake_canhub_stats)
+
+
+def given_stats_error(monkeypatch, message):
+    monkeypatch.setattr(native.lib, "canhub_stats", lambda *arguments: native.ERR_ARGUMENT)
+    monkeypatch.setattr(native.lib, "canhub_last_error", lambda session: message)
+
+
 def given_hub_lists(monkeypatch, total):
     def fake_canhub_list(session, buffer, capacity, timeout_ms):
         count = min(total, capacity)

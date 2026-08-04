@@ -121,13 +121,13 @@ void Client_SetFilters(Client *self, const CanFilter *filters, uint8_t count)
     }
 }
 
-bool Client_SendFrame(Client *self, FrameMessage *frame, uint64_t now_us)
+TCLIENT_SEND_RESULT Client_SendFrame(Client *self, FrameMessage *frame, uint64_t now_us)
 {
     uint8_t encoded[FRAME_WIRE_SIZE];
     size_t encoded_size;
 
     if (self->state != kCLIENT_OPEN) {
-        return false;
+        return kCLIENT_SEND_FAILED;
     }
 
     frame->channel = self->channel;
@@ -135,15 +135,24 @@ bool Client_SendFrame(Client *self, FrameMessage *frame, uint64_t now_us)
     EgressShaper_Refill(&self->shaper, now_us);
     if (!EgressShaper_TryConsume(&self->shaper, frameWireBits(frame))) {
         self->frames_paced_dropped++;
-        return true;
+        return kCLIENT_SEND_RATE_LIMITED;
     }
 
     encoded_size = FrameMessage_Encode(frame, encoded, sizeof(encoded));
     if (encoded_size == 0) {
-        return false;
+        return kCLIENT_SEND_FAILED;
     }
 
-    return self->hub->send_frame(self->hub->context, frame->channel, encoded, encoded_size);
+    if (!self->hub->send_frame(self->hub->context, frame->channel, encoded, encoded_size)) {
+        return kCLIENT_SEND_FAILED;
+    }
+
+    return kCLIENT_SEND_SENT;
+}
+
+uint64_t Client_FramesPacedDropped(const Client *self)
+{
+    return self->frames_paced_dropped;
 }
 
 uint8_t Client_State(const Client *self)
