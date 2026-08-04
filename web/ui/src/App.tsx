@@ -84,7 +84,7 @@ function Console({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) 
           </div>
           <h1 className="text-xl font-semibold text-gray-900">{current?.label ?? 'can-hub'}</h1>
         </div>
-        <div className="max-w-5xl px-8 py-6">
+        <div className="max-w-[1600px] px-6 py-6">
           {allowed.length === 0 ? (
             <p className="text-gray-500">Your account has no permissions yet. Ask an administrator to add you to a group.</p>
           ) : (

@@ -57,7 +57,7 @@ export function Acls() {
         <Tbody>
           {(data ?? []).map((a) => (
             <Tr key={`${a.fingerprintHex}-${a.agentName}-${a.interfaceName}`}>
-              <Td><Fingerprint value={a.fingerprintHex} /></Td>
+              <Td><Fingerprint value={a.fingerprintHex} full /></Td>
               <Td>{a.agentName}/{a.interfaceName}</Td>
               <Td><Badge variant={levelVariant[a.level] ?? 'secondary'}>{a.level}</Badge></Td>
               <Td>
