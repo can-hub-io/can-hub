@@ -48,6 +48,7 @@ extern "C" {
 #define CANHUB_ERR_TRANSPORT (-9)
 #define CANHUB_ERR_HUB (-10)
 #define CANHUB_ERR_RELIABLE_UNSUPPORTED (-11)
+#define CANHUB_ERR_RATE_LIMITED (-12)
 
 typedef struct CanHubSession CanHubSession;
 
@@ -70,6 +71,12 @@ typedef struct {
     uint32_t can_id;
     uint32_t can_mask;
 } CanHubFilter;
+
+typedef struct {
+    uint32_t struct_size;
+    uint64_t frames_rate_limited;
+    uint64_t frames_ring_dropped;
+} CanHubStats;
 
 typedef struct {
     uint32_t struct_size;
@@ -97,6 +104,7 @@ CANHUB_API int32_t canhub_open(CanHubSession *session, const char *interface_nam
 CANHUB_API int32_t canhub_set_filters(CanHubSession *session, const CanHubFilter *filters, uint8_t filter_count);
 CANHUB_API int32_t canhub_recv(CanHubSession *session, CanHubFrame *frame, int32_t timeout_ms);
 CANHUB_API int32_t canhub_send(CanHubSession *session, const CanHubFrame *frame);
+CANHUB_API int32_t canhub_stats(CanHubSession *session, CanHubStats *stats);
 
 #ifdef __cplusplus
 }

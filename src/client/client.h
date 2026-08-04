@@ -26,6 +26,13 @@ typedef enum tclient_state_e {
     kCLIENT_STATE_MAX,
 } TCLIENT_STATE;
 
+typedef enum tclient_send_result_e {
+    kCLIENT_SEND_SENT = 0,
+    kCLIENT_SEND_RATE_LIMITED,
+    kCLIENT_SEND_FAILED,
+    kCLIENT_SEND_RESULT_MAX,
+} TCLIENT_SEND_RESULT;
+
 typedef struct {
     void *context;
     void (*on_list_reply)(void *context, const ListReplyMessage *reply);
@@ -60,6 +67,7 @@ void Client_RequestList(Client *self, uint16_t offset);
 void Client_OpenById(Client *self, uint32_t interface_id, uint8_t flags);
 void Client_OpenByName(Client *self, const char *interface_name, uint8_t flags);
 void Client_SetFilters(Client *self, const CanFilter *filters, uint8_t count);
-bool Client_SendFrame(Client *self, FrameMessage *frame, uint64_t now_us);
+TCLIENT_SEND_RESULT Client_SendFrame(Client *self, FrameMessage *frame, uint64_t now_us);
+uint64_t Client_FramesPacedDropped(const Client *self);
 uint8_t Client_State(const Client *self);
 uint8_t Client_Channel(const Client *self);

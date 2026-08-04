@@ -44,7 +44,8 @@ canhub_close(session);
 | `canhub_open(session, name, flags, timeout_ms)` | by namespaced name (`agent/iface`) or numeric id; flags `CANHUB_OPEN_FLAG_WRITE`, `CANHUB_OPEN_FLAG_NO_ECHO`, `CANHUB_OPEN_FLAG_RELIABLE` (lossless ordered QUIC stream, `quic://` only; `CANHUB_ERR_RELIABLE_UNSUPPORTED` if the hub lacks the capability) |
 | `canhub_set_filters(session, filters, count)` | hub-side CAN id mask filters, replace semantics, max 16 |
 | `canhub_recv(session, frame, timeout_ms)` | `CANHUB_RECEIVED`, `CANHUB_ERR_TIMEOUT`, or a failure |
-| `canhub_send(session, frame)` | needs an open writable channel |
+| `canhub_send(session, frame)` | needs an open writable channel; `CANHUB_ERR_RATE_LIMITED` when the local pacer drops the frame |
+| `canhub_stats(session, stats)` | local drop counters: `frames_rate_limited` (pacer), `frames_ring_dropped` (receive ring overrun) |
 | `canhub_last_error(session)` | human-readable detail for the last failure; pass `NULL` for why the last `canhub_connect` on this thread failed |
 | `canhub_api_version()` | `CANHUB_API_VERSION` of the linked library |
 
@@ -55,6 +56,22 @@ milliseconds. `CANHUB_ERR_TIMEOUT` when it expires.
 Errors are negative `CANHUB_ERR_*` codes (`canhub.h`); ACL denials surface
 as `CANHUB_ERR_READ_DENIED`/`CANHUB_ERR_WRITE_DENIED`. Without a write flag
 or grant a session can still read — same baseline as every client.
+
+Two drops happen inside the library and never reach the hub, so the hub-side
+counters cannot show them. `canhub_send` returns `CANHUB_ERR_RATE_LIMITED`
+when the pace relayed by the hub leaves no budget for the frame, and the
+receive ring (512 frames) overwrites its oldest entry when the caller reads
+slower than the bus produces. `canhub_stats` returns both as monotonic
+counters, so a consumer can tell a quiet bus from one it is losing:
+
+```c
+CanHubStats stats = { 0 };
+stats.struct_size = sizeof(stats);
+canhub_stats(session, &stats);
+printf("paced out %llu, ring lost %llu\n",
+       (unsigned long long)stats.frames_rate_limited,
+       (unsigned long long)stats.frames_ring_dropped);
+```
 
 `canhub_connect` returns NULL for every failure, so there is no session to
 ask. `canhub_last_error(NULL)` returns the reason for the last failed
