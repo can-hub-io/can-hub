@@ -14,8 +14,8 @@
 # so that directory goes on the include path and `#include <openssl/ssl.h>`
 # resolves unchanged.
 
-set(CAN_HUB_WOLFSSL_VERSION 5.8.2-stable)
-set(CAN_HUB_WOLFSSL_SHA256 3ef126e3466e2f8f6ebb62b916a7f8fb26c6709dbdf2b63a167759f2fdb53068)
+set(CAN_HUB_WOLFSSL_VERSION 5.9.2-stable)
+set(CAN_HUB_WOLFSSL_SHA256 2f4ef3d4fd387a9b3191d36a6316d69116c46ff69bb9583b6c82b36d7b8ca114)
 set(CAN_HUB_WOLFSSL_URL "https://github.com/wolfSSL/wolfssl/archive/refs/tags/v${CAN_HUB_WOLFSSL_VERSION}.tar.gz")
 set(CAN_HUB_WOLFSSL_PREFIX "${CMAKE_BINARY_DIR}/wolfssl")
 
@@ -42,7 +42,7 @@ if(NOT EXISTS "${CAN_HUB_WOLFSSL_PREFIX}/lib/libwolfssl.a")
                 # ours to gate on.
                 # HAVE_AES_ECB/AES_DIRECT: header protection in the ngtcp2
                 # backend; they are configure.ac defines, not cmake options.
-                "-DCMAKE_C_FLAGS=-Wno-error -DHAVE_AES_ECB -DWOLFSSL_AES_DIRECT"
+                "-DCMAKE_C_FLAGS=-DHAVE_AES_ECB -DWOLFSSL_AES_DIRECT"
                 -DBUILD_SHARED_LIBS=OFF
                 -DWOLFSSL_QUIC=yes
                 -DWOLFSSL_TLS13=yes
