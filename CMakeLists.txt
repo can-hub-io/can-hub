@@ -13,6 +13,20 @@ set(CMAKE_C_FLAGS_DEBUG "-O0 -g")
 add_compile_options(-Wall -Wextra)
 
 option(CAN_HUB_STATIC "Fully static binaries against a static OpenSSL stack" OFF)
+
+# openssl (default) or awslc. AWS-LC is Apache-2.0/ISC and yields a far smaller
+# binary; see cmake/awslc.cmake. Reject anything else rather than silently
+# falling back, and say so when a combination is not wired up yet.
+set(CAN_HUB_TLS_BACKEND "openssl" CACHE STRING "TLS backend: openssl | awslc")
+if(NOT CAN_HUB_TLS_BACKEND MATCHES "^(openssl|awslc)$")
+    message(FATAL_ERROR "CAN_HUB_TLS_BACKEND must be openssl or awslc, got '${CAN_HUB_TLS_BACKEND}'")
+endif()
+if(CAN_HUB_STATIC AND CAN_HUB_TLS_BACKEND STREQUAL "awslc")
+    message(FATAL_ERROR "CAN_HUB_STATIC builds against the sysroot OpenSSL; the awslc backend is not wired into it yet")
+endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND CAN_HUB_TLS_BACKEND STREQUAL "awslc")
+    message(FATAL_ERROR "the awslc backend is not wired into the windows build yet")
+endif()
 if(CAN_HUB_STATIC)
     add_compile_options(-ffunction-sections -fdata-sections)
     # 64K segment alignment so the static binaries load on kernels with any page
@@ -22,6 +36,8 @@ if(CAN_HUB_STATIC)
     set(OPENSSL_ROOT_DIR "$ENV{CAN_HUB_SYSROOT}")
     set(OPENSSL_USE_STATIC_LIBS TRUE)
     find_package(OpenSSL REQUIRED)
+elseif(CAN_HUB_TLS_BACKEND STREQUAL "awslc")
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/awslc.cmake)
 else()
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/openssl.cmake)
 endif()
@@ -30,7 +46,12 @@ include_directories(src)
 
 include(FetchContent)
 set(ENABLE_GNUTLS OFF CACHE BOOL "" FORCE)
-set(ENABLE_OPENSSL ON CACHE BOOL "" FORCE)
+if(CAN_HUB_TLS_BACKEND STREQUAL "awslc")
+    set(ENABLE_OPENSSL OFF CACHE BOOL "" FORCE)
+    set(ENABLE_BORINGSSL ON CACHE BOOL "" FORCE)
+else()
+    set(ENABLE_OPENSSL ON CACHE BOOL "" FORCE)
+endif()
 set(ENABLE_SHARED_LIB OFF CACHE BOOL "" FORCE)
 set(ENABLE_STATIC_LIB ON CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
@@ -39,6 +60,16 @@ FetchContent_Declare(ngtcp2
     GIT_TAG 454390edaf6c954a101aa77961a939dd9e338ad2 # v1.23.0
 )
 FetchContent_MakeAvailable(ngtcp2)
+
+# One name for "the TLS stack and its ngtcp2 backend", so the link lines below
+# do not have to know which one is in play.
+add_library(can_hub_tls INTERFACE)
+if(CAN_HUB_TLS_BACKEND STREQUAL "awslc")
+    target_link_libraries(can_hub_tls INTERFACE ngtcp2_crypto_boringssl_static awslc)
+    target_compile_definitions(can_hub_tls INTERFACE CAN_HUB_TLS_BORINGSSL)
+else()
+    target_link_libraries(can_hub_tls INTERFACE ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto)
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(LIBCANHUB_WINDOWS_SOURCES
@@ -80,11 +111,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 
     add_library(canhub STATIC ${LIBCANHUB_WINDOWS_SOURCES})
     target_include_directories(canhub PUBLIC include)
-    target_link_libraries(canhub PUBLIC ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto ${CAN_HUB_WINDOWS_LIBRARIES})
+    target_link_libraries(canhub PUBLIC ngtcp2_static can_hub_tls ${CAN_HUB_WINDOWS_LIBRARIES})
 
     add_library(canhub_shared SHARED ${LIBCANHUB_WINDOWS_SOURCES})
     target_include_directories(canhub_shared PUBLIC include)
-    target_link_libraries(canhub_shared PRIVATE ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto ${CAN_HUB_WINDOWS_LIBRARIES})
+    target_link_libraries(canhub_shared PRIVATE ngtcp2_static can_hub_tls ${CAN_HUB_WINDOWS_LIBRARIES})
     set_target_properties(canhub_shared PROPERTIES OUTPUT_NAME canhub C_VISIBILITY_PRESET hidden)
 
     add_executable(canhub-dump examples/canhub_dump.c)
@@ -137,6 +168,7 @@ set(AGENT_SOURCES
     src/platform/linux/shared/pinned_server_verifier.c
     src/platform/linux/shared/tls_defaults.c
     src/platform/linux/shared/tls_identity.c
+    src/platform/linux/shared/tls_identity_openssl.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/socketcan/socketcan_adapter.c
     src/platform/linux/socketcan/can_netlink.c
@@ -173,6 +205,7 @@ set(HUB_SOURCES
     src/platform/linux/shared/pin_store.c
     src/platform/linux/shared/tls_defaults.c
     src/platform/linux/shared/tls_identity.c
+    src/platform/linux/shared/tls_identity_openssl.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/tcp/tcp_channel.c
     src/platform/linux/tcp/tcp_server_transport.c
@@ -190,9 +223,9 @@ set(HUB_SOURCES
 )
 
 add_executable(can-hub src/platform/linux/hub_main.c ${COMMON_SOURCES} ${HUB_SOURCES})
-target_link_libraries(can-hub PRIVATE ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto sqlite3)
+target_link_libraries(can-hub PRIVATE ngtcp2_static can_hub_tls sqlite3)
 add_executable(can-hub-agent src/platform/linux/agent_main.c ${COMMON_SOURCES} ${AGENT_SOURCES})
-target_link_libraries(can-hub-agent PRIVATE ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(can-hub-agent PRIVATE ngtcp2_static can_hub_tls)
 set(CLIENT_SOURCES
     src/client/client.c
     src/platform/linux/clock/clock.c
@@ -214,6 +247,7 @@ set(CLIENT_TLS_SOURCES
     src/platform/linux/shared/pinned_server_verifier.c
     src/platform/linux/shared/tls_defaults.c
     src/platform/linux/shared/tls_identity.c
+    src/platform/linux/shared/tls_identity_openssl.c
     src/platform/linux/tls/tls_channel.c
     src/platform/linux/tls/tls_client_security.c
     src/platform/linux/tls/tls_client_transport.c
@@ -241,7 +275,7 @@ set(SOCKETCAND_SOURCES
 )
 
 add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES} ${CLIENT_ATTACH_SOURCES} ${CLIENT_TLS_SOURCES} ${SOCKETCAND_SOURCES})
-target_link_libraries(can-hub-client PRIVATE ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(can-hub-client PRIVATE ngtcp2_static can_hub_tls)
 add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES})
 
 set(LIBCANHUB_SOURCES
@@ -252,12 +286,12 @@ set(LIBCANHUB_SOURCES
 
 add_library(canhub STATIC ${COMMON_SOURCES} ${LIBCANHUB_SOURCES})
 target_include_directories(canhub PUBLIC include)
-target_link_libraries(canhub PUBLIC ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(canhub PUBLIC ngtcp2_static can_hub_tls)
 
 if(NOT CAN_HUB_STATIC)
     add_library(canhub_shared SHARED ${COMMON_SOURCES} ${LIBCANHUB_SOURCES})
     target_include_directories(canhub_shared PUBLIC include)
-    target_link_libraries(canhub_shared PRIVATE ngtcp2_static ngtcp2_crypto_ossl_static OpenSSL::SSL OpenSSL::Crypto)
+    target_link_libraries(canhub_shared PRIVATE ngtcp2_static can_hub_tls)
     set_target_properties(canhub_shared PROPERTIES
         OUTPUT_NAME canhub
         C_VISIBILITY_PRESET hidden

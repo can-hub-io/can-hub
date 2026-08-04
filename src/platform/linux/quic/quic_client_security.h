@@ -3,7 +3,7 @@
 #include <stdbool.h>
 
 #include <ngtcp2/ngtcp2_crypto.h>
-#include <ngtcp2/ngtcp2_crypto_ossl.h>
+#include "platform/linux/quic/quic_tls_backend.h"
 #include <openssl/ssl.h>
 
 #include "platform/linux/shared/pinned_server_verifier.h"
@@ -26,7 +26,7 @@ typedef struct {
 typedef struct {
     SSL_CTX *context;
     SSL *ssl;
-    ngtcp2_crypto_ossl_ctx *tls_context;
+    QuicTlsContext *tls_context;
     PinnedServerVerifier verifier;
 } QuicClientSecurity;
 

@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <openssl/ssl.h>
+
 /*
  * Self-signed TLS identity for zero-config TOFU: an ED25519 keypair and
  * certificate generated on first start and reused afterwards. The state
@@ -23,3 +25,4 @@ bool TlsIdentity_LoadOrCreate(
 );
 bool TlsIdentity_FingerprintOfDer(const uint8_t *certificate_der, size_t der_size, char *fingerprint_hex);
 bool TlsIdentity_FingerprintOfFile(const char *certificate_path, char *fingerprint_hex);
+bool TlsIdentity_FingerprintOfPeer(SSL *ssl, char *fingerprint_hex);

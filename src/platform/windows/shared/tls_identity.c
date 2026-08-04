@@ -64,6 +64,29 @@ bool TlsIdentity_LoadOrCreate(
     return generateIdentity(certificate_path, key_path, name);
 }
 
+// get1 returns a counted reference, hence the X509_free. Mirrors the linux
+// implementation: tls_channel.c is shared between the two platforms.
+bool TlsIdentity_FingerprintOfPeer(SSL *ssl, char *fingerprint_hex)
+{
+    X509 *certificate = SSL_get1_peer_certificate(ssl);
+    uint8_t *der = NULL;
+    int der_size;
+    bool computed = false;
+
+    if (certificate == NULL) {
+        return false;
+    }
+
+    der_size = i2d_X509(certificate, &der);
+    if (der_size > 0) {
+        computed = TlsIdentity_FingerprintOfDer(der, (size_t)der_size, fingerprint_hex);
+        OPENSSL_free(der);
+    }
+    X509_free(certificate);
+
+    return computed;
+}
+
 bool TlsIdentity_FingerprintOfDer(const uint8_t *certificate_der, size_t der_size, char *fingerprint_hex)
 {
     uint8_t fingerprint[FINGERPRINT_SIZE];

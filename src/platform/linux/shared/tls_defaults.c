@@ -25,11 +25,31 @@ SSL_CTX *TlsDefaults_NewContext(const SSL_METHOD *method)
     }
 
     if (SSL_CTX_set_min_proto_version(context, TLS1_3_VERSION) != 1
-        || SSL_CTX_set_max_proto_version(context, TLS1_3_VERSION) != 1
-        || SSL_CTX_set_ciphersuites(context, TLS13_CIPHERSUITES) != 1) {
+        || SSL_CTX_set_max_proto_version(context, TLS1_3_VERSION) != 1) {
         SSL_CTX_free(context);
         return NULL;
     }
+#if defined(CAN_HUB_TLS_BORINGSSL)
+    // BoringSSL and its forks fix the TLS 1.3 suites, so there is nothing to
+    // pin. They also leave ED25519 out of the default signature preferences,
+    // which makes a handshake between two ED25519 identities fail with
+    // NO_COMMON_SIGNATURE_ALGORITHMS unless it is asked for on both sides:
+    // signing with our own key, and accepting the peer's.
+    {
+        static const uint16_t signature_algorithms[] = { SSL_SIGN_ED25519 };
+
+        if (SSL_CTX_set_signing_algorithm_prefs(context, signature_algorithms, 1) != 1
+            || SSL_CTX_set_verify_algorithm_prefs(context, signature_algorithms, 1) != 1) {
+            SSL_CTX_free(context);
+            return NULL;
+        }
+    }
+#else
+    if (SSL_CTX_set_ciphersuites(context, TLS13_CIPHERSUITES) != 1) {
+        SSL_CTX_free(context);
+        return NULL;
+    }
+#endif
 
     return context;
 }

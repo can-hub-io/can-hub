@@ -3,7 +3,7 @@
 #include <stdbool.h>
 
 #include <ngtcp2/ngtcp2_crypto.h>
-#include <ngtcp2/ngtcp2_crypto_ossl.h>
+#include "platform/linux/quic/quic_tls_backend.h"
 #include <openssl/ssl.h>
 
 /*
@@ -20,7 +20,7 @@ bool QuicServerSecurity_Init(QuicServerSecurity *self, const char *certificate_f
 bool QuicServerSecurity_NewSession(
     QuicServerSecurity *self,
     SSL **ssl,
-    ngtcp2_crypto_ossl_ctx **tls_context,
+    QuicTlsContext **tls_context,
     ngtcp2_crypto_conn_ref *connection_ref
 );
-void QuicServerSecurity_FreeSession(SSL *ssl, ngtcp2_crypto_ossl_ctx *tls_context);
+void QuicServerSecurity_FreeSession(SSL *ssl, QuicTlsContext *tls_context);

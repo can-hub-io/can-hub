@@ -1,5 +1,7 @@
 #include "platform/linux/shared/tls_identity.h"
 
+#include "platform/linux/shared/tls_identity_backend.h"
+
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +19,7 @@
 #define USER_STATE_SUBDIRECTORY "/.local/state/can-hub"
 #define STATE_DIRECTORY_MODE 0755
 #define PRIVATE_KEY_FILE_MODE 0600
+#define IDENTITY_PEM_MAX 8192
 #define CERTIFICATE_FILE_MODE 0644
 #define CERTIFICATE_LIFETIME_SECONDS (20L * 365 * 24 * 3600)
 #define CERTIFICATE_BACKDATE_SECONDS 86400
@@ -28,10 +31,7 @@ static bool directoryUsable(const char *directory);
 static bool makeDirectoryPath(const char *directory);
 static bool filesExist(const char *first_path, const char *second_path);
 static bool generateIdentity(const char *certificate_path, const char *key_path, const char *common_name);
-static X509 *buildSelfSignedCertificate(EVP_PKEY *key, const char *common_name);
-static bool exportPrivateKeyPem(EVP_PKEY *key, const char *path);
-static bool exportCertificatePem(X509 *certificate, const char *path);
-static bool writePemWithMode(const char *path, BIO *pem, mode_t mode);
+static bool writeFileWithMode(const char *path, const uint8_t *data, size_t size, mode_t mode);
 
 /* ---------- public ---------- */
 
@@ -73,6 +73,29 @@ bool TlsIdentity_LoadOrCreate(
     }
 
     return generateIdentity(certificate_path, key_path, name);
+}
+
+// get1 returns a counted reference, hence the X509_free the get0 form did not
+// need. Using the modern name is also what lets OpenSSL be built no-deprecated.
+bool TlsIdentity_FingerprintOfPeer(SSL *ssl, char *fingerprint_hex)
+{
+    X509 *certificate = SSL_get1_peer_certificate(ssl);
+    uint8_t *der = NULL;
+    int der_size;
+    bool computed = false;
+
+    if (certificate == NULL) {
+        return false;
+    }
+
+    der_size = i2d_X509(certificate, &der);
+    if (der_size > 0) {
+        computed = TlsIdentity_FingerprintOfDer(der, (size_t)der_size, fingerprint_hex);
+        OPENSSL_free(der);
+    }
+    X509_free(certificate);
+
+    return computed;
 }
 
 bool TlsIdentity_FingerprintOfDer(const uint8_t *certificate_der, size_t der_size, char *fingerprint_hex)
@@ -125,6 +148,11 @@ bool TlsIdentity_FingerprintOfFile(const char *certificate_path, char *fingerpri
 
 /* ---------- private ---------- */
 
+// EVP_PKEY_Q_keygen is an OpenSSL 3.x convenience with no counterpart in the
+// wolfSSL compatibility layer; the context form works on both. NID_ED25519 is
+// the identifier both stacks agree on (EVP_PKEY_ED25519 is OpenSSL-only, and
+// is the same value).
+
 static bool directoryUsable(const char *directory)
 {
     return access(directory, W_OK | X_OK) == 0;
@@ -154,100 +182,31 @@ static bool filesExist(const char *first_path, const char *second_path)
 
 static bool generateIdentity(const char *certificate_path, const char *key_path, const char *common_name)
 {
-    EVP_PKEY *key;
-    X509 *certificate;
-    bool generated = false;
+    uint8_t certificate_pem[IDENTITY_PEM_MAX];
+    uint8_t key_pem[IDENTITY_PEM_MAX];
+    size_t certificate_length = 0;
+    size_t key_length = 0;
 
-    key = EVP_PKEY_Q_keygen(NULL, NULL, "ED25519");
-    if (key == NULL) {
+    if (!TlsIdentityBackend_Generate(
+            common_name,
+            certificate_pem, sizeof(certificate_pem), &certificate_length,
+            key_pem, sizeof(key_pem), &key_length)) {
         return false;
     }
 
-    certificate = buildSelfSignedCertificate(key, common_name);
-    if (certificate != NULL) {
-        generated = exportPrivateKeyPem(key, key_path) && exportCertificatePem(certificate, certificate_path);
-        X509_free(certificate);
-    }
-    EVP_PKEY_free(key);
-
-    return generated;
+    return writeFileWithMode(key_path, key_pem, key_length, PRIVATE_KEY_FILE_MODE)
+        && writeFileWithMode(certificate_path, certificate_pem, certificate_length, CERTIFICATE_FILE_MODE);
 }
 
-static X509 *buildSelfSignedCertificate(EVP_PKEY *key, const char *common_name)
-{
-    X509 *certificate = X509_new();
-    X509_NAME *name;
-    bool built = false;
 
-    if (certificate == NULL) {
-        return NULL;
-    }
 
-    if (X509_set_version(certificate, CERTIFICATE_X509_VERSION_3) == 1
-        && ASN1_INTEGER_set(X509_get_serialNumber(certificate), CERTIFICATE_SERIAL) == 1
-        && X509_gmtime_adj(X509_getm_notBefore(certificate), -CERTIFICATE_BACKDATE_SECONDS) != NULL
-        && X509_gmtime_adj(X509_getm_notAfter(certificate), CERTIFICATE_LIFETIME_SECONDS) != NULL
-        && X509_set_pubkey(certificate, key) == 1) {
-        name = X509_get_subject_name(certificate);
-        built = X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (const unsigned char *)common_name, -1, -1, 0) == 1
-            && X509_set_issuer_name(certificate, name) == 1
-            && X509_sign(certificate, key, NULL) > 0;
-    }
 
-    if (!built) {
-        X509_free(certificate);
-        return NULL;
-    }
 
-    return certificate;
-}
-
-static bool exportPrivateKeyPem(EVP_PKEY *key, const char *path)
-{
-    BIO *pem = BIO_new(BIO_s_mem());
-    bool written = false;
-
-    if (pem == NULL) {
-        return false;
-    }
-
-    if (PEM_write_bio_PKCS8PrivateKey(pem, key, NULL, NULL, 0, NULL, NULL) == 1) {
-        written = writePemWithMode(path, pem, PRIVATE_KEY_FILE_MODE);
-    }
-    BIO_free(pem);
-
-    return written;
-}
-
-static bool exportCertificatePem(X509 *certificate, const char *path)
-{
-    BIO *pem = BIO_new(BIO_s_mem());
-    bool written = false;
-
-    if (pem == NULL) {
-        return false;
-    }
-
-    if (PEM_write_bio_X509(pem, certificate) == 1) {
-        written = writePemWithMode(path, pem, CERTIFICATE_FILE_MODE);
-    }
-    BIO_free(pem);
-
-    return written;
-}
-
-static bool writePemWithMode(const char *path, BIO *pem, mode_t mode)
+static bool writeFileWithMode(const char *path, const uint8_t *data, size_t size, mode_t mode)
 {
     FILE *file;
-    char *data = NULL;
-    long size;
     size_t written;
     int32_t fd;
-
-    size = BIO_get_mem_data(pem, &data);
-    if (size <= 0) {
-        return false;
-    }
 
     fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, mode);
     if (fd < 0) {
@@ -264,8 +223,8 @@ static bool writePemWithMode(const char *path, BIO *pem, mode_t mode)
         return false;
     }
 
-    written = fwrite(data, 1, (size_t)size, file);
+    written = fwrite(data, 1, size, file);
     fclose(file);
 
-    return written == (size_t)size;
+    return written == size;
 }
