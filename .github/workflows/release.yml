@@ -8,7 +8,21 @@ permissions:
   contents: write
 
 jobs:
+  # ci.yml runs on branches and pull requests, never on tags, so without this the
+  # whole release fans out from an untested tag: binaries, wheels and PyPI.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libssl-dev perl
+      - name: unit tests
+        run: make test
+      - name: release build
+        run: make release
+
   create-release:
+    needs: tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
