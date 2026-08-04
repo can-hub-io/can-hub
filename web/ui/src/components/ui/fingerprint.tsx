@@ -29,7 +29,7 @@ async function copy(text: string): Promise<boolean> {
   return copied
 }
 
-export function Fingerprint({ value }: { value: string | null | undefined }) {
+export function Fingerprint({ value, full }: { value: string | null | undefined; full?: boolean }) {
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -43,7 +43,7 @@ export function Fingerprint({ value }: { value: string | null | undefined }) {
 
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className="font-mono text-xs" title={value}>{middleFp(value)}</span>
+      <span className="font-mono text-xs" title={value}>{full ? value : middleFp(value)}</span>
       <button
         type="button"
         title={copied ? 'Copied' : 'Copy the full fingerprint'}

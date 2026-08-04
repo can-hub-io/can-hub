@@ -41,7 +41,7 @@ export function Pins() {
           {(data ?? []).map((p) => (
             <Tr key={p.agentName}>
               <Td className="font-medium text-gray-900">{p.agentName}</Td>
-              <Td><Fingerprint value={p.fingerprintHex} /></Td>
+              <Td><Fingerprint value={p.fingerprintHex} full /></Td>
               <Td>
                 <div className="flex justify-end">
                   <ConfirmButton
