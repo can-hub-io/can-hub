@@ -12,7 +12,7 @@ export function DataView<T>({ fetcher, columns, rowKey, actions }: {
   fetcher: () => Promise<T[]>
   columns: Column<T>[]
   rowKey: (row: T) => string | number
-  actions?: (row: T, run: (action: () => Promise<void>) => void) => ReactNode
+  actions?: (row: T, run: (action: () => Promise<void>, done?: string) => void, pending: boolean) => ReactNode
 }) {
   const { data, error, refresh } = usePolling(fetcher)
   const action = useAction(refresh)
@@ -35,7 +35,7 @@ export function DataView<T>({ fetcher, columns, rowKey, actions }: {
               {columns.map((c) => (
                 <Td key={c.header} className={c.num ? 'text-right tabular-nums' : ''}>{c.render(row)}</Td>
               ))}
-              {actions && <Td className="text-right"><div className="flex justify-end gap-2">{actions(row, action.run)}</div></Td>}
+              {actions && <Td className="text-right"><div className="flex justify-end gap-2">{actions(row, action.run, action.pending)}</div></Td>}
             </Tr>
           ))}
         </Tbody>

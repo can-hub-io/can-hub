@@ -3,6 +3,7 @@ import { useAction, usePolling } from '../hooks'
 import { can, peerId, shortFp, transportOf } from '../lib'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
+import { ConfirmButton } from './ui/confirm'
 import { Table, Tbody, Td, Th, Thead, Tr } from './ui/table'
 
 export function Agents({ permissions }: { permissions: string[] }) {
@@ -48,20 +49,23 @@ export function Agents({ permissions }: { permissions: string[] }) {
                   <Td>
                     <div className="flex justify-end gap-2">
                       {allowPin && !isPinned && a.fingerprintHex && (
-                        <Button size="sm" onClick={() => action.run(() => api.pinAdd(a.agentName, a.fingerprintHex))}>
+                        <Button size="sm" disabled={action.pending} onClick={() => action.run(() => api.pinAdd(a.agentName, a.fingerprintHex), `Pinned ${a.agentName}`)}>
                           Pin
                         </Button>
                       )}
                       {allowKick && (
-                        <Button
+                        <ConfirmButton
                           variant="outline"
                           size="sm"
-                          onClick={() => {
-                            if (window.confirm(`Kick agent ${a.agentName}?`)) action.run(() => api.kickAgent(a.agentName))
-                          }}
+                          disabled={action.pending}
+                          title={`Kick agent ${a.agentName}?`}
+                          description="Every client channel on this agent's interfaces drops until it reconnects."
+                          confirmLabel="Kick"
+                          destructive
+                          onConfirm={() => action.run(() => api.kickAgent(a.agentName), `Agent ${a.agentName} kicked`)}
                         >
                           Kick
-                        </Button>
+                        </ConfirmButton>
                       )}
                     </div>
                   </Td>

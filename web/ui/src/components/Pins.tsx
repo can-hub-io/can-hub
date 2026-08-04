@@ -3,6 +3,7 @@ import { api } from '../api'
 import { useAction, usePolling } from '../hooks'
 import { shortFp } from '../lib'
 import { Button } from './ui/button'
+import { ConfirmButton } from './ui/confirm'
 import { Input } from './ui/input'
 import { Table, Tbody, Td, Th, Thead, Tr } from './ui/table'
 
@@ -19,7 +20,7 @@ export function Pins() {
       await api.pinAdd(name, fingerprint)
       setName('')
       setFingerprint('')
-    })
+    }, `Pinned ${name}`)
   }
 
   return (
@@ -29,7 +30,7 @@ export function Pins() {
       <form className="flex flex-wrap items-center gap-2" onSubmit={add}>
         <Input className="w-48" placeholder="agent name" value={name} onChange={(e) => setName(e.target.value)} />
         <Input className="w-80" placeholder="fingerprint (sha256 hex)" value={fingerprint} onChange={(e) => setFingerprint(e.target.value)} />
-        <Button type="submit">Add pin</Button>
+        <Button type="submit" disabled={action.pending}>{action.pending ? 'Adding…' : 'Add pin'}</Button>
       </form>
 
       <Table>
@@ -43,15 +44,18 @@ export function Pins() {
               <Td className="font-mono text-xs">{shortFp(p.fingerprintHex)}</Td>
               <Td>
                 <div className="flex justify-end">
-                  <Button
+                  <ConfirmButton
                     variant="outline"
                     size="sm"
-                    onClick={() => {
-                      if (window.confirm(`Delete pin for ${p.agentName}?`)) action.run(() => api.pinDelete(p.agentName))
-                    }}
+                    disabled={action.pending}
+                    title={`Delete pin for ${p.agentName}?`}
+                    description="The agent will be able to pin a new fingerprint on its next connection."
+                    confirmLabel="Delete"
+                    destructive
+                    onConfirm={() => action.run(() => api.pinDelete(p.agentName), `Pin for ${p.agentName} deleted`)}
                   >
                     Delete
-                  </Button>
+                  </ConfirmButton>
                 </div>
               </Td>
             </Tr>

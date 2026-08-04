@@ -3,9 +3,12 @@ import { api, type ManagedGroup, type ManagedUser } from '../api'
 import { useAction, usePolling } from '../hooks'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
+import { ConfirmButton } from './ui/confirm'
 import { Input } from './ui/input'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
 import { Table, Tbody, Td, Th, Thead, Tr } from './ui/table'
+
+const PASSWORD_MIN = 8
 
 export function Users({ currentUser }: { currentUser: string | null }) {
   const users = usePolling(api.listManagedUsers)
@@ -74,15 +77,18 @@ export function Users({ currentUser }: { currentUser: string | null }) {
                 <Td>
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={() => setEditingGroup(g)}>Edit</Button>
-                    <Button
+                    <ConfirmButton
                       variant="outline"
                       size="sm"
-                      onClick={() => {
-                        if (window.confirm(`Delete group ${g.name}?`)) action.run(() => api.deleteManagedGroup(g.id))
-                      }}
+                      disabled={action.pending}
+                      title={`Delete group ${g.name}?`}
+                      description="Members lose every permission this group granted them."
+                      confirmLabel="Delete"
+                      destructive
+                      onConfirm={() => action.run(() => api.deleteManagedGroup(g.id), `Group ${g.name} deleted`)}
                     >
                       Delete
-                    </Button>
+                    </ConfirmButton>
                   </div>
                 </Td>
               </Tr>
@@ -131,15 +137,18 @@ export function Users({ currentUser }: { currentUser: string | null }) {
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" size="sm" onClick={() => setEditingUser(u)}>Edit</Button>
                       {!isSelf && (
-                        <Button
+                        <ConfirmButton
                           variant="outline"
                           size="sm"
-                          onClick={() => {
-                            if (window.confirm(`Delete user ${u.name}?`)) action.run(() => api.deleteManagedUser(u.id))
-                          }}
+                          disabled={action.pending}
+                          title={`Delete user ${u.name}?`}
+                          description="The account is removed and any open session for it stops working."
+                          confirmLabel="Delete"
+                          destructive
+                          onConfirm={() => action.run(() => api.deleteManagedUser(u.id), `User ${u.name} deleted`)}
                         >
                           Delete
-                        </Button>
+                        </ConfirmButton>
                       )}
                     </div>
                   </Td>
@@ -202,15 +211,69 @@ function EditGroup({ group, permissions, run, onClose }: {
   )
 }
 
+function ResetPassword({ user, onCancel, onSubmit }: {
+  user: ManagedUser
+  onCancel: () => void
+  onSubmit: (password: string) => void
+}) {
+  const [password, setPassword] = useState('')
+  const [confirmation, setConfirmation] = useState('')
+  const tooShort = password.length > 0 && password.length < PASSWORD_MIN
+  const mismatch = confirmation.length > 0 && confirmation !== password
+  const valid = password.length >= PASSWORD_MIN && confirmation === password
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (valid) onSubmit(password)
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Reset password · {user.name}</DialogTitle></DialogHeader>
+        <form className="space-y-3" onSubmit={submit}>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-gray-800" htmlFor="reset-password">New password</label>
+            <Input
+              id="reset-password"
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            {tooShort && <p className="text-xs text-red-600">At least {PASSWORD_MIN} characters.</p>}
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-gray-800" htmlFor="reset-confirm">Confirm password</label>
+            <Input
+              id="reset-confirm"
+              type="password"
+              autoComplete="new-password"
+              value={confirmation}
+              onChange={(e) => setConfirmation(e.target.value)}
+            />
+            {mismatch && <p className="text-xs text-red-600">The two entries do not match.</p>}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
+            <Button type="submit" disabled={!valid}>Reset password</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function EditUser({ user, groups, isSelf, run, onClose }: {
   user: ManagedUser
   groups: ManagedGroup[]
   isSelf: boolean
-  run: (action: () => Promise<void>) => void
+  run: (action: () => Promise<void>, done?: string) => void
   onClose: () => void
 }) {
   const [enabled, setEnabled] = useState(user.enabled)
   const [memberOf, setMemberOf] = useState<number[]>(user.groupIds)
+  const [resetting, setResetting] = useState(false)
   const toggle = (id: number) => setMemberOf((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
 
   const save = () => {
@@ -226,9 +289,9 @@ function EditUser({ user, groups, isSelf, run, onClose }: {
     onClose()
   }
 
-  const resetPassword = () => {
-    const password = window.prompt(`New password for ${user.name} (min 8 chars)`)
-    if (password) run(() => api.resetUserPassword(user.id, password))
+  const resetPassword = (password: string) => {
+    setResetting(false)
+    run(() => api.resetUserPassword(user.id, password), `Password reset for ${user.name}`)
   }
 
   return (
@@ -256,13 +319,16 @@ function EditUser({ user, groups, isSelf, run, onClose }: {
           {groups.length === 0 && <span className="text-sm text-gray-400">No groups yet.</span>}
         </div>
         <DialogFooter className="justify-between">
-          <Button variant="outline" onClick={resetPassword}>Reset password</Button>
+          <Button variant="outline" onClick={() => setResetting(true)}>Reset password</Button>
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose}>Cancel</Button>
             <Button onClick={save}>Save</Button>
           </div>
         </DialogFooter>
       </DialogContent>
+      {resetting && (
+        <ResetPassword user={user} onCancel={() => setResetting(false)} onSubmit={resetPassword} />
+      )}
     </Dialog>
   )
 }
