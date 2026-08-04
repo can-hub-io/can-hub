@@ -4,6 +4,7 @@ import { useAction, usePolling } from '../hooks'
 import { shortFp } from '../lib'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
+import { ConfirmButton } from './ui/confirm'
 import { Input } from './ui/input'
 import { Table, Tbody, Td, Th, Thead, Tr } from './ui/table'
 
@@ -26,7 +27,10 @@ export function Acls() {
 
   const grant = (event: React.FormEvent) => {
     event.preventDefault()
-    action.run(() => api.aclSet(fingerprint || '*', agent || '*', iface || '*', level))
+    action.run(
+      () => api.aclSet(fingerprint || '*', agent || '*', iface || '*', level),
+      `Granted ${level} on ${agent || '*'}/${iface || '*'}`,
+    )
   }
 
   return (
@@ -42,7 +46,7 @@ export function Acls() {
           <option value="ro">ro</option>
           <option value="rw">rw</option>
         </select>
-        <Button type="submit">Grant</Button>
+        <Button type="submit" disabled={action.pending}>{action.pending ? 'Granting…' : 'Grant'}</Button>
       </form>
 
       <Table>
@@ -57,16 +61,18 @@ export function Acls() {
               <Td><Badge variant={levelVariant[a.level] ?? 'secondary'}>{a.level}</Badge></Td>
               <Td>
                 <div className="flex justify-end">
-                  <Button
+                  <ConfirmButton
                     variant="outline"
                     size="sm"
-                    onClick={() => {
-                      if (window.confirm(`Revoke grant for ${shortFp(a.fingerprintHex)} on ${a.agentName}/${a.interfaceName}?`))
-                        action.run(() => api.aclRevoke(a.fingerprintHex, a.agentName, a.interfaceName))
-                    }}
+                    disabled={action.pending}
+                    title="Revoke this grant?"
+                    description={`${shortFp(a.fingerprintHex)} on ${a.agentName}/${a.interfaceName}. Live sessions keep the access they opened with.`}
+                    confirmLabel="Revoke"
+                    destructive
+                    onConfirm={() => action.run(() => api.aclRevoke(a.fingerprintHex, a.agentName, a.interfaceName), 'Grant revoked')}
                   >
                     Revoke
-                  </Button>
+                  </ConfirmButton>
                 </div>
               </Td>
             </Tr>

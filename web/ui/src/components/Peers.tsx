@@ -1,7 +1,7 @@
 import { api, PERMISSION, type Peer } from '../api'
 import { can, formatUptime, peerId, shortFp } from '../lib'
 import { Badge } from './ui/badge'
-import { Button } from './ui/button'
+import { ConfirmButton } from './ui/confirm'
 import { DataView, type Column } from './DataView'
 
 export function Peers({ permissions }: { permissions: string[] }) {
@@ -24,16 +24,19 @@ export function Peers({ permissions }: { permissions: string[] }) {
       columns={columns}
       actions={
         allowKick
-          ? (r, run) => (
-              <Button
+          ? (r, run, pending) => (
+              <ConfirmButton
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  if (window.confirm(`Kick peer ${peerId(r.peerId)}?`)) run(() => api.kickPeer(r.peerId))
-                }}
+                disabled={pending}
+                title={`Kick peer ${peerId(r.peerId)}?`}
+                description="The connection is dropped immediately; the peer may reconnect."
+                confirmLabel="Kick"
+                destructive
+                onConfirm={() => run(() => api.kickPeer(r.peerId), `Peer ${peerId(r.peerId)} kicked`)}
               >
                 Kick
-              </Button>
+              </ConfirmButton>
             )
           : undefined
       }

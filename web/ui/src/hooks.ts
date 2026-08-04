@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, telemetryUrl, type AuthState, type TelemetryFrame } from './api'
+import { useToast } from './components/ui/toast'
 
 // Current auth state (bootstrap needed / authenticated / permissions).
 export function useAuth() {
@@ -56,22 +57,30 @@ export function usePolling<T>(fetcher: () => Promise<T>, intervalMs = 2000) {
 }
 
 // Run a mutating action, surfacing failures as an inline error string instead
-// of an alert(). On success the supplied refresh runs.
+// of an alert(). On success the supplied refresh runs and, when the caller
+// names the outcome, a toast confirms it. `pending` is true for the duration so
+// callers can disable the control and stop a double submit.
 export function useAction(refresh: () => void) {
   const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+  const toast = useToast()
   const run = useCallback(
-    async (action: () => Promise<void>) => {
+    async (action: () => Promise<void>, done?: string) => {
       setError(null)
+      setPending(true)
       try {
         await action()
         refresh()
+        if (done) toast(done)
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause))
+      } finally {
+        setPending(false)
       }
     },
-    [refresh],
+    [refresh, toast],
   )
-  return { error, run, setError }
+  return { error, run, setError, pending }
 }
 
 // Subscribe to the telemetry WebSocket, reconnecting if it drops. Returns the
