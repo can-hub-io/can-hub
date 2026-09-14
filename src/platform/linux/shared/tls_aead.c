@@ -261,6 +261,64 @@ static int fusionEcbSetup(ptls_cipher_context_t *context, int is_enc, const void
     return 0;
 }
 
+#elif defined(CAN_HUB_TLS_ARMV8_CRYPTO)
+
+#include "platform/linux/shared/tls_aes_armv8.h"
+
+/*
+ * ARMv8 has one AES-GCM engine, not two: the split that forces a per-transport
+ * suite list on x86-64 does not exist here, so both transports get the same
+ * one. The suites still come through the transport-shaped accessors so the
+ * profile has a single shape everywhere.
+ */
+static ptls_cipher_suite_t armv8_aes128gcmsha256 = {
+    .id = PTLS_CIPHER_SUITE_AES_128_GCM_SHA256,
+    .name = PTLS_CIPHER_SUITE_NAME_AES_128_GCM_SHA256,
+    .aead = &can_hub_armv8_aes128gcm,
+    .hash = &ptls_minicrypto_sha256,
+};
+
+static ptls_cipher_suite_t armv8_aes256gcmsha384 = {
+    .id = PTLS_CIPHER_SUITE_AES_256_GCM_SHA384,
+    .name = PTLS_CIPHER_SUITE_NAME_AES_256_GCM_SHA384,
+    .aead = &can_hub_armv8_aes256gcm,
+    .hash = &ptls_minicrypto_sha384,
+};
+
+ptls_aead_algorithm_t *TlsAead_Aes128Gcm(void)
+{
+    return TlsAesArmv8_IsSupported() ? &can_hub_armv8_aes128gcm : &ptls_minicrypto_aes128gcm;
+}
+
+ptls_aead_algorithm_t *TlsAead_Aes256Gcm(void)
+{
+    return TlsAesArmv8_IsSupported() ? &can_hub_armv8_aes256gcm : &ptls_minicrypto_aes256gcm;
+}
+
+ptls_cipher_algorithm_t *TlsAead_Aes128Ecb(void)
+{
+    return TlsAesArmv8_IsSupported() ? &can_hub_armv8_aes128ecb : &ptls_minicrypto_aes128ecb;
+}
+
+ptls_cipher_algorithm_t *TlsAead_Aes256Ecb(void)
+{
+    return TlsAesArmv8_IsSupported() ? &can_hub_armv8_aes256ecb : &ptls_minicrypto_aes256ecb;
+}
+
+static ptls_cipher_suite_t *acceleratedAesSuite(TLS_TRANSPORT transport)
+{
+    (void)transport;
+
+    return TlsAesArmv8_IsSupported() ? &armv8_aes128gcmsha256 : NULL;
+}
+
+static ptls_cipher_suite_t *acceleratedAes256Suite(TLS_TRANSPORT transport)
+{
+    (void)transport;
+
+    return TlsAesArmv8_IsSupported() ? &armv8_aes256gcmsha384 : NULL;
+}
+
 #else
 
 static ptls_cipher_suite_t *acceleratedAesSuite(TLS_TRANSPORT transport);

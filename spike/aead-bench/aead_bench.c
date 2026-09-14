@@ -23,6 +23,10 @@
 #include <picotls/fusion.h>
 #endif
 
+#if defined(CAN_HUB_TLS_ARMV8_CRYPTO)
+#include "platform/linux/shared/tls_aes_armv8.h"
+#endif
+
 #include "platform/linux/shared/tls_aead.h"
 
 #define BUDGET_NS 300000000.0
@@ -41,10 +45,20 @@ int main(void)
 #if defined(CAN_HUB_TLS_FUSION)
     printf("fusion supported by cpu: %d, aesni256: ", ptls_fusion_is_supported_by_cpu());
     printf("%d\n", ptls_fusion_can_aesni256);
+#elif defined(CAN_HUB_TLS_ARMV8_CRYPTO)
+    printf("armv8 crypto extensions: %s\n", TlsAesArmv8_IsSupported() ? "present" : "absent");
 #else
-    printf("built without fusion\n");
+    printf("built without a hardware aes engine\n");
 #endif
     printf("\n%-32s %9s %9s %10s %9s\n", "engine", "40 B us", "1200 B us", "one-shot", "vectored");
+#if defined(CAN_HUB_TLS_ARMV8_CRYPTO)
+    if (TlsAesArmv8_IsSupported()) {
+        report("armv8 aes128gcm", &can_hub_armv8_aes128gcm, &ptls_minicrypto_aes128gcm);
+        report("armv8 aes256gcm", &can_hub_armv8_aes256gcm, &ptls_minicrypto_aes256gcm);
+    } else {
+        printf("armv8 crypto extensions absent on this cpu; AES stays on cifra\n");
+    }
+#endif
 #if defined(CAN_HUB_TLS_FUSION)
     report("fusion aes128gcm (quic)", &ptls_fusion_aes128gcm, &ptls_minicrypto_aes128gcm);
     report("fusion aes256gcm (quic)", &ptls_fusion_aes256gcm, &ptls_minicrypto_aes256gcm);

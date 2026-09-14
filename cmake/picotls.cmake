@@ -63,6 +63,17 @@ endif()
 # fixes AES-128-GCM for Initial packets, which unauthenticated peers can make
 # the hub process. x86-64 only, and gated again at runtime by
 # ptls_fusion_is_supported_by_cpu.
+# The ARMv8 crypto extensions are the ARM counterpart of fusion: AESE, AESMC and
+# PMULL are instructions, so the engine is a binding rather than an
+# implementation. They are optional in ARMv8-A — a Raspberry Pi 4 has neither, a
+# Pi 5 and every server part have both — so the build only compiles the engine
+# in and a runtime HWCAP check decides whether it is used.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+    set(CAN_HUB_TLS_ARMV8_CRYPTO ON)
+else()
+    set(CAN_HUB_TLS_ARMV8_CRYPTO OFF)
+endif()
+
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
     set(CAN_HUB_TLS_FUSION ON)
     set(_picotls_fusion_option "-DWITH_FUSION=ON")
@@ -173,6 +184,10 @@ if(CAN_HUB_TLS_FUSION)
 endif()
 
 add_library(picotls INTERFACE)
+if(CAN_HUB_TLS_ARMV8_CRYPTO)
+    target_compile_definitions(picotls INTERFACE CAN_HUB_TLS_ARMV8_CRYPTO)
+    target_compile_options(picotls INTERFACE -march=armv8-a+crypto)
+endif()
 if(CAN_HUB_TLS_FUSION)
     target_compile_definitions(picotls INTERFACE CAN_HUB_TLS_FUSION)
     # fusion's 256-bit VAES path miscompiles under llvm-mingw: built there,

@@ -26,7 +26,16 @@ CPPFLAGS += -DCAN_HUB_TLS_FUSION
 LIBS := $(BUILD)/picotls-build/libpicotls-fusion.a $(LIBS)
 endif
 
-aead_bench: aead_bench.c $(ROOT)/src/platform/linux/shared/tls_aead.c
+# On aarch64 the hardware AES engine is ours rather than picotls's, so it is a
+# source file instead of an archive. ARMV8=1 builds it in; the runtime HWCAP
+# check still decides whether it is used.
+ifeq ($(ARMV8),1)
+CFLAGS += -march=armv8-a+crypto
+CPPFLAGS += -DCAN_HUB_TLS_ARMV8_CRYPTO
+EXTRA_SOURCES += $(ROOT)/src/platform/linux/shared/tls_aes_armv8.c
+endif
+
+aead_bench: aead_bench.c $(ROOT)/src/platform/linux/shared/tls_aead.c $(EXTRA_SOURCES)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LIBS)
 
 clean:
