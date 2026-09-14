@@ -16,6 +16,18 @@ static const ptls_iovec_t alpn_protocols[] = {
 };
 static const uint16_t verifiable_signature_algorithms[] = { PTLS_SIGNATURE_ED25519, UINT16_MAX };
 
+/*
+ * X25519 first, secp256r1 as the fallback, which is the order v0.3.0 got from
+ * OpenSSL's defaults. picotls's own ptls_minicrypto_key_exchanges holds
+ * secp256r1 alone (lib/uecc.c), so taking it wholesale would silently drop
+ * X25519 from the handshake even though cifra implements it.
+ */
+static ptls_key_exchange_algorithm_t *key_exchanges[] = {
+    &ptls_minicrypto_x25519,
+    &ptls_minicrypto_secp256r1,
+    NULL,
+};
+
 static void initCommonProfile(TlsProfile *self, TLS_TRANSPORT transport);
 static int acceptAnyClientCertificate(
     ptls_verify_certificate_t *verifier,
@@ -93,7 +105,7 @@ static void initCommonProfile(TlsProfile *self, TLS_TRANSPORT transport)
     memset(self, 0, sizeof(*self));
     self->context.random_bytes = ptls_minicrypto_random_bytes;
     self->context.get_time = &ptls_get_time;
-    self->context.key_exchanges = ptls_minicrypto_key_exchanges;
+    self->context.key_exchanges = key_exchanges;
     self->context.cipher_suites = TlsAead_CipherSuites(transport);
 }
 
