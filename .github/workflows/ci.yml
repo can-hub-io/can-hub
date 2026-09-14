@@ -55,6 +55,30 @@ jobs:
           path: build/armhf/release/can-hub*
           retention-days: 7
 
+  # arm64 is the only configuration that compiles tls_aes_armv8.c. The static
+  # job builds it too but runs on push only, so without this job a change to
+  # the ARMv8 AES engine reaches main without ever having been compiled.
+  cross-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: cache build tree
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: arm64-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
+      - name: release build
+        run: make release ARCH=arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: can-hub-arm64
+          path: build/arm64/release/can-hub*
+          retention-days: 7
+
   windows-libcanhub:
     runs-on: ubuntu-latest
     env:
