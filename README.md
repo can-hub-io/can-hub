@@ -33,8 +33,9 @@ to socketcand and cannelloni.
 - **Small enough for the edge.** No OpenSSL: the TLS 1.3 and QUIC stack is
   picotls with permissively licensed primitives, statically linked. The
   fully static musl agent is **~590 KB** on arm64 and armv7 with no runtime
-  dependencies at all, and its `.deb` is ~310 KB. Where the CPU has AES-NI
-  the handshake and data plane use it.
+  dependencies at all, and its `.deb` is ~310 KB. Hardware AES is used where
+  the CPU has it — AES-NI on x86-64, the crypto extensions on arm64 —
+  and ChaCha20-Poly1305 everywhere else.
 - **Freestanding core.** Everything outside `src/platform/` is C11 without
   POSIX, heap or syscalls — the agent core compiles for microcontrollers
   as-is.

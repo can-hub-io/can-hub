@@ -24,39 +24,39 @@ listeners share the certificate.
 
 ## What the handshake negotiates
 
-TLS 1.3 only, ALPN `canhub/0`, ED25519 signatures. The offered cipher suites
-depend on what the CPU can do:
+TLS 1.3 only, ALPN `canhub/0`, ED25519 signatures. Key exchange is X25519,
+with secp256r1 as the fallback.
 
-| Build | Offered, most preferred first |
+Cipher suites depend on whether the CPU has a hardware AES:
+
+| CPU | Offered, most preferred first |
 |---|---|
 | x86-64 with AES-NI | `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`, `TLS_CHACHA20_POLY1305_SHA256` |
-| everything else (arm64, armv7, static musl, any CPU without AES-NI) | `TLS_CHACHA20_POLY1305_SHA256` |
+| arm64 with the ARMv8 crypto extensions | same three |
+| everything else (armv7, arm64 without the extensions, any CPU without AES-NI) | `TLS_CHACHA20_POLY1305_SHA256` |
 
-AES is offered **only where there is a fast AES**. Without AES-NI the only
-AES implementation available is a constant-time software one that takes
-2.4 ms to seal a 1200-byte record on x86-64 and 4.0 ms on a Raspberry Pi 5 —
-600 to 900 times the ChaCha20 path on the same CPU. In TLS 1.3 the server
-picks from what the client offered, so a device that never offers AES cannot
-be pushed onto that implementation by a server that prefers it. There is no
-capability signalling on the wire and no knob: the build decides, and a mixed
-fleet works because ChaCha20 is always offered.
+Detection is at runtime, so one arm64 binary covers both cases: a Raspberry
+Pi 5 has the extensions and offers AES, a Pi 4 does not and offers ChaCha20.
 
-This is about the software fallback, not about the silicon: an ARM chip may
-well have the ARMv8 crypto extensions (a Pi 5 does), but no ARM AES engine
-exists in this stack, so ChaCha20 is what an ARM build uses either way. At
-0.74 µs per CAN frame on a Pi 5 that is roughly 1.3 M frames/s on one core,
-against about 8 700 frames/s from a saturated 1 Mbit/s bus.
+AES is offered only where it is hardware-backed. The software fallback is a
+constant-time implementation that takes 2.4 ms to seal a 1200-byte record on
+x86-64 and 4.0 ms on a Pi 5 — around 600x the ChaCha20 path. Since a TLS 1.3
+server picks from what the client offered, a build that never offers AES
+cannot be pushed onto that implementation. There is no wire signalling and no
+knob: the build and the CPU decide, and mixed fleets work because ChaCha20 is
+always offered.
 
-Interop is unaffected — an OpenSSL peer negotiates AES-128-GCM with an
-x86-64 build and ChaCha20-Poly1305 with an ARM one, both RFC 8446 suites.
+Interop is unaffected either way — an OpenSSL peer negotiates AES-GCM against
+a build that offers it and ChaCha20-Poly1305 against one that does not, both
+RFC 8446 suites.
 
-QUIC is the exception worth knowing about: RFC 9001 fixes AES-128-GCM for
-Initial packets whatever the connection later negotiates, so a hub on a CPU
-without a fast AES pays the software AES cost on every connection attempt,
-including attempts from peers it has never heard of. On a Pi 5 that is about
-4 ms per packet. If you run the hub on such a machine and expose it to the
-open internet, prefer `tls://` or put address validation in front of it —
-`tls://` has no mandatory suite and negotiates ChaCha20 there.
+**QUIC Initial packets are the exception.** RFC 9001 fixes AES-128-GCM for
+them whatever the connection later negotiates, so a hub on a CPU with no
+hardware AES pays the software cost on every connection attempt, including
+from peers it has never heard of — about 4 ms per packet, which one core
+saturates at roughly 250 attempts per second. On such a machine, prefer
+`tls://` for an internet-facing hub, or put address validation in front of
+it. `tls://` has no mandatory suite and negotiates ChaCha20 there.
 
 ## Plaintext transports are network-trusted
 
