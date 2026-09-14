@@ -44,12 +44,6 @@ else()
     set(_picotls_platform_flags "")
 endif()
 
-if(DEFINED CAN_HUB_OPENSSL_PREFIX)
-    set(_picotls_openssl_root "-DOPENSSL_ROOT_DIR=${CAN_HUB_OPENSSL_PREFIX}")
-else()
-    set(_picotls_openssl_root "")
-endif()
-
 if(NOT DEFINED CAN_HUB_BUILD_PARALLELISM)
     include(ProcessorCount)
     ProcessorCount(CAN_HUB_BUILD_PARALLELISM)
@@ -57,6 +51,28 @@ if(NOT DEFINED CAN_HUB_BUILD_PARALLELISM)
         set(CAN_HUB_BUILD_PARALLELISM 1)
     endif()
 endif()
+
+# Both AES engines are selected from what the compiler says it targets, never
+# from CMAKE_SYSTEM_PROCESSOR. A native build takes that variable from uname,
+# and uname lies in the containers the release wheels are built in: the armv7l
+# manylinux image runs on an arm64 host. Trusting it there turns the ARMv8
+# engine on for a 32-bit toolchain and passes -march=armv8-a+crypto to a
+# compiler that rejects it. __aarch64__ and __x86_64__ come from the compiler
+# driving the build, so they are right under emulation, in a container, and
+# through a cross toolchain file alike.
+include(CheckCSourceCompiles)
+check_c_source_compiles("
+#if !defined(__aarch64__)
+#error not aarch64
+#endif
+int main(void) { return 0; }
+" CAN_HUB_TARGET_IS_AARCH64)
+check_c_source_compiles("
+#if !defined(__x86_64__)
+#error not x86-64
+#endif
+int main(void) { return 0; }
+" CAN_HUB_TARGET_IS_X86_64)
 
 # fusion is picotls's AES-NI engine. It is the only fast AES available once
 # OpenSSL is gone, and QUIC needs one whatever suite is negotiated: RFC 9001
@@ -68,13 +84,13 @@ endif()
 # implementation. They are optional in ARMv8-A — a Raspberry Pi 4 has neither, a
 # Pi 5 and every server part have both — so the build only compiles the engine
 # in and a runtime HWCAP check decides whether it is used.
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+if(CAN_HUB_TARGET_IS_AARCH64)
     set(CAN_HUB_TLS_ARMV8_CRYPTO ON)
 else()
     set(CAN_HUB_TLS_ARMV8_CRYPTO OFF)
 endif()
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
+if(CAN_HUB_TARGET_IS_X86_64)
     set(CAN_HUB_TLS_FUSION ON)
     set(_picotls_fusion_option "-DWITH_FUSION=ON")
     set(_picotls_fusion_target picotls-fusion)

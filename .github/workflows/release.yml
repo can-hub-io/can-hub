@@ -71,9 +71,10 @@ jobs:
     needs: create-release
     # Each arch builds on its native arm64/x86 runner instead of x86 + QEMU,
     # which kept the emulated dependency builds inside the job timeout. The
-    # armv7l container runs on the arm64 host where uname reports aarch64;
-    # nothing in the stack has per-architecture assembly any more, so that
-    # mismatch no longer needs a CMAKE_SYSTEM_PROCESSOR override.
+    # armv7l container runs on the arm64 host, so uname inside it cannot be
+    # trusted to name the target: cmake/picotls.cmake selects the AES engines
+    # from the compiler's own __aarch64__ / __x86_64__ instead, which is what
+    # keeps the 32-bit wheel off the ARMv8 engine and its -march flag.
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
