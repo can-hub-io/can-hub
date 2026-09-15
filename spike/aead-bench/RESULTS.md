@@ -129,6 +129,40 @@ penalty for the state, not for the chip.
 Timings from a shared runner are indicative — it is not a quiet host (#193) — but agreement
 is host-independent, and agreement is what gates.
 
+### armv7 against the OpenSSL v0.3.0 shipped with, same core, same state
+
+The reference is Ubuntu's own `openssl` 3.0.13 for armhf, extracted and run through the armhf
+loader so the runner's arm64 build is left alone. Same silicon, same execution state, so what
+is left is the stack.
+
+| | ours | OpenSSL | |
+|---|---|---|---|
+| CHACHA20-POLY1305, 40 B | 0.584 | 0.172 | **3.4x** |
+| CHACHA20-POLY1305, 1200 B | 4.770 | 1.932 | **2.5x** |
+| AES-128-GCM, 40 B | not offered | 0.059 | — |
+| AES-128-GCM, 1200 B | not offered | 0.624 | — |
+| AES-256-GCM, 1200 B | not offered | 0.736 | — |
+
+**ChaCha20 against ChaCha20 is the honest comparison**, and it misses the 1.5x bar by a wide
+margin — 3.4x at frame size. OpenSSL's 32-bit ChaCha20 is NEON, which every armv7 target has,
+so that ratio is the one that carries to real hardware.
+
+**The AES rows are a different measurement**, and they are the reason this core flatters
+OpenSSL: 0.624 µs for a 1200-byte record is within 4 % of what our own ARMv8 engine does in
+*64-bit* mode on the same chip (0.650). OpenSSL is not running bitsliced NEON here — it has
+found the ARMv8 crypto extensions in AArch32 state and is using hardware AES. A Cortex-A7 or
+A9, which is what most of the armv7 fleet is, has no such instructions, and OpenSSL there
+falls back to software.
+
+So this measures the gap on an ARMv8 core running 32-bit code, not on the armv7 fleet. Two
+readings follow from it, and only the first transfers:
+
+- Against the same algorithm, we are 2.5-3.4x off, and no part of that is the hardware.
+- Against what v0.3.0 would actually negotiate on this core (AES-128-GCM), we are **9.9x**
+  slower at frame size, because we offer no AES at all in 32-bit mode. On a core with the
+  extensions in AArch32 that gap is real; the fleet's A7s and A9s do not have them, so the
+  number there would be smaller and nobody has measured it.
+
 ## arm64 under qemu — agreement only, after the engine changed — 2026-09-15
 
 The ARMv8 engine is the one part of this stack that no x86-64 machine compiles,
