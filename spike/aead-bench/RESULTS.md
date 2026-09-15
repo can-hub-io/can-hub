@@ -98,6 +98,37 @@ RFC 9001 fixes AES-128-GCM for QUIC Initial packets, so a hub on this hardware s
 every connection attempt, from any unauthenticated peer: one core is saturated by about 250
 Initial packets per second. On an ARM hub, QUIC address validation is not an optimisation.
 
+## Both ARM states on a Neoverse N2 — GitHub CI, every run
+
+`ubuntu-24.04-arm` is a real ARM core — `CPU part 0xd49`, Neoverse N2 — and **it implements
+AArch32 at EL0**, which server-class ARM cores often do not. So one free hosted runner times
+both execution states on the same silicon, and `ci.yml` does it on every pull request: the
+`cross-arm64` job gates on agreement (a `NO` fails the build) and `cross-armhf` runs the
+32-bit build for information.
+
+That it executes natively rather than under an emulator is visible in the clock: the same
+armv7 binary takes 2.33 µs under `qemu-arm` and 0.584 µs here.
+
+| AEAD, one operation | 40 B | 1200 B |
+|---|---|---|
+| `armv8 aes128gcm`, arm64 | **0.091** | **0.650** |
+| `armv8 aes256gcm`, arm64 | 0.099 | 0.705 |
+| `can-hub chacha20poly1305`, arm64 | 0.392 | 3.115 |
+| `can-hub chacha20poly1305`, **armv7** | 0.584 | 4.770 |
+| `minicrypto chacha20poly1305`, arm64 | 0.918 | 11.363 |
+| `minicrypto aes128gcm`, arm64 (cifra) | 148.4 | 2 288 |
+
+Every engine agreed with minicrypto, one-shot and vectored, in both states.
+
+**Two things this settles.** The ARMv8 engine was only ever measured on one Cortex-A76; it
+holds on a second microarchitecture, and an N2 is about 1.9x faster than the Pi 5 at frame
+size. And the cost of the 32-bit ISA is isolated for the first time: on identical silicon
+armv7 ChaCha20 is **1.49x** the arm64 figure at 40 B and **1.53x** at 1200 B, which is the
+penalty for the state, not for the chip.
+
+Timings from a shared runner are indicative — it is not a quiet host (#193) — but agreement
+is host-independent, and agreement is what gates.
+
 ## arm64 under qemu — agreement only, after the engine changed — 2026-09-15
 
 The ARMv8 engine is the one part of this stack that no x86-64 machine compiles,
