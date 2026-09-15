@@ -169,11 +169,35 @@ against none for the same source on AArch64. The AES key schedule alone is 240 b
 round keys cannot stay resident and are reloaded every iteration. OpenSSL's hand-written
 AArch32 assembly schedules those reloads better than a compiler does from intrinsics.
 
-**Narrowing the loops to two blocks was tried and reverted.** It helped nothing — armv7 at
-1200 B got 16 % *slower* — and rewriting the unrolled bodies as arrays indexed by a loop
-variable cost AArch64 60 % at 1200 B, because a local array is addressable and stays on the
-stack instead of being scalarised into registers. Closing the remaining 2.5x needs hand-
-written AArch32 assembly, which §20 of MIGRATION_PICOTLS.md rules out by policy.
+### Four attempts at the remaining 2.5x, all reverted
+
+Measured on the runner, against the 0.149 / 1.440 baseline:
+
+| Attempt | Result |
+|---|---|
+| Narrow the loops to two blocks | armv7 +16 % at 1200 B, **AArch64 +60 %** — the rewrite put the unrolled bodies in loop-indexed arrays, which are addressable and so stay on the stack instead of being scalarised into registers |
+| `-marm` instead of the armhf default Thumb-2 | Identical, 52 spills either way |
+| `-funroll-loops` | 52 spills becomes 184 |
+| Specialise the round count so the loop unrolls | armv7 −1.6 %, AArch64 +4.8 % — inside runner noise |
+
+The last one was aimed at what OpenSSL's disassembly shows it doing, and it is worth recording
+why it did not pay. Their AArch32 CTR loop is straight-line — `aese q1,q8 / aesmc / aese
+q10,q8 / aesmc / aese q1,q9 …` — with six round keys resident in q8, q9 and q12-q15, and only
+**two** blocks in flight. Ours reloads a round key per round because the trip count is a
+runtime 10 or 14. But that load is shared by the four blocks of the same iteration, so one
+`vldr` per four `aese` amortises to nothing; the reload was real and irrelevant.
+
+(Their key expansion also derives SubWord through `aese` against a zero key, which is what
+this engine does for the same reason — the two arrived at it independently.)
+
+What is left is scheduling: ~25 cycles per block for OpenSSL against ~58 for us on the same
+core. That gap is hand-written assembly, which §20 of MIGRATION_PICOTLS.md rules out by
+policy — and the policy is right here, because the schedule would be tuned against a Neoverse
+N2 pipeline while the armv7 fleet is Cortex-A7 and A9.
+
+**What the 2.5x costs in the workload it was built for**: 0.149 µs per CAN frame is 0.13 % of
+one core at 8 700 frames/s, a saturated 1 Mbit/s bus. One core covers 771 such buses. armv7 is
+an agent platform, not a hub platform, so the ratio is a policy miss, not a product limit.
 
 **The AES rows are a different measurement**, and they are the reason this core flatters
 OpenSSL: 0.624 µs for a 1200-byte record is within 4 % of what our own ARMv8 engine does in
