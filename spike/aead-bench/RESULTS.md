@@ -98,15 +98,69 @@ RFC 9001 fixes AES-128-GCM for QUIC Initial packets, so a hub on this hardware s
 every connection attempt, from any unauthenticated peer: one core is saturated by about 250
 Initial packets per second. On an ARM hub, QUIC address validation is not an optimisation.
 
-## armv7 — correct, speed not measured
+## arm64 under qemu — agreement only, after the engine changed — 2026-09-15
 
-Run under qemu (`docker --platform linux/arm/v7`, Debian bookworm, native gcc in the
-container). **Agreement only** — emulated timings measure qemu, not the target.
+The ARMv8 engine is the one part of this stack that no x86-64 machine compiles,
+so a change to it lands unverified unless a target is available. qemu-aarch64
+implements AESE, AESMC and PMULL and reports `aes pmull` in HWCAP, which is
+enough for the agreement columns — and agreement is the question a key schedule
+change raises. Timings below are omitted because they measure qemu.
+
+Run after the key schedule moved from an S-box table to AESE against a zero
+round key, and after `halveInGcmOrder` became branchless:
+
+    docker run --rm --platform linux/arm64 -v "$PWD":/work -w /work/spike/aead-bench \
+        debian:bookworm-slim sh -c 'apt-get update -qq && apt-get install -y -qq gcc make &&
+        make BUILD=/work/build/arm64-native FUSION=0 ARMV8=1 && ./aead_bench'
 
 | Engine | one-shot | vectored |
 |---|---|---|
-| `can-hub chacha20poly1305`, armv7l | match | match |
-| `can-hub chacha20poly1305`, aarch64 (also checked this way) | match | match |
+| `armv8 aes128gcm` | match | match |
+| `armv8 aes256gcm` | match | match |
+| `can-hub chacha20poly1305` | match | match |
+
+`BUILD` points at an aarch64 build tree for the picotls and Monocypher archives
+only; `tls_aead.c` and `tls_aes_armv8.c` are compiled from source by the bench,
+so the tree may predate the change under test.
+
+This does not replace a measurement on real hardware — the numbers in the Pi 5
+section above still stand for speed, and nothing here re-measures them.
+
+## armv7 — correct, speed not measured — 2026-09-15
+
+**Agreement only** — emulated timings measure qemu, not the target.
+
+Cross-built on an x86-64 container and run under an explicit `qemu-arm`, which needs no
+binfmt handler on the host (a `--platform linux/arm/v7` container does, and fails with
+`exec format error` when only `qemu-aarch64` is registered):
+
+    docker run --rm --platform linux/amd64 -v "$PWD":/work -w /work/spike/aead-bench \
+        debian:bookworm-slim sh -c 'apt-get update -qq &&
+        apt-get install -y -qq gcc-arm-linux-gnueabihf make qemu-user &&
+        make CC=arm-linux-gnueabihf-gcc BUILD=/work/build/armhf/release FUSION=0 &&
+        qemu-arm -L /usr/arm-linux-gnueabihf ./aead_bench'
+
+| Engine | one-shot | vectored |
+|---|---|---|
+| `can-hub chacha20poly1305` — the only suite an armv7 build offers | match | match |
+| `minicrypto chacha20poly1305` | reference | reference |
+| `minicrypto aes128gcm` | reference | reference |
+| `minicrypto aes256gcm` | reference | reference |
+
+cifra's AES is built and compared but never offered, the same as on every target without a
+hardware AES.
+
+The run opens with `built without a hardware aes engine`, which is the other half of what
+this checks: an armv7 build must not pull in the ARMv8 engine, whose A64 intrinsics do not
+port and whose `-march=armv8-a+crypto` a 32-bit compiler rejects. The engine is gated on the
+compiler's own `__aarch64__` rather than on `CMAKE_SYSTEM_PROCESSOR` precisely so this holds
+where uname cannot be trusted — the armv7l release-wheel container runs on an arm64 host:
+
+| Compiler driving the build | Probe result |
+|---|---|
+| `arm-linux-gnueabihf-gcc` | not aarch64 — ARMv8 engine off |
+| `aarch64-linux-gnu-gcc` | aarch64 — ARMv8 engine on |
+| host `gcc` (x86-64) | not aarch64 — ARMv8 engine off |
 
 To measure a real armv7 target, copy the sources and build with plain gcc — no cmake needed:
 the file list is in `spike/aead-bench/` history, or use the tree's build with
