@@ -63,6 +63,33 @@ jobs:
               CFLAGS="-O2 -Wall -Wextra -static" \
               BUILD="$PWD/build/armhf/release" FUSION=0
           ./spike/aead-bench/aead_bench || echo "this core does not run AArch32"
+      # The OpenSSL v0.3.0 shipped against, on the same core and the same
+      # execution state, so the comparison isolates the stack rather than the
+      # hardware. Extracted rather than installed: openssl is Multi-Arch
+      # foreign, so apt would replace the runner's own arm64 build.
+      - name: armv7 against the openssl v0.3.0 shipped with
+        continue-on-error: true
+        run: |
+          mkdir -p /tmp/ossl && cd /tmp/ossl
+          apt-get download openssl:armhf libssl3t64:armhf libc6:armhf 2>/dev/null \
+            || apt-get download openssl:armhf libssl3:armhf libc6:armhf
+          for package in *.deb; do dpkg -x "$package" root; done
+          R=$PWD/root
+          run_openssl() {
+              "$R/lib/ld-linux-armhf.so.3" \
+                  --library-path "$R/usr/lib/arm-linux-gnueabihf:$R/lib/arm-linux-gnueabihf" \
+                  "$R/usr/bin/openssl" "$@"
+          }
+          run_openssl version
+          echo "algorithm            bytes   us/op"
+          for algorithm in chacha20-poly1305 aes-128-gcm aes-256-gcm; do
+              for size in 40 1200; do
+                  rate=$(run_openssl speed -elapsed -evp $algorithm -bytes $size 2>/dev/null \
+                         | tail -1 | tr -s ' ' | cut -d' ' -f2 | tr -d 'k')
+                  echo "$algorithm $size $rate" \
+                    | awk '{printf "%-20s %5d %7.3f\n", $1, $2, $2 * 1000 / $3}'
+              done
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: can-hub-armhf
