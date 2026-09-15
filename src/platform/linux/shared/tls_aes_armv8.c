@@ -16,7 +16,7 @@
 
 typedef struct {
     uint8x16_t round_keys[AES_ROUND_KEY_MAX];
-    int rounds;
+    uint8_t rounds;
 } AesKeySchedule;
 
 typedef struct {
@@ -151,12 +151,12 @@ static void expandKey(AesKeySchedule *schedule, const uint8_t *key, size_t key_s
 {
     static const uint8_t round_constants[10] = { 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36 };
     uint32_t words[4 * (AES_MAX_ROUNDS + 1)];
-    int key_words = (int)(key_size / 4);
-    int total;
-    int i;
+    uint8_t key_words = (uint8_t)(key_size / 4);
+    uint8_t total;
+    uint8_t i;
 
-    schedule->rounds = key_words + 6;
-    total = 4 * (schedule->rounds + 1);
+    schedule->rounds = (uint8_t)(key_words + 6);
+    total = (uint8_t)(4 * (schedule->rounds + 1));
     for (i = 0; i < key_words; i++) {
         memcpy(&words[i], key + i * 4, 4);
     }
@@ -177,7 +177,7 @@ static void expandKey(AesKeySchedule *schedule, const uint8_t *key, size_t key_s
 
 static uint8x16_t encryptBlock(const AesKeySchedule *schedule, uint8x16_t state)
 {
-    int i;
+    uint8_t i;
 
     for (i = 0; i < schedule->rounds - 1; i++) {
         state = vaesmcq_u8(vaeseq_u8(state, schedule->round_keys[i]));
@@ -244,7 +244,7 @@ static void halveInGcmOrder(uint8_t value[AES_BLOCK_SIZE])
 {
     uint8_t top = (uint8_t)(value[0] >> 7);
     uint8_t reduce = (uint8_t)(0xe1 & (uint8_t)-top);
-    int i;
+    uint8_t i;
 
     value[0] ^= reduce;
     for (i = 0; i < AES_BLOCK_SIZE - 1; i++) {
@@ -295,7 +295,7 @@ static uint8x16_t hashLengths(const ArmAesGcmContext *self, uint8x16_t accumulat
     uint8_t lengths[AES_BLOCK_SIZE];
     uint64_t aad_bits = (uint64_t)aad_size * 8;
     uint64_t text_bits = (uint64_t)text_size * 8;
-    int i;
+    uint8_t i;
 
     for (i = 0; i < 8; i++) {
         lengths[i] = (uint8_t)(aad_bits >> ((7 - i) * 8));
@@ -355,7 +355,7 @@ static size_t counterCrypt(const ArmAesGcmContext *self, uint8_t *output, const 
         uint8x16_t b1 = counterBlock(iv, counter + 1);
         uint8x16_t b2 = counterBlock(iv, counter + 2);
         uint8x16_t b3 = counterBlock(iv, counter + 3);
-        int round;
+        uint8_t round;
 
         for (round = 0; round < self->schedule.rounds - 1; round++) {
             uint8x16_t key = self->schedule.round_keys[round];
