@@ -14,6 +14,19 @@
 #define AES_MAX_ROUNDS 14
 #define AES_ROUND_KEY_MAX (AES_MAX_ROUNDS + 1)
 
+/*
+ * How many blocks the GHASH and counter loops carry at once. The products are
+ * independent, so a wider body hides the multiply latency — but only while the
+ * operands stay in registers. AArch32 has 16 Q registers to AArch64's 32, and
+ * at four blocks it spills: 101 vector loads and stores in the compiled body
+ * against none for the same source on AArch64. Two fit.
+ */
+#if defined(__aarch64__)
+#define GCM_WIDE_BLOCKS 4
+#else
+#define GCM_WIDE_BLOCKS 2
+#endif
+
 typedef struct {
     uint8x16_t round_keys[AES_ROUND_KEY_MAX];
     uint8_t rounds;
@@ -22,10 +35,7 @@ typedef struct {
 typedef struct {
     ptls_aead_context_t super;
     AesKeySchedule schedule;
-    uint8x16_t hash_key;
-    uint8x16_t hash_key2;
-    uint8x16_t hash_key3;
-    uint8x16_t hash_key4;
+    uint8x16_t hash_keys[GCM_WIDE_BLOCKS];
     uint8_t static_iv[AES_GCM_IV_SIZE];
 } ArmAesGcmContext;
 
@@ -265,37 +275,36 @@ static void halveInGcmOrder(uint8_t value[AES_BLOCK_SIZE])
 }
 
 /*
- * Four blocks with one reduction: the products against H^4, H^3, H^2 and H have
- * no dependency between them, which takes the serial chain out of the loop.
+ * Several blocks to one reduction: the products against H^n ... H do not depend
+ * on each other, which takes the serial chain out of the loop.
  */
 static uint8x16_t hashBytes(const ArmAesGcmContext *self, uint8x16_t accumulator, const uint8_t *data, size_t size)
 {
     uint8_t partial[AES_BLOCK_SIZE];
     size_t offset = 0;
 
-    while (offset + 4 * AES_BLOCK_SIZE <= size) {
+    while (offset + GCM_WIDE_BLOCKS * AES_BLOCK_SIZE <= size) {
         uint8x16_t high, low, term_high, term_low;
+        uint8_t block;
 
-        multiplyWide(veorq_u8(accumulator, reverseBytes(vld1q_u8(data + offset))), self->hash_key4, &high, &low);
-        multiplyWide(reverseBytes(vld1q_u8(data + offset + 16)), self->hash_key3, &term_high, &term_low);
-        high = veorq_u8(high, term_high);
-        low = veorq_u8(low, term_low);
-        multiplyWide(reverseBytes(vld1q_u8(data + offset + 32)), self->hash_key2, &term_high, &term_low);
-        high = veorq_u8(high, term_high);
-        low = veorq_u8(low, term_low);
-        multiplyWide(reverseBytes(vld1q_u8(data + offset + 48)), self->hash_key, &term_high, &term_low);
-        high = veorq_u8(high, term_high);
-        low = veorq_u8(low, term_low);
+        multiplyWide(veorq_u8(accumulator, reverseBytes(vld1q_u8(data + offset))),
+                     self->hash_keys[GCM_WIDE_BLOCKS - 1], &high, &low);
+        for (block = 1; block < GCM_WIDE_BLOCKS; block++) {
+            multiplyWide(reverseBytes(vld1q_u8(data + offset + block * AES_BLOCK_SIZE)),
+                         self->hash_keys[GCM_WIDE_BLOCKS - 1 - block], &term_high, &term_low);
+            high = veorq_u8(high, term_high);
+            low = veorq_u8(low, term_low);
+        }
         accumulator = reduceProduct(high, low);
-        offset += 4 * AES_BLOCK_SIZE;
+        offset += GCM_WIDE_BLOCKS * AES_BLOCK_SIZE;
     }
     for (; offset + AES_BLOCK_SIZE <= size; offset += AES_BLOCK_SIZE) {
-        accumulator = multiplyField(veorq_u8(accumulator, reverseBytes(vld1q_u8(data + offset))), self->hash_key);
+        accumulator = multiplyField(veorq_u8(accumulator, reverseBytes(vld1q_u8(data + offset))), self->hash_keys[0]);
     }
     if (offset < size) {
         memset(partial, 0, sizeof(partial));
         memcpy(partial, data + offset, size - offset);
-        accumulator = multiplyField(veorq_u8(accumulator, reverseBytes(vld1q_u8(partial))), self->hash_key);
+        accumulator = multiplyField(veorq_u8(accumulator, reverseBytes(vld1q_u8(partial))), self->hash_keys[0]);
     }
 
     return accumulator;
@@ -313,7 +322,7 @@ static uint8x16_t hashLengths(const ArmAesGcmContext *self, uint8x16_t accumulat
         lengths[8 + i] = (uint8_t)(text_bits >> ((7 - i) * 8));
     }
 
-    return multiplyField(veorq_u8(accumulator, reverseBytes(vld1q_u8(lengths))), self->hash_key);
+    return multiplyField(veorq_u8(accumulator, reverseBytes(vld1q_u8(lengths))), self->hash_keys[0]);
 }
 
 /* ---------- private: counter mode ---------- */
@@ -361,35 +370,30 @@ static size_t counterCrypt(const ArmAesGcmContext *self, uint8_t *output, const 
             counter++;
         }
     }
-    while (offset + 4 * AES_BLOCK_SIZE <= size) {
-        uint8x16_t b0 = counterBlock(iv, counter);
-        uint8x16_t b1 = counterBlock(iv, counter + 1);
-        uint8x16_t b2 = counterBlock(iv, counter + 2);
-        uint8x16_t b3 = counterBlock(iv, counter + 3);
+    while (offset + GCM_WIDE_BLOCKS * AES_BLOCK_SIZE <= size) {
+        uint8x16_t blocks[GCM_WIDE_BLOCKS];
         uint8_t round;
+        uint8_t block;
 
+        for (block = 0; block < GCM_WIDE_BLOCKS; block++) {
+            blocks[block] = counterBlock(iv, counter + block);
+        }
         for (round = 0; round < self->schedule.rounds - 1; round++) {
             uint8x16_t key = self->schedule.round_keys[round];
 
-            b0 = vaesmcq_u8(vaeseq_u8(b0, key));
-            b1 = vaesmcq_u8(vaeseq_u8(b1, key));
-            b2 = vaesmcq_u8(vaeseq_u8(b2, key));
-            b3 = vaesmcq_u8(vaeseq_u8(b3, key));
+            for (block = 0; block < GCM_WIDE_BLOCKS; block++) {
+                blocks[block] = vaesmcq_u8(vaeseq_u8(blocks[block], key));
+            }
         }
-        b0 = veorq_u8(vaeseq_u8(b0, self->schedule.round_keys[self->schedule.rounds - 1]),
-                      self->schedule.round_keys[self->schedule.rounds]);
-        b1 = veorq_u8(vaeseq_u8(b1, self->schedule.round_keys[self->schedule.rounds - 1]),
-                      self->schedule.round_keys[self->schedule.rounds]);
-        b2 = veorq_u8(vaeseq_u8(b2, self->schedule.round_keys[self->schedule.rounds - 1]),
-                      self->schedule.round_keys[self->schedule.rounds]);
-        b3 = veorq_u8(vaeseq_u8(b3, self->schedule.round_keys[self->schedule.rounds - 1]),
-                      self->schedule.round_keys[self->schedule.rounds]);
-        vst1q_u8(output + offset, veorq_u8(vld1q_u8(input + offset), b0));
-        vst1q_u8(output + offset + 16, veorq_u8(vld1q_u8(input + offset + 16), b1));
-        vst1q_u8(output + offset + 32, veorq_u8(vld1q_u8(input + offset + 32), b2));
-        vst1q_u8(output + offset + 48, veorq_u8(vld1q_u8(input + offset + 48), b3));
-        counter += 4;
-        offset += 4 * AES_BLOCK_SIZE;
+        for (block = 0; block < GCM_WIDE_BLOCKS; block++) {
+            size_t at = offset + block * AES_BLOCK_SIZE;
+
+            blocks[block] = veorq_u8(vaeseq_u8(blocks[block], self->schedule.round_keys[self->schedule.rounds - 1]),
+                                     self->schedule.round_keys[self->schedule.rounds]);
+            vst1q_u8(output + at, veorq_u8(vld1q_u8(input + at), blocks[block]));
+        }
+        counter += GCM_WIDE_BLOCKS;
+        offset += GCM_WIDE_BLOCKS * AES_BLOCK_SIZE;
     }
     for (; offset + AES_BLOCK_SIZE <= size; offset += AES_BLOCK_SIZE) {
         vst1q_u8(output + offset, veorq_u8(vld1q_u8(input + offset),
@@ -505,6 +509,7 @@ static int aeadSetup(ptls_aead_context_t *context, int is_encrypt, const void *k
 {
     ArmAesGcmContext *self = (ArmAesGcmContext *)context;
     uint8_t hash_key[AES_BLOCK_SIZE];
+    uint8_t power;
 
     (void)is_encrypt;
 
@@ -516,10 +521,10 @@ static int aeadSetup(ptls_aead_context_t *context, int is_encrypt, const void *k
     expandKey(&self->schedule, key, self->super.algo->key_size);
     vst1q_u8(hash_key, encryptBlock(&self->schedule, vdupq_n_u8(0)));
     halveInGcmOrder(hash_key);
-    self->hash_key = reverseBytes(vld1q_u8(hash_key));
-    self->hash_key2 = multiplyField(self->hash_key, self->hash_key);
-    self->hash_key3 = multiplyField(self->hash_key2, self->hash_key);
-    self->hash_key4 = multiplyField(self->hash_key2, self->hash_key2);
+    self->hash_keys[0] = reverseBytes(vld1q_u8(hash_key));
+    for (power = 1; power < GCM_WIDE_BLOCKS; power++) {
+        self->hash_keys[power] = multiplyField(self->hash_keys[power - 1], self->hash_keys[0]);
+    }
     ptls_clear_memory(hash_key, sizeof(hash_key));
 
     self->super.dispose_crypto = aeadDispose;
