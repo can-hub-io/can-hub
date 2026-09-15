@@ -113,11 +113,24 @@ if(NOT EXISTS "${CAN_HUB_PICOTLS_BUILD}/libpicotls-core.a")
         endif()
     endif()
 
+    # One execute_process per command: several COMMANDs in one call are a
+    # pipeline, so they run concurrently and fight over .git/index.lock, and
+    # RESULT_VARIABLE would only carry the last child's status.
     execute_process(
         COMMAND git -C "${CAN_HUB_PICOTLS_PREFIX}" checkout --quiet ${CAN_HUB_PICOTLS_COMMIT}
-        COMMAND git -C "${CAN_HUB_PICOTLS_PREFIX}" submodule update --init --recursive
         RESULT_VARIABLE _picotls_checkout
     )
+    if(NOT _picotls_checkout EQUAL 0)
+        message(FATAL_ERROR "could not check out picotls ${CAN_HUB_PICOTLS_COMMIT}")
+    endif()
+
+    execute_process(
+        COMMAND git -C "${CAN_HUB_PICOTLS_PREFIX}" submodule update --init --recursive
+        RESULT_VARIABLE _picotls_submodules
+    )
+    if(NOT _picotls_submodules EQUAL 0)
+        message(FATAL_ERROR "could not update the picotls submodules")
+    endif()
 
     # The nested build has to be told it is cross-compiling, or it probes the
     # host and picks up host headers and host feature detection.

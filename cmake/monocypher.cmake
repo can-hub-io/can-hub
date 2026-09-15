@@ -15,7 +15,7 @@ if(NOT DEFINED CAN_HUB_ROOT_DIR)
 endif()
 set(CAN_HUB_MONOCYPHER_PREFIX "${CAN_HUB_ROOT_DIR}/build/monocypher-src")
 
-if(NOT EXISTS "${CAN_HUB_MONOCYPHER_PREFIX}/src/monocypher.c")
+if(NOT EXISTS "${CAN_HUB_MONOCYPHER_PREFIX}/.git")
     message(STATUS "Fetching Monocypher ${CAN_HUB_MONOCYPHER_TAG}, one-off")
     execute_process(
         COMMAND git clone --depth 1 --branch ${CAN_HUB_MONOCYPHER_TAG}
@@ -24,6 +24,37 @@ if(NOT EXISTS "${CAN_HUB_MONOCYPHER_PREFIX}/src/monocypher.c")
     )
     if(NOT _monocypher_clone EQUAL 0)
         message(FATAL_ERROR "could not clone Monocypher")
+    endif()
+endif()
+
+# The prefix is shared by every build tree, so an existing clone says nothing
+# about which revision it holds. Checking the tag rather than the presence of a
+# source file is what makes bumping CAN_HUB_MONOCYPHER_TAG — a security fix in
+# the ED25519 code, say — actually reach the build. Offline reconfigures of an
+# already-correct tree touch the network not at all.
+execute_process(
+    COMMAND git -C "${CAN_HUB_MONOCYPHER_PREFIX}" describe --tags --exact-match
+    OUTPUT_VARIABLE _monocypher_current
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT _monocypher_current STREQUAL CAN_HUB_MONOCYPHER_TAG)
+    message(STATUS "Moving Monocypher to ${CAN_HUB_MONOCYPHER_TAG}, was '${_monocypher_current}'")
+    execute_process(
+        COMMAND git -C "${CAN_HUB_MONOCYPHER_PREFIX}" fetch --depth 1 origin
+                tag ${CAN_HUB_MONOCYPHER_TAG}
+        RESULT_VARIABLE _monocypher_fetch
+    )
+    if(NOT _monocypher_fetch EQUAL 0)
+        message(FATAL_ERROR "could not fetch Monocypher ${CAN_HUB_MONOCYPHER_TAG}")
+    endif()
+
+    execute_process(
+        COMMAND git -C "${CAN_HUB_MONOCYPHER_PREFIX}" checkout --quiet ${CAN_HUB_MONOCYPHER_TAG}
+        RESULT_VARIABLE _monocypher_checkout
+    )
+    if(NOT _monocypher_checkout EQUAL 0)
+        message(FATAL_ERROR "could not check out Monocypher ${CAN_HUB_MONOCYPHER_TAG}")
     endif()
 endif()
 
