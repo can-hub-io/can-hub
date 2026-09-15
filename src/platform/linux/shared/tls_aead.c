@@ -15,7 +15,7 @@ typedef struct {
 static void poly1305Init(struct chacha20poly1305_context_t *context, const void *key);
 static void poly1305Update(struct chacha20poly1305_context_t *context, const void *input, size_t size);
 static void poly1305Finish(struct chacha20poly1305_context_t *context, void *tag);
-static int setupCrypto(ptls_aead_context_t *context, int is_enc, const void *key, const void *iv);
+static int setupCrypto(ptls_aead_context_t *context, int is_encrypt, const void *key, const void *iv);
 static size_t appendSuite(ptls_cipher_suite_t **offered, size_t count, ptls_cipher_suite_t *suite);
 
 /* ---------- public ---------- */
@@ -66,11 +66,11 @@ static void poly1305Finish(struct chacha20poly1305_context_t *context, void *tag
     crypto_poly1305_final(&self->poly1305, tag);
 }
 
-static int setupCrypto(ptls_aead_context_t *context, int is_enc, const void *key, const void *iv)
+static int setupCrypto(ptls_aead_context_t *context, int is_encrypt, const void *key, const void *iv)
 {
     return chacha20poly1305_setup_crypto(
         context,
-        is_enc,
+        is_encrypt,
         key,
         iv,
         &ptls_minicrypto_chacha20,
@@ -113,7 +113,7 @@ static ptls_cipher_suite_t *acceleratedAes256Suite(TLS_TRANSPORT transport);
 static ptls_fusion_aesecb_context_t *fusionEcbOf(FusionEcbContext *self);
 static void fusionEcbDispose(ptls_cipher_context_t *context);
 static void fusionEcbTransform(ptls_cipher_context_t *context, void *output, const void *input, size_t size);
-static int fusionEcbSetup(ptls_cipher_context_t *context, int is_enc, const void *key);
+static int fusionEcbSetup(ptls_cipher_context_t *context, int is_encrypt, const void *key);
 
 static ptls_cipher_algorithm_t fusion_aes128ecb = {
     "AES128-ECB",
@@ -244,11 +244,11 @@ static void fusionEcbTransform(ptls_cipher_context_t *context, void *output, con
     }
 }
 
-static int fusionEcbSetup(ptls_cipher_context_t *context, int is_enc, const void *key)
+static int fusionEcbSetup(ptls_cipher_context_t *context, int is_encrypt, const void *key)
 {
     FusionEcbContext *self = (FusionEcbContext *)context;
 
-    if (!is_enc) {
+    if (!is_encrypt) {
         return PTLS_ERROR_LIBRARY;
     }
 

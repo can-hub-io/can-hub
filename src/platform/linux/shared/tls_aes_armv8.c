@@ -13,6 +13,14 @@
 #define AES_GCM_TAG_SIZE 16
 #define AES_MAX_ROUNDS 14
 #define AES_ROUND_KEY_MAX (AES_MAX_ROUNDS + 1)
+#define AES_WORD_SIZE 4
+#define AES_WORDS_PER_BLOCK 4
+#define AES_ROUNDS_OVER_KEY_WORDS 6
+#define AES_KEY_WORDS_NEEDING_EXTRA_SUBSTITUTION 6
+#define AES_EXTRA_SUBSTITUTION_POSITION 4
+#define GCM_WIDE_BLOCKS 4
+#define GCM_LENGTH_FIELD_SIZE 8
+#define BITS_PER_BYTE 8
 
 typedef struct {
     uint8x16_t round_keys[AES_ROUND_KEY_MAX];
@@ -162,27 +170,28 @@ static void expandKey(AesKeySchedule *schedule, const uint8_t *key, size_t key_s
 {
     static const uint8_t round_constants[10] = { 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36 };
     uint32_t words[4 * (AES_MAX_ROUNDS + 1)];
-    uint8_t key_words = (uint8_t)(key_size / 4);
+    uint8_t key_words = (uint8_t)(key_size / AES_WORD_SIZE);
+    uint32_t previous;
     uint8_t total;
     uint8_t i;
 
-    schedule->rounds = (uint8_t)(key_words + 6);
-    total = (uint8_t)(4 * (schedule->rounds + 1));
-    for (i = 0; i < key_words; i++) {
-        memcpy(&words[i], key + i * 4, 4);
+    schedule->rounds = (uint8_t)(key_words + AES_ROUNDS_OVER_KEY_WORDS);
+    total = (uint8_t)(AES_WORDS_PER_BLOCK * (schedule->rounds + 1));
+    for(i=0; i<key_words; i++) {
+        memcpy(&words[i], key + i * AES_WORD_SIZE, AES_WORD_SIZE);
     }
-    for (i = key_words; i < total; i++) {
-        uint32_t previous = words[i - 1];
-
+    for(i=key_words; i<total; i++) {
+        previous = words[i - 1];
         if (i % key_words == 0) {
             previous = substituteWord(rotateWord(previous)) ^ (uint32_t)round_constants[i / key_words - 1];
-        } else if (key_words > 6 && i % key_words == 4) {
+        } else if (key_words > AES_KEY_WORDS_NEEDING_EXTRA_SUBSTITUTION
+                   && i % key_words == AES_EXTRA_SUBSTITUTION_POSITION) {
             previous = substituteWord(previous);
         }
         words[i] = words[i - key_words] ^ previous;
     }
-    for (i = 0; i <= schedule->rounds; i++) {
-        schedule->round_keys[i] = vld1q_u8((const uint8_t *)&words[i * 4]);
+    for(i=0; i<=schedule->rounds; i++) {
+        schedule->round_keys[i] = vld1q_u8((const uint8_t *)&words[i * AES_WORDS_PER_BLOCK]);
     }
 }
 
@@ -190,7 +199,7 @@ static uint8x16_t encryptBlock(const AesKeySchedule *schedule, uint8x16_t state)
 {
     uint8_t i;
 
-    for (i = 0; i < schedule->rounds - 1; i++) {
+    for(i=0; i<schedule->rounds-1; i++) {
         state = vaesmcq_u8(vaeseq_u8(state, schedule->round_keys[i]));
     }
 
@@ -258,7 +267,7 @@ static void halveInGcmOrder(uint8_t value[AES_BLOCK_SIZE])
     uint8_t i;
 
     value[0] ^= reduce;
-    for (i = 0; i < AES_BLOCK_SIZE - 1; i++) {
+    for(i=0; i<AES_BLOCK_SIZE-1; i++) {
         value[i] = (uint8_t)((value[i] << 1) | (value[i + 1] >> 7));
     }
     value[AES_BLOCK_SIZE - 1] = (uint8_t)((value[AES_BLOCK_SIZE - 1] << 1) | top);
@@ -271,25 +280,30 @@ static void halveInGcmOrder(uint8_t value[AES_BLOCK_SIZE])
 static uint8x16_t hashBytes(const ArmAesGcmContext *self, uint8x16_t accumulator, const uint8_t *data, size_t size)
 {
     uint8_t partial[AES_BLOCK_SIZE];
+    uint8x16_t high;
+    uint8x16_t low;
+    uint8x16_t term_high;
+    uint8x16_t term_low;
     size_t offset = 0;
 
-    while (offset + 4 * AES_BLOCK_SIZE <= size) {
-        uint8x16_t high, low, term_high, term_low;
-
+    while (offset + GCM_WIDE_BLOCKS * AES_BLOCK_SIZE <= size) {
         multiplyWide(veorq_u8(accumulator, reverseBytes(vld1q_u8(data + offset))), self->hash_key4, &high, &low);
-        multiplyWide(reverseBytes(vld1q_u8(data + offset + 16)), self->hash_key3, &term_high, &term_low);
+        multiplyWide(reverseBytes(vld1q_u8(data + offset + AES_BLOCK_SIZE)), self->hash_key3,
+                     &term_high, &term_low);
         high = veorq_u8(high, term_high);
         low = veorq_u8(low, term_low);
-        multiplyWide(reverseBytes(vld1q_u8(data + offset + 32)), self->hash_key2, &term_high, &term_low);
+        multiplyWide(reverseBytes(vld1q_u8(data + offset + 2 * AES_BLOCK_SIZE)), self->hash_key2,
+                     &term_high, &term_low);
         high = veorq_u8(high, term_high);
         low = veorq_u8(low, term_low);
-        multiplyWide(reverseBytes(vld1q_u8(data + offset + 48)), self->hash_key, &term_high, &term_low);
+        multiplyWide(reverseBytes(vld1q_u8(data + offset + 3 * AES_BLOCK_SIZE)), self->hash_key,
+                     &term_high, &term_low);
         high = veorq_u8(high, term_high);
         low = veorq_u8(low, term_low);
         accumulator = reduceProduct(high, low);
-        offset += 4 * AES_BLOCK_SIZE;
+        offset += GCM_WIDE_BLOCKS * AES_BLOCK_SIZE;
     }
-    for (; offset + AES_BLOCK_SIZE <= size; offset += AES_BLOCK_SIZE) {
+    for(; offset+AES_BLOCK_SIZE<=size; offset+=AES_BLOCK_SIZE) {
         accumulator = multiplyField(veorq_u8(accumulator, reverseBytes(vld1q_u8(data + offset))), self->hash_key);
     }
     if (offset < size) {
@@ -304,13 +318,15 @@ static uint8x16_t hashBytes(const ArmAesGcmContext *self, uint8x16_t accumulator
 static uint8x16_t hashLengths(const ArmAesGcmContext *self, uint8x16_t accumulator, size_t aad_size, size_t text_size)
 {
     uint8_t lengths[AES_BLOCK_SIZE];
-    uint64_t aad_bits = (uint64_t)aad_size * 8;
-    uint64_t text_bits = (uint64_t)text_size * 8;
+    uint64_t aad_bits = (uint64_t)aad_size * BITS_PER_BYTE;
+    uint64_t text_bits = (uint64_t)text_size * BITS_PER_BYTE;
+    uint8_t shift;
     uint8_t i;
 
-    for (i = 0; i < 8; i++) {
-        lengths[i] = (uint8_t)(aad_bits >> ((7 - i) * 8));
-        lengths[8 + i] = (uint8_t)(text_bits >> ((7 - i) * 8));
+    for(i=0; i<GCM_LENGTH_FIELD_SIZE; i++) {
+        shift = (uint8_t)((GCM_LENGTH_FIELD_SIZE - 1 - i) * BITS_PER_BYTE);
+        lengths[i] = (uint8_t)(aad_bits >> shift);
+        lengths[GCM_LENGTH_FIELD_SIZE + i] = (uint8_t)(text_bits >> shift);
     }
 
     return multiplyField(veorq_u8(accumulator, reverseBytes(vld1q_u8(lengths))), self->hash_key);
@@ -341,17 +357,24 @@ static size_t counterCrypt(const ArmAesGcmContext *self, uint8_t *output, const 
                            const uint8_t iv[AES_GCM_IV_SIZE], uint32_t counter, size_t block_offset)
 {
     uint8_t keystream[AES_BLOCK_SIZE];
+    uint8x16_t block0;
+    uint8x16_t block1;
+    uint8x16_t block2;
+    uint8x16_t block3;
+    uint8x16_t key;
+    uint8x16_t last_key;
     size_t offset = 0;
+    size_t take;
+    uint8_t round;
+    size_t i;
 
     if (block_offset != 0) {
-        size_t take = AES_BLOCK_SIZE - block_offset;
-        size_t i;
-
+        take = AES_BLOCK_SIZE - block_offset;
         if (take > size) {
             take = size;
         }
         vst1q_u8(keystream, encryptBlock(&self->schedule, counterBlock(iv, counter)));
-        for (i = 0; i < take; i++) {
+        for(i=0; i<take; i++) {
             output[i] = input[i] ^ keystream[block_offset + i];
         }
         offset = take;
@@ -361,50 +384,46 @@ static size_t counterCrypt(const ArmAesGcmContext *self, uint8_t *output, const 
             counter++;
         }
     }
-    while (offset + 4 * AES_BLOCK_SIZE <= size) {
-        uint8x16_t b0 = counterBlock(iv, counter);
-        uint8x16_t b1 = counterBlock(iv, counter + 1);
-        uint8x16_t b2 = counterBlock(iv, counter + 2);
-        uint8x16_t b3 = counterBlock(iv, counter + 3);
-        uint8_t round;
-
-        for (round = 0; round < self->schedule.rounds - 1; round++) {
-            uint8x16_t key = self->schedule.round_keys[round];
-
-            b0 = vaesmcq_u8(vaeseq_u8(b0, key));
-            b1 = vaesmcq_u8(vaeseq_u8(b1, key));
-            b2 = vaesmcq_u8(vaeseq_u8(b2, key));
-            b3 = vaesmcq_u8(vaeseq_u8(b3, key));
+    while (offset + GCM_WIDE_BLOCKS * AES_BLOCK_SIZE <= size) {
+        block0 = counterBlock(iv, counter);
+        block1 = counterBlock(iv, counter + 1);
+        block2 = counterBlock(iv, counter + 2);
+        block3 = counterBlock(iv, counter + 3);
+        for(round=0; round<self->schedule.rounds-1; round++) {
+            key = self->schedule.round_keys[round];
+            block0 = vaesmcq_u8(vaeseq_u8(block0, key));
+            block1 = vaesmcq_u8(vaeseq_u8(block1, key));
+            block2 = vaesmcq_u8(vaeseq_u8(block2, key));
+            block3 = vaesmcq_u8(vaeseq_u8(block3, key));
         }
-        b0 = veorq_u8(vaeseq_u8(b0, self->schedule.round_keys[self->schedule.rounds - 1]),
-                      self->schedule.round_keys[self->schedule.rounds]);
-        b1 = veorq_u8(vaeseq_u8(b1, self->schedule.round_keys[self->schedule.rounds - 1]),
-                      self->schedule.round_keys[self->schedule.rounds]);
-        b2 = veorq_u8(vaeseq_u8(b2, self->schedule.round_keys[self->schedule.rounds - 1]),
-                      self->schedule.round_keys[self->schedule.rounds]);
-        b3 = veorq_u8(vaeseq_u8(b3, self->schedule.round_keys[self->schedule.rounds - 1]),
-                      self->schedule.round_keys[self->schedule.rounds]);
-        vst1q_u8(output + offset, veorq_u8(vld1q_u8(input + offset), b0));
-        vst1q_u8(output + offset + 16, veorq_u8(vld1q_u8(input + offset + 16), b1));
-        vst1q_u8(output + offset + 32, veorq_u8(vld1q_u8(input + offset + 32), b2));
-        vst1q_u8(output + offset + 48, veorq_u8(vld1q_u8(input + offset + 48), b3));
-        counter += 4;
-        offset += 4 * AES_BLOCK_SIZE;
+        key = self->schedule.round_keys[self->schedule.rounds - 1];
+        last_key = self->schedule.round_keys[self->schedule.rounds];
+        block0 = veorq_u8(vaeseq_u8(block0, key), last_key);
+        block1 = veorq_u8(vaeseq_u8(block1, key), last_key);
+        block2 = veorq_u8(vaeseq_u8(block2, key), last_key);
+        block3 = veorq_u8(vaeseq_u8(block3, key), last_key);
+        vst1q_u8(output + offset, veorq_u8(vld1q_u8(input + offset), block0));
+        vst1q_u8(output + offset + AES_BLOCK_SIZE,
+                 veorq_u8(vld1q_u8(input + offset + AES_BLOCK_SIZE), block1));
+        vst1q_u8(output + offset + 2 * AES_BLOCK_SIZE,
+                 veorq_u8(vld1q_u8(input + offset + 2 * AES_BLOCK_SIZE), block2));
+        vst1q_u8(output + offset + 3 * AES_BLOCK_SIZE,
+                 veorq_u8(vld1q_u8(input + offset + 3 * AES_BLOCK_SIZE), block3));
+        counter += GCM_WIDE_BLOCKS;
+        offset += GCM_WIDE_BLOCKS * AES_BLOCK_SIZE;
     }
-    for (; offset + AES_BLOCK_SIZE <= size; offset += AES_BLOCK_SIZE) {
+    for(; offset+AES_BLOCK_SIZE<=size; offset+=AES_BLOCK_SIZE) {
         vst1q_u8(output + offset, veorq_u8(vld1q_u8(input + offset),
                  encryptBlock(&self->schedule, counterBlock(iv, counter))));
         counter++;
     }
     if (offset < size) {
-        size_t remaining = size - offset;
-        size_t i;
-
+        take = size - offset;
         vst1q_u8(keystream, encryptBlock(&self->schedule, counterBlock(iv, counter)));
-        for (i = 0; i < remaining; i++) {
+        for(i=0; i<take; i++) {
             output[offset + i] = input[offset + i] ^ keystream[i];
         }
-        block_offset = remaining;
+        block_offset = take;
     }
 
     return block_offset;
@@ -448,7 +467,7 @@ static void aeadEncryptVector(ptls_aead_context_t *context, void *output, ptls_i
     ptls_aead__build_iv(self->super.algo, iv, self->static_iv, sequence);
     tag_mask = encryptBlock(&self->schedule, counterBlock(iv, 1));
 
-    for (i = 0; i < count; i++) {
+    for(i=0; i<count; i++) {
         block_offset = counterCrypt(self, destination + written, input[i].base, input[i].len, iv,
                                     2 + (uint32_t)(written / AES_BLOCK_SIZE), block_offset);
         written += input[i].len;
@@ -489,7 +508,7 @@ static size_t aeadDecrypt(ptls_aead_context_t *context, void *output, const void
     accumulator = hashLengths(self, accumulator, aad_size, text_size);
     vst1q_u8(expected, veorq_u8(reverseBytes(accumulator), tag_mask));
 
-    for (i = 0; i < AES_GCM_TAG_SIZE; i++) {
+    for(i=0; i<AES_GCM_TAG_SIZE; i++) {
         difference |= (uint8_t)(expected[i] ^ ciphertext[text_size + i]);
     }
     if (difference != 0) {
@@ -546,7 +565,7 @@ static void ecbTransform(ptls_cipher_context_t *context, void *output, const voi
     ArmAesEcbContext *self = (ArmAesEcbContext *)context;
     size_t offset;
 
-    for (offset = 0; offset + AES_BLOCK_SIZE <= size; offset += AES_BLOCK_SIZE) {
+    for(offset=0; offset+AES_BLOCK_SIZE<=size; offset+=AES_BLOCK_SIZE) {
         vst1q_u8((uint8_t *)output + offset,
                  encryptBlock(&self->schedule, vld1q_u8((const uint8_t *)input + offset)));
     }

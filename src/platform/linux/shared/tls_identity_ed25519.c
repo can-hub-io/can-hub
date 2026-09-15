@@ -115,7 +115,8 @@ bool TlsIdentityBackend_Generate(
         return false;
     }
 
-    if (!writePem("CERTIFICATE", certificate, certificate_length, certificate_pem, certificate_pem_size, certificate_pem_length)) {
+    if (!writePem("CERTIFICATE", certificate, certificate_length,
+                  certificate_pem, certificate_pem_size, certificate_pem_length)) {
         return false;
     }
 

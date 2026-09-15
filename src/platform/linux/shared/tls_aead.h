@@ -55,10 +55,10 @@ ptls_cipher_algorithm_t *TlsAead_Aes256Ecb(void);
  * vectored path.
  */
 
-typedef enum tls_transport_e {
+typedef enum ttls_transport_e {
     kTLS_TRANSPORT_STREAM,
     kTLS_TRANSPORT_QUIC,
-    kTLS_TRANSPORT_MAX
+    kTLS_TRANSPORT_MAX,
 } TLS_TRANSPORT;
 
 /*

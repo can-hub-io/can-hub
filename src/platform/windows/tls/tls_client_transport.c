@@ -254,7 +254,7 @@ static void announceWhenEstablished(TlsClientTransport *self)
 
 static bool pumpCiphertextOut(TlsClientTransport *self)
 {
-    int bytes_sent;
+    int32_t bytes_sent;
 
     if (!TlsChannel_Flush(&self->channel)) {
         return false;
@@ -287,7 +287,7 @@ static bool pumpCiphertextOut(TlsClientTransport *self)
 static bool pumpCiphertextIn(TlsClientTransport *self)
 {
     uint8_t chunk[TLS_CLIENT_READ_CHUNK_SIZE];
-    int bytes_received;
+    int32_t bytes_received;
 
     for (;;) {
         bytes_received = recv((SOCKET)self->fd, (char *)chunk, (int)sizeof(chunk), 0);

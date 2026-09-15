@@ -38,7 +38,11 @@ static int acceptAnyClientCertificate(
     ptls_iovec_t *certificates,
     size_t count
 );
-static int selectAlpnProtocol(ptls_on_client_hello_t *selector, ptls_t *tls, ptls_on_client_hello_parameters_t *parameters);
+static int selectAlpnProtocol(
+    ptls_on_client_hello_t *selector,
+    ptls_t *tls,
+    ptls_on_client_hello_parameters_t *parameters
+);
 
 /* ---------- public ---------- */
 
@@ -138,7 +142,11 @@ static int acceptAnyClientCertificate(
     return 0;
 }
 
-static int selectAlpnProtocol(ptls_on_client_hello_t *selector, ptls_t *tls, ptls_on_client_hello_parameters_t *parameters)
+static int selectAlpnProtocol(
+    ptls_on_client_hello_t *selector,
+    ptls_t *tls,
+    ptls_on_client_hello_parameters_t *parameters
+)
 {
     size_t i;
 
