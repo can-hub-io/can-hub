@@ -72,8 +72,6 @@ bool TlsClientTransport_WantsWritable(const TlsClientTransport *self)
 
 void TlsClientTransport_OnReadable(TlsClientTransport *self)
 {
-    MessageSink sink = { self, dispatchMessage };
-
     if (!TlsChannel_IsBound(&self->channel)) {
         return;
     }
