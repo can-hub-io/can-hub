@@ -11,9 +11,7 @@
 #define AES_BLOCK_SIZE 16
 #define AES_GCM_IV_SIZE 12
 #define AES_GCM_TAG_SIZE 16
-#define AES_ROUNDS_128 10
-#define AES_ROUNDS_256 14
-#define AES_MAX_ROUNDS AES_ROUNDS_256
+#define AES_MAX_ROUNDS 14
 #define AES_ROUND_KEY_MAX (AES_MAX_ROUNDS + 1)
 
 typedef struct {
@@ -46,9 +44,6 @@ static uint8x16_t reduceProduct(uint8x16_t high, uint8x16_t low);
 static uint8x16_t multiplyField(uint8x16_t a, uint8x16_t b);
 static void halveInGcmOrder(uint8_t value[AES_BLOCK_SIZE]);
 static uint8x16_t counterBlock(const uint8_t iv[AES_GCM_IV_SIZE], uint32_t counter);
-static inline void encryptCounterRun(const ArmAesGcmContext *self, uint8_t *output, const uint8_t *input,
-                                     size_t size, const uint8_t iv[AES_GCM_IV_SIZE], uint32_t *counter,
-                                     size_t *offset, uint8_t rounds) __attribute__((always_inline));
 static uint8x16_t hashBytes(const ArmAesGcmContext *self, uint8x16_t accumulator, const uint8_t *data, size_t size);
 static uint8x16_t hashLengths(const ArmAesGcmContext *self, uint8x16_t accumulator, size_t aad_size, size_t text_size);
 static size_t counterCrypt(const ArmAesGcmContext *self, uint8_t *output, const uint8_t *input, size_t size,
@@ -342,45 +337,6 @@ static uint8x16_t counterBlock(const uint8_t iv[AES_GCM_IV_SIZE], uint32_t count
  * run at a time where the offset allows it: the chains are independent, so the
  * several cycles of AESE latency stay covered.
  */
-/*
- * The round count reaches this as a literal, which is the whole point: with a
- * variable trip count the compiler cannot unroll, so it reloads a round key
- * from the schedule on every round and the AES pipeline never fills. OpenSSL's
- * hand-written AArch32 loop is straight-line for the same reason — its round
- * keys sit in registers across the body.
- */
-static inline void encryptCounterRun(const ArmAesGcmContext *self, uint8_t *output, const uint8_t *input,
-                                     size_t size, const uint8_t iv[AES_GCM_IV_SIZE], uint32_t *counter,
-                                     size_t *offset, uint8_t rounds)
-{
-    while (*offset + 4 * AES_BLOCK_SIZE <= size) {
-        uint8x16_t b0 = counterBlock(iv, *counter);
-        uint8x16_t b1 = counterBlock(iv, *counter + 1);
-        uint8x16_t b2 = counterBlock(iv, *counter + 2);
-        uint8x16_t b3 = counterBlock(iv, *counter + 3);
-        uint8_t round;
-
-        for (round = 0; round < rounds - 1; round++) {
-            uint8x16_t key = self->schedule.round_keys[round];
-
-            b0 = vaesmcq_u8(vaeseq_u8(b0, key));
-            b1 = vaesmcq_u8(vaeseq_u8(b1, key));
-            b2 = vaesmcq_u8(vaeseq_u8(b2, key));
-            b3 = vaesmcq_u8(vaeseq_u8(b3, key));
-        }
-        b0 = veorq_u8(vaeseq_u8(b0, self->schedule.round_keys[rounds - 1]), self->schedule.round_keys[rounds]);
-        b1 = veorq_u8(vaeseq_u8(b1, self->schedule.round_keys[rounds - 1]), self->schedule.round_keys[rounds]);
-        b2 = veorq_u8(vaeseq_u8(b2, self->schedule.round_keys[rounds - 1]), self->schedule.round_keys[rounds]);
-        b3 = veorq_u8(vaeseq_u8(b3, self->schedule.round_keys[rounds - 1]), self->schedule.round_keys[rounds]);
-        vst1q_u8(output + *offset, veorq_u8(vld1q_u8(input + *offset), b0));
-        vst1q_u8(output + *offset + 16, veorq_u8(vld1q_u8(input + *offset + 16), b1));
-        vst1q_u8(output + *offset + 32, veorq_u8(vld1q_u8(input + *offset + 32), b2));
-        vst1q_u8(output + *offset + 48, veorq_u8(vld1q_u8(input + *offset + 48), b3));
-        *counter += 4;
-        *offset += 4 * AES_BLOCK_SIZE;
-    }
-}
-
 static size_t counterCrypt(const ArmAesGcmContext *self, uint8_t *output, const uint8_t *input, size_t size,
                            const uint8_t iv[AES_GCM_IV_SIZE], uint32_t counter, size_t block_offset)
 {
@@ -405,10 +361,35 @@ static size_t counterCrypt(const ArmAesGcmContext *self, uint8_t *output, const 
             counter++;
         }
     }
-    if (self->schedule.rounds == AES_ROUNDS_128) {
-        encryptCounterRun(self, output, input, size, iv, &counter, &offset, AES_ROUNDS_128);
-    } else {
-        encryptCounterRun(self, output, input, size, iv, &counter, &offset, AES_ROUNDS_256);
+    while (offset + 4 * AES_BLOCK_SIZE <= size) {
+        uint8x16_t b0 = counterBlock(iv, counter);
+        uint8x16_t b1 = counterBlock(iv, counter + 1);
+        uint8x16_t b2 = counterBlock(iv, counter + 2);
+        uint8x16_t b3 = counterBlock(iv, counter + 3);
+        uint8_t round;
+
+        for (round = 0; round < self->schedule.rounds - 1; round++) {
+            uint8x16_t key = self->schedule.round_keys[round];
+
+            b0 = vaesmcq_u8(vaeseq_u8(b0, key));
+            b1 = vaesmcq_u8(vaeseq_u8(b1, key));
+            b2 = vaesmcq_u8(vaeseq_u8(b2, key));
+            b3 = vaesmcq_u8(vaeseq_u8(b3, key));
+        }
+        b0 = veorq_u8(vaeseq_u8(b0, self->schedule.round_keys[self->schedule.rounds - 1]),
+                      self->schedule.round_keys[self->schedule.rounds]);
+        b1 = veorq_u8(vaeseq_u8(b1, self->schedule.round_keys[self->schedule.rounds - 1]),
+                      self->schedule.round_keys[self->schedule.rounds]);
+        b2 = veorq_u8(vaeseq_u8(b2, self->schedule.round_keys[self->schedule.rounds - 1]),
+                      self->schedule.round_keys[self->schedule.rounds]);
+        b3 = veorq_u8(vaeseq_u8(b3, self->schedule.round_keys[self->schedule.rounds - 1]),
+                      self->schedule.round_keys[self->schedule.rounds]);
+        vst1q_u8(output + offset, veorq_u8(vld1q_u8(input + offset), b0));
+        vst1q_u8(output + offset + 16, veorq_u8(vld1q_u8(input + offset + 16), b1));
+        vst1q_u8(output + offset + 32, veorq_u8(vld1q_u8(input + offset + 32), b2));
+        vst1q_u8(output + offset + 48, veorq_u8(vld1q_u8(input + offset + 48), b3));
+        counter += 4;
+        offset += 4 * AES_BLOCK_SIZE;
     }
     for (; offset + AES_BLOCK_SIZE <= size; offset += AES_BLOCK_SIZE) {
         vst1q_u8(output + offset, veorq_u8(vld1q_u8(input + offset),
