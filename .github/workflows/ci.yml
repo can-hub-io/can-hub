@@ -75,10 +75,12 @@ jobs:
             || apt-get download openssl:armhf libssl3:armhf libc6:armhf
           for package in *.deb; do dpkg -x "$package" root; done
           R=$PWD/root
+          # Located rather than hardcoded: a merged-usr distribution ships the
+          # loader under /usr/lib and a split one under /lib.
+          loader=$(find "$R" -name 'ld-linux-armhf.so.3' -print -quit)
+          libraries=$(find "$R" -name 'libc.so.6' -printf '%h\n' | tr '\n' ':')
           run_openssl() {
-              "$R/lib/ld-linux-armhf.so.3" \
-                  --library-path "$R/usr/lib/arm-linux-gnueabihf:$R/lib/arm-linux-gnueabihf" \
-                  "$R/usr/bin/openssl" "$@"
+              "$loader" --library-path "$libraries" "$R/usr/bin/openssl" "$@"
           }
           run_openssl version
           echo "algorithm            bytes   us/op"
