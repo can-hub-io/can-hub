@@ -40,6 +40,7 @@ static bool feedPeer(TlsServerTransport *self, TlsServerPeer *peer, const uint8_
 static void announcePeer(TlsServerTransport *self, TlsServerPeer *peer);
 static void dispatchMessage(void *context, const uint8_t *message, size_t size);
 static void closePeer(TlsServerTransport *self, TlsServerPeer *peer, bool notify);
+static void sendPendingRecords(TlsServerPeer *peer);
 
 /* ---------- public ---------- */
 
@@ -206,7 +207,7 @@ static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data
     if (!TlsChannel_Queue(&peer->channel, data, size)) {
         return false;
     }
-    if (!TlsChannel_Flush(&peer->channel)) {
+    if (!TlsChannel_Flush(&peer->channel) || !pumpCiphertextOut(self, peer)) {
         closePeer(self, peer, true);
         return false;
     }
@@ -414,6 +415,7 @@ static void closePeer(TlsServerTransport *self, TlsServerPeer *peer, bool notify
     bool was_announced = peer->announced;
     int32_t peer_fd = peer->fd;
 
+    sendPendingRecords(peer);
     TlsChannel_Close(&peer->channel);
     close(peer_fd);
     peer->fd = TLS_CHANNEL_NO_SOCKET;
@@ -421,5 +423,32 @@ static void closePeer(TlsServerTransport *self, TlsServerPeer *peer, bool notify
 
     if (notify && was_announced) {
         self->events.on_peer_disconnected(self->events.context, peer_id, Clock_MonotonicUs());
+    }
+}
+
+/*
+ * A rejected handshake leaves a fatal alert in the channel's ciphertext.
+ * Without this the peer sees a bare FIN and cannot tell a policy rejection
+ * from a network fault. Best effort: the socket is closing either way.
+ */
+static void sendPendingRecords(TlsServerPeer *peer)
+{
+    ssize_t bytes_sent;
+
+    if (peer->fd == TLS_CHANNEL_NO_SOCKET) {
+        return;
+    }
+
+    while (TlsChannel_PendingCiphertext(&peer->channel) > 0) {
+        bytes_sent = send(
+            peer->fd,
+            TlsChannel_Ciphertext(&peer->channel),
+            TlsChannel_PendingCiphertext(&peer->channel),
+            MSG_NOSIGNAL
+        );
+        if (bytes_sent <= 0) {
+            return;
+        }
+        TlsChannel_ConsumeCiphertext(&peer->channel, (size_t)bytes_sent);
     }
 }

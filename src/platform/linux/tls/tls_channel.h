@@ -33,6 +33,7 @@ typedef struct {
     TlsPeerCertificate peer;
     ptls_handshake_properties_t handshake_properties;
     uint8_t state;
+    bool handshake_started;
     MessageFramer framer;
     uint8_t tx_backlog[TLS_CHANNEL_TX_BACKLOG_SIZE];
     size_t tx_used;

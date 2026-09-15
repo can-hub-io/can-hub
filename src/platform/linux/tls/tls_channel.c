@@ -63,6 +63,8 @@ bool TlsChannel_Pump(TlsChannel *self)
         return true;
     }
 
+    self->handshake_started = true;
+
     return advanceHandshake(self, NULL, NULL);
 }
 
@@ -77,6 +79,17 @@ bool TlsChannel_PushCiphertext(
     *consumed = size;
 
     if (self->state == kTLS_CHANNEL_STATE_HANDSHAKING) {
+        /*
+         * A client that has not produced its ClientHello yet is in a state
+         * where ptls_handshake returns without reading the input or writing
+         * *inlen, so the pre-set *consumed above would swallow the whole chunk.
+         * Nothing can legitimately arrive before our own first flight anyway.
+         */
+        if (!self->handshake_started && !ptls_is_server(self->tls)) {
+            *consumed = 0;
+            return true;
+        }
+
         return advanceHandshake(self, data, consumed);
     }
 
@@ -191,15 +204,15 @@ static bool decryptAndFrame(
     size_t offset = 0;
     size_t taken;
     bool drained = true;
+    bool failed = false;
 
     ptls_buffer_init(&plaintext, storage, sizeof(storage));
 
     while (offset < size) {
         taken = size - offset;
         if (ptls_receive(self->tls, &plaintext, data + offset, &taken) != 0) {
-            ptls_buffer_dispose(&plaintext);
-            *consumed = offset;
-            return false;
+            failed = true;
+            break;
         }
         offset += taken;
         if (taken == 0) {
@@ -208,12 +221,18 @@ static bool decryptAndFrame(
     }
     *consumed = offset;
 
+    /*
+     * Earlier iterations of the loop may already have decrypted whole
+     * messages before a later record turned out to be an alert or malformed.
+     * They are valid and have to reach the sink before the failure is
+     * reported, or a close_notify riding in the same read silently eats them.
+     */
     if (plaintext.off > 0) {
         drained = drainPlaintext(self, plaintext.base, plaintext.off, sink);
     }
     ptls_buffer_dispose(&plaintext);
 
-    return drained;
+    return drained && !failed;
 }
 
 static bool drainPlaintext(TlsChannel *self, const uint8_t *plaintext, size_t size, const MessageSink *sink)

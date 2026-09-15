@@ -28,6 +28,7 @@ static bool pumpCiphertextIn(TlsClientTransport *self);
 static bool feedChannel(TlsClientTransport *self, const uint8_t *data, size_t size);
 static void dispatchMessage(void *context, const uint8_t *message, size_t size);
 static void closeConnection(TlsClientTransport *self, bool notify);
+static void sendPendingRecords(TlsClientTransport *self);
 
 /* ---------- public ---------- */
 
@@ -361,6 +362,7 @@ static void closeConnection(TlsClientTransport *self, bool notify)
     }
 
     connection_fd = self->fd;
+    sendPendingRecords(self);
     TlsChannel_Close(&self->channel);
     close(connection_fd);
     self->fd = TLS_CHANNEL_NO_SOCKET;
@@ -369,5 +371,32 @@ static void closeConnection(TlsClientTransport *self, bool notify)
 
     if (notify) {
         self->events.on_disconnected(self->events.context, Clock_MonotonicUs());
+    }
+}
+
+/*
+ * A rejected handshake leaves a fatal alert in the channel's ciphertext.
+ * Without this the peer sees a bare FIN and cannot tell a policy rejection
+ * from a network fault. Best effort: the socket is closing either way.
+ */
+static void sendPendingRecords(TlsClientTransport *self)
+{
+    ssize_t bytes_sent;
+
+    if (self->fd == TLS_CHANNEL_NO_SOCKET) {
+        return;
+    }
+
+    while (TlsChannel_PendingCiphertext(&self->channel) > 0) {
+        bytes_sent = send(
+            self->fd,
+            TlsChannel_Ciphertext(&self->channel),
+            TlsChannel_PendingCiphertext(&self->channel),
+            MSG_NOSIGNAL
+        );
+        if (bytes_sent <= 0) {
+            return;
+        }
+        TlsChannel_ConsumeCiphertext(&self->channel, (size_t)bytes_sent);
     }
 }
