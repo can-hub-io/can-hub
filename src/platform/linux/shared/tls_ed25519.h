@@ -27,6 +27,7 @@ typedef struct {
 } TlsEd25519Signer;
 
 bool TlsEd25519_AttachSigner(TlsEd25519Signer *self, ptls_context_t *context, const char *key_path);
+void TlsEd25519_ForgetSigner(TlsEd25519Signer *self);
 bool TlsEd25519_PublicKeyOfCertificate(const uint8_t *certificate_der, size_t size, uint8_t *public_key);
 bool TlsEd25519_Verify(
     const uint8_t *public_key,

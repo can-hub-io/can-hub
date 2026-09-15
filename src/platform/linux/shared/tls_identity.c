@@ -100,10 +100,12 @@ bool TlsIdentity_FingerprintOfFile(const char *certificate_path, char *fingerpri
     bool computed = false;
     size_t i;
 
-    if (ptls_load_pem_objects(certificate_path, "CERTIFICATE", certificates, IDENTITY_CHAIN_MAX, &count) != 0) {
-        return false;
-    }
-    if (count > 0) {
+    /*
+     * A failed load still reports the objects it managed to read, so the free
+     * loop below has to run on the error path too.
+     */
+    if (ptls_load_pem_objects(certificate_path, "CERTIFICATE", certificates, IDENTITY_CHAIN_MAX, &count) == 0
+        && count > 0) {
         computed = TlsIdentity_FingerprintOfDer(certificates[0].base, certificates[0].len, fingerprint_hex);
     }
 

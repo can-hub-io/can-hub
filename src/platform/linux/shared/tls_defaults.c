@@ -83,6 +83,7 @@ void TlsDefaults_FreeProfile(TlsProfile *self)
     size_t i;
 
     self->has_signer = false;
+    TlsEd25519_ForgetSigner(&self->signer);
     for(i=0; i<self->context.certificates.count; i++) {
         free(self->context.certificates.list[i].base);
     }

@@ -9,6 +9,7 @@
 #define DER_TAG_INTEGER 0x02
 #define DER_TAG_BIT_STRING 0x03
 #define DER_TAG_OCTET_STRING 0x04
+#define DER_TAG_OBJECT_IDENTIFIER 0x06
 #define DER_TAG_SEQUENCE 0x30
 #define DER_TAG_CONTEXT_ZERO 0xA0
 #define DER_LONG_FORM 0x80
@@ -37,6 +38,7 @@ static bool seedOfPrivateKeyDer(const uint8_t *key_der, size_t size, uint8_t *se
 static void derReaderInit(DerReader *reader, const uint8_t *data, size_t size);
 static bool derReadElement(DerReader *reader, uint8_t tag, DerReader *content);
 static bool derSkipElement(DerReader *reader);
+static bool derReadEd25519Algorithm(DerReader *reader);
 
 /* ---------- public ---------- */
 
@@ -58,17 +60,26 @@ bool TlsEd25519_AttachSigner(TlsEd25519Signer *self, ptls_context_t *context, co
     }
 
     loaded = seedOfPrivateKeyDer(objects[0].base, objects[0].len, seed);
+    ptls_clear_memory(objects[0].base, objects[0].len);
     free(objects[0].base);
     if (!loaded) {
+        ptls_clear_memory(seed, sizeof(seed));
         return false;
     }
 
     crypto_ed25519_key_pair(self->secret_key, public_key, seed);
+    ptls_clear_memory(seed, sizeof(seed));
     self->loaded = true;
     self->super.cb = signCertificate;
     context->sign_certificate = &self->super;
 
     return true;
+}
+
+void TlsEd25519_ForgetSigner(TlsEd25519Signer *self)
+{
+    ptls_clear_memory(self->secret_key, sizeof(self->secret_key));
+    self->loaded = false;
 }
 
 bool TlsEd25519_PublicKeyOfCertificate(const uint8_t *certificate_der, size_t size, uint8_t *public_key)
@@ -97,7 +108,7 @@ bool TlsEd25519_PublicKeyOfCertificate(const uint8_t *certificate_der, size_t si
     if (!derReadElement(&tbs, DER_TAG_SEQUENCE, &key_info)) {
         return false;
     }
-    if (!derSkipElement(&key_info)) {
+    if (!derReadEd25519Algorithm(&key_info)) {
         return false;
     }
     if (!derReadElement(&key_info, DER_TAG_BIT_STRING, &bits)) {
@@ -188,7 +199,7 @@ static bool seedOfPrivateKeyDer(const uint8_t *key_der, size_t size, uint8_t *se
     if (!derReadElement(&key, DER_TAG_SEQUENCE, &key)) {
         return false;
     }
-    if (!derSkipElement(&key) || !derSkipElement(&key)) {
+    if (!derSkipElement(&key) || !derReadEd25519Algorithm(&key)) {
         return false;
     }
     if (!derReadElement(&key, DER_TAG_OCTET_STRING, &wrapper)) {
@@ -261,4 +272,29 @@ static bool derSkipElement(DerReader *reader)
     }
 
     return derReadElement(reader, reader->data[reader->offset], &content);
+}
+
+/*
+ * An AlgorithmIdentifier is skipped nowhere: without this a compressed P-256
+ * point is 33 bytes with a zero unused-bits octet, which passes every length
+ * check and is then used as an ED25519 key. The signature fails afterwards, so
+ * this is a clearer error rather than an authentication fix.
+ */
+static bool derReadEd25519Algorithm(DerReader *reader)
+{
+    static const uint8_t oid_ed25519[] = { 0x2B, 0x65, 0x70 };
+    DerReader algorithm;
+    DerReader oid;
+
+    if (!derReadElement(reader, DER_TAG_SEQUENCE, &algorithm)) {
+        return false;
+    }
+    if (!derReadElement(&algorithm, DER_TAG_OBJECT_IDENTIFIER, &oid)) {
+        return false;
+    }
+    if (oid.size - oid.offset != sizeof(oid_ed25519)) {
+        return false;
+    }
+
+    return memcmp(oid.data + oid.offset, oid_ed25519, sizeof(oid_ed25519)) == 0;
 }
