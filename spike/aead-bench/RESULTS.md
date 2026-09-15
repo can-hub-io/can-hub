@@ -162,6 +162,12 @@ where uname cannot be trusted — the armv7l release-wheel container runs on an 
 | `aarch64-linux-gnu-gcc` | aarch64 — ARMv8 engine on |
 | host `gcc` (x86-64) | not aarch64 — ARMv8 engine off |
 
-To measure a real armv7 target, copy the sources and build with plain gcc — no cmake needed:
-the file list is in `spike/aead-bench/` history, or use the tree's build with
-`make BUILD=<can-hub build tree> FUSION=0`.
+### Measuring armv7 for real
+
+A Cortex-A76 implements AArch32 at EL0, so a Raspberry Pi 5 times both execution states on
+one core — `spike/aead-bench/run-on-pi.sh` builds and runs each. The bench links statically,
+so no armhf runtime libraries have to be installed on the target.
+
+That answers what the 32-bit ISA costs, not what the armv7 fleet does: an A76 running
+32-bit code is still an A76. The figure that carries over to an A7 or an A53 is the **ratio**
+against OpenSSL measured on the same core, which is why the script runs both.
