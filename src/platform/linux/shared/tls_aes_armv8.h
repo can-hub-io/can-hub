@@ -9,9 +9,11 @@
  *
  * AESE and AESMC are the AES round functions in silicon and PMULL is the
  * carry-less multiply GHASH needs, so the primitives are the instructions, not
- * an implementation of ours. What this module owns is the GHASH reduction and
- * the GCM framing, both straight-line with no branch or table lookup on secret
- * data, and both checked byte for byte against minicrypto.
+ * an implementation of ours. What this module owns is the GHASH reduction, the
+ * key schedule and the GCM framing, all three straight-line with no branch or
+ * table lookup on secret data — the key schedule derives SubWord through AESE
+ * rather than an S-box table for that reason — and all checked byte for byte
+ * against minicrypto.
  *
  * The extensions are optional in ARMv8-A — a Raspberry Pi 4 has neither, a
  * Pi 5 and every server-class part have both — so availability is a runtime
