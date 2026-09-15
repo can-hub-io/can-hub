@@ -62,13 +62,24 @@ static int ecbSetup(ptls_cipher_context_t *context, int is_encrypt, const void *
 
 /* ---------- public ---------- */
 
+/*
+ * The same extensions are advertised through different words in the two
+ * execution states: AArch64 puts AES and PMULL in HWCAP, AArch32 in HWCAP2.
+ * Reading the wrong one reports absent on hardware that has them.
+ */
 bool TlsAesArmv8_IsSupported(void)
 {
     static int8_t supported = -1;
+    unsigned long capabilities;
 
     if (supported < 0) {
-        unsigned long capabilities = getauxval(AT_HWCAP);
+#if defined(__aarch64__)
+        capabilities = getauxval(AT_HWCAP);
         supported = ((capabilities & HWCAP_AES) != 0 && (capabilities & HWCAP_PMULL) != 0) ? 1 : 0;
+#else
+        capabilities = getauxval(AT_HWCAP2);
+        supported = ((capabilities & HWCAP2_AES) != 0 && (capabilities & HWCAP2_PMULL) != 0) ? 1 : 0;
+#endif
     }
 
     return supported == 1;

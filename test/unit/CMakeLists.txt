@@ -1,3 +1,11 @@
+# The instruction-set flag for the ARM AES engine reaches exactly one source
+# file. See the note in cmake/picotls.cmake: on 32-bit ARM it also enables NEON,
+# which the armhf baseline does not guarantee.
+if(CAN_HUB_ARM_CRYPTO_FLAGS)
+    set_source_files_properties(${ROOT_SRC_DIR}/platform/linux/shared/tls_aes_armv8.c
+        PROPERTIES COMPILE_OPTIONS "${CAN_HUB_ARM_CRYPTO_FLAGS}")
+endif()
+
 set(CEST_DIR ${CMAKE_SOURCE_DIR}/vendor)
 
 # add_unit_test(<name> SOURCES <test.cpp> [real_src.c ...])

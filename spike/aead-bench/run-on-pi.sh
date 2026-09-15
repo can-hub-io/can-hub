@@ -6,6 +6,10 @@
 # only way to separate the cost of the 32-bit ISA from the cost of the core it
 # runs on, and it needs no emulator: qemu answers agreement, never speed.
 #
+# Both states get the hardware AES engine where the CPU has the extensions —
+# ARMv8-A defines them in AArch32 too, which is what a Pi running a 32-bit OS
+# needs.
+#
 # Run it on the Pi, from a can-hub checkout:
 #
 #   sh spike/aead-bench/run-on-pi.sh
@@ -45,7 +49,7 @@ run_bench() {
     rm -f "$BENCH/aead_bench"
     make -C "$BENCH" \
         CC="$cc" \
-        CFLAGS="-O2 -Wall -Wextra -static${armv8:+ -march=armv8-a+crypto}" \
+        CFLAGS="-O2 -Wall -Wextra -static" \
         BUILD="$ROOT/build/$arch/release" \
         FUSION="$fusion" ${armv8:+ARMV8=1} >/dev/null
     "$BENCH/aead_bench" || echo "  -> did not run on this kernel"
@@ -64,7 +68,7 @@ if ! command -v arm-linux-gnueabihf-gcc >/dev/null 2>&1; then
 fi
 
 build_tree armhf
-run_bench armhf arm-linux-gnueabihf-gcc 0 ""
+run_bench armhf arm-linux-gnueabihf-gcc 0 1
 
 echo "== OpenSSL on the same core, for the ratio that transfers =="
 echo "   64-bit:"

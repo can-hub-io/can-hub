@@ -30,6 +30,14 @@ endif()
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/picotls.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/monocypher.cmake)
 
+# The instruction-set flag for the ARM AES engine reaches exactly one source
+# file. See the note in cmake/picotls.cmake: on 32-bit ARM it also enables NEON,
+# which the armhf baseline does not guarantee.
+if(CAN_HUB_ARM_CRYPTO_FLAGS)
+    set_source_files_properties(src/platform/linux/shared/tls_aes_armv8.c
+        PROPERTIES COMPILE_OPTIONS "${CAN_HUB_ARM_CRYPTO_FLAGS}")
+endif()
+
 include_directories(src)
 
 include(FetchContent)

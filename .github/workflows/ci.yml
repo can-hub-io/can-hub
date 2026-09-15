@@ -49,11 +49,11 @@ jobs:
           key: armhf-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
       - name: release build
         run: make release ARCH=armhf
-      # The runner is an arm64 core. Whether it also implements AArch32 at EL0
-      # decides whether armv7 can ever be measured here rather than emulated,
-      # so ask the silicon instead of assuming: a static binary needs no armhf
-      # runtime, and a kernel or core without 32-bit support answers with
-      # "Exec format error". Informational — it must not fail the build.
+      # ARMv8-A defines the crypto extensions in AArch32 too, so the same engine
+      # serves a 32-bit userland on 64-bit silicon — Raspberry Pi OS armhf on a
+      # Pi 3, 4 or 5. This runner is such a core, so it checks the engine in
+      # that state. Informational: a runner without AArch32 answers with
+      # "Exec format error", and that must not fail the build.
       - name: armv7 aead agreement, if this core runs 32-bit
         continue-on-error: true
         run: |
@@ -61,7 +61,7 @@ jobs:
           make -C spike/aead-bench \
               CC=arm-linux-gnueabihf-gcc \
               CFLAGS="-O2 -Wall -Wextra -static" \
-              BUILD="$PWD/build/armhf/release" FUSION=0
+              BUILD="$PWD/build/armhf/release" FUSION=0 ARMV8=1
           ./spike/aead-bench/aead_bench || echo "this core does not run AArch32"
       # The OpenSSL v0.3.0 shipped against, on the same core and the same
       # execution state, so the comparison isolates the stack rather than the
@@ -98,9 +98,9 @@ jobs:
           path: build/armhf/release/can-hub*
           retention-days: 7
 
-  # arm64 is the only configuration that compiles tls_aes_armv8.c. The static
-  # job builds it too but runs on push only, so without this job a change to
-  # the ARMv8 AES engine reaches main without ever having been compiled.
+  # The static job also builds arm64 but runs on push only, so without this
+  # job a change to the ARMv8 AES engine would reach main having been compiled
+  # by nothing. cross-armhf covers the same engine in its AArch32 form.
   cross-arm64:
     runs-on: ubuntu-24.04-arm
     steps:
@@ -126,7 +126,7 @@ jobs:
           grep -m1 'model name\|CPU part' /proc/cpuinfo || true
           make -C spike/aead-bench \
               CC=aarch64-linux-gnu-gcc \
-              CFLAGS="-O2 -Wall -Wextra -static -march=armv8-a+crypto" \
+              CFLAGS="-O2 -Wall -Wextra -static" \
               BUILD="$PWD/build/arm64/release" FUSION=0 ARMV8=1
           ./spike/aead-bench/aead_bench | tee agreement.txt
           if grep -qE '\bNO\b' agreement.txt; then

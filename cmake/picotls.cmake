@@ -84,10 +84,37 @@ int main(void) { return 0; }
 # implementation. They are optional in ARMv8-A — a Raspberry Pi 4 has neither, a
 # Pi 5 and every server part have both — so the build only compiles the engine
 # in and a runtime HWCAP check decides whether it is used.
+#
+# ARMv8-A defines them in AArch32 as well, and ACLE spells the intrinsics the
+# same in both states, so one source covers both. That matters for 32-bit
+# userland on 64-bit silicon — Raspberry Pi OS armhf on a Pi 3, 4 or 5 — where
+# OpenSSL found the instructions and we otherwise would not, which measured at
+# 9.9x at CAN frame size (spike/aead-bench/RESULTS.md).
 if(CAN_HUB_TARGET_IS_AARCH64)
     set(CAN_HUB_TLS_ARMV8_CRYPTO ON)
+    set(CAN_HUB_ARM_CRYPTO_FLAGS -march=armv8-a+crypto)
 else()
-    set(CAN_HUB_TLS_ARMV8_CRYPTO OFF)
+    # A 32-bit ARM toolchain may be configured for a baseline that cannot even
+    # assemble these, so ask it rather than deciding from the triple.
+    set(CMAKE_REQUIRED_FLAGS "-march=armv8-a -mfpu=crypto-neon-fp-armv8")
+    check_c_source_compiles("
+#include <arm_neon.h>
+int main(void) {
+    uint8x16_t s = vdupq_n_u8(0);
+    poly64x2_t p = vreinterpretq_p64_u8(s);
+    s = vaesmcq_u8(vaeseq_u8(s, s));
+    (void)vmull_high_p64(p, p);
+    return vgetq_lane_u8(s, 0);
+}
+" CAN_HUB_TARGET_HAS_AARCH32_CRYPTO)
+    unset(CMAKE_REQUIRED_FLAGS)
+
+    if(CAN_HUB_TARGET_HAS_AARCH32_CRYPTO)
+        set(CAN_HUB_TLS_ARMV8_CRYPTO ON)
+        set(CAN_HUB_ARM_CRYPTO_FLAGS -march=armv8-a -mfpu=crypto-neon-fp-armv8)
+    else()
+        set(CAN_HUB_TLS_ARMV8_CRYPTO OFF)
+    endif()
 endif()
 
 if(CAN_HUB_TARGET_IS_X86_64)
@@ -214,8 +241,13 @@ endif()
 
 add_library(picotls INTERFACE)
 if(CAN_HUB_TLS_ARMV8_CRYPTO)
+    # The definition is global, the instruction-set flag is not: it belongs to
+    # tls_aes_armv8.c alone, applied by whichever CMakeLists compiles it. On
+    # 32-bit ARM the flag also turns NEON on, and the armhf baseline is
+    # ARMv7 + VFPv3-D16 without it, so letting every file see it would license
+    # the compiler to vectorise code that then dies with SIGILL on a CPU that
+    # has no NEON. The engine itself is still gated at runtime by HWCAP.
     target_compile_definitions(picotls INTERFACE CAN_HUB_TLS_ARMV8_CRYPTO)
-    target_compile_options(picotls INTERFACE -march=armv8-a+crypto)
 endif()
 if(CAN_HUB_TLS_FUSION)
     target_compile_definitions(picotls INTERFACE CAN_HUB_TLS_FUSION)
