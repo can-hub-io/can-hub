@@ -1,6 +1,6 @@
 #include "platform/linux/shared/tls_aes_armv8.h"
 
-/* Compiled to nothing off aarch64, so the source lists stay one shape. */
+/* Compiled to nothing off ARM, so the source lists stay one shape. */
 #if defined(CAN_HUB_TLS_ARMV8_CRYPTO)
 
 #include <arm_neon.h>
@@ -146,11 +146,10 @@ ptls_cipher_algorithm_t can_hub_armv8_aes256ecb = {
 /* ---------- private: key schedule and block ---------- */
 
 /*
- * SubWord through AESE against a zero round key, not through a table: the key
- * schedule is derived from secret material and a 256-byte lookup indexed by it
- * is a cache-timing channel. AESE computes SubBytes(ShiftRows(state)), and a
- * state whose four columns are all the same word has every row constant, so
- * ShiftRows leaves it alone and each column comes out as SubWord(word).
+ * SubWord through AESE rather than an S-box table: the key schedule is derived
+ * from secret material, and a 256-byte lookup indexed by it is a cache-timing
+ * channel. AESE computes SubBytes(ShiftRows(state)), and four identical columns
+ * survive ShiftRows unchanged, so each comes out as SubWord(word).
  */
 static uint32_t substituteWord(uint32_t word)
 {
@@ -254,11 +253,10 @@ static uint8x16_t multiplyField(uint8x16_t a, uint8x16_t b)
 }
 
 /*
- * GCM numbers bits from the most significant end; PMULL does not. Reversing the
- * bytes of both operands and of the result gives the product GCM wants, up to
- * one factor of x: measured against a bit-by-bit reference, the reversed
- * product is exactly x times the true one. Halving the hash key once, at key
- * setup, cancels it for every block that follows.
+ * GCM numbers bits from the most significant end; PMULL does not. Byte-reversing
+ * both operands and the result gives GCM's product times x — checked against a
+ * bit-by-bit reference. Halving the hash key once at setup cancels it for every
+ * block after.
  */
 static void halveInGcmOrder(uint8_t value[AES_BLOCK_SIZE])
 {
@@ -273,10 +271,8 @@ static void halveInGcmOrder(uint8_t value[AES_BLOCK_SIZE])
     value[AES_BLOCK_SIZE - 1] = (uint8_t)((value[AES_BLOCK_SIZE - 1] << 1) | top);
 }
 
-/*
- * Four blocks with one reduction: the products against H^4, H^3, H^2 and H have
- * no dependency between them, which takes the serial chain out of the loop.
- */
+/* Four blocks to one reduction: the products against H^4..H are independent, so
+   the serial chain leaves the loop. */
 static uint8x16_t hashBytes(const ArmAesGcmContext *self, uint8x16_t accumulator, const uint8_t *data, size_t size)
 {
     uint8_t partial[AES_BLOCK_SIZE];
@@ -348,10 +344,9 @@ static uint8x16_t counterBlock(const uint8_t iv[AES_GCM_IV_SIZE], uint32_t count
 }
 
 /*
- * Encrypts size bytes starting block_offset bytes into the keystream, and
- * returns the block offset the next call must resume from. Four counter blocks
- * run at a time where the offset allows it: the chains are independent, so the
- * several cycles of AESE latency stay covered.
+ * Returns the block offset the next call resumes from, so an iovec can be
+ * encrypted piecewise. Four counter blocks at a time where the offset allows:
+ * independent chains cover the AESE latency.
  */
 static size_t counterCrypt(const ArmAesGcmContext *self, uint8_t *output, const uint8_t *input, size_t size,
                            const uint8_t iv[AES_GCM_IV_SIZE], uint32_t counter, size_t block_offset)

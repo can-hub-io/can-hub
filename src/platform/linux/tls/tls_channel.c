@@ -80,10 +80,9 @@ bool TlsChannel_PushCiphertext(
 
     if (self->state == kTLS_CHANNEL_STATE_HANDSHAKING) {
         /*
-         * A client that has not produced its ClientHello yet is in a state
-         * where ptls_handshake returns without reading the input or writing
-         * *inlen, so the pre-set *consumed above would swallow the whole chunk.
-         * Nothing can legitimately arrive before our own first flight anyway.
+         * Before the ClientHello, ptls_handshake returns without writing
+         * *inlen, so the pre-set *consumed would swallow the chunk. Nothing can
+         * legitimately arrive before our own first flight.
          */
         if (!self->handshake_started && !ptls_is_server(self->tls)) {
             *consumed = 0;

@@ -9,11 +9,9 @@
 #include "platform/linux/shared/tls_identity.h"
 
 /*
- * ED25519 for picotls, over Monocypher. This is the whole crypto surface the
- * project owns: signing our own CertificateVerify, verifying the peer's, and
- * reading the two DER shapes involved — the PKCS#8 private key and the
- * SubjectPublicKeyInfo inside a certificate. No signing key or signature ever
- * reaches a general-purpose TLS library.
+ * ED25519 for picotls, over Monocypher: signing our CertificateVerify,
+ * verifying the peer's, and reading the two DER shapes involved — the PKCS#8
+ * private key and the SubjectPublicKeyInfo inside a certificate.
  */
 
 #define TLS_ED25519_SECRET_KEY_SIZE 64

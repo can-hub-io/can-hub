@@ -9,16 +9,13 @@
 #include "platform/linux/shared/tls_identity.h"
 
 /*
- * Peer certificate state for the picotls verify_certificate callbacks,
- * shared by the client pin check and the server accept-any path. picotls
- * hands the chain over as raw DER, which is exactly what the fingerprint is
- * taken over, so no X.509 object is ever built for it. One of these lives
- * per session and doubles as the verify_sign context.
+ * Peer certificate state for the picotls verify_certificate callbacks. The
+ * fingerprint is taken over the raw DER picotls hands over, so no X.509 object
+ * is built. One per session, doubling as the verify_sign context.
  *
- * Sessions are reached differently per transport: TLS-over-TCP owns the
- * picotls data pointer, while QUIC must leave it to ngtcp2, which stores
- * its connection reference there. A resolver supplied at attach time is
- * what keeps one pair of callbacks serving both.
+ * The session is reached differently per transport — TLS-over-TCP owns the
+ * picotls data pointer, QUIC must leave it to ngtcp2 — so a resolver supplied
+ * at attach time is what keeps one pair of callbacks serving both.
  */
 
 typedef struct {
