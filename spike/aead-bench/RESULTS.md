@@ -147,6 +147,34 @@ is left is the stack.
 margin — 3.4x at frame size. OpenSSL's 32-bit ChaCha20 is NEON, which every armv7 target has,
 so that ratio is the one that carries to real hardware.
 
+### After the engine learned AArch32
+
+ARMv8-A defines the crypto extensions in AArch32 too, and ACLE spells the intrinsics the same,
+so the engine covers both states from one source. On this core:
+
+| AEAD, one operation | 40 B | 1200 B |
+|---|---|---|
+| AES-128-GCM, ours | **0.149** | **1.440** |
+| AES-128-GCM, OpenSSL | 0.059 | 0.623 |
+| — ratio | 2.53x | 2.31x |
+| what we offered before (ChaCha20) | 0.584 | 4.770 |
+
+**9.9x becomes 2.53x** at frame size, a 3.9x improvement, and every engine still agrees with
+minicrypto byte for byte. It is not parity: the same source on AArch64 *beats* OpenSSL by
+2.1x (Pi 5, above), and in 32-bit it trails by 2.5x.
+
+The cause is register pressure, and it is visible in the compiled output: AArch32 has 16 Q
+registers to AArch64's 32, and the four-block bodies spill — 101 vector loads and stores
+against none for the same source on AArch64. The AES key schedule alone is 240 bytes, so the
+round keys cannot stay resident and are reloaded every iteration. OpenSSL's hand-written
+AArch32 assembly schedules those reloads better than a compiler does from intrinsics.
+
+**Narrowing the loops to two blocks was tried and reverted.** It helped nothing — armv7 at
+1200 B got 16 % *slower* — and rewriting the unrolled bodies as arrays indexed by a loop
+variable cost AArch64 60 % at 1200 B, because a local array is addressable and stays on the
+stack instead of being scalarised into registers. Closing the remaining 2.5x needs hand-
+written AArch32 assembly, which §20 of MIGRATION_PICOTLS.md rules out by policy.
+
 **The AES rows are a different measurement**, and they are the reason this core flatters
 OpenSSL: 0.624 µs for a 1200-byte record is within 4 % of what our own ARMv8 engine does in
 *64-bit* mode on the same chip (0.650). OpenSSL is not running bitsliced NEON here — it has
