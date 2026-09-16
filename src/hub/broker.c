@@ -18,7 +18,6 @@
 #define CONTROL_BUFFER_SIZE 4096
 #define PING_REPLY_FLAG 0x01
 #define HELLO_TIMEOUT_US 5000000
-#define FRAME_ROUTE_TOKEN_VALUES_MAX 63
 #define FRAME_CHANNEL_OFFSET (MESSAGE_HEADER_SIZE + 12)
 #define FRAME_PAYLOAD_LENGTH_OFFSET (MESSAGE_HEADER_SIZE + 13)
 #define FRAME_ROUTE_FLAGS_OFFSET (MESSAGE_HEADER_SIZE + 15)
@@ -75,7 +74,8 @@ static void detachAgent(Broker *self, uint32_t agent_peer_id);
 static void reattachClientsToAgent(Broker *self, uint32_t agent_peer_id);
 static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size);
 static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char *detail);
-static bool forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id, const uint8_t *data, size_t size, uint8_t route_flags);
+static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame);
+static bool forwardFrame(Broker *self, const FrameRoute *route, const FrameMessage *frame, uint8_t route_flags);
 static uint64_t frameWireBits(const uint8_t *wire, uint16_t size);
 static void enqueueFrame(Broker *self, HubPeer *peer, uint8_t channel, const uint8_t *data, size_t size);
 static void drainPeer(Broker *self, HubPeer *peer);
@@ -280,8 +280,29 @@ static bool onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
 {
     Broker *self = context;
     HubPeer *peer = PeerDirectory_Find(&self->directory, peer_id);
-    MessageHeader header;
+    FrameStream stream;
     FrameMessage frame;
+    bool accepted = true;
+
+    if (peer == NULL) {
+        return true;
+    }
+    if (peer->role != kHUB_PEER_ROLE_AGENT && peer->role != kHUB_PEER_ROLE_CLIENT) {
+        return true;
+    }
+
+    FrameStream_Init(&stream, data, size);
+    while (FrameStream_Next(&stream, &frame)) {
+        if (!routeFrame(self, peer, &frame)) {
+            accepted = false;
+        }
+    }
+
+    return accepted;
+}
+
+static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame)
+{
     FrameRoute *routes = self->frame_routes;
     uint32_t echo_originator_peer_id = 0;
     uint16_t route_count = 0;
@@ -290,44 +311,28 @@ static bool onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
     bool accepted = true;
     uint16_t i;
 
-    if (peer == NULL || size > FRAME_BUFFER_SIZE) {
-        return true;
-    }
-    if (!MessageHeader_Decode(&header, data, size)) {
-        return true;
-    }
-    if (header.type != kMESSAGE_TYPE_FRAME || size < (size_t)MESSAGE_HEADER_SIZE + header.length) {
-        return true;
-    }
-    if (!FrameMessage_Decode(&frame, data + MESSAGE_HEADER_SIZE, header.length)) {
-        return true;
-    }
-    if (peer->role != kHUB_PEER_ROLE_AGENT && peer->role != kHUB_PEER_ROLE_CLIENT) {
-        return true;
-    }
-
     self->metrics.frames_received++;
-    countInterfaceFrame(self, peer, frame.channel);
+    countInterfaceFrame(self, peer, frame->channel);
 
     if (peer->role == kHUB_PEER_ROLE_AGENT) {
         route_count = FrameRoutes_FromAgent(
             &self->registry,
             &self->directory,
             peer->peer_id,
-            frame.channel,
+            frame->channel,
             routes,
             FRAME_ROUTES_MAX,
             &routes_dropped
         );
-        forwarded_route_flags = frame.route_flags & (FRAME_ROUTE_FLAG_BRIDGED | FRAME_ROUTE_FLAG_ECHO);
-        echo_originator_peer_id = echoOriginatorPeerId(self, frame.route_flags);
+        forwarded_route_flags = frame->route_flags & (FRAME_ROUTE_FLAG_BRIDGED | FRAME_ROUTE_FLAG_ECHO);
+        echo_originator_peer_id = echoOriginatorPeerId(self, frame->route_flags);
     } else {
-        if (!ClientSession_CanWrite(&peer->session, frame.channel)) {
+        if (!ClientSession_CanWrite(&peer->session, frame->channel)) {
             self->metrics.frames_dropped++;
             return true;
         }
         route_count = FrameRoutes_FromClient(
-            &self->registry, peer, frame.channel, routes, FRAME_ROUTES_MAX, &routes_dropped);
+            &self->registry, peer, frame->channel, routes, FRAME_ROUTES_MAX, &routes_dropped);
         forwarded_route_flags = (uint8_t)(injectionToken(self, peer) << FRAME_ROUTE_TOKEN_SHIFT);
     }
 
@@ -342,7 +347,7 @@ static bool onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
         if (routes[i].suppress_echo && routes[i].peer_id == echo_originator_peer_id) {
             continue;
         }
-        if (!forwardFrame(self, &routes[i], frame.can_id, data, size, forwarded_route_flags)) {
+        if (!forwardFrame(self, &routes[i], frame, forwarded_route_flags)) {
             accepted = false;
         }
     }
@@ -1245,21 +1250,32 @@ static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char 
     self->transport->send_control(self->transport->context, peer_id, encoded, encoded_size);
 }
 
-static bool forwardFrame(Broker *self, const FrameRoute *route, uint32_t can_id, const uint8_t *data, size_t size, uint8_t route_flags)
+/*
+ * Re-encoded from the decoded frame, never copied from the received buffer: a
+ * datagram may carry several frames, and anything after the declared body is
+ * not ours to relay.
+ */
+static bool forwardFrame(Broker *self, const FrameRoute *route, const FrameMessage *frame, uint8_t route_flags)
 {
     uint8_t forwarded[FRAME_BUFFER_SIZE];
+    FrameMessage outgoing = *frame;
     HubPeer *destination;
+    size_t size;
 
     destination = PeerDirectory_Find(&self->directory, route->peer_id);
     if (destination != NULL
         && destination->role == kHUB_PEER_ROLE_CLIENT
-        && !ClientSession_ChannelAccepts(&destination->session, route->channel, can_id)) {
+        && !ClientSession_ChannelAccepts(&destination->session, route->channel, frame->can_id)) {
         return true;
     }
 
-    memcpy(forwarded, data, size);
-    forwarded[FRAME_CHANNEL_OFFSET] = route->channel;
-    forwarded[FRAME_ROUTE_FLAGS_OFFSET] = route_flags;
+    outgoing.channel = route->channel;
+    outgoing.route_flags = route_flags;
+    size = FrameMessage_Encode(&outgoing, forwarded, sizeof(forwarded));
+    if (size == 0) {
+        self->metrics.frames_dropped++;
+        return true;
+    }
 
     if (destination == NULL) {
         if (self->transport->send_frame(self->transport->context, route->peer_id, route->channel, forwarded, size)) {
@@ -1453,6 +1469,8 @@ static uint8_t injectionToken(Broker *self, const HubPeer *sender)
         return FRAME_ROUTE_NO_TOKEN;
     }
 
+    self->injection_token_owner[slot] = sender->peer_id;
+
     return (uint8_t)(slot + 1);
 }
 
@@ -1466,7 +1484,7 @@ static uint32_t echoOriginatorPeerId(Broker *self, uint8_t route_flags)
     }
 
     originator = PeerDirectory_At(&self->directory, (uint8_t)(token - 1));
-    if (originator == NULL) {
+    if (originator == NULL || originator->peer_id != self->injection_token_owner[token - 1]) {
         return 0;
     }
 

@@ -1163,20 +1163,84 @@ describe("broker", []() {
 
         it("suppresses the echo only for its opted-out originator", []() {
             uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            FrameMessage injected = { 0x456, 2000, 0, 1, 0, 0, { 0x55 } };
             FrameMessage echo = { 0x456, 2100, 0, 1, 0, 0, { 0x55 } };
+            FrameMessage relayed;
+            MessageHeader header;
             uint8_t encoded[128];
             size_t encoded_size;
 
             BrokerDriver_ConnectClient(&events, CLIENT_PEER + 1);
-            BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, OPEN_FLAG_SUPPRESS_OWN_ECHO);
+            BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id,
+                                       OPEN_FLAG_SUPPRESS_OWN_ECHO | OPEN_FLAG_WANT_WRITE);
             BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER + 1, interface_id, 0);
+
+            encoded_size = FrameMessage_Encode(&injected, encoded, sizeof(encoded));
+            events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
+            MessageHeader_Decode(&header, transport.frame_log[0], transport.frame_sizes[0]);
+            FrameMessage_Decode(&relayed, transport.frame_log[0] + MESSAGE_HEADER_SIZE, header.length);
+
+            transport.frame_count = 0;
+            echo.route_flags = FRAME_ROUTE_FLAG_ECHO | (relayed.route_flags & FRAME_ROUTE_TOKEN_MASK);
+            encoded_size = FrameMessage_Encode(&echo, encoded, sizeof(encoded));
+            events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
+
+            expect(transport.frame_count).toBe(1);
+            expect(transport.frame_peers[0]).toBe((uint32_t)(CLIENT_PEER + 1));
+        });
+
+        it("routes every frame packed into one datagram", []() {
+            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            FrameMessage first = { 0x111, 2100, 0, 1, 0, 0, { 0xAA } };
+            FrameMessage second = { 0x222, 2101, 0, 1, 0, 0, { 0xBB } };
+            FrameMessage relayed;
+            MessageHeader header;
+            uint8_t encoded[256];
+            size_t packed = 0;
+
+            BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, 0);
+            packed += FrameMessage_Encode(&first, encoded + packed, sizeof(encoded) - packed);
+            packed += FrameMessage_Encode(&second, encoded + packed, sizeof(encoded) - packed);
+
+            events.on_peer_frame(events.context, AGENT_PEER, encoded, packed);
+
+            expect(transport.frame_count).toBe(2);
+            MessageHeader_Decode(&header, transport.frame_log[1], transport.frame_sizes[1]);
+            FrameMessage_Decode(&relayed, transport.frame_log[1] + MESSAGE_HEADER_SIZE, header.length);
+            expect(relayed.can_id).toBe((uint32_t)0x222);
+        });
+
+        it("relays the declared body and not the bytes after it", []() {
+            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            FrameMessage frame = { 0x456, 2100, 0, 1, 0, 0, { 0x55 } };
+            uint8_t encoded[128];
+            size_t encoded_size;
+
+            BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, 0);
+            encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+            encoded[encoded_size] = 0xFF;
+            encoded[encoded_size + 1] = 0xFF;
+
+            events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size + 2);
+
+            expect(transport.frame_count).toBe(1);
+            expect(transport.frame_sizes[0]).toBe((uint16_t)encoded_size);
+        });
+
+        it("ignores an echo token the agent made up", []() {
+            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            FrameMessage echo = { 0x456, 2100, 0, 1, 0, 0, { 0x55 } };
+            uint8_t encoded[128];
+            size_t encoded_size;
+
+            BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id,
+                                       OPEN_FLAG_SUPPRESS_OWN_ECHO);
             echo.route_flags = FRAME_ROUTE_FLAG_ECHO | (2 << FRAME_ROUTE_TOKEN_SHIFT);
             encoded_size = FrameMessage_Encode(&echo, encoded, sizeof(encoded));
 
             events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
 
             expect(transport.frame_count).toBe(1);
-            expect(transport.frame_peers[0]).toBe((uint32_t)(CLIENT_PEER + 1));
         });
 
         it("delivers the echo to an opted-out client when it is not the originator", []() {
