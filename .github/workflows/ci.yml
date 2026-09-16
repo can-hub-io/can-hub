@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: install dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libssl-dev perl
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
       - name: cache build trees
         uses: actions/cache@v4
         with:
@@ -41,7 +41,7 @@ jobs:
         run: |
           sudo dpkg --add-architecture armhf
           sudo apt-get update
-          sudo apt-get install -y ninja-build gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf perl
+          sudo apt-get install -y ninja-build gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
       - name: cache build tree
         uses: actions/cache@v4
         with:
@@ -49,10 +49,94 @@ jobs:
           key: armhf-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
       - name: release build
         run: make release ARCH=armhf
+      # ARMv8-A defines the crypto extensions in AArch32 too, so the same engine
+      # serves a 32-bit userland on 64-bit silicon — Raspberry Pi OS armhf on a
+      # Pi 3, 4 or 5. This runner is such a core, so it checks the engine in
+      # that state. Informational: a runner without AArch32 answers with
+      # "Exec format error", and that must not fail the build.
+      - name: armv7 aead agreement, if this core runs 32-bit
+        continue-on-error: true
+        run: |
+          grep -m1 'model name\|CPU part' /proc/cpuinfo || true
+          make -C spike/aead-bench \
+              CC=arm-linux-gnueabihf-gcc \
+              CFLAGS="-O2 -Wall -Wextra -static" \
+              BUILD="$PWD/build/armhf/release" FUSION=0 ARMV8=1
+          ./spike/aead-bench/aead_bench || echo "this core does not run AArch32"
+      # The OpenSSL v0.3.0 shipped against, on the same core and the same
+      # execution state, so the comparison isolates the stack rather than the
+      # hardware. Extracted rather than installed: openssl is Multi-Arch
+      # foreign, so apt would replace the runner's own arm64 build.
+      - name: armv7 against the openssl v0.3.0 shipped with
+        continue-on-error: true
+        run: |
+          mkdir -p /tmp/ossl && cd /tmp/ossl
+          apt-get download openssl:armhf libssl3t64:armhf libc6:armhf 2>/dev/null \
+            || apt-get download openssl:armhf libssl3:armhf libc6:armhf
+          for package in *.deb; do dpkg -x "$package" root; done
+          R=$PWD/root
+          # Located rather than hardcoded: a merged-usr distribution ships the
+          # loader under /usr/lib and a split one under /lib.
+          loader=$(find "$R" -name 'ld-linux-armhf.so.3' -print -quit)
+          libraries=$(find "$R" -name 'libc.so.6' -printf '%h\n' | tr '\n' ':')
+          run_openssl() {
+              "$loader" --library-path "$libraries" "$R/usr/bin/openssl" "$@"
+          }
+          run_openssl version
+          echo "algorithm            bytes   us/op"
+          for algorithm in chacha20-poly1305 aes-128-gcm aes-256-gcm; do
+              for size in 40 1200; do
+                  rate=$(run_openssl speed -elapsed -evp $algorithm -bytes $size 2>/dev/null \
+                         | tail -1 | tr -s ' ' | cut -d' ' -f2 | tr -d 'k')
+                  echo "$algorithm $size $rate" \
+                    | awk '{printf "%-20s %5d %7.3f\n", $1, $2, $2 * 1000 / $3}'
+              done
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: can-hub-armhf
           path: build/armhf/release/can-hub*
+          retention-days: 7
+
+  # The static job also builds arm64 but runs on push only, so without this
+  # job a change to the ARMv8 AES engine would reach main having been compiled
+  # by nothing. cross-armhf covers the same engine in its AArch32 form.
+  cross-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: cache build tree
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: arm64-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
+      - name: release build
+        run: make release ARCH=arm64
+      # Agreement for the ARMv8 engine on a real ARM core rather than under an
+      # emulator, and on a second microarchitecture: every number in
+      # spike/aead-bench/RESULTS.md comes from one Cortex-A76. Timings printed
+      # here are indicative only — a shared runner is not a quiet host (#193) —
+      # but a MISMATCH is a MISMATCH on any host, and that is what this gates.
+      - name: arm64 aead agreement
+        run: |
+          grep -m1 'model name\|CPU part' /proc/cpuinfo || true
+          make -C spike/aead-bench \
+              CC=aarch64-linux-gnu-gcc \
+              CFLAGS="-O2 -Wall -Wextra -static" \
+              BUILD="$PWD/build/arm64/release" FUSION=0 ARMV8=1
+          ./spike/aead-bench/aead_bench | tee agreement.txt
+          if grep -qE '\bNO\b' agreement.txt; then
+              echo "an engine disagrees with minicrypto"
+              exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: can-hub-arm64
+          path: build/arm64/release/can-hub*
           retention-days: 7
 
   windows-libcanhub:
@@ -63,7 +147,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: install dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build perl
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
       - name: install llvm-mingw
         run: |
           curl -fsSL -o /tmp/llvm-mingw.tar.xz "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/llvm-mingw-$LLVM_MINGW_VERSION-ucrt-ubuntu-22.04-x86_64.tar.xz"
@@ -152,7 +236,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build perl lintian
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build lintian
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:

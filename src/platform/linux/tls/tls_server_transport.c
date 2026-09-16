@@ -2,6 +2,7 @@
 
 #include "platform/linux/tls/tls_server_transport.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +18,8 @@
 #include "platform/linux/shared/tls_identity.h"
 #include "protocol/message_header.h"
 
+#define TLS_SERVER_READ_CHUNK_SIZE 4096
+
 #define LISTEN_BACKLOG 8
 
 static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
@@ -31,9 +34,13 @@ typedef struct {
 } TlsServerDispatch;
 
 static void pumpHandshake(TlsServerTransport *self, TlsServerPeer *peer);
+static bool pumpCiphertextOut(TlsServerTransport *self, TlsServerPeer *peer);
+static bool pumpCiphertextIn(TlsServerTransport *self, TlsServerPeer *peer);
+static bool feedPeer(TlsServerTransport *self, TlsServerPeer *peer, const uint8_t *data, size_t size);
 static void announcePeer(TlsServerTransport *self, TlsServerPeer *peer);
 static void dispatchMessage(void *context, const uint8_t *message, size_t size);
 static void closePeer(TlsServerTransport *self, TlsServerPeer *peer, bool notify);
+static void sendPendingRecords(TlsServerPeer *peer);
 
 /* ---------- public ---------- */
 
@@ -63,6 +70,7 @@ bool TlsServerTransport_Init(
     self->next_peer_id = peer_id_base;
     for(slot=0; slot<TLS_SERVER_PEERS_MAX; slot++) {
         TlsChannel_Reset(&self->peers[slot].channel);
+        self->peers[slot].fd = TLS_CHANNEL_NO_SOCKET;
     }
 
     if (!TlsServerSecurity_Init(&self->security, certificate_file, key_file)) {
@@ -97,7 +105,7 @@ int32_t TlsServerTransport_ListenFd(const TlsServerTransport *self)
 
 int32_t TlsServerTransport_SlotFd(const TlsServerTransport *self, uint8_t slot)
 {
-    return self->peers[slot].channel.fd;
+    return self->peers[slot].fd;
 }
 
 bool TlsServerTransport_SlotWantsWritable(const TlsServerTransport *self, uint8_t slot)
@@ -112,7 +120,7 @@ bool TlsServerTransport_SlotWantsWritable(const TlsServerTransport *self, uint8_
 void TlsServerTransport_OnAcceptReady(TlsServerTransport *self)
 {
     TlsServerPeer *peer;
-    SSL *ssl;
+    ptls_t *tls;
     struct sockaddr_storage remote;
     socklen_t remote_size = sizeof(remote);
     int32_t peer_fd;
@@ -129,13 +137,14 @@ void TlsServerTransport_OnAcceptReady(TlsServerTransport *self)
             close(peer_fd);
             continue;
         }
-        if (!TlsServerSecurity_NewSession(&self->security, &ssl)) {
+        if (!TlsServerSecurity_NewSession(&self->security, &tls)) {
             close(peer_fd);
             continue;
         }
 
         setsockopt(peer_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
-        TlsChannel_Bind(&peer->channel, peer_fd, ssl);
+        TlsChannel_Bind(&peer->channel, tls, NULL);
+        peer->fd = peer_fd;
         peer->peer_id = self->next_peer_id++;
         peer->announced = false;
         ListenEndpoint_FormatOrigin(&remote, peer->origin, sizeof(peer->origin));
@@ -146,19 +155,19 @@ void TlsServerTransport_OnAcceptReady(TlsServerTransport *self)
 void TlsServerTransport_OnSlotReadable(TlsServerTransport *self, uint8_t slot)
 {
     TlsServerPeer *peer = &self->peers[slot];
-    TlsServerDispatch dispatch = { self, peer };
-    MessageSink sink = { &dispatch, dispatchMessage };
 
     if (!TlsChannel_IsBound(&peer->channel)) {
         return;
     }
 
-    if (!TlsChannel_IsEstablished(&peer->channel)) {
-        pumpHandshake(self, peer);
+    if (!pumpCiphertextIn(self, peer)) {
+        closePeer(self, peer, true);
         return;
     }
-
-    if (!TlsChannel_Receive(&peer->channel, &sink)) {
+    if (!TlsChannel_IsBound(&peer->channel)) {
+        return;
+    }
+    if (!pumpCiphertextOut(self, peer)) {
         closePeer(self, peer, true);
     }
 }
@@ -171,13 +180,12 @@ void TlsServerTransport_OnSlotWritable(TlsServerTransport *self, uint8_t slot)
         return;
     }
 
-    if (!TlsChannel_IsEstablished(&peer->channel)) {
-        pumpHandshake(self, peer);
+    if (!pumpCiphertextOut(self, peer)) {
+        closePeer(self, peer, true);
         return;
     }
 
-    if (!TlsChannel_Flush(&peer->channel)) {
-        closePeer(self, peer, true);
+    if (!TlsChannel_IsEstablished(&peer->channel)) {
         return;
     }
 
@@ -199,7 +207,7 @@ static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data
     if (!TlsChannel_Queue(&peer->channel, data, size)) {
         return false;
     }
-    if (!TlsChannel_Flush(&peer->channel)) {
+    if (!TlsChannel_Flush(&peer->channel) || !pumpCiphertextOut(self, peer)) {
         closePeer(self, peer, true);
         return false;
     }
@@ -272,7 +280,7 @@ static TlsServerPeer *findFreeSlot(TlsServerTransport *self)
 
 static void pumpHandshake(TlsServerTransport *self, TlsServerPeer *peer)
 {
-    if (!TlsChannel_Pump(&peer->channel)) {
+    if (!TlsChannel_Pump(&peer->channel) || !pumpCiphertextOut(self, peer)) {
         closePeer(self, peer, false);
         return;
     }
@@ -287,8 +295,6 @@ static void announcePeer(TlsServerTransport *self, TlsServerPeer *peer)
     char fingerprint_hex[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
     bool has_fingerprint = TlsChannel_PeerFingerprint(&peer->channel, fingerprint_hex);
     HubPeerConnectInfo info;
-    TlsServerDispatch dispatch = { self, peer };
-    MessageSink sink = { &dispatch, dispatchMessage };
 
     peer->announced = true;
     info.fingerprint_hex = has_fingerprint ? fingerprint_hex : NULL;
@@ -296,10 +302,90 @@ static void announcePeer(TlsServerTransport *self, TlsServerPeer *peer)
     info.transport_kind = kPEER_TRANSPORT_TLS;
     info.local = false;
     self->events.on_peer_connected(self->events.context, peer->peer_id, &info, Clock_MonotonicUs());
+}
 
-    if (!TlsChannel_Receive(&peer->channel, &sink)) {
-        closePeer(self, peer, true);
+static bool pumpCiphertextOut(TlsServerTransport *self, TlsServerPeer *peer)
+{
+    ssize_t bytes_sent;
+
+    (void)self;
+
+    if (!TlsChannel_Flush(&peer->channel)) {
+        return false;
     }
+
+    while (TlsChannel_PendingCiphertext(&peer->channel) > 0) {
+        bytes_sent = send(
+            peer->fd,
+            TlsChannel_Ciphertext(&peer->channel),
+            TlsChannel_PendingCiphertext(&peer->channel),
+            MSG_NOSIGNAL
+        );
+        if (bytes_sent > 0) {
+            TlsChannel_ConsumeCiphertext(&peer->channel, (size_t)bytes_sent);
+            if (!TlsChannel_Flush(&peer->channel)) {
+                return false;
+            }
+            continue;
+        }
+        if (bytes_sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    return true;
+}
+
+static bool pumpCiphertextIn(TlsServerTransport *self, TlsServerPeer *peer)
+{
+    uint8_t chunk[TLS_SERVER_READ_CHUNK_SIZE];
+    ssize_t bytes_received;
+
+    for (;;) {
+        bytes_received = recv(peer->fd, chunk, sizeof(chunk), 0);
+        if (bytes_received > 0) {
+            if (!feedPeer(self, peer, chunk, (size_t)bytes_received)) {
+                return false;
+            }
+            if (!TlsChannel_IsBound(&peer->channel)) {
+                return true;
+            }
+            continue;
+        }
+        if (bytes_received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            return true;
+        }
+
+        return false;
+    }
+}
+
+static bool feedPeer(TlsServerTransport *self, TlsServerPeer *peer, const uint8_t *data, size_t size)
+{
+    TlsServerDispatch dispatch = { self, peer };
+    MessageSink sink = { &dispatch, dispatchMessage };
+    size_t offset = 0;
+    size_t consumed;
+
+    while (offset < size) {
+        if (!TlsChannel_PushCiphertext(&peer->channel, data + offset, size - offset, &consumed, &sink)) {
+            return false;
+        }
+        offset += consumed;
+        if (TlsChannel_IsEstablished(&peer->channel) && !peer->announced) {
+            announcePeer(self, peer);
+        }
+        if (!TlsChannel_IsBound(&peer->channel)) {
+            return true;
+        }
+        if (consumed == 0) {
+            return true;
+        }
+    }
+
+    return true;
 }
 
 static void dispatchMessage(void *context, const uint8_t *message, size_t size)
@@ -327,13 +413,42 @@ static void closePeer(TlsServerTransport *self, TlsServerPeer *peer, bool notify
 {
     uint32_t peer_id = peer->peer_id;
     bool was_announced = peer->announced;
-    int32_t peer_fd = peer->channel.fd;
+    int32_t peer_fd = peer->fd;
 
+    sendPendingRecords(peer);
     TlsChannel_Close(&peer->channel);
     close(peer_fd);
+    peer->fd = TLS_CHANNEL_NO_SOCKET;
     peer->announced = false;
 
     if (notify && was_announced) {
         self->events.on_peer_disconnected(self->events.context, peer_id, Clock_MonotonicUs());
+    }
+}
+
+/*
+ * A rejected handshake leaves a fatal alert in the channel's ciphertext.
+ * Without this the peer sees a bare FIN and cannot tell a policy rejection
+ * from a network fault. Best effort: the socket is closing either way.
+ */
+static void sendPendingRecords(TlsServerPeer *peer)
+{
+    ssize_t bytes_sent;
+
+    if (peer->fd == TLS_CHANNEL_NO_SOCKET) {
+        return;
+    }
+
+    while (TlsChannel_PendingCiphertext(&peer->channel) > 0) {
+        bytes_sent = send(
+            peer->fd,
+            TlsChannel_Ciphertext(&peer->channel),
+            TlsChannel_PendingCiphertext(&peer->channel),
+            MSG_NOSIGNAL
+        );
+        if (bytes_sent <= 0) {
+            return;
+        }
+        TlsChannel_ConsumeCiphertext(&peer->channel, (size_t)bytes_sent);
     }
 }

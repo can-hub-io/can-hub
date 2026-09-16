@@ -1,3 +1,11 @@
+# The instruction-set flag for the ARM AES engine reaches exactly one source
+# file. See the note in cmake/picotls.cmake: on 32-bit ARM it also enables NEON,
+# which the armhf baseline does not guarantee.
+if(CAN_HUB_ARM_CRYPTO_FLAGS)
+    set_source_files_properties(${ROOT_SRC_DIR}/platform/linux/shared/tls_aes_armv8.c
+        PROPERTIES COMPILE_OPTIONS "${CAN_HUB_ARM_CRYPTO_FLAGS}")
+endif()
+
 set(CEST_DIR ${CMAKE_SOURCE_DIR}/vendor)
 
 # add_unit_test(<name> SOURCES <test.cpp> [real_src.c ...])
@@ -188,12 +196,16 @@ add_unit_test(test_tls_channel
         ${ROOT_SRC_DIR}/platform/linux/shared/pinned_server_verifier.c
         ${ROOT_SRC_DIR}/platform/linux/shared/tls_defaults.c
         ${ROOT_SRC_DIR}/platform/linux/shared/tls_identity.c
-        ${ROOT_SRC_DIR}/platform/linux/shared/tls_identity_openssl.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/tls_identity_ed25519.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/tls_peer_certificate.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/tls_ed25519.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/tls_aead.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/tls_aes_armv8.c
         ${ROOT_SRC_DIR}/platform/linux/shared/message_framer.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
-target_link_libraries(test_tls_channel PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(test_tls_channel PRIVATE picotls monocypher)
 
 add_unit_test(test_identity_database
     SOURCES

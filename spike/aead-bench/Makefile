@@ -1,0 +1,53 @@
+# AEAD bench — standalone, not part of the main can-hub build.
+#
+# Links the archives an existing build tree already produced, so it measures the
+# engines that build negotiates. Point BUILD at that tree:
+#
+#   make BUILD=../../build/x86_64/release && ./aead_bench
+#   make BUILD=../../build/arm64/release ARMV8=1   # on an ARM target
+#
+# Fusion is x86-64 only; the build tree's own gate decides, so pass FUSION=0
+# when the tree was configured without it (every non-x86-64 target).
+
+BUILD ?= ../../build/x86_64/release
+ROOT := ../..
+PICOTLS_SRC := $(ROOT)/build/picotls-src
+FUSION ?= 1
+
+CFLAGS ?= -O2 -Wall -Wextra
+CPPFLAGS := -I$(ROOT)/src -I$(PICOTLS_SRC)/include -I$(PICOTLS_SRC)/lib -I$(ROOT)/build/monocypher-src/src
+LIBS := $(BUILD)/picotls-build/libpicotls-minicrypto.a \
+        $(BUILD)/picotls-build/libpicotls-core.a \
+        $(BUILD)/libmonocypher.a
+
+# Kept out of CFLAGS: a CFLAGS= on the command line replaces the makefile's,
+# which would silently drop the instruction-set flags the engines need.
+ARCH_FLAGS :=
+
+ifeq ($(FUSION),1)
+ARCH_FLAGS += -maes -mpclmul -mssse3 -mavx2
+CPPFLAGS += -DCAN_HUB_TLS_FUSION
+LIBS := $(BUILD)/picotls-build/libpicotls-fusion.a $(LIBS)
+endif
+
+# On ARM the hardware AES engine is ours rather than picotls's, so it is a
+# source file instead of an archive. ARMV8=1 builds it in; the runtime HWCAP
+# check still decides whether it is used. The flag that enables the extensions
+# is spelled differently in the two execution states, so ask the compiler which
+# one it targets rather than requiring the caller to know.
+ifeq ($(ARMV8),1)
+ARM_CRYPTO_FLAGS ?= $(shell $(CC) -dM -E -x c /dev/null 2>/dev/null | grep -q __aarch64__ \
+                      && echo "-march=armv8-a+crypto" \
+                      || echo "-march=armv8-a -mfpu=crypto-neon-fp-armv8")
+ARCH_FLAGS += $(ARM_CRYPTO_FLAGS)
+CPPFLAGS += -DCAN_HUB_TLS_ARMV8_CRYPTO
+EXTRA_SOURCES += $(ROOT)/src/platform/linux/shared/tls_aes_armv8.c
+endif
+
+aead_bench: aead_bench.c $(ROOT)/src/platform/linux/shared/tls_aead.c $(EXTRA_SOURCES)
+	$(CC) $(CFLAGS) $(ARCH_FLAGS) $(CPPFLAGS) -o $@ $^ $(LIBS)
+
+clean:
+	rm -f aead_bench
+
+.PHONY: clean

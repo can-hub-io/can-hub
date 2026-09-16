@@ -1,6 +1,6 @@
 # manylinux wheel for python-can-hub: builds libcanhub.so against glibc inside
 # a manylinux image, bundles it into the package and produces a platform wheel
-# repaired by auditwheel. The .so embeds OpenSSL/ngtcp2/SQLite statically, so
+# repaired by auditwheel. The .so embeds picotls/ngtcp2/SQLite statically, so
 # glibc is the only dynamic dependency and the wheel is interpreter-independent
 # (one wheel per platform, py3-none-manylinux_*).
 #
@@ -18,11 +18,10 @@ FROM ${MANYLINUX_IMAGE} AS build
 ARG BUILD_PYTHON=cp312-cp312
 ENV PATH=/opt/python/${BUILD_PYTHON}/bin:$PATH
 
-# ninja from pip works on every base; OpenSSL's Configure needs the full perl
-# core, which the AlmaLinux-based images (manylinux_2_28) split out — the
-# Ubuntu-based ones (manylinux_2_31_armv7l) already ship it.
+# ninja from pip works on every base. picotls and Monocypher are cloned at
+# configure time, so git has to be present too.
 RUN pip install ninja \
-    && if command -v yum >/dev/null 2>&1; then yum install -y perl-core; fi
+    && if command -v yum >/dev/null 2>&1; then yum install -y git; else apt-get update && apt-get install -y git; fi
 
 COPY . /src
 

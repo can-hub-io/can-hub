@@ -22,6 +22,37 @@ require client certificates (mTLS).
 One pin covers both `quic://` and `tls://` on the same host:port — the
 listeners share the certificate.
 
+## What the handshake negotiates
+
+TLS 1.3 only, ALPN `canhub/0`, ED25519 signatures, X25519 key exchange with
+secp256r1 as the fallback.
+
+AES is offered only where the CPU implements it in hardware:
+
+| CPU | Offered, most preferred first |
+|---|---|
+| x86-64 with AES-NI | `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`, `TLS_CHACHA20_POLY1305_SHA256` |
+| ARM with the ARMv8 crypto extensions, 64- or 32-bit | the same three |
+| everything else | `TLS_CHACHA20_POLY1305_SHA256` |
+
+Detection is at runtime, so one binary per architecture covers both cases: a
+Raspberry Pi 5 offers AES, a Pi 4 offers ChaCha20.
+
+The software AES fallback is a constant-time implementation around 600x slower
+than the ChaCha20 path. A TLS 1.3 server picks from what the client offered, so
+a build that never offers AES cannot be pushed onto it. There is no wire
+signalling and no knob; mixed fleets work because ChaCha20 is always offered.
+
+Interop is unaffected: an OpenSSL peer negotiates AES-GCM against a build that
+offers it and ChaCha20-Poly1305 against one that does not, both RFC 8446 suites.
+
+**QUIC Initial packets are the exception.** RFC 9001 fixes AES-128-GCM for them
+whatever the connection later negotiates, so a hub with no hardware AES pays the
+software cost on every connection attempt, including from peers it has never
+heard of — one core saturates at roughly 250 attempts per second. On such a
+machine, prefer `tls://` for an internet-facing hub, or put address validation
+in front of it.
+
 ## Plaintext transports are network-trusted
 
 Plain `tcp://` and the unix socket carry no identity: no pinning, no
