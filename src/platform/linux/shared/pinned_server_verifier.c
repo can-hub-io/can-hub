@@ -47,6 +47,17 @@ void PinnedServerVerifier_AttachFixed(
     attachVerifier(self, context, resolve_peer);
 }
 
+void PinnedServerVerifier_CommitPin(PinnedServerVerifier *self)
+{
+    if (self->pending_fingerprint[0] == '\0') {
+        return;
+    }
+
+    fprintf(stderr, "pinning hub %s fingerprint %s\n", self->pin_key, self->pending_fingerprint);
+    PinStore_Append(self->pin_store_path, self->pin_key, self->pending_fingerprint);
+    self->pending_fingerprint[0] = '\0';
+}
+
 /* ---------- private ---------- */
 
 static void attachVerifier(PinnedServerVerifier *self, ptls_context_t *context, TlsPeerResolver resolve_peer)
@@ -101,8 +112,8 @@ static bool fingerprintIsPinned(PinnedServerVerifier *self, const char *fingerpr
     }
 
     if (!PinStore_Lookup(self->pin_store_path, self->pin_key, pinned)) {
-        fprintf(stderr, "pinning hub %s fingerprint %s\n", self->pin_key, fingerprint);
-        return PinStore_Append(self->pin_store_path, self->pin_key, fingerprint);
+        snprintf(self->pending_fingerprint, sizeof(self->pending_fingerprint), "%s", fingerprint);
+        return true;
     }
     if (strcmp(pinned, fingerprint) != 0) {
         fprintf(stderr, "hub %s fingerprint changed, rejecting connection\n", self->pin_key);

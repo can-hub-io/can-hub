@@ -355,6 +355,7 @@ static void onHandshakeCompleted(void *context)
     }
 
     self->connected = true;
+    QuicClientSecurity_CommitPin(&self->security);
     LOG_INFO("connected to %s:%s over quic://, negotiated %s", self->server.host, self->server.port_text,
              cipherSuiteOrUnknown(QuicConnection_CipherSuiteName(&self->connection)));
     self->events.on_connected(self->events.context);

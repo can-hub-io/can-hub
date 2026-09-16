@@ -248,6 +248,8 @@ static void announceWhenEstablished(TlsClientTransport *self)
         return;
     }
 
+    TlsClientSecurity_CommitPin(&self->security);
+
     self->announced = true;
     self->events.on_connected(self->events.context);
 }

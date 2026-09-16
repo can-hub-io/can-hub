@@ -342,6 +342,7 @@ static void onHandshakeCompleted(void *context)
     }
 
     self->connected = true;
+    QuicClientSecurity_CommitPin(&self->security);
     self->events.on_connected(self->events.context);
 }
 
