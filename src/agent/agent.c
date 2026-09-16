@@ -14,6 +14,7 @@
 typedef void (*TControlHandler)(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
 
 static void eventConnected(void *context);
+static void injectFrame(Agent *self, const FrameMessage *frame);
 static void eventDisconnected(void *context, uint64_t now_us);
 static void eventControl(void *context, const uint8_t *data, size_t size, uint64_t now_us);
 static void eventTransportFrame(void *context, const uint8_t *data, size_t size);
@@ -170,32 +171,16 @@ bool Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *
 
 void Agent_OnTransportFrame(Agent *self, const uint8_t *data, size_t size)
 {
-    MessageHeader header;
+    FrameStream stream;
     FrameMessage frame;
-    uint8_t interface_index;
-    uint8_t token;
 
     if (self->state != kAGENT_STATE_RUNNING) {
         return;
     }
-    if (!MessageHeader_Decode(&header, data, size)) {
-        return;
-    }
-    if (header.type != kMESSAGE_TYPE_FRAME || size < (size_t)MESSAGE_HEADER_SIZE + header.length) {
-        return;
-    }
-    if (!FrameMessage_Decode(&frame, data + MESSAGE_HEADER_SIZE, header.length)) {
-        return;
-    }
-    if (!ChannelMap_InterfaceForChannel(&self->channel_map, frame.channel, &interface_index)) {
-        return;
-    }
 
-    token = (uint8_t)((frame.route_flags & FRAME_ROUTE_TOKEN_MASK) >> FRAME_ROUTE_TOKEN_SHIFT);
-    EchoCorrelator_Push(&self->echo, interface_index, token, frame.can_id);
-    if (!self->can->write_frame(self->can->context, interface_index, &frame)) {
-        EchoCorrelator_DropNewest(&self->echo, interface_index);
-        self->tx_dropped[interface_index]++;
+    FrameStream_Init(&stream, data, size);
+    while (FrameStream_Next(&stream, &frame)) {
+        injectFrame(self, &frame);
     }
 }
 
@@ -418,4 +403,21 @@ static bool interfaceIndexForName(const Agent *self, const char *interface_name,
     }
 
     return false;
+}
+
+static void injectFrame(Agent *self, const FrameMessage *frame)
+{
+    uint8_t interface_index;
+    uint8_t token;
+
+    if (!ChannelMap_InterfaceForChannel(&self->channel_map, frame->channel, &interface_index)) {
+        return;
+    }
+
+    token = (uint8_t)((frame->route_flags & FRAME_ROUTE_TOKEN_MASK) >> FRAME_ROUTE_TOKEN_SHIFT);
+    EchoCorrelator_Push(&self->echo, interface_index, token, frame->can_id);
+    if (!self->can->write_frame(self->can->context, interface_index, frame)) {
+        EchoCorrelator_DropNewest(&self->echo, interface_index);
+        self->tx_dropped[interface_index]++;
+    }
 }

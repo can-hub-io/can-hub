@@ -81,3 +81,37 @@ static bool isPayloadLengthValid(uint8_t payload_length, uint8_t frame_flags)
     }
     return payload_length <= FRAME_PAYLOAD_MAX_CLASSIC;
 }
+
+void FrameStream_Init(FrameStream *self, const uint8_t *data, size_t size)
+{
+    self->data = data;
+    self->size = size;
+    self->offset = 0;
+}
+
+bool FrameStream_Next(FrameStream *self, FrameMessage *frame)
+{
+    MessageHeader header;
+    size_t remaining = self->size - self->offset;
+    size_t total;
+
+    if (self->offset >= self->size) {
+        return false;
+    }
+    if (!MessageHeader_Decode(&header, self->data + self->offset, remaining)) {
+        return false;
+    }
+    if (header.type != kMESSAGE_TYPE_FRAME) {
+        return false;
+    }
+    total = (size_t)MESSAGE_HEADER_SIZE + header.length;
+    if (remaining < total) {
+        return false;
+    }
+    if (!FrameMessage_Decode(frame, self->data + self->offset + MESSAGE_HEADER_SIZE, header.length)) {
+        return false;
+    }
+    self->offset += total;
+
+    return true;
+}

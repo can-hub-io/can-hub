@@ -453,7 +453,11 @@ echo returns in real bus order and only if the TX actually made it onto the
 wire; the injecting client receives its own echo too unless it opened the
 channel with the suppress-own-echo flag.
 
-Multiple FRAME messages may be packed back-to-back in one datagram up to the path MTU.
+Multiple FRAME messages may be packed back-to-back in one datagram up to the
+path MTU. A sender may pack or not; **a receiver must decode every FRAME in the
+buffer**, not only the first. Decoding stops at the end of the buffer and at the
+first entry that is not a well-formed FRAME, so a truncated tail costs the
+frames after it and nothing before it.
 
 ## Reliable channels
 
