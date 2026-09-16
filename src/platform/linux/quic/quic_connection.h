@@ -39,6 +39,7 @@ ngtcp2_crypto_conn_ref *QuicConnection_Ref(QuicConnection *self);
 ngtcp2_conn *QuicConnection_Handle(QuicConnection *self);
 TlsPeerCertificate *QuicConnection_PeerCertificate(QuicConnection *self);
 TlsPeerCertificate *QuicConnection_PeerCertificateOfSession(ptls_t *tls);
+const char *QuicConnection_CipherSuiteName(const QuicConnection *self);
 bool QuicConnection_Open(QuicConnection *self, ngtcp2_crypto_picotls_ctx *tls_context, const ngtcp2_path *path);
 bool QuicConnection_OpenServer(
     QuicConnection *self,

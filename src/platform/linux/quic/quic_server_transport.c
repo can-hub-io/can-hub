@@ -14,6 +14,7 @@
 #include "platform/linux/quic/quic_egress.h"
 #include "platform/linux/quic/quic_udp_gso.h"
 #include "platform/linux/shared/listen_endpoint.h"
+#include "platform/linux/shared/log.h"
 #include "protocol/message_header.h"
 
 #define UDP_PACKET_BUFFER_SIZE 1452
@@ -54,6 +55,8 @@ static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_o
 static void receiveControlData(QuicServerPeer *peer, const uint8_t *data, size_t size);
 static bool serverFrameSink(void *context, const uint8_t *frame, size_t size);
 static void retryStalledReliableStreams(QuicServerTransport *self);
+
+static const char *cipherSuiteOrUnknown(const char *name);
 
 /* ---------- public ---------- */
 
@@ -580,6 +583,8 @@ static void onHandshakeCompleted(void *context)
     capturePeerFingerprint(peer);
     peer->connected = true;
     ListenEndpoint_FormatOrigin(&peer->remote_address, origin, sizeof(origin));
+    LOG_INFO("peer %u on quic:// from %s negotiated %s", peer->peer_id, origin,
+             cipherSuiteOrUnknown(QuicConnection_CipherSuiteName(&peer->connection)));
     info.fingerprint_hex = peer->fingerprint_hex[0] != '\0' ? peer->fingerprint_hex : NULL;
     info.origin = origin;
     info.transport_kind = kPEER_TRANSPORT_QUIC;
@@ -662,4 +667,9 @@ static bool serverFrameSink(void *context, const uint8_t *frame, size_t size)
     QuicServerPeer *peer = context;
 
     return peer->transport->events.on_peer_frame(peer->transport->events.context, peer->peer_id, frame, size);
+}
+
+static const char *cipherSuiteOrUnknown(const char *name)
+{
+    return name != NULL ? name : "unknown";
 }

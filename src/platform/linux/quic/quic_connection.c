@@ -88,6 +88,25 @@ TlsPeerCertificate *QuicConnection_PeerCertificate(QuicConnection *self)
     return &self->peer;
 }
 
+/* ngtcp2's native handle for this backend is the picotls context, not the
+   ptls_t the session lives in. */
+const char *QuicConnection_CipherSuiteName(const QuicConnection *self)
+{
+    ngtcp2_crypto_picotls_ctx *tls_context;
+    ptls_cipher_suite_t *suite;
+
+    if (self->connection == NULL) {
+        return NULL;
+    }
+    tls_context = ngtcp2_conn_get_tls_native_handle(self->connection);
+    if (tls_context == NULL || tls_context->ptls == NULL) {
+        return NULL;
+    }
+    suite = ptls_get_cipher(tls_context->ptls);
+
+    return suite != NULL ? suite->name : NULL;
+}
+
 TlsPeerCertificate *QuicConnection_PeerCertificateOfSession(ptls_t *tls)
 {
     ngtcp2_crypto_conn_ref *reference = *ptls_get_data_ptr(tls);

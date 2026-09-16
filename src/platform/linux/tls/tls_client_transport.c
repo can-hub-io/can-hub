@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 
 #include "platform/linux/clock/clock.h"
+#include "platform/linux/shared/log.h"
 #include "protocol/message_header.h"
 
 #define TLS_CLIENT_READ_CHUNK_SIZE 4096
@@ -29,6 +30,8 @@ static bool feedChannel(TlsClientTransport *self, const uint8_t *data, size_t si
 static void dispatchMessage(void *context, const uint8_t *message, size_t size);
 static void closeConnection(TlsClientTransport *self, bool notify);
 static void sendPendingRecords(TlsClientTransport *self);
+
+static const char *cipherSuiteOrUnknown(const char *name);
 
 /* ---------- public ---------- */
 
@@ -258,6 +261,8 @@ static void announceWhenEstablished(TlsClientTransport *self)
     }
 
     self->announced = true;
+    LOG_INFO("connected to %s:%s over tls://, negotiated %s", self->host, self->port_text,
+             cipherSuiteOrUnknown(TlsChannel_CipherSuiteName(&self->channel)));
     self->events.on_connected(self->events.context);
 }
 
@@ -399,4 +404,9 @@ static void sendPendingRecords(TlsClientTransport *self)
         }
         TlsChannel_ConsumeCiphertext(&self->channel, (size_t)bytes_sent);
     }
+}
+
+static const char *cipherSuiteOrUnknown(const char *name)
+{
+    return name != NULL ? name : "unknown";
 }
