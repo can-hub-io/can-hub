@@ -51,26 +51,25 @@ jobs:
       - name: unit tests under asan and ubsan
         run: make test-sanitized
 
-  # The wheel shipped without this suite ever having run in the pipeline. It
-  # must fail rather than skip when the library is missing, or it would pass on
-  # a tree that never built one.
+  # The wheel shipped without this suite ever having run in the pipeline. The
+  # package is installed the way it ships — library bundled into canhub/, as
+  # docker/wheel.Dockerfile does — so the run exercises what users get rather
+  # than a library pointed at by an environment variable.
   python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: build and bundle libcanhub
         run: |
-          sudo apt-get update && sudo apt-get install -y ninja-build
-          python3 -m pip install --upgrade pytest
-      - name: build libcanhub
-        run: make release
+          make release
+          cp build/x86_64/release/libcanhub.so.0 python/canhub/libcanhub.so
+      - name: install the package and its test extra
+        run: python3 -m pip install --break-system-packages "./python[test]"
       - name: pytest
-        run: |
-          # The suite skips itself when no library is found, so assert one was
-          # built rather than letting an empty run report success.
-          test -f build/x86_64/release/libcanhub.so
-          cd python && CANHUB_LIBRARY="$GITHUB_WORKSPACE/build/x86_64/release/libcanhub.so" \
-              python3 -m pytest -q
+        working-directory: python
+        run: python3 -m pytest
 
   cross-armhf:
     runs-on: ubuntu-24.04-arm
