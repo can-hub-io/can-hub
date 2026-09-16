@@ -175,6 +175,18 @@ bool TlsChannel_PeerFingerprint(const TlsChannel *self, char *fingerprint_hex)
     return true;
 }
 
+const char *TlsChannel_CipherSuiteName(const TlsChannel *self)
+{
+    ptls_cipher_suite_t *suite;
+
+    if (self->tls == NULL) {
+        return NULL;
+    }
+    suite = ptls_get_cipher(self->tls);
+
+    return suite != NULL ? suite->name : NULL;
+}
+
 /* ---------- private ---------- */
 
 static bool advanceHandshake(TlsChannel *self, const uint8_t *data, size_t *size)

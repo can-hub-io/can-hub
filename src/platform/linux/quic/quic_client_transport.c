@@ -1,4 +1,5 @@
 #include "platform/linux/quic/quic_client_transport.h"
+#include "platform/linux/shared/log.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -24,6 +25,8 @@ static void onHandshakeCompleted(void *context);
 static void onDatagram(void *context, const uint8_t *data, size_t size);
 static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, size_t size);
 static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_offset);
+
+static const char *cipherSuiteOrUnknown(const char *name);
 
 /* ---------- public ---------- */
 
@@ -352,6 +355,8 @@ static void onHandshakeCompleted(void *context)
     }
 
     self->connected = true;
+    LOG_INFO("connected to %s:%s over quic://, negotiated %s", self->server.host, self->server.port_text,
+             cipherSuiteOrUnknown(QuicConnection_CipherSuiteName(&self->connection)));
     self->events.on_connected(self->events.context);
 }
 
@@ -422,4 +427,9 @@ static bool clientFrameSink(void *context, const uint8_t *frame, size_t size)
     self->events.on_frame(self->events.context, frame, size);
 
     return true;
+}
+
+static const char *cipherSuiteOrUnknown(const char *name)
+{
+    return name != NULL ? name : "unknown";
 }

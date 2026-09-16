@@ -15,6 +15,7 @@
 
 #include "platform/linux/clock/clock.h"
 #include "platform/linux/shared/listen_endpoint.h"
+#include "platform/linux/shared/log.h"
 #include "platform/linux/shared/tls_identity.h"
 #include "protocol/message_header.h"
 
@@ -41,6 +42,8 @@ static void announcePeer(TlsServerTransport *self, TlsServerPeer *peer);
 static void dispatchMessage(void *context, const uint8_t *message, size_t size);
 static void closePeer(TlsServerTransport *self, TlsServerPeer *peer, bool notify);
 static void sendPendingRecords(TlsServerPeer *peer);
+
+static const char *cipherSuiteOrUnknown(const char *name);
 
 /* ---------- public ---------- */
 
@@ -297,6 +300,8 @@ static void announcePeer(TlsServerTransport *self, TlsServerPeer *peer)
     HubPeerConnectInfo info;
 
     peer->announced = true;
+    LOG_INFO("peer %u on tls:// from %s negotiated %s", peer->peer_id, peer->origin,
+             cipherSuiteOrUnknown(TlsChannel_CipherSuiteName(&peer->channel)));
     info.fingerprint_hex = has_fingerprint ? fingerprint_hex : NULL;
     info.origin = peer->origin;
     info.transport_kind = kPEER_TRANSPORT_TLS;
@@ -451,4 +456,9 @@ static void sendPendingRecords(TlsServerPeer *peer)
         }
         TlsChannel_ConsumeCiphertext(&peer->channel, (size_t)bytes_sent);
     }
+}
+
+static const char *cipherSuiteOrUnknown(const char *name)
+{
+    return name != NULL ? name : "unknown";
 }

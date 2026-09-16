@@ -62,3 +62,4 @@ bool TlsChannel_Queue(TlsChannel *self, const uint8_t *data, size_t size);
 bool TlsChannel_Flush(TlsChannel *self);
 bool TlsChannel_WantsWrite(const TlsChannel *self);
 bool TlsChannel_PeerFingerprint(const TlsChannel *self, char *fingerprint_hex);
+const char *TlsChannel_CipherSuiteName(const TlsChannel *self);
