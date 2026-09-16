@@ -2,21 +2,24 @@
 
 /* ---------- public ---------- */
 
-uint8_t FrameRoutes_FromAgent(
+uint16_t FrameRoutes_FromAgent(
     const InterfaceRegistry *registry,
     PeerDirectory *directory,
     uint32_t agent_peer_id,
     uint8_t agent_channel,
     FrameRoute *routes,
-    uint8_t routes_max
+    uint16_t routes_max,
+    uint16_t *dropped
 )
 {
     const InterfaceEntry *entry;
     const ChannelBinding *binding;
     HubPeer *peer;
-    uint8_t route_count = 0;
+    uint16_t route_count = 0;
     uint8_t peer_index;
     uint8_t binding_iterator;
+
+    *dropped = 0;
 
     entry = InterfaceRegistry_FindByAgentChannel(registry, agent_peer_id, agent_channel);
     if (entry == NULL) {
@@ -31,7 +34,8 @@ uint8_t FrameRoutes_FromAgent(
         binding_iterator = 0;
         while ((binding = ClientSession_NextBindingForInterface(&peer->session, entry->interface_id, &binding_iterator)) != NULL) {
             if (route_count == routes_max) {
-                return route_count;
+                (*dropped)++;
+                continue;
             }
 
             routes[route_count].peer_id = peer->peer_id;
@@ -45,16 +49,19 @@ uint8_t FrameRoutes_FromAgent(
     return route_count;
 }
 
-uint8_t FrameRoutes_FromClient(
+uint16_t FrameRoutes_FromClient(
     const InterfaceRegistry *registry,
     const HubPeer *client_peer,
     uint8_t client_channel,
     FrameRoute *routes,
-    uint8_t routes_max
+    uint16_t routes_max,
+    uint16_t *dropped
 )
 {
     const InterfaceEntry *entry;
     uint32_t interface_id;
+
+    *dropped = 0;
 
     if (routes_max == 0) {
         return 0;
