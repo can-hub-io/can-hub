@@ -3,10 +3,17 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "hub/domain/client_session.h"
 #include "hub/domain/interface_registry.h"
 #include "hub/domain/peer_directory.h"
 
-#define FRAME_ROUTES_MAX PEER_DIRECTORY_MAX
+/*
+ * Bindings, not peers: several clients can open the same interface and each
+ * holds up to CLIENT_SESSION_BINDINGS_MAX channels, so one frame from an agent
+ * can owe a delivery to every binding in the hub. Sizing this by peer count
+ * dropped every subscriber past the 64th with no error and no counter.
+ */
+#define FRAME_ROUTES_MAX (PEER_DIRECTORY_MAX * CLIENT_SESSION_BINDINGS_MAX)
 
 /*
  * Pure routing service: given a frame source (peer + connection-scoped
@@ -20,18 +27,20 @@ typedef struct {
     bool reliable;
 } FrameRoute;
 
-uint8_t FrameRoutes_FromAgent(
+uint16_t FrameRoutes_FromAgent(
     const InterfaceRegistry *registry,
     PeerDirectory *directory,
     uint32_t agent_peer_id,
     uint8_t agent_channel,
     FrameRoute *routes,
-    uint8_t routes_max
+    uint16_t routes_max,
+    uint16_t *dropped
 );
-uint8_t FrameRoutes_FromClient(
+uint16_t FrameRoutes_FromClient(
     const InterfaceRegistry *registry,
     const HubPeer *client_peer,
     uint8_t client_channel,
     FrameRoute *routes,
-    uint8_t routes_max
+    uint16_t routes_max,
+    uint16_t *dropped
 );

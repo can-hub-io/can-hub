@@ -34,11 +34,12 @@ describe("frame_routes", []() {
         };
         FrameRoute routes[FRAME_ROUTES_MAX];
         uint8_t client_channel = 0;
-        uint8_t route_count;
+        uint16_t route_count;
+        uint16_t routes_dropped;
 
         ClientSession_OpenInterface(&client->session, &request, &client_channel);
 
-        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX);
+        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX, &routes_dropped);
 
         expect(route_count).toBe(1);
         expect(routes[0].peer_id).toBe((uint32_t)200);
@@ -56,11 +57,12 @@ describe("frame_routes", []() {
         };
         FrameRoute routes[FRAME_ROUTES_MAX];
         uint8_t client_channel = 0;
-        uint8_t route_count;
+        uint16_t route_count;
+        uint16_t routes_dropped;
 
         ClientSession_OpenInterface(&client->session, &request, &client_channel);
 
-        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX);
+        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX, &routes_dropped);
 
         expect(route_count).toBe(1);
         expect(routes[0].reliable).toBe(true);
@@ -78,12 +80,13 @@ describe("frame_routes", []() {
         FrameRoute routes[FRAME_ROUTES_MAX];
         uint8_t first_channel = 0;
         uint8_t second_channel = 0;
-        uint8_t route_count;
+        uint16_t route_count;
+        uint16_t routes_dropped;
 
         ClientSession_OpenInterface(&client->session, &request, &first_channel);
         ClientSession_OpenInterface(&client->session, &request, &second_channel);
 
-        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX);
+        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX, &routes_dropped);
 
         expect(route_count).toBe(2);
         expect(routes[0].peer_id).toBe((uint32_t)200);
@@ -103,30 +106,68 @@ describe("frame_routes", []() {
         };
         FrameRoute routes[FRAME_ROUTES_MAX];
         uint8_t channel = 0;
-        uint8_t route_count;
+        uint16_t route_count;
+        uint16_t routes_dropped;
 
         ClientSession_OpenInterface(&client->session, &request, &channel);
         ClientSession_OpenInterface(&client->session, &request, &channel);
 
-        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, 1);
+        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, 1, &routes_dropped);
 
         expect(route_count).toBe(1);
+        expect(routes_dropped).toBe(1);
+    });
+
+    it("routes past the old peer-count ceiling", []() {
+        FrameRoute routes[FRAME_ROUTES_MAX];
+        const InterfaceEntry *entry = InterfaceRegistry_FindByAgentChannel(&registry, 100, 1);
+        ChannelOpenRequest request = {
+            .interface_id = entry->interface_id,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
+        };
+        HubPeer *client;
+        uint8_t channel;
+        uint16_t route_count;
+        uint16_t routes_dropped;
+        uint16_t expected = 0;
+        uint32_t peer_id;
+        uint8_t opened;
+
+        for(peer_id=200; peer_id<204; peer_id++) {
+            client = PeerDirectory_Allocate(&directory, peer_id);
+            client->role = kHUB_PEER_ROLE_CLIENT;
+            for(opened=0; opened<CLIENT_SESSION_BINDINGS_MAX; opened++) {
+                channel = 0;
+                ClientSession_OpenInterface(&client->session, &request, &channel);
+                expected++;
+            }
+        }
+
+        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX, &routes_dropped);
+
+        expect(expected > PEER_DIRECTORY_MAX).toBe(true);
+        expect(route_count).toBe(expected);
+        expect(routes_dropped).toBe(0);
     });
 
     it("routes nothing when no client opened the interface", []() {
         FrameRoute routes[FRAME_ROUTES_MAX];
-        uint8_t route_count;
+        uint16_t route_count;
+        uint16_t routes_dropped;
 
-        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX);
+        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX, &routes_dropped);
 
         expect(route_count).toBe(0);
     });
 
     it("routes nothing for an unknown agent channel", []() {
         FrameRoute routes[FRAME_ROUTES_MAX];
-        uint8_t route_count;
+        uint16_t route_count;
+        uint16_t routes_dropped;
 
-        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 42, routes, FRAME_ROUTES_MAX);
+        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 42, routes, FRAME_ROUTES_MAX, &routes_dropped);
 
         expect(route_count).toBe(0);
     });
@@ -142,11 +183,12 @@ describe("frame_routes", []() {
         };
         FrameRoute routes[FRAME_ROUTES_MAX];
         uint8_t client_channel = 0;
-        uint8_t route_count;
+        uint16_t route_count;
+        uint16_t routes_dropped;
 
         ClientSession_OpenInterface(&client->session, &request, &client_channel);
 
-        route_count = FrameRoutes_FromClient(&registry, client, client_channel, routes, FRAME_ROUTES_MAX);
+        route_count = FrameRoutes_FromClient(&registry, client, client_channel, routes, FRAME_ROUTES_MAX, &routes_dropped);
 
         expect(route_count).toBe(1);
         expect(routes[0].peer_id).toBe((uint32_t)100);
@@ -156,9 +198,10 @@ describe("frame_routes", []() {
     it("routes nothing for a client channel that is not open", []() {
         HubPeer *client = PeerDirectory_Find(&directory, 200);
         FrameRoute routes[FRAME_ROUTES_MAX];
-        uint8_t route_count;
+        uint16_t route_count;
+        uint16_t routes_dropped;
 
-        route_count = FrameRoutes_FromClient(&registry, client, 5, routes, FRAME_ROUTES_MAX);
+        route_count = FrameRoutes_FromClient(&registry, client, 5, routes, FRAME_ROUTES_MAX, &routes_dropped);
 
         expect(route_count).toBe(0);
     });

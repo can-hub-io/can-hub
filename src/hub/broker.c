@@ -282,12 +282,13 @@ static bool onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
     HubPeer *peer = PeerDirectory_Find(&self->directory, peer_id);
     MessageHeader header;
     FrameMessage frame;
-    FrameRoute routes[FRAME_ROUTES_MAX];
+    FrameRoute *routes = self->frame_routes;
     uint32_t echo_originator_peer_id = 0;
+    uint16_t route_count = 0;
+    uint16_t routes_dropped = 0;
     uint8_t forwarded_route_flags = 0;
-    uint8_t route_count = 0;
     bool accepted = true;
-    uint8_t i;
+    uint16_t i;
 
     if (peer == NULL || size > FRAME_BUFFER_SIZE) {
         return true;
@@ -315,7 +316,8 @@ static bool onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
             peer->peer_id,
             frame.channel,
             routes,
-            FRAME_ROUTES_MAX
+            FRAME_ROUTES_MAX,
+            &routes_dropped
         );
         forwarded_route_flags = frame.route_flags & (FRAME_ROUTE_FLAG_BRIDGED | FRAME_ROUTE_FLAG_ECHO);
         echo_originator_peer_id = echoOriginatorPeerId(self, frame.route_flags);
@@ -324,9 +326,12 @@ static bool onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
             self->metrics.frames_dropped++;
             return true;
         }
-        route_count = FrameRoutes_FromClient(&self->registry, peer, frame.channel, routes, FRAME_ROUTES_MAX);
+        route_count = FrameRoutes_FromClient(
+            &self->registry, peer, frame.channel, routes, FRAME_ROUTES_MAX, &routes_dropped);
         forwarded_route_flags = (uint8_t)(injectionToken(self, peer) << FRAME_ROUTE_TOKEN_SHIFT);
     }
+
+    self->metrics.frames_dropped += routes_dropped;
 
     if (route_count == 0) {
         self->metrics.frames_unroutable++;

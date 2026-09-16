@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hub/domain/interface_registry.h"
+#include "hub/domain/frame_routes.h"
 #include "hub/domain/peer_directory.h"
 #include "hub/ports/authorization_port.h"
 #include "hub/ports/hub_transport_events.h"
@@ -38,6 +39,13 @@ typedef struct {
     PeerDirectory directory;
     HubMetrics metrics;
     PendingIfconfig pending_ifconfig[BROKER_PENDING_IFCONFIG_MAX];
+    /*
+     * Held here rather than on the stack: sized by bindings it is 16 KB, and
+     * onPeerFrame is the hub's hottest path. Safe to share because the broker
+     * is driven one event at a time and nothing reachable from a send re-enters
+     * onPeerFrame.
+     */
+    FrameRoute frame_routes[FRAME_ROUTES_MAX];
     bool require_known_agents;
     uint64_t now_us;
 } Broker;
