@@ -33,6 +33,45 @@ jobs:
           path: build/x86_64/release/can-hub*
           retention-days: 7
 
+  # Our own sources under ASan and UBSan. `make test` builds them plain: the
+  # cest runner is an ASan binary, but that watches the runner's allocations,
+  # not ours. Separate job so a sanitizer report never hides behind a build
+  # failure, and because the instrumented build is a second compile of the tree.
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: cache build tree
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: sanitized-${{ hashFiles('CMakeLists.txt', 'test/CMakeLists.txt', 'cmake/**') }}
+      - name: unit tests under asan and ubsan
+        run: make test-sanitized
+
+  # The wheel shipped without this suite ever having run in the pipeline. It
+  # must fail rather than skip when the library is missing, or it would pass on
+  # a tree that never built one.
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y ninja-build
+          python3 -m pip install --upgrade pytest
+      - name: build libcanhub
+        run: make release
+      - name: pytest
+        run: |
+          # The suite skips itself when no library is found, so assert one was
+          # built rather than letting an empty run report success.
+          test -f build/x86_64/release/libcanhub.so
+          cd python && CANHUB_LIBRARY="$GITHUB_WORKSPACE/build/x86_64/release/libcanhub.so" \
+              python3 -m pytest -q
+
   cross-armhf:
     runs-on: ubuntu-24.04-arm
     steps:

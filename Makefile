@@ -23,9 +23,11 @@ _BUILD_RELEASE := build/$(ARCH)/release
 _BUILD_DEBUG := build/$(ARCH)/debug
 _BUILD_DEB := build/$(ARCH)/package
 _BUILD_TEST := build/test
+_BUILD_TEST_SANITIZED := build/test-sanitized
+_SANITIZERS := -fsanitize=address,undefined -fno-omit-frame-pointer -g
 _CEST_RUNNER := test/vendor/cest-runner_linux_x86_64
 
-.PHONY: release debug install deb static deb-debug test e2e e2e-image web-daemon windows bump clean
+.PHONY: release debug install deb static deb-debug test test-sanitized e2e e2e-image web-daemon windows bump clean
 
 _BUILD_WINDOWS := build/mingw-x86_64/release
 
@@ -93,6 +95,22 @@ test:
 	# ASLR of kernels >= 6.5 (intermittent SIGSEGV inside ASan's handler).
 	# Disabling ASLR for the runner process keeps ASan fully functional.
 	setarch -R $(_CEST_RUNNER) $(_BUILD_TEST)
+
+# The same unit tests with our own sources instrumented. `make test` builds them
+# plain — the cest runner is an ASan binary, but that only watches the runner's
+# allocations, not ours, so nothing looked at this code until this target.
+test-sanitized:
+	$(CMAKE) -B $(_BUILD_TEST_SANITIZED) test/ \
+	         -G $(GENERATOR) \
+	         -DCMAKE_TOOLCHAIN_FILE=$(abspath cmake/toolchain-x86_64.cmake) \
+	         -DCMAKE_C_FLAGS="$(_SANITIZERS)" \
+	         -DCMAKE_CXX_FLAGS="$(_SANITIZERS)" \
+	         -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+	$(CMAKE) --build $(_BUILD_TEST_SANITIZED)
+	@chmod +x $(_CEST_RUNNER)
+	LSAN_OPTIONS=suppressions=$(abspath test/lsan.supp) \
+	UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+	setarch -R $(_CEST_RUNNER) $(_BUILD_TEST_SANITIZED)
 
 # End-to-end bench (Robot Framework). One privileged container: vcan + per-Server
 # network namespaces + netem. Needs the release binaries and the host modules.

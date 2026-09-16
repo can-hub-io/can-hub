@@ -1,0 +1,6 @@
+# SQLite keeps global allocations alive until sqlite3_shutdown(), which nothing
+# calls because the process is about to exit anyway. identity_database closes
+# every connection it opens; what is left here is the library's own state, so
+# leaving it unsuppressed would report 74 allocations that no change of ours
+# can ever remove.
+leak:sqlite3
