@@ -148,23 +148,17 @@ static void transportOnControl(void *context, const uint8_t *data, size_t size, 
 static void transportOnFrame(void *context, const uint8_t *data, size_t size)
 {
     MirrorApp *self = context;
-    MessageHeader header;
+    FrameStream stream;
     FrameMessage frame;
 
     if (self->state != kMIRROR_PUMPING) {
         return;
     }
-    if (!MessageHeader_Decode(&header, data, size)) {
-        return;
-    }
-    if (header.type != kMESSAGE_TYPE_FRAME || size < (size_t)MESSAGE_HEADER_SIZE + header.length) {
-        return;
-    }
-    if (!FrameMessage_Decode(&frame, data + MESSAGE_HEADER_SIZE, header.length)) {
-        return;
-    }
 
-    self->can->write_frame(self->can->context, 0, &frame);
+    FrameStream_Init(&stream, data, size);
+    while (FrameStream_Next(&stream, &frame)) {
+        self->can->write_frame(self->can->context, 0, &frame);
+    }
 }
 
 static void handleListReply(MirrorApp *self, const uint8_t *body, uint16_t length)

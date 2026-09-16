@@ -35,3 +35,19 @@ typedef struct {
 
 size_t FrameMessage_Encode(const FrameMessage *self, uint8_t *buffer, size_t buffer_size);
 bool FrameMessage_Decode(FrameMessage *self, const uint8_t *payload, size_t payload_length);
+
+/*
+ * A datagram may carry several FRAMEs back to back (see doc/protocol.md), so a
+ * receiver that decodes only the first silently drops the rest. This walks
+ * them; it stops at the end of the buffer and at the first entry that is not a
+ * well-formed FRAME, so a truncated tail costs the frames after it, never a
+ * read past the end.
+ */
+typedef struct {
+    const uint8_t *data;
+    size_t size;
+    size_t offset;
+} FrameStream;
+
+void FrameStream_Init(FrameStream *self, const uint8_t *data, size_t size);
+bool FrameStream_Next(FrameStream *self, FrameMessage *frame);

@@ -91,4 +91,101 @@ describe("frame_message", []() {
 
         expect(encoded_size).toBe((size_t)0);
     });
+
+    it("walks every frame packed in one datagram", []() {
+        FrameMessage first = { 0x101, 11, 1, 2, 0, 0, { 0xAA, 0xBB } };
+        FrameMessage second = { 0x202, 22, 2, 3, 0, 0, { 0x01, 0x02, 0x03 } };
+        FrameMessage third = { 0x303, 33, 3, 1, 0, 0, { 0x7F } };
+        FrameMessage decoded;
+        FrameStream stream;
+        uint8_t buffer[256];
+        size_t packed = 0;
+        uint32_t seen[4];
+        uint8_t count = 0;
+
+        packed += FrameMessage_Encode(&first, buffer + packed, sizeof(buffer) - packed);
+        packed += FrameMessage_Encode(&second, buffer + packed, sizeof(buffer) - packed);
+        packed += FrameMessage_Encode(&third, buffer + packed, sizeof(buffer) - packed);
+
+        FrameStream_Init(&stream, buffer, packed);
+        while (FrameStream_Next(&stream, &decoded)) {
+            seen[count] = decoded.can_id;
+            count++;
+        }
+
+        expect(count).toBe((uint8_t)3);
+        expect(seen[0]).toBe((uint32_t)0x101);
+        expect(seen[1]).toBe((uint32_t)0x202);
+        expect(seen[2]).toBe((uint32_t)0x303);
+    });
+
+    it("keeps the frames before a truncated tail", []() {
+        FrameMessage first = { 0x101, 11, 1, 2, 0, 0, { 0xAA, 0xBB } };
+        FrameMessage second = { 0x202, 22, 2, 3, 0, 0, { 0x01, 0x02, 0x03 } };
+        FrameMessage decoded;
+        FrameStream stream;
+        uint8_t buffer[256];
+        size_t packed = 0;
+        uint8_t count = 0;
+
+        packed += FrameMessage_Encode(&first, buffer + packed, sizeof(buffer) - packed);
+        packed += FrameMessage_Encode(&second, buffer + packed, sizeof(buffer) - packed);
+
+        FrameStream_Init(&stream, buffer, packed - 1);
+        while (FrameStream_Next(&stream, &decoded)) {
+            count++;
+        }
+
+        expect(count).toBe((uint8_t)1);
+    });
+
+    it("yields the single frame a lone datagram carries", []() {
+        FrameMessage only = { 0x123, 1, 1, 4, 0, 0, { 1, 2, 3, 4 } };
+        FrameMessage decoded;
+        FrameStream stream;
+        uint8_t buffer[128];
+        size_t encoded_size;
+        bool first_ok;
+        bool second_ok;
+
+        encoded_size = FrameMessage_Encode(&only, buffer, sizeof(buffer));
+
+        FrameStream_Init(&stream, buffer, encoded_size);
+        first_ok = FrameStream_Next(&stream, &decoded);
+        second_ok = FrameStream_Next(&stream, &decoded);
+
+        expect(first_ok).toBe(true);
+        expect(second_ok).toBe(false);
+        expect(decoded.can_id).toBe((uint32_t)0x123);
+    });
+
+    it("yields nothing from an empty datagram", []() {
+        FrameMessage decoded;
+        FrameStream stream;
+        uint8_t buffer[1] = { 0 };
+
+        FrameStream_Init(&stream, buffer, 0);
+
+        expect(FrameStream_Next(&stream, &decoded)).toBe(false);
+    });
+
+    it("stops at a packed entry that is not a frame", []() {
+        FrameMessage first = { 0x101, 11, 1, 2, 0, 0, { 0xAA, 0xBB } };
+        FrameMessage decoded;
+        FrameStream stream;
+        MessageHeader ping = { kMESSAGE_TYPE_PING, 0, 0 };
+        uint8_t buffer[256];
+        size_t packed = 0;
+        uint8_t count = 0;
+
+        packed += FrameMessage_Encode(&first, buffer + packed, sizeof(buffer) - packed);
+        packed += MessageHeader_Encode(&ping, buffer + packed, sizeof(buffer) - packed);
+
+        FrameStream_Init(&stream, buffer, packed);
+        while (FrameStream_Next(&stream, &decoded)) {
+            count++;
+        }
+
+        expect(count).toBe((uint8_t)1);
+    });
 });

@@ -220,23 +220,17 @@ static void transportOnControl(void *context, const uint8_t *data, size_t size, 
 static void transportOnFrame(void *context, const uint8_t *data, size_t size)
 {
     Client *self = context;
-    MessageHeader header;
+    FrameStream stream;
     FrameMessage frame;
 
     if (self->state != kCLIENT_OPEN) {
         return;
     }
-    if (!MessageHeader_Decode(&header, data, size)) {
-        return;
-    }
-    if (header.type != kMESSAGE_TYPE_FRAME || size < (size_t)MESSAGE_HEADER_SIZE + header.length) {
-        return;
-    }
-    if (!FrameMessage_Decode(&frame, data + MESSAGE_HEADER_SIZE, header.length)) {
-        return;
-    }
 
-    self->events.on_frame(self->events.context, &frame);
+    FrameStream_Init(&stream, data, size);
+    while (FrameStream_Next(&stream, &frame)) {
+        self->events.on_frame(self->events.context, &frame);
+    }
 }
 
 static void runPending(Client *self)
