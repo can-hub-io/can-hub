@@ -15,7 +15,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: install dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
       - name: unit tests
         run: make test
       - name: release build
@@ -108,7 +111,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: install dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
       - name: install llvm-mingw
         run: |
           curl -fsSL -o /tmp/llvm-mingw.tar.xz "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/llvm-mingw-$LLVM_MINGW_VERSION-ucrt-ubuntu-22.04-x86_64.tar.xz"
