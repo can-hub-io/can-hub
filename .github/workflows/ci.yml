@@ -36,10 +36,8 @@ jobs:
           path: build/x86_64/release/can-hub*
           retention-days: 7
 
-  # Our own sources under ASan and UBSan. `make test` builds them plain: the
-  # cest runner is an ASan binary, but that watches the runner's allocations,
-  # not ours. Separate job so a sanitizer report never hides behind a build
-  # failure, and because the instrumented build is a second compile of the tree.
+  # `make test` builds our sources plain: the cest runner is an ASan binary, but
+  # that watches the runner's allocations, not ours.
   sanitizers:
     runs-on: ubuntu-latest
     steps:
@@ -57,10 +55,8 @@ jobs:
       - name: unit tests under asan and ubsan
         run: make test-sanitized
 
-  # The wheel shipped without this suite ever having run in the pipeline. The
-  # package is installed the way it ships — library bundled into canhub/, as
-  # docker/wheel.Dockerfile does — so the run exercises what users get rather
-  # than a library pointed at by an environment variable.
+  # Installed the way it ships, library bundled into canhub/, so the suite runs
+  # against what a user gets rather than a path in an environment variable.
   python:
     runs-on: ubuntu-latest
     steps:
