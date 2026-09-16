@@ -7,12 +7,8 @@
 #include "hub/domain/interface_registry.h"
 #include "hub/domain/peer_directory.h"
 
-/*
- * Bindings, not peers: several clients can open the same interface and each
- * holds up to CLIENT_SESSION_BINDINGS_MAX channels, so one frame from an agent
- * can owe a delivery to every binding in the hub. Sizing this by peer count
- * dropped every subscriber past the 64th with no error and no counter.
- */
+/* Bindings, not peers: several clients can open the same interface, and each
+   holds up to CLIENT_SESSION_BINDINGS_MAX channels of it. */
 #define FRAME_ROUTES_MAX (PEER_DIRECTORY_MAX * CLIENT_SESSION_BINDINGS_MAX)
 
 /*

@@ -39,12 +39,8 @@ typedef struct {
     PeerDirectory directory;
     HubMetrics metrics;
     PendingIfconfig pending_ifconfig[BROKER_PENDING_IFCONFIG_MAX];
-    /*
-     * Held here rather than on the stack: sized by bindings it is 16 KB, and
-     * onPeerFrame is the hub's hottest path. Safe to share because the broker
-     * is driven one event at a time and nothing reachable from a send re-enters
-     * onPeerFrame.
-     */
+    /* 16 KB, so not on the stack of onPeerFrame. Shared safely only while
+       nothing reachable from a send re-enters that function. */
     FrameRoute frame_routes[FRAME_ROUTES_MAX];
     bool require_known_agents;
     uint64_t now_us;
