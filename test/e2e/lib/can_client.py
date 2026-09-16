@@ -27,6 +27,12 @@ class CanClient:
         return cls(server, config, process)
 
     @staticmethod
+    def show_identity(server: Server, state_dir: str) -> str:
+        result = server.exec(binary("can-hub-client"), "--show-identity",
+                             "--state-dir", state_dir)
+        return result.stdout.strip()
+
+    @staticmethod
     def list(server: Server, connect: str | None = None):
         argv = [binary("can-hub-client")]
         if connect:

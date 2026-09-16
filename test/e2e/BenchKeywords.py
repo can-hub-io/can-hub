@@ -7,8 +7,11 @@ Keywords return Can* instances so tests read like:
 """
 
 import json
+import re
 import statistics
+import tempfile
 import time
+from pathlib import Path
 
 from robot.api import logger
 from robot.api.deco import keyword, library
@@ -86,6 +89,37 @@ class BenchKeywords:
 
     # ---------- actions ----------
 
+    @keyword("Fresh State Directory For ${role}")
+    def fresh_state_directory(self, role) -> str:
+        path = Path(tempfile.mkdtemp(prefix=f"can-hub-{role}-"))
+        return str(path)
+
+    @keyword("Negotiated Cipher Suite On ${hub} Over ${scheme}")
+    def negotiated_cipher_suite(self, hub, scheme, timeout=5):
+        process = getattr(hub, "process", hub)
+        pattern = re.compile(rf"on {scheme}:// from \S+ negotiated (\S+)")
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            found = pattern.search(process.read_log())
+            if found:
+                return found.group(1)
+            time.sleep(0.1)
+        raise AssertionError(
+            f"hub logged no negotiated cipher suite for {scheme}\n{process.read_log()}"
+        )
+
+    @keyword("Interfaces On ${hub}")
+    def interfaces_on(self, hub):
+        return hub.interfaces()
+
+    @keyword("Identity Of Agent On ${server} In ${state_dir}")
+    def identity_of_agent(self, server, state_dir) -> str:
+        return CanAgent.show_identity(server, state_dir)
+
+    @keyword("Identity Of Client On ${server} In ${state_dir}")
+    def identity_of_client(self, server, state_dir) -> str:
+        return CanClient.show_identity(server, state_dir)
+
     @keyword("Run CLI On Hub ${hub}")
     def run_cli_on_hub(self, hub, *args):
         return hub.cli(*args)
@@ -147,7 +181,8 @@ class BenchKeywords:
         return server.exec(binary(name), *args, background=True, log_name=name)
 
     @keyword("Log Of ${process} Should Contain ${text}")
-    def log_should_contain(self, process, text, timeout=5):
+    def log_should_contain(self, target, text, timeout=5):
+        process = getattr(target, "process", target)
         deadline = time.monotonic() + float(timeout)
         while time.monotonic() < deadline:
             if text in process.read_log():
