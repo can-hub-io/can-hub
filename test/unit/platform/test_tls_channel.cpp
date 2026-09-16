@@ -108,13 +108,18 @@ describe("tls_channel", []() {
         expect((const char *)file_fingerprint).toBe((const char *)handshake_fingerprint);
     });
 
-    it("pins the server fingerprint on first contact", []() {
+    it("holds the first-contact pin until the transport commits it", []() {
         char pinned[PIN_STORE_FINGERPRINT_HEX_SIZE];
         bool client_failed = false;
+        bool pinned_during_handshake;
 
         expect(startChannelPair()).toBe(true);
         expect(pumpUntilEstablished(&client_failed)).toBe(true);
+        pinned_during_handshake = PinStore_Lookup(PIN_STORE_PATH, PIN_KEY, pinned);
 
+        TlsClientSecurity_CommitPin(&client_security);
+
+        expect(pinned_during_handshake).toBe(false);
         expect(PinStore_Lookup(PIN_STORE_PATH, PIN_KEY, pinned)).toBe(true);
     });
 

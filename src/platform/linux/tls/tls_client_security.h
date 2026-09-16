@@ -30,5 +30,6 @@ typedef struct {
 
 bool TlsClientSecurity_Init(TlsClientSecurity *self, const TlsClientSecurityConfig *config);
 void TlsClientSecurity_Free(TlsClientSecurity *self);
+void TlsClientSecurity_CommitPin(TlsClientSecurity *self);
 bool TlsClientSecurity_NewSession(TlsClientSecurity *self, const char *server_host, ptls_t **tls);
 const ptls_handshake_properties_t *TlsClientSecurity_HandshakeProperties(const TlsClientSecurity *self);

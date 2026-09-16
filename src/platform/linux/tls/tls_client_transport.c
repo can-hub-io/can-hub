@@ -261,6 +261,7 @@ static void announceWhenEstablished(TlsClientTransport *self)
     }
 
     self->announced = true;
+    TlsClientSecurity_CommitPin(&self->security);
     LOG_INFO("connected to %s:%s over tls://, negotiated %s", self->host, self->port_text,
              cipherSuiteOrUnknown(TlsChannel_CipherSuiteName(&self->channel)));
     self->events.on_connected(self->events.context);

@@ -5,7 +5,7 @@
 #include "platform/linux/quic/quic_connection.h"
 
 static bool loadClientIdentity(QuicClientSecurity *self, const QuicClientSecurityConfig *config);
-static void attachVerifier(QuicClientSecurity *self, const QuicClientSecurityConfig *config);
+static bool attachVerifier(QuicClientSecurity *self, const QuicClientSecurityConfig *config);
 
 /* ---------- public ---------- */
 
@@ -29,7 +29,10 @@ bool QuicClientSecurity_Init(
         QuicClientSecurity_Free(self);
         return false;
     }
-    attachVerifier(self, config);
+    if (!attachVerifier(self, config)) {
+        QuicClientSecurity_Free(self);
+        return false;
+    }
 
     ngtcp2_crypto_picotls_ctx_init(&self->tls_context);
     self->tls_context.ptls = ptls_new(&self->profile.context, 0);
@@ -67,6 +70,11 @@ void QuicClientSecurity_Free(QuicClientSecurity *self)
     TlsDefaults_FreeProfile(&self->profile);
 }
 
+void QuicClientSecurity_CommitPin(QuicClientSecurity *self)
+{
+    PinnedServerVerifier_CommitPin(&self->verifier);
+}
+
 /* ---------- private ---------- */
 
 static bool loadClientIdentity(QuicClientSecurity *self, const QuicClientSecurityConfig *config)
@@ -78,10 +86,15 @@ static bool loadClientIdentity(QuicClientSecurity *self, const QuicClientSecurit
     return TlsDefaults_LoadIdentity(&self->profile, config->certificate_path, config->key_path);
 }
 
-static void attachVerifier(QuicClientSecurity *self, const QuicClientSecurityConfig *config)
+/*
+ * Refusing to initialise is the point: picotls skips verification entirely when
+ * ctx->verify_certificate is NULL, so returning without a verifier would accept
+ * any certificate on both planes.
+ */
+static bool attachVerifier(QuicClientSecurity *self, const QuicClientSecurityConfig *config)
 {
     if (config == NULL) {
-        return;
+        return false;
     }
 
     if (config->pinned_fingerprint != NULL) {
@@ -91,7 +104,7 @@ static void attachVerifier(QuicClientSecurity *self, const QuicClientSecurityCon
             QuicConnection_PeerCertificateOfSession,
             config->pinned_fingerprint
         );
-        return;
+        return true;
     }
     if (config->pin_store_path != NULL && config->pin_key != NULL) {
         PinnedServerVerifier_Attach(
@@ -101,5 +114,8 @@ static void attachVerifier(QuicClientSecurity *self, const QuicClientSecurityCon
             config->pin_store_path,
             config->pin_key
         );
+        return true;
     }
+
+    return false;
 }

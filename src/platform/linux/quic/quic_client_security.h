@@ -41,3 +41,4 @@ bool QuicClientSecurity_Init(
 );
 bool QuicClientSecurity_AttachConnection(QuicClientSecurity *self, ngtcp2_conn *connection);
 void QuicClientSecurity_Free(QuicClientSecurity *self);
+void QuicClientSecurity_CommitPin(QuicClientSecurity *self);

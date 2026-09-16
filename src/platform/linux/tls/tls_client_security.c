@@ -3,6 +3,7 @@
 #include <string.h>
 
 static bool loadClientIdentity(TlsClientSecurity *self, const TlsClientSecurityConfig *config);
+static bool attachVerifier(TlsClientSecurity *self, const TlsClientSecurityConfig *config);
 
 /* ---------- public ---------- */
 
@@ -18,21 +19,9 @@ bool TlsClientSecurity_Init(TlsClientSecurity *self, const TlsClientSecurityConf
         return false;
     }
 
-    if (config != NULL && config->pinned_fingerprint != NULL) {
-        PinnedServerVerifier_AttachFixed(
-            &self->verifier,
-            &self->profile.context,
-            TlsPeerCertificate_FromDataPointer,
-            config->pinned_fingerprint
-        );
-    } else if (config != NULL && config->pin_store_path != NULL && config->pin_key != NULL) {
-        PinnedServerVerifier_Attach(
-            &self->verifier,
-            &self->profile.context,
-            TlsPeerCertificate_FromDataPointer,
-            config->pin_store_path,
-            config->pin_key
-        );
+    if (!attachVerifier(self, config)) {
+        TlsClientSecurity_Free(self);
+        return false;
     }
     TlsDefaults_ConfigureClientHandshake(&self->handshake_properties);
 
@@ -64,6 +53,11 @@ const ptls_handshake_properties_t *TlsClientSecurity_HandshakeProperties(const T
     return &self->handshake_properties;
 }
 
+void TlsClientSecurity_CommitPin(TlsClientSecurity *self)
+{
+    PinnedServerVerifier_CommitPin(&self->verifier);
+}
+
 /* ---------- private ---------- */
 
 static bool loadClientIdentity(TlsClientSecurity *self, const TlsClientSecurityConfig *config)
@@ -73,4 +67,38 @@ static bool loadClientIdentity(TlsClientSecurity *self, const TlsClientSecurityC
     }
 
     return TlsDefaults_LoadIdentity(&self->profile, config->certificate_path, config->key_path);
+}
+
+/*
+ * Refusing to initialise is the point: picotls skips verification entirely when
+ * ctx->verify_certificate is NULL, so returning without a verifier would accept
+ * any certificate.
+ */
+static bool attachVerifier(TlsClientSecurity *self, const TlsClientSecurityConfig *config)
+{
+    if (config == NULL) {
+        return false;
+    }
+
+    if (config->pinned_fingerprint != NULL) {
+        PinnedServerVerifier_AttachFixed(
+            &self->verifier,
+            &self->profile.context,
+            TlsPeerCertificate_FromDataPointer,
+            config->pinned_fingerprint
+        );
+        return true;
+    }
+    if (config->pin_store_path != NULL && config->pin_key != NULL) {
+        PinnedServerVerifier_Attach(
+            &self->verifier,
+            &self->profile.context,
+            TlsPeerCertificate_FromDataPointer,
+            config->pin_store_path,
+            config->pin_key
+        );
+        return true;
+    }
+
+    return false;
 }

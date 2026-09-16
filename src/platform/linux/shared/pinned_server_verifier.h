@@ -24,6 +24,7 @@ typedef struct {
     char pin_store_path[PINNED_SERVER_VERIFIER_PATH_MAX];
     char pin_key[PIN_STORE_KEY_MAX];
     char expected_fingerprint[PIN_STORE_FINGERPRINT_HEX_SIZE];
+    char pending_fingerprint[PIN_STORE_FINGERPRINT_HEX_SIZE];
 } PinnedServerVerifier;
 
 void PinnedServerVerifier_Attach(
@@ -39,3 +40,4 @@ void PinnedServerVerifier_AttachFixed(
     TlsPeerResolver resolve_peer,
     const char *expected_fingerprint
 );
+void PinnedServerVerifier_CommitPin(PinnedServerVerifier *self);
