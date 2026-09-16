@@ -93,11 +93,9 @@ jobs:
           key: armhf-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
       - name: release build
         run: make release ARCH=armhf
-      # ARMv8-A defines the crypto extensions in AArch32 too, so the same engine
-      # serves a 32-bit userland on 64-bit silicon — Raspberry Pi OS armhf on a
-      # Pi 3, 4 or 5. This runner is such a core, so it checks the engine in
-      # that state. Informational: a runner without AArch32 answers with
-      # "Exec format error", and that must not fail the build.
+      # ARMv8-A defines the crypto extensions in AArch32 too, and this runner
+      # implements that state. Informational: a runner that does not answers
+      # with "Exec format error", which must not fail the build.
       - name: armv7 aead agreement, if this core runs 32-bit
         continue-on-error: true
         run: |
@@ -107,10 +105,9 @@ jobs:
               CFLAGS="-O2 -Wall -Wextra -static" \
               BUILD="$PWD/build/armhf/release" FUSION=0 ARMV8=1
           ./spike/aead-bench/aead_bench || echo "this core does not run AArch32"
-      # The OpenSSL v0.3.0 shipped against, on the same core and the same
-      # execution state, so the comparison isolates the stack rather than the
-      # hardware. Extracted rather than installed: openssl is Multi-Arch
-      # foreign, so apt would replace the runner's own arm64 build.
+      # Same core and execution state, so the comparison isolates the stack.
+      # Extracted rather than installed: openssl is Multi-Arch foreign, so apt
+      # would replace the runner's own arm64 build.
       - name: armv7 against the openssl v0.3.0 shipped with
         continue-on-error: true
         run: |
@@ -161,11 +158,8 @@ jobs:
           key: arm64-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
       - name: release build
         run: make release ARCH=arm64
-      # Agreement for the ARMv8 engine on a real ARM core rather than under an
-      # emulator, and on a second microarchitecture: every number in
-      # spike/aead-bench/RESULTS.md comes from one Cortex-A76. Timings printed
-      # here are indicative only — a shared runner is not a quiet host (#193) —
-      # but a MISMATCH is a MISMATCH on any host, and that is what this gates.
+      # Timings from a shared runner are indicative (#193); agreement is not,
+      # and agreement is what this gates.
       - name: arm64 aead agreement
         run: |
           grep -m1 'model name\|CPU part' /proc/cpuinfo || true
