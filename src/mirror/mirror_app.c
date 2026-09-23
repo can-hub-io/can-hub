@@ -19,6 +19,7 @@ static void transportOnFrame(void *context, const uint8_t *data, size_t size);
 static void handleListReply(MirrorApp *self, const uint8_t *body, uint16_t length);
 static void handleOpenAck(MirrorApp *self, const OpenAckMessage *ack);
 static void openResolvedInterface(MirrorApp *self);
+static uint8_t openFlags(const MirrorApp *self, uint8_t access_flags);
 static void sendHello(MirrorApp *self);
 static void sendList(MirrorApp *self, uint16_t offset);
 static void sendOpen(MirrorApp *self, uint8_t flags);
@@ -191,14 +192,18 @@ static void handleListReply(MirrorApp *self, const uint8_t *body, uint16_t lengt
 
 static void openResolvedInterface(MirrorApp *self)
 {
-    uint8_t flags = OPEN_FLAGS_READ_WRITE;
-
-    if (self->reliable) {
-        flags |= OPEN_FLAG_RELIABLE;
-    }
     self->state = kMIRROR_OPENING;
     self->pending_write = true;
-    sendOpen(self, flags);
+    sendOpen(self, openFlags(self, OPEN_FLAGS_READ_WRITE));
+}
+
+static uint8_t openFlags(const MirrorApp *self, uint8_t access_flags)
+{
+    if (self->reliable) {
+        return access_flags | OPEN_FLAG_RELIABLE;
+    }
+
+    return access_flags;
 }
 
 static void handleOpenAck(MirrorApp *self, const OpenAckMessage *ack)
@@ -219,7 +224,7 @@ static void handleOpenAck(MirrorApp *self, const OpenAckMessage *ack)
 
     if (self->pending_write && ack->status == OPEN_STATUS_WRITE_DENIED) {
         self->pending_write = false;
-        sendOpen(self, OPEN_FLAGS_READ_ONLY);
+        sendOpen(self, openFlags(self, OPEN_FLAGS_READ_ONLY));
         return;
     }
 
