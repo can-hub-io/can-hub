@@ -74,6 +74,20 @@ static void reattachClientsToAgent(Broker *self, uint32_t agent_peer_id);
 static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size);
 static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char *detail);
 static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame);
+static bool reliableRoutesFit(
+    Broker *self,
+    const FrameRoute *routes,
+    uint16_t route_count,
+    const FrameMessage *frame,
+    uint32_t echo_originator_peer_id
+);
+static bool routeTakesFrame(
+    Broker *self,
+    const FrameRoute *route,
+    const FrameMessage *frame,
+    uint32_t echo_originator_peer_id
+);
+static size_t frameWireSize(const FrameMessage *frame);
 static bool forwardFrame(Broker *self, const FrameRoute *route, const FrameMessage *frame, uint8_t route_flags);
 static uint64_t frameWireBits(const uint8_t *wire, uint16_t size);
 static void enqueueFrame(Broker *self, HubPeer *peer, uint8_t channel, const uint8_t *data, size_t size);
@@ -342,8 +356,12 @@ static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame)
         return true;
     }
 
+    if (!reliableRoutesFit(self, routes, route_count, frame, echo_originator_peer_id)) {
+        return false;
+    }
+
     for(i=0; i<route_count; i++) {
-        if (routes[i].suppress_echo && routes[i].peer_id == echo_originator_peer_id) {
+        if (!routeTakesFrame(self, &routes[i], frame, echo_originator_peer_id)) {
             continue;
         }
         if (!forwardFrame(self, &routes[i], frame, forwarded_route_flags)) {
@@ -1257,6 +1275,55 @@ static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char 
     self->transport->send_control(self->transport->context, peer_id, encoded, encoded_size);
 }
 
+static bool reliableRoutesFit(
+    Broker *self,
+    const FrameRoute *routes,
+    uint16_t route_count,
+    const FrameMessage *frame,
+    uint32_t echo_originator_peer_id
+)
+{
+    size_t size = frameWireSize(frame);
+    uint16_t i;
+
+    for(i=0; i<route_count; i++) {
+        if (!routes[i].reliable || !routeTakesFrame(self, &routes[i], frame, echo_originator_peer_id)) {
+            continue;
+        }
+        if (!self->transport->frame_fits(self->transport->context, routes[i].peer_id, routes[i].channel, size)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool routeTakesFrame(
+    Broker *self,
+    const FrameRoute *route,
+    const FrameMessage *frame,
+    uint32_t echo_originator_peer_id
+)
+{
+    HubPeer *destination;
+
+    if (route->suppress_echo && route->peer_id == echo_originator_peer_id) {
+        return false;
+    }
+
+    destination = PeerDirectory_Find(&self->directory, route->peer_id);
+    if (destination == NULL || destination->role != kHUB_PEER_ROLE_CLIENT) {
+        return true;
+    }
+
+    return ClientSession_ChannelAccepts(&destination->session, route->channel, frame->can_id);
+}
+
+static size_t frameWireSize(const FrameMessage *frame)
+{
+    return (size_t)MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + frame->payload_length;
+}
+
 static bool forwardFrame(Broker *self, const FrameRoute *route, const FrameMessage *frame, uint8_t route_flags)
 {
     uint8_t forwarded[FRAME_BUFFER_SIZE];
@@ -1265,12 +1332,6 @@ static bool forwardFrame(Broker *self, const FrameRoute *route, const FrameMessa
     size_t size;
 
     destination = PeerDirectory_Find(&self->directory, route->peer_id);
-    if (destination != NULL
-        && destination->role == kHUB_PEER_ROLE_CLIENT
-        && !ClientSession_ChannelAccepts(&destination->session, route->channel, frame->can_id)) {
-        return true;
-    }
-
     outgoing.channel = route->channel;
     outgoing.route_flags = route_flags;
     size = FrameMessage_Encode(&outgoing, forwarded, sizeof(forwarded));
