@@ -325,7 +325,7 @@ static void handleRegisterAck(Agent *self, const MessageHeader *header, const ui
         Agent_OnDisconnected(self, now_us);
         return;
     }
-    if (!ChannelMap_AssignFromAck(&self->channel_map, &ack)) {
+    if (!ChannelMap_AssignFromAck(&self->channel_map, &ack, self->registration.interface_count)) {
         self->transport->disconnect(self->transport->context);
         Agent_OnDisconnected(self, now_us);
         return;

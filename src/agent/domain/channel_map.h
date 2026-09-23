@@ -11,6 +11,6 @@ typedef struct {
 } ChannelMap;
 
 void ChannelMap_Reset(ChannelMap *self);
-bool ChannelMap_AssignFromAck(ChannelMap *self, const RegisterAckMessage *ack);
+bool ChannelMap_AssignFromAck(ChannelMap *self, const RegisterAckMessage *ack, uint8_t registered_count);
 bool ChannelMap_ChannelForInterface(const ChannelMap *self, uint8_t interface_index, uint8_t *channel);
 bool ChannelMap_InterfaceForChannel(const ChannelMap *self, uint8_t channel, uint8_t *interface_index);
