@@ -137,6 +137,14 @@ class BenchKeywords:
     def inject_can_frame_on(self, server, interface, frame):
         return server.exec("cansend", interface, frame)
 
+    @keyword("Stop CAN Client ${client}")
+    def stop_can_client(self, client):
+        client.stop()
+
+    @keyword("Wait Until Hub ${hub} Logged ${text} ${count} Times")
+    def wait_until_hub_logged(self, hub, text, count: int, timeout: float = 10):
+        hub.wait_logged(text, count, timeout)
+
     @keyword("Wait Until Agent ${agent} Registered On ${hub}")
     def wait_until_agent_registered(self, agent, hub, timeout=5):
         agent.wait_registered(hub, float(timeout))

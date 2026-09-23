@@ -66,6 +66,11 @@ static void mockSetChannelMode(void *context, uint32_t peer_id, uint8_t channel,
 {
     HubTransportPortMock *self = context;
 
+    if (self->channel_mode_count < HUB_MOCK_CHANNEL_MODE_LOG_MAX) {
+        self->channel_mode_peers[self->channel_mode_count] = peer_id;
+        self->channel_mode_channels[self->channel_mode_count] = channel;
+        self->channel_mode_reliable[self->channel_mode_count] = reliable;
+    }
     self->channel_mode_count++;
     self->last_channel_mode_peer = peer_id;
     self->last_channel_mode_channel = channel;

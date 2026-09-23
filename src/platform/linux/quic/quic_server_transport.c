@@ -52,6 +52,10 @@ static void onHandshakeCompleted(void *context);
 static void onDatagram(void *context, const uint8_t *data, size_t size);
 static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, size_t size);
 static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_offset);
+static void onStreamFinished(void *context, int64_t stream_id);
+static void onStreamClosed(void *context, int64_t stream_id);
+static void openReliableChannel(QuicServerPeer *peer, uint8_t channel);
+static void closeReliableChannel(QuicServerPeer *peer, uint8_t channel);
 static void receiveControlData(QuicServerPeer *peer, const uint8_t *data, size_t size);
 static bool serverFrameSink(void *context, const uint8_t *frame, size_t size);
 static void retryStalledReliableStreams(QuicServerTransport *self);
@@ -277,11 +281,37 @@ static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel,
     QuicServerTransport *self = context;
     QuicServerPeer *peer = findPeerById(self, peer_id);
 
-    if (peer == NULL || !peer->connected || !reliable) {
+    if (peer == NULL || !peer->connected) {
+        return;
+    }
+    if (!reliable) {
+        closeReliableChannel(peer, channel);
         return;
     }
 
-    QuicReliableStreams_Open(&peer->reliable_streams, &peer->connection, channel);
+    openReliableChannel(peer, channel);
+}
+
+static void openReliableChannel(QuicServerPeer *peer, uint8_t channel)
+{
+    if (QuicReliableStreams_FindByChannel(&peer->reliable_streams, channel) != NULL) {
+        return;
+    }
+    if (QuicReliableStreams_Open(&peer->reliable_streams, &peer->connection, channel) == NULL) {
+        LOG_WARN("peer %u reliable channel %u could not open a stream", peer->peer_id, channel);
+        return;
+    }
+
+    LOG_INFO("peer %u reliable channel %u opened", peer->peer_id, channel);
+}
+
+static void closeReliableChannel(QuicServerPeer *peer, uint8_t channel)
+{
+    if (QuicReliableStreams_Close(&peer->reliable_streams, channel) == NULL) {
+        return;
+    }
+
+    LOG_INFO("peer %u reliable channel %u closing", peer->peer_id, channel);
 }
 
 static void portClosePeer(void *context, uint32_t peer_id)
@@ -369,6 +399,8 @@ static QuicServerPeer *acceptPeer(
         .on_datagram = onDatagram,
         .on_stream_data = onStreamData,
         .on_stream_acked = onStreamAcked,
+        .on_stream_finished = onStreamFinished,
+        .on_stream_closed = onStreamClosed,
     };
     ngtcp2_pkt_hd initial_header;
     QuicServerPeer *peer = NULL;
@@ -645,6 +677,28 @@ static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_o
     if (reliable != NULL) {
         QuicControlChannel_MarkAcked(&reliable->stream, acked_end_offset);
     }
+}
+
+static void onStreamFinished(void *context, int64_t stream_id)
+{
+    QuicServerPeer *peer = context;
+
+    QuicReliableStreams_Finish(&peer->reliable_streams, stream_id);
+}
+
+static void onStreamClosed(void *context, int64_t stream_id)
+{
+    QuicServerPeer *peer = context;
+    QuicReliableStream *reliable = QuicReliableStreams_FindById(&peer->reliable_streams, stream_id);
+    uint8_t channel;
+
+    if (reliable == NULL) {
+        return;
+    }
+
+    channel = reliable->channel;
+    QuicReliableStreams_Release(&peer->reliable_streams, stream_id);
+    LOG_INFO("peer %u reliable channel %u closed", peer->peer_id, channel);
 }
 
 static void receiveControlData(QuicServerPeer *peer, const uint8_t *data, size_t size)

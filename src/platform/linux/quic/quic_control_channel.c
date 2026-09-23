@@ -33,7 +33,7 @@ void QuicControlChannel_AdoptRxBuffer(QuicControlChannel *self, uint8_t *buffer,
 
 bool QuicControlChannel_CanQueue(const QuicControlChannel *self, size_t size)
 {
-    return self->tx_used + size <= self->tx_capacity;
+    return !self->finish_requested && self->tx_used + size <= self->tx_capacity;
 }
 
 size_t QuicControlChannel_RxPending(const QuicControlChannel *self)
@@ -47,7 +47,7 @@ bool QuicControlChannel_QueueTx(QuicControlChannel *self, const uint8_t *data, s
     size_t write_index;
     size_t first_span;
 
-    if (self->tx_used + size > self->tx_capacity) {
+    if (!QuicControlChannel_CanQueue(self, size)) {
         return false;
     }
 
@@ -107,6 +107,21 @@ void QuicControlChannel_MarkAcked(QuicControlChannel *self, uint64_t acked_end_o
         self->tx_sent -= acked_bytes;
     }
     self->tx_base_offset += acked_bytes;
+}
+
+void QuicControlChannel_RequestFinish(QuicControlChannel *self)
+{
+    self->finish_requested = true;
+}
+
+bool QuicControlChannel_FinishDue(const QuicControlChannel *self)
+{
+    return self->finish_requested && !self->finish_sent && self->tx_sent == self->tx_used;
+}
+
+void QuicControlChannel_MarkFinishSent(QuicControlChannel *self)
+{
+    self->finish_sent = true;
 }
 
 size_t QuicControlChannel_QueueRx(QuicControlChannel *self, const uint8_t *data, size_t size)

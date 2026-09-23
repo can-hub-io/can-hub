@@ -67,6 +67,8 @@ static uint8_t adminIfconfigStatus(uint8_t agent_status);
 static void countInterfaceFrame(Broker *self, const HubPeer *peer, uint8_t channel);
 static void disconnectPeer(Broker *self, uint32_t peer_id);
 static void releasePeer(Broker *self, HubPeer *peer);
+static void releaseReliableBindings(Broker *self, HubPeer *client);
+static void revertAgentChannelIfUnused(Broker *self, uint32_t interface_id);
 static bool displaceGhostPeer(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
 static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
@@ -523,8 +525,9 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
 static void handleClose(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
 {
     CloseMessage close;
-
-    (void)self;
+    uint32_t interface_id;
+    bool reliable;
+    bool attached;
 
     if (peer->role != kHUB_PEER_ROLE_CLIENT) {
         return;
@@ -533,7 +536,15 @@ static void handleClose(Broker *self, HubPeer *peer, const MessageHeader *header
         return;
     }
 
+    reliable = ClientSession_ChannelReliable(&peer->session, close.channel);
+    attached = ClientSession_InterfaceForChannel(&peer->session, close.channel, &interface_id);
     ClientSession_CloseChannel(&peer->session, close.channel);
+    if (!reliable || !attached) {
+        return;
+    }
+
+    self->transport->set_channel_mode(self->transport->context, peer->peer_id, close.channel, false);
+    revertAgentChannelIfUnused(self, interface_id);
 }
 
 static void handleSubscribe(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
@@ -1146,9 +1157,44 @@ static void releasePeer(Broker *self, HubPeer *peer)
         detachAgent(self, peer_id);
         EchoTokens_ReleaseAgent(&self->echo_tokens, PeerDirectory_SlotOf(&self->directory, peer));
     }
+    if (peer->role == kHUB_PEER_ROLE_CLIENT) {
+        releaseReliableBindings(self, peer);
+    }
 
     releasePendingIfconfig(self, peer_id);
     PeerDirectory_Release(&self->directory, peer_id);
+}
+
+static void releaseReliableBindings(Broker *self, HubPeer *client)
+{
+    uint32_t interface_id;
+
+    while (ClientSession_TakeReliableBinding(&client->session, &interface_id)) {
+        revertAgentChannelIfUnused(self, interface_id);
+    }
+}
+
+static void revertAgentChannelIfUnused(Broker *self, uint32_t interface_id)
+{
+    const InterfaceEntry *entry = InterfaceRegistry_FindById(&self->registry, interface_id);
+    HubPeer *peer;
+    uint8_t i;
+
+    if (entry == NULL) {
+        return;
+    }
+
+    for(i=0; i<PEER_DIRECTORY_MAX; i++) {
+        peer = PeerDirectory_At(&self->directory, i);
+        if (peer == NULL || peer->role != kHUB_PEER_ROLE_CLIENT) {
+            continue;
+        }
+        if (ClientSession_HoldsReliable(&peer->session, interface_id)) {
+            return;
+        }
+    }
+
+    self->transport->set_channel_mode(self->transport->context, entry->agent_peer_id, entry->agent_channel, false);
 }
 
 static bool displaceGhostPeer(Broker *self, const HubPeer *peer, const RegisterMessage *registration)

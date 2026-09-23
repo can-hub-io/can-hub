@@ -45,6 +45,8 @@ typedef struct {
     uint8_t channel;
     bool in_use;
     bool has_channel;
+    bool closing;
+    bool closed;
 } QuicReliableStream;
 
 typedef struct {
@@ -61,6 +63,9 @@ QuicReliableStream *QuicReliableStreams_FindByChannel(QuicReliableStreamSet *sel
 QuicReliableStream *QuicReliableStreams_FindById(QuicReliableStreamSet *self, int64_t stream_id);
 QuicReliableStream *QuicReliableStreams_Open(QuicReliableStreamSet *self, QuicConnection *connection, uint8_t channel);
 QuicReliableStream *QuicReliableStreams_Adopt(QuicReliableStreamSet *self, int64_t stream_id);
+QuicReliableStream *QuicReliableStreams_Close(QuicReliableStreamSet *self, uint8_t channel);
+void QuicReliableStreams_Finish(QuicReliableStreamSet *self, int64_t stream_id);
+void QuicReliableStreams_Release(QuicReliableStreamSet *self, int64_t stream_id);
 void QuicReliableStreams_Receive(
     QuicReliableStream *reliable,
     QuicConnection *connection,

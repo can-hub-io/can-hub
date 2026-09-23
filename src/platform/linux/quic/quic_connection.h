@@ -24,6 +24,8 @@ typedef struct {
     void (*on_datagram)(void *context, const uint8_t *data, size_t size);
     void (*on_stream_data)(void *context, int64_t stream_id, const uint8_t *data, size_t size);
     void (*on_stream_acked)(void *context, int64_t stream_id, uint64_t acked_end_offset);
+    void (*on_stream_finished)(void *context, int64_t stream_id);
+    void (*on_stream_closed)(void *context, int64_t stream_id);
 } QuicConnectionEvents;
 
 typedef struct {
@@ -71,6 +73,13 @@ ngtcp2_ssize QuicConnection_WriteStream(
     const uint8_t *data,
     size_t data_size,
     size_t *consumed
+);
+ngtcp2_ssize QuicConnection_WriteStreamFinish(
+    QuicConnection *self,
+    uint8_t *packet_buffer,
+    size_t packet_buffer_size,
+    int64_t stream_id,
+    bool *finished
 );
 ngtcp2_ssize QuicConnection_WritePacket(QuicConnection *self, uint8_t *packet_buffer, size_t packet_buffer_size);
 ngtcp2_ssize QuicConnection_WriteConnectionClose(QuicConnection *self, uint8_t *packet_buffer, size_t packet_buffer_size);

@@ -173,6 +173,34 @@ void ClientSession_RemoveInterface(ClientSession *self, uint32_t interface_id)
     }
 }
 
+bool ClientSession_HoldsReliable(const ClientSession *self, uint32_t interface_id)
+{
+    uint8_t i;
+
+    for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
+        if (self->bindings[i].in_use && self->bindings[i].reliable && self->bindings[i].interface_id == interface_id) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool ClientSession_TakeReliableBinding(ClientSession *self, uint32_t *interface_id)
+{
+    uint8_t i;
+
+    for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
+        if (self->bindings[i].in_use && self->bindings[i].reliable) {
+            *interface_id = self->bindings[i].interface_id;
+            memset(&self->bindings[i], 0, sizeof(self->bindings[i]));
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void ClientSession_DetachInterface(ClientSession *self, uint32_t interface_id)
 {
     uint8_t i;
