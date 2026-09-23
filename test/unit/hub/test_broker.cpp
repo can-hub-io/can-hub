@@ -37,6 +37,10 @@ static IdentityStorePort overreporting_identity_store;
 static HubTransportEvents events;
 static uint8_t client_channel;
 static const RegisterMessage truck_registration = { "truck42", 2, { "can0", "can1" } };
+static uint32_t reliable_interface_id;
+
+static uint8_t openReliableChannel(uint32_t client_peer_id);
+static void closeChannel(uint32_t client_peer_id, uint8_t channel);
 static const RegisterMessage bus_registration = { "bus7", 1, { "can0" } };
 
 static uint8_t injectFrom(uint32_t client_peer_id, uint8_t channel);
@@ -533,6 +537,64 @@ describe("broker", []() {
             interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
 
             expect(openReliableStatus(CLIENT_PEER, interface_id)).toBe(OPEN_STATUS_RELIABLE_UNSUPPORTED);
+        });
+    });
+
+    describe("reliable mode revert", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            events = Broker_Events(&broker);
+            BrokerDriver_ConnectAgentWithCapabilities(
+                &events,
+                &transport,
+                AGENT_PEER,
+                &truck_registration,
+                HELLO_CAP_RELIABLE_CHANNELS
+            );
+            BrokerDriver_ConnectClientWithCapabilities(&events, CLIENT_PEER, HELLO_CAP_RELIABLE_CHANNELS);
+            BrokerDriver_ConnectClientWithCapabilities(&events, CLIENT_PEER + 1, HELLO_CAP_RELIABLE_CHANNELS);
+            reliable_interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+        });
+
+        it("reverts the agent channel when its last reliable client disconnects", []() {
+            openReliableChannel(CLIENT_PEER);
+
+            events.on_peer_disconnected(events.context, CLIENT_PEER, 0);
+
+            expect(transport.channel_mode_count).toBe((uint32_t)1);
+            expect(transport.channel_mode_peers[0]).toBe((uint32_t)AGENT_PEER);
+            expect(transport.channel_mode_reliable[0]).toBe(false);
+        });
+
+        it("keeps the agent channel reliable while another client still holds it", []() {
+            openReliableChannel(CLIENT_PEER);
+            openReliableChannel(CLIENT_PEER + 1);
+
+            events.on_peer_disconnected(events.context, CLIENT_PEER, 0);
+
+            expect(transport.channel_mode_count).toBe((uint32_t)0);
+        });
+
+        it("closes the client leg and then the agent leg on CLOSE", []() {
+            uint8_t channel = openReliableChannel(CLIENT_PEER);
+
+            closeChannel(CLIENT_PEER, channel);
+
+            expect(transport.channel_mode_count).toBe((uint32_t)2);
+            expect(transport.channel_mode_peers[0]).toBe((uint32_t)CLIENT_PEER);
+            expect(transport.channel_mode_channels[0]).toBe(channel);
+            expect(transport.channel_mode_reliable[0]).toBe(false);
+            expect(transport.channel_mode_peers[1]).toBe((uint32_t)AGENT_PEER);
+            expect(transport.channel_mode_reliable[1]).toBe(false);
+        });
+
+        it("leaves channel modes alone when a lossy channel closes", []() {
+            uint8_t channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, reliable_interface_id, 0);
+
+            closeChannel(CLIENT_PEER, channel);
+
+            expect(transport.channel_mode_count).toBe((uint32_t)0);
         });
     });
 
@@ -1805,4 +1867,28 @@ static FrameMessage relayedFrameAt(uint16_t index)
     FrameMessage_Decode(&relayed, transport.frame_log[index] + MESSAGE_HEADER_SIZE, header.length);
 
     return relayed;
+}
+
+static uint8_t openReliableChannel(uint32_t client_peer_id)
+{
+    uint8_t channel = BrokerDriver_OpenInterface(
+        &events,
+        &transport,
+        client_peer_id,
+        reliable_interface_id,
+        OPEN_FLAG_RELIABLE
+    );
+
+    transport.channel_mode_count = 0;
+
+    return channel;
+}
+
+static void closeChannel(uint32_t client_peer_id, uint8_t channel)
+{
+    CloseMessage close = { channel };
+    uint8_t encoded[64];
+    size_t encoded_size = CloseMessage_Encode(&close, encoded, sizeof(encoded));
+
+    events.on_peer_control(events.context, client_peer_id, encoded, encoded_size, 0);
 }

@@ -503,8 +503,13 @@ window closes in turn — the flow paces itself to the bus with no datagram drop
 For a reliable channel this flow control *is* the rate-matching the lossy plane
 gets from explicit pacing credit (INTERFACE_STATUS).
 
-**Lifecycle.** CLOSE on the channel tears down the dedicated stream on both legs;
-the channel id is freed as usual.
+**Lifecycle.** The hub drives teardown on both legs. CLOSE on a reliable channel
+finishes the client's stream; once no client holds the interface reliable (CLOSE
+or disconnect of the last one), the hub also finishes the agent's stream and the
+agent's uplink for that channel returns to the lossy datagram plane. Finishing
+is graceful: queued frames are sent, then a FIN; the peer answers with its own
+FIN and stops using the stream, and both sides free it once it is closed. The
+channel id is freed as usual.
 
 **TCP / TLS fallback.** The fallback transports have no useful multistream: the
 whole connection is already one reliable, ordered byte stream shared by both

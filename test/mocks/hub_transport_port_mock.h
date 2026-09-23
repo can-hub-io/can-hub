@@ -6,6 +6,7 @@
 #define HUB_MOCK_CONTROL_SIZE 4096
 #define HUB_MOCK_FRAME_LOG_MAX 16
 #define HUB_MOCK_FRAME_SIZE 128
+#define HUB_MOCK_CHANNEL_MODE_LOG_MAX 8
 
 typedef struct {
     HubTransportPort port;
@@ -24,6 +25,9 @@ typedef struct {
     uint32_t last_channel_mode_peer;
     uint8_t last_channel_mode_channel;
     bool last_channel_mode_reliable;
+    uint32_t channel_mode_peers[HUB_MOCK_CHANNEL_MODE_LOG_MAX];
+    uint8_t channel_mode_channels[HUB_MOCK_CHANNEL_MODE_LOG_MAX];
+    bool channel_mode_reliable[HUB_MOCK_CHANNEL_MODE_LOG_MAX];
     bool control_result;
     bool frame_result;
 } HubTransportPortMock;
