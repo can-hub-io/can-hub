@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hub/domain/echo_tokens.h"
 #include "hub/domain/interface_registry.h"
 #include "hub/domain/frame_routes.h"
 #include "hub/domain/peer_directory.h"
@@ -42,6 +43,7 @@ typedef struct {
     /* 16 KB, so not on the stack of onPeerFrame. Shared safely only while
        nothing reachable from a send re-enters that function. */
     FrameRoute frame_routes[FRAME_ROUTES_MAX];
+    EchoTokens echo_tokens;
     bool require_known_agents;
     uint64_t now_us;
 } Broker;
