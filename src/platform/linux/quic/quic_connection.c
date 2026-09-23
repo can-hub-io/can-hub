@@ -62,6 +62,24 @@ static int ackedStreamDataOffsetCallback(
     void *user_data,
     void *stream_user_data
 );
+static int streamCloseCallback(
+    ngtcp2_conn *connection,
+    uint32_t flags,
+    int64_t stream_id,
+    uint64_t app_error_code,
+    void *user_data,
+    void *stream_user_data
+);
+static ngtcp2_ssize writeStream(
+    QuicConnection *self,
+    uint8_t *packet_buffer,
+    size_t packet_buffer_size,
+    uint32_t flags,
+    int64_t stream_id,
+    const uint8_t *data,
+    size_t data_size,
+    ngtcp2_ssize *stream_bytes_written
+);
 
 /* ---------- public ---------- */
 
@@ -306,28 +324,46 @@ ngtcp2_ssize QuicConnection_WriteStream(
     size_t *consumed
 )
 {
-    ngtcp2_vec data_vector = { (uint8_t *)data, data_size };
-    ngtcp2_path_storage path_storage;
-    ngtcp2_pkt_info packet_info;
+    ngtcp2_ssize stream_bytes_written;
     ngtcp2_ssize bytes_written;
-    ngtcp2_ssize stream_bytes_consumed = 0;
 
-    ngtcp2_path_storage_zero(&path_storage);
-    bytes_written = ngtcp2_conn_writev_stream(
-        self->connection,
-        &path_storage.path,
-        &packet_info,
+    bytes_written = writeStream(
+        self,
         packet_buffer,
         packet_buffer_size,
-        &stream_bytes_consumed,
         NGTCP2_WRITE_STREAM_FLAG_NONE,
         stream_id,
-        &data_vector,
-        data == NULL ? 0 : 1,
-        Clock_MonotonicNs()
+        data,
+        data_size,
+        &stream_bytes_written
     );
+    *consumed = stream_bytes_written > 0 ? (size_t)stream_bytes_written : 0;
 
-    *consumed = stream_bytes_consumed > 0 ? (size_t)stream_bytes_consumed : 0;
+    return bytes_written;
+}
+
+ngtcp2_ssize QuicConnection_WriteStreamFinish(
+    QuicConnection *self,
+    uint8_t *packet_buffer,
+    size_t packet_buffer_size,
+    int64_t stream_id,
+    bool *finished
+)
+{
+    ngtcp2_ssize stream_bytes_written;
+    ngtcp2_ssize bytes_written;
+
+    bytes_written = writeStream(
+        self,
+        packet_buffer,
+        packet_buffer_size,
+        NGTCP2_WRITE_STREAM_FLAG_FIN,
+        stream_id,
+        NULL,
+        0,
+        &stream_bytes_written
+    );
+    *finished = stream_bytes_written >= 0;
 
     return bytes_written;
 }
@@ -386,6 +422,7 @@ static void buildCallbacks(ngtcp2_callbacks *callbacks, bool is_server)
     callbacks->recv_datagram = receiveDatagramCallback;
     callbacks->recv_stream_data = receiveStreamDataCallback;
     callbacks->acked_stream_data_offset = ackedStreamDataOffsetCallback;
+    callbacks->stream_close = streamCloseCallback;
 
     if (is_server) {
         callbacks->recv_client_initial = ngtcp2_crypto_recv_client_initial_cb;
@@ -496,11 +533,13 @@ static int receiveStreamDataCallback(
     QuicConnection *self = user_data;
 
     (void)connection;
-    (void)flags;
     (void)stream_offset;
     (void)stream_user_data;
 
     self->events.on_stream_data(self->events.context, stream_id, data, data_length);
+    if (flags & NGTCP2_STREAM_DATA_FLAG_FIN) {
+        self->events.on_stream_finished(self->events.context, stream_id);
+    }
 
     return 0;
 }
@@ -522,4 +561,57 @@ static int ackedStreamDataOffsetCallback(
     self->events.on_stream_acked(self->events.context, stream_id, stream_offset + data_length);
 
     return 0;
+}
+
+static int streamCloseCallback(
+    ngtcp2_conn *connection,
+    uint32_t flags,
+    int64_t stream_id,
+    uint64_t app_error_code,
+    void *user_data,
+    void *stream_user_data
+)
+{
+    QuicConnection *self = user_data;
+
+    (void)connection;
+    (void)flags;
+    (void)app_error_code;
+    (void)stream_user_data;
+
+    self->events.on_stream_closed(self->events.context, stream_id);
+
+    return 0;
+}
+
+static ngtcp2_ssize writeStream(
+    QuicConnection *self,
+    uint8_t *packet_buffer,
+    size_t packet_buffer_size,
+    uint32_t flags,
+    int64_t stream_id,
+    const uint8_t *data,
+    size_t data_size,
+    ngtcp2_ssize *stream_bytes_written
+)
+{
+    ngtcp2_vec data_vector = { (uint8_t *)data, data_size };
+    ngtcp2_path_storage path_storage;
+    ngtcp2_pkt_info packet_info;
+
+    ngtcp2_path_storage_zero(&path_storage);
+
+    return ngtcp2_conn_writev_stream(
+        self->connection,
+        &path_storage.path,
+        &packet_info,
+        packet_buffer,
+        packet_buffer_size,
+        stream_bytes_written,
+        flags,
+        stream_id,
+        &data_vector,
+        data == NULL ? 0 : 1,
+        Clock_MonotonicNs()
+    );
 }

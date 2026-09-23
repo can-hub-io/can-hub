@@ -55,6 +55,65 @@ describe("client_session", []() {
         expect(ClientSession_BindingForChannel(&session, lossy_channel)->reliable).toBe(false);
     });
 
+    it("tells whether an interface is still held reliable", []() {
+        ChannelOpenRequest reliable_request = {
+            .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = true,
+        };
+        ChannelOpenRequest lossy_request = {
+            .interface_id = 9,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
+        };
+        uint8_t channel = 0;
+        bool reliable_held;
+        bool lossy_held;
+
+        ClientSession_OpenInterface(&session, &reliable_request, &channel);
+        ClientSession_OpenInterface(&session, &lossy_request, &channel);
+        reliable_held = ClientSession_HoldsReliable(&session, 7);
+        lossy_held = ClientSession_HoldsReliable(&session, 9);
+
+        expect(reliable_held).toBe(true);
+        expect(lossy_held).toBe(false);
+    });
+
+    it("takes each reliable binding once and leaves the lossy ones", []() {
+        ChannelOpenRequest reliable_request = {
+            .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = true,
+        };
+        ChannelOpenRequest lossy_request = {
+            .interface_id = 9,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
+        };
+        uint8_t channel = 0;
+        uint32_t taken_interface = 0;
+        bool first_taken;
+        bool second_taken;
+        uint32_t lossy_interface = 0;
+        bool lossy_kept;
+
+        ClientSession_OpenInterface(&session, &reliable_request, &channel);
+        ClientSession_OpenInterface(&session, &lossy_request, &channel);
+        first_taken = ClientSession_TakeReliableBinding(&session, &taken_interface);
+        second_taken = ClientSession_TakeReliableBinding(&session, &taken_interface);
+        lossy_kept = ClientSession_InterfaceForChannel(&session, channel, &lossy_interface);
+
+        expect(first_taken).toBe(true);
+        expect(taken_interface).toBe((uint32_t)7);
+        expect(second_taken).toBe(false);
+        expect(lossy_kept).toBe(true);
+        expect(lossy_interface).toBe((uint32_t)9);
+    });
+
     it("maps channels to interfaces in both directions", []() {
         ChannelOpenRequest request = {
             .interface_id = 7,

@@ -54,6 +54,14 @@ class CanHub:
     def interfaces(self):
         return parse_interfaces(self.cli("interfaces").stdout)
 
+    def wait_logged(self, text: str, count: int, timeout: float = 10.0) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.process.read_log().count(text) >= count:
+                return
+            time.sleep(0.1)
+        raise TimeoutError(f"hub logged {text!r} fewer than {count} times\n{self.process.read_log()}")
+
     def stop(self) -> None:
         self.process.stop()
 

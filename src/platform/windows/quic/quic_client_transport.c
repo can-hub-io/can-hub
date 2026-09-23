@@ -24,6 +24,8 @@ static void onHandshakeCompleted(void *context);
 static void onDatagram(void *context, const uint8_t *data, size_t size);
 static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, size_t size);
 static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_offset);
+static void onStreamFinished(void *context, int64_t stream_id);
+static void onStreamClosed(void *context, int64_t stream_id);
 
 /* ---------- public ---------- */
 
@@ -41,6 +43,8 @@ bool QuicClientTransport_Init(
         .on_datagram = onDatagram,
         .on_stream_data = onStreamData,
         .on_stream_acked = onStreamAcked,
+        .on_stream_finished = onStreamFinished,
+        .on_stream_closed = onStreamClosed,
     };
 
     memset(self, 0, sizeof(*self));
@@ -229,7 +233,11 @@ static void portSetChannelMode(void *context, uint8_t channel, bool reliable)
 {
     QuicClientTransport *self = context;
 
-    if (!self->connected || !reliable) {
+    if (!self->connected) {
+        return;
+    }
+    if (!reliable) {
+        QuicReliableStreams_Close(&self->reliable_streams, channel);
         return;
     }
 
@@ -404,6 +412,20 @@ static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_o
     if (reliable != NULL) {
         QuicControlChannel_MarkAcked(&reliable->stream, acked_end_offset);
     }
+}
+
+static void onStreamFinished(void *context, int64_t stream_id)
+{
+    QuicClientTransport *self = context;
+
+    QuicReliableStreams_Finish(&self->reliable_streams, stream_id);
+}
+
+static void onStreamClosed(void *context, int64_t stream_id)
+{
+    QuicClientTransport *self = context;
+
+    QuicReliableStreams_Release(&self->reliable_streams, stream_id);
 }
 
 static bool clientFrameSink(void *context, const uint8_t *frame, size_t size)
