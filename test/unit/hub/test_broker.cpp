@@ -19,10 +19,14 @@ extern "C" {
 }
 
 #define AGENT_PEER 100
+#define BUS_AGENT_PEER 101
 #define CLIENT_PEER 200
 #define ADMIN_PEER 300
 #define TRUCK_FINGERPRINT "aa11bb22cc33dd44ee55ff66aa77bb88cc99dd00ee11ff22aa33bb44cc55dd66"
 #define OTHER_FINGERPRINT "0000000000000000000000000000000000000000000000000000000000000000"
+#define BUS_INTERFACE_INDEX 2
+#define CLIENT_TOKEN 2
+#define SUPPRESS_ECHO_AND_WRITE (OPEN_FLAG_SUPPRESS_OWN_ECHO | OPEN_FLAG_WANT_WRITE)
 
 static Broker broker;
 static HubTransportPortMock transport;
@@ -33,6 +37,11 @@ static IdentityStorePort overreporting_identity_store;
 static HubTransportEvents events;
 static uint8_t client_channel;
 static const RegisterMessage truck_registration = { "truck42", 2, { "can0", "can1" } };
+static const RegisterMessage bus_registration = { "bus7", 1, { "can0" } };
+
+static uint8_t injectFrom(uint32_t client_peer_id, uint8_t channel);
+static void sendEchoFromAgent(uint32_t agent_peer_id, uint8_t token);
+static FrameMessage relayedFrameAt(uint16_t index);
 
 static void connectPeer(uint32_t peer_id, const char *fingerprint, bool local)
 {
@@ -1163,27 +1172,21 @@ describe("broker", []() {
 
         it("suppresses the echo only for its opted-out originator", []() {
             uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
-            FrameMessage injected = { 0x456, 2000, 0, 1, 0, 0, { 0x55 } };
-            FrameMessage echo = { 0x456, 2100, 0, 1, 0, 0, { 0x55 } };
-            FrameMessage relayed;
-            MessageHeader header;
-            uint8_t encoded[128];
-            size_t encoded_size;
+            uint8_t channel;
+            uint8_t token;
 
             BrokerDriver_ConnectClient(&events, CLIENT_PEER + 1);
-            BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id,
-                                       OPEN_FLAG_SUPPRESS_OWN_ECHO | OPEN_FLAG_WANT_WRITE);
+            channel = BrokerDriver_OpenInterface(
+                &events,
+                &transport,
+                CLIENT_PEER,
+                interface_id,
+                SUPPRESS_ECHO_AND_WRITE
+            );
             BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER + 1, interface_id, 0);
+            token = injectFrom(CLIENT_PEER, channel);
 
-            encoded_size = FrameMessage_Encode(&injected, encoded, sizeof(encoded));
-            events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
-            MessageHeader_Decode(&header, transport.frame_log[0], transport.frame_sizes[0]);
-            FrameMessage_Decode(&relayed, transport.frame_log[0] + MESSAGE_HEADER_SIZE, header.length);
-
-            transport.frame_count = 0;
-            echo.route_flags = FRAME_ROUTE_FLAG_ECHO | (relayed.route_flags & FRAME_ROUTE_TOKEN_MASK);
-            encoded_size = FrameMessage_Encode(&echo, encoded, sizeof(encoded));
-            events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
+            sendEchoFromAgent(AGENT_PEER, token);
 
             expect(transport.frame_count).toBe(1);
             expect(transport.frame_peers[0]).toBe((uint32_t)(CLIENT_PEER + 1));
@@ -1193,8 +1196,7 @@ describe("broker", []() {
             uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
             FrameMessage first = { 0x111, 2100, 0, 1, 0, 0, { 0xAA } };
             FrameMessage second = { 0x222, 2101, 0, 1, 0, 0, { 0xBB } };
-            FrameMessage relayed;
-            MessageHeader header;
+            FrameMessage second_relayed;
             uint8_t encoded[256];
             size_t packed = 0;
 
@@ -1203,11 +1205,10 @@ describe("broker", []() {
             packed += FrameMessage_Encode(&second, encoded + packed, sizeof(encoded) - packed);
 
             events.on_peer_frame(events.context, AGENT_PEER, encoded, packed);
+            second_relayed = relayedFrameAt(1);
 
             expect(transport.frame_count).toBe(2);
-            MessageHeader_Decode(&header, transport.frame_log[1], transport.frame_sizes[1]);
-            FrameMessage_Decode(&relayed, transport.frame_log[1] + MESSAGE_HEADER_SIZE, header.length);
-            expect(relayed.can_id).toBe((uint32_t)0x222);
+            expect(second_relayed.can_id).toBe((uint32_t)0x222);
         });
 
         it("relays the declared body and not the bytes after it", []() {
@@ -1224,23 +1225,41 @@ describe("broker", []() {
             events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size + 2);
 
             expect(transport.frame_count).toBe(1);
-            expect(transport.frame_sizes[0]).toBe((uint16_t)encoded_size);
+            expect(transport.frame_sizes[0]).toBe(encoded_size);
         });
 
-        it("ignores an echo token the agent made up", []() {
+        it("ignores an echo token the client was never issued", []() {
             uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
-            FrameMessage echo = { 0x456, 2100, 0, 1, 0, 0, { 0x55 } };
-            uint8_t encoded[128];
-            size_t encoded_size;
 
-            BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id,
-                                       OPEN_FLAG_SUPPRESS_OWN_ECHO);
-            echo.route_flags = FRAME_ROUTE_FLAG_ECHO | (2 << FRAME_ROUTE_TOKEN_SHIFT);
-            encoded_size = FrameMessage_Encode(&echo, encoded, sizeof(encoded));
+            BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, OPEN_FLAG_SUPPRESS_OWN_ECHO);
 
-            events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
+            sendEchoFromAgent(AGENT_PEER, CLIENT_TOKEN);
 
             expect(transport.frame_count).toBe(1);
+        });
+
+        it("ignores the token of a client that never wrote to the echoing agent", []() {
+            uint32_t truck_interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            uint32_t bus_interface_id;
+            uint8_t truck_channel;
+            uint8_t token;
+
+            BrokerDriver_ConnectAgent(&events, &transport, BUS_AGENT_PEER, &bus_registration);
+            bus_interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, BUS_INTERFACE_INDEX);
+            truck_channel = BrokerDriver_OpenInterface(
+                &events,
+                &transport,
+                CLIENT_PEER,
+                truck_interface_id,
+                SUPPRESS_ECHO_AND_WRITE
+            );
+            BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, bus_interface_id, OPEN_FLAG_SUPPRESS_OWN_ECHO);
+            token = injectFrom(CLIENT_PEER, truck_channel);
+
+            sendEchoFromAgent(BUS_AGENT_PEER, token);
+
+            expect(transport.frame_count).toBe(1);
+            expect(transport.frame_peers[0]).toBe((uint32_t)CLIENT_PEER);
         });
 
         it("delivers the echo to an opted-out client when it is not the originator", []() {
@@ -1751,3 +1770,39 @@ describe("broker", []() {
         });
     });
 });
+
+static uint8_t injectFrom(uint32_t client_peer_id, uint8_t channel)
+{
+    FrameMessage injected = { 0x456, 2000, channel, 1, 0, 0, { 0x55 } };
+    FrameMessage relayed;
+    uint8_t encoded[128];
+    size_t encoded_size = FrameMessage_Encode(&injected, encoded, sizeof(encoded));
+
+    events.on_peer_frame(events.context, client_peer_id, encoded, encoded_size);
+    relayed = relayedFrameAt((uint16_t)(transport.frame_count - 1));
+    transport.frame_count = 0;
+
+    return (uint8_t)((relayed.route_flags & FRAME_ROUTE_TOKEN_MASK) >> FRAME_ROUTE_TOKEN_SHIFT);
+}
+
+static void sendEchoFromAgent(uint32_t agent_peer_id, uint8_t token)
+{
+    FrameMessage echo = { 0x456, 2100, 0, 1, 0, 0, { 0x55 } };
+    uint8_t encoded[128];
+    size_t encoded_size;
+
+    echo.route_flags = (uint8_t)(FRAME_ROUTE_FLAG_ECHO | (token << FRAME_ROUTE_TOKEN_SHIFT));
+    encoded_size = FrameMessage_Encode(&echo, encoded, sizeof(encoded));
+    events.on_peer_frame(events.context, agent_peer_id, encoded, encoded_size);
+}
+
+static FrameMessage relayedFrameAt(uint16_t index)
+{
+    FrameMessage relayed;
+    MessageHeader header;
+
+    MessageHeader_Decode(&header, transport.frame_log[index], transport.frame_sizes[index]);
+    FrameMessage_Decode(&relayed, transport.frame_log[index] + MESSAGE_HEADER_SIZE, header.length);
+
+    return relayed;
+}

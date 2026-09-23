@@ -272,6 +272,12 @@ add_unit_test(test_hub_peer
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
 )
 
+add_unit_test(test_echo_tokens
+    SOURCES
+        hub/domain/test_echo_tokens.cpp
+        ${ROOT_SRC_DIR}/hub/domain/echo_tokens.c
+)
+
 add_unit_test(test_egress_queue
     SOURCES
         hub/domain/test_egress_queue.cpp
@@ -305,6 +311,7 @@ add_unit_test(test_broker
         hub/test_broker.cpp
         ${ROOT_SRC_DIR}/hub/broker.c
         ${ROOT_SRC_DIR}/hub/domain/admin_views.c
+        ${ROOT_SRC_DIR}/hub/domain/echo_tokens.c
         ${ROOT_SRC_DIR}/hub/domain/egress_queue.c
         ${ROOT_SRC_DIR}/hub/domain/frame_routes.c
         ${ROOT_SRC_DIR}/protocol/error_message.c

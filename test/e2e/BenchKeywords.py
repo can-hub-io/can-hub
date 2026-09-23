@@ -24,6 +24,7 @@ from lib.rows import parse_candump
 
 CONSUME_SCRIPT = "/work/test/e2e/scripts/consume.py"
 PRODUCE_SCRIPT = "/work/test/e2e/scripts/produce.py"
+ECHO_PROBE_SCRIPT = "/work/test/e2e/scripts/echo_probe.py"
 LATENCY_SEND_SCRIPT = "/work/test/e2e/scripts/latency_send.py"
 BENCH_SEND_SCRIPT = "/work/test/e2e/scripts/bench_send.py"
 
@@ -488,6 +489,11 @@ class BenchKeywords:
                               str(hold), background=True, log_name="produce")
         process.wait(timeout=float(hold) + 30)
         return json.loads(process.read_log().strip().splitlines()[-1])
+
+    @keyword("Start Echo Probe Of ${count} Frames Through Socketcand On ${server} ${channel}")
+    def start_echo_probe(self, count, server, channel, own_id="123", seconds=10, host="127.0.0.1", port="29536"):
+        return server.exec("python3", ECHO_PROBE_SCRIPT, host, str(port), channel, str(count), own_id,
+                           str(seconds), background=True, log_name="echo-probe")
 
     @keyword("Wait Until ${count} Channels Open On ${hub}")
     def wait_until_channels_open(self, count, hub, timeout=8):
