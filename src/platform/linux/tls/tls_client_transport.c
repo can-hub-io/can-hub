@@ -12,6 +12,7 @@
 
 #include "platform/linux/clock/clock.h"
 #include "platform/linux/shared/log.h"
+#include "platform/linux/shared/tcp_keepalive.h"
 #include "protocol/message_header.h"
 
 #define TLS_CLIENT_READ_CHUNK_SIZE 4096
@@ -227,6 +228,7 @@ static bool connectTcp(TlsClientTransport *self, int32_t *connected_fd)
             continue;
         }
         setsockopt(tcp_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+        TcpKeepalive_Enable(tcp_fd);
         connect_result = connect(tcp_fd, candidate->ai_addr, candidate->ai_addrlen);
         if (connect_result == 0 || errno == EINPROGRESS) {
             break;

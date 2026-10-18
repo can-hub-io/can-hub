@@ -161,9 +161,15 @@ class BenchKeywords:
     def blackhole_tcp_source_port(self, port, server):
         server.exec("iptables", "-A", "OUTPUT", "-p", "tcp", "--sport", str(port), "-j", "DROP")
 
+    @keyword("Silence TCP Port ${port} On ${server}")
+    def silence_tcp_port(self, port, server):
+        server.exec("iptables", "-A", "OUTPUT", "-p", "tcp", "--sport", str(port), "-j", "DROP")
+        server.exec("iptables", "-A", "INPUT", "-p", "tcp", "--dport", str(port), "-j", "DROP")
+
     @keyword("Flush Firewall On ${server}")
     def flush_firewall(self, server):
         server.exec("iptables", "-F", "OUTPUT", check=False)
+        server.exec("iptables", "-F", "INPUT", check=False)
 
     @keyword("Peer Id Of Agent ${agent} On ${hub}")
     def peer_id_of_agent(self, agent, hub) -> int:

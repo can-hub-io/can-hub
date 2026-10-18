@@ -16,6 +16,7 @@
 #include "platform/linux/clock/clock.h"
 #include "platform/linux/shared/listen_endpoint.h"
 #include "platform/linux/shared/log.h"
+#include "platform/linux/shared/tcp_keepalive.h"
 #include "platform/linux/shared/tls_identity.h"
 #include "protocol/message_header.h"
 
@@ -148,7 +149,7 @@ void TlsServerTransport_OnAcceptReady(TlsServerTransport *self)
         }
 
         setsockopt(peer_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
-        ListenEndpoint_EnableKeepalive(peer_fd);
+        TcpKeepalive_Enable(peer_fd);
         TlsChannel_Bind(&peer->channel, tls, NULL);
         peer->fd = peer_fd;
         peer->peer_id = self->next_peer_id++;

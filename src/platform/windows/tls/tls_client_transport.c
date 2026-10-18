@@ -7,6 +7,7 @@
 #include <ws2tcpip.h>
 
 #include "platform/linux/clock/clock.h"
+#include "platform/linux/shared/tcp_keepalive.h"
 #include "protocol/message_header.h"
 
 #define TLS_CLIENT_READ_CHUNK_SIZE 4096
@@ -219,6 +220,7 @@ static bool connectTcp(TlsClientTransport *self, int32_t *connected_fd)
     }
     ioctlsocket(tcp_socket, FIONBIO, &nonblocking);
     setsockopt(tcp_socket, IPPROTO_TCP, TCP_NODELAY, (const char *)&nodelay, sizeof(nodelay));
+    TcpKeepalive_Enable((int32_t)tcp_socket);
 
     connect_result = connect(tcp_socket, resolved->ai_addr, (int)resolved->ai_addrlen);
     freeaddrinfo(resolved);

@@ -5,14 +5,9 @@
 #include <string.h>
 
 #include <arpa/inet.h>
-#include <netinet/tcp.h>
 #include <unistd.h>
 
 #define V4_MAPPED_OFFSET 12
-#define KEEPALIVE_IDLE_SECONDS 10
-#define KEEPALIVE_INTERVAL_SECONDS 5
-#define KEEPALIVE_PROBES 4
-#define KEEPALIVE_USER_TIMEOUT_MS 30000
 
 static bool buildSockaddrIn6(const char *bind_address, const char *port, struct sockaddr_storage *out, socklen_t *out_length);
 static bool buildSockaddrIn(const char *bind_address, const char *port, struct sockaddr_storage *out, socklen_t *out_length);
@@ -84,21 +79,6 @@ void ListenEndpoint_FormatHost(const struct sockaddr_storage *address, char *out
     }
 
     formatAddress(AF_INET, &in->sin_addr, out, size);
-}
-
-void ListenEndpoint_EnableKeepalive(int32_t fd)
-{
-    int32_t enabled = 1;
-    int32_t idle_seconds = KEEPALIVE_IDLE_SECONDS;
-    int32_t interval_seconds = KEEPALIVE_INTERVAL_SECONDS;
-    int32_t probes = KEEPALIVE_PROBES;
-    uint32_t user_timeout_ms = KEEPALIVE_USER_TIMEOUT_MS;
-
-    setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &enabled, sizeof(enabled));
-    setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle_seconds, sizeof(idle_seconds));
-    setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &interval_seconds, sizeof(interval_seconds));
-    setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &probes, sizeof(probes));
-    setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &user_timeout_ms, sizeof(user_timeout_ms));
 }
 
 static bool buildSockaddrIn6(const char *bind_address, const char *port, struct sockaddr_storage *out, socklen_t *out_length)

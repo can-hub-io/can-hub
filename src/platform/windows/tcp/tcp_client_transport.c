@@ -7,6 +7,7 @@
 #include <ws2tcpip.h>
 
 #include "platform/linux/clock/clock.h"
+#include "platform/linux/shared/tcp_keepalive.h"
 #include "protocol/message_header.h"
 
 static bool portConnect(void *context);
@@ -204,6 +205,7 @@ static bool connectTcp(TcpClientTransport *self, int32_t *connected_fd)
         return false;
     }
     ioctlsocket(tcp_socket, FIONBIO, &nonblocking);
+    TcpKeepalive_Enable((int32_t)tcp_socket);
 
     connect_result = connect(tcp_socket, resolved->ai_addr, (int)resolved->ai_addrlen);
     freeaddrinfo(resolved);
