@@ -8,7 +8,8 @@ Wants=network-online.target
 Type=simple
 User=can-hub
 Group=can-hub
-EnvironmentFile=/etc/can-hub/hub.conf
+Environment="HUB_LISTEN_ARGS=--listen quic://0.0.0.0:7227 --listen unix:///run/can-hub/hub.sock"
+EnvironmentFile=-/etc/can-hub/hub.conf
 ExecStart=/usr/bin/can-hub --state-dir /var/lib/can-hub $HUB_LISTEN_ARGS
 Restart=on-failure
 RestartSec=2

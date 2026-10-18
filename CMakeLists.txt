@@ -332,7 +332,7 @@ endif()
 add_executable(canhub-dump examples/canhub_dump.c)
 target_link_libraries(canhub-dump PRIVATE canhub)
 
-install(TARGETS can-hub can-hub-agent can-hub-cli RUNTIME DESTINATION bin)
+install(TARGETS can-hub can-hub-agent can-hub-cli can-hub-client RUNTIME DESTINATION bin)
 install(TARGETS canhub ARCHIVE DESTINATION lib)
 install(FILES include/canhub.h DESTINATION include)
 

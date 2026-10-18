@@ -8,7 +8,8 @@ Wants=can-hub.service
 Type=simple
 User=can-hub
 Group=can-hub
-EnvironmentFile=/etc/can-hub/web.conf
+Environment="WEB_ARGS=--listen 127.0.0.1:8080"
+EnvironmentFile=-/etc/can-hub/web.conf
 ExecStart=/usr/bin/can-hub-web --db /var/lib/can-hub/web.db $WEB_ARGS
 Restart=on-failure
 RestartSec=2
