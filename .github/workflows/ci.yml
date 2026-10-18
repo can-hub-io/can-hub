@@ -26,7 +26,7 @@ jobs:
         with:
           path: build
           key: x86_64-${{ hashFiles('CMakeLists.txt', 'test/CMakeLists.txt', 'cmake/**') }}
-      - name: unit tests
+      - name: unit tests under asan and ubsan
         run: make test
       - name: release build
         run: make release
@@ -35,25 +35,6 @@ jobs:
           name: can-hub-x86_64
           path: build/x86_64/release/can-hub*
           retention-days: 7
-
-  # `make test` builds our sources plain: the cest runner is an ASan binary, but
-  # that watches the runner's allocations, not ours.
-  sanitizers:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: install dependencies
-        run: |
-          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          sudo apt-get update
-          sudo apt-get install -y ninja-build
-      - name: cache build tree
-        uses: actions/cache@v4
-        with:
-          path: build
-          key: sanitized-${{ hashFiles('CMakeLists.txt', 'test/CMakeLists.txt', 'cmake/**') }}
-      - name: unit tests under asan and ubsan
-        run: make test-sanitized
 
   # Installed the way it ships, library bundled into canhub/, so the suite runs
   # against what a user gets rather than a path in an environment variable.

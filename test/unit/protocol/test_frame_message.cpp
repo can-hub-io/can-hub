@@ -16,7 +16,7 @@ describe("frame_message", []() {
             FRAME_ROUTE_FLAG_ECHO | (9 << FRAME_ROUTE_TOKEN_SHIFT),
             { 0xDE, 0xAD, 0xBE, 0xEF },
         };
-        FrameMessage decoded;
+        FrameMessage decoded = { 0 };
         uint8_t buffer[128];
         size_t expected_size = MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + 4;
         size_t encoded_size;
@@ -32,7 +32,7 @@ describe("frame_message", []() {
         expect(decoded.channel).toBe(7);
         expect(decoded.payload_length).toBe(4);
         expect(decoded.route_flags).toBe(FRAME_ROUTE_FLAG_ECHO | (9 << FRAME_ROUTE_TOKEN_SHIFT));
-        expect(decoded.payload).toEqualMemory(frame.payload, 4);
+        expect(decoded.payload).toEqual(frame.payload);
     });
 
     it("round-trips a 64-byte FD frame", []() {
@@ -54,7 +54,7 @@ describe("frame_message", []() {
         expect(encoded_size).toBe(expected_size);
         expect(decoded_ok).toBe(true);
         expect(decoded.payload_length).toBe(FRAME_PAYLOAD_MAX_FD);
-        expect(decoded.payload).toEqualMemory(frame.payload, FRAME_PAYLOAD_MAX_FD);
+        expect(decoded.payload).toEqual(frame.payload);
     });
 
     it("rejects a classic frame with more than 8 payload bytes", []() {
