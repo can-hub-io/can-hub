@@ -8,14 +8,18 @@ Wants=can-hub.service
 Type=simple
 User=can-hub
 Group=can-hub
+Environment=HUB_URL=unix:///run/can-hub/hub.sock
+Environment=SOCKETCAND_ARGS=
 EnvironmentFile=-/etc/can-hub/socketcand.conf
-ExecStart=/usr/bin/can-hub-client --connect unix:///run/can-hub/hub.sock socketcand $SOCKETCAND_ARGS
+ExecStart=/usr/bin/can-hub-client --connect ${HUB_URL} --state-dir /var/lib/can-hub-client socketcand $SOCKETCAND_ARGS
 Restart=on-failure
 RestartSec=2
+StateDirectory=can-hub-client
 
-# Bridges the hub (unix socket) to a local socketcand TCP server + UDP beacon.
-# No CAN access: it never touches a vcan, frames travel through the hub. So no
-# capabilities; only the unix socket and the loopback TCP/UDP families.
+# Bridges the hub (local unix socket, or a remote hub over quic/tls) to a local
+# socketcand TCP server + UDP beacon. Its TLS identity and known_hubs live in
+# its own state directory, apart from the hub's. No CAN access: frames travel
+# through the hub, so no capabilities.
 NoNewPrivileges=yes
 CapabilityBoundingSet=
 AmbientCapabilities=

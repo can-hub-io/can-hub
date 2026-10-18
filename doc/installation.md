@@ -49,9 +49,15 @@ The client package includes a service that exposes the hub's interfaces as
 a local socketcand server (for python-can, Kayak, SavvyCAN):
 
 ```sh
-sudo editor /etc/can-hub/socketcand.conf   # defaults: 127.0.0.1:29536, beacon on
+sudo editor /etc/can-hub/socketcand.conf   # defaults: local hub, 127.0.0.1:29536, beacon on
 sudo systemctl enable --now can-hub-socketcand
 ```
+
+`HUB_URL` points the bridge at a remote hub (`quic://` or `tls://`); its TLS
+identity and `known_hubs` live in `/var/lib/can-hub-client`.
+
+Every unit carries the same defaults as its `/etc/can-hub/*.conf`, so a
+service still starts with the file removed; the file only overrides.
 
 ## Static binaries (from releases)
 
@@ -89,7 +95,9 @@ make test                     # unit tests (CEST)
 ```
 
 `make install` installs the four binaries, `libcanhub` (static + shared) and
-`include/canhub.h` — no systemd units; use the debs for service deployment.
+`include/canhub.h`. It ships no systemd units: they run as the `can-hub`
+system user, which only the debs create, so use the debs for service
+deployment.
 
 Other targets:
 
