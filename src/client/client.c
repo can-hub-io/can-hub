@@ -1,6 +1,5 @@
 #include "client/client.h"
 
-#include <stdio.h>
 #include <string.h>
 
 #include "protocol/control_buffer.h"
@@ -8,6 +7,7 @@
 #include "protocol/interface_status_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
+#include "shared/bounded_string.h"
 
 #define CLIENT_PACE_BURST_BITS 8192
 #define FRAME_PACE_OVERHEAD_BITS 64
@@ -54,7 +54,7 @@ void Client_Init(Client *self, TransportPort *hub, const ClientEvents *events)
 
 void Client_SetName(Client *self, const char *name)
 {
-    snprintf(self->name, sizeof(self->name), "%s", name);
+    BoundedString_Copy(self->name, sizeof(self->name), name);
 }
 
 TransportEvents Client_TransportEvents(Client *self)
@@ -96,7 +96,7 @@ void Client_OpenById(Client *self, uint32_t interface_id, uint8_t flags)
 
 void Client_OpenByName(Client *self, const char *interface_name, uint8_t flags)
 {
-    snprintf(self->interface_name, sizeof(self->interface_name), "%s", interface_name);
+    BoundedString_Copy(self->interface_name, sizeof(self->interface_name), interface_name);
     self->open_flags = flags;
 
     if (!self->connected) {

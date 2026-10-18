@@ -7,6 +7,7 @@ extern "C" {
 #include "can_port_mock.h"
 #include "mirror/mirror_app.h"
 #include "protocol/frame_message.h"
+#include "protocol/hello_message.h"
 #include "protocol/list_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
@@ -27,6 +28,7 @@ static void feedListReply(uint8_t flags, const char *agent, const char *iface, u
 static void feedHubFrame(uint8_t channel, uint32_t can_id, uint8_t byte0, uint8_t byte1);
 static void feedHubError();
 static void sendLocalFrame(uint32_t can_id, uint8_t byte0);
+static void decodeSentHello(uint8_t slot, HelloMessage *hello);
 static void decodeSentOpen(uint8_t slot, OpenMessage *open);
 static uint8_t sentMessageType(uint8_t slot);
 static void decodeSentFrame(FrameMessage *frame);
@@ -37,6 +39,17 @@ describe("mirror_app", []() {
         CanPortMock_Reset(&can);
         MirrorApp_Init(&mirror, &hub.port, &can.port, TEST_INTERFACE_ID, nullptr);
         hub_events = MirrorApp_TransportEvents(&mirror);
+    });
+
+    it("says HELLO with no name once the name is cleared", []() {
+        HelloMessage hello;
+
+        MirrorApp_SetName(&mirror, "bridge");
+        MirrorApp_SetName(&mirror, NULL);
+        connect();
+        decodeSentHello(0, &hello);
+
+        expect((const char *)hello.name).toBe("");
     });
 
     it("sends HELLO then OPEN with want-write on connect", []() {
@@ -272,3 +285,12 @@ static void decodeSentFrame(FrameMessage *frame)
     MessageHeader_Decode(&header, hub.last_frame, hub.last_frame_size);
     FrameMessage_Decode(frame, hub.last_frame + MESSAGE_HEADER_SIZE, header.length);
 }
+
+static void decodeSentHello(uint8_t slot, HelloMessage *hello)
+{
+    MessageHeader header;
+
+    MessageHeader_Decode(&header, hub.control_log[slot], hub.control_sizes[slot]);
+    HelloMessage_Decode(hello, hub.control_log[slot] + MESSAGE_HEADER_SIZE, header.length);
+}
+

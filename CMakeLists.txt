@@ -77,6 +77,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/protocol/interface_name.c
         src/protocol/interface_status_message.c
         src/shared/egress_shaper.c
+        src/shared/bounded_string.c
         src/client/client.c
         src/platform/windows/clock/clock.c
         src/platform/linux/shared/connect_url.c
@@ -147,6 +148,7 @@ set(COMMON_SOURCES
     src/protocol/interface_status_message.c
     src/protocol/interface_name.c
     src/shared/egress_shaper.c
+    src/shared/bounded_string.c
 )
 
 FetchContent_Declare(sqlite3

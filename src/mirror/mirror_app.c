@@ -1,6 +1,5 @@
 #include "mirror/mirror_app.h"
 
-#include <stdio.h>
 #include <string.h>
 
 #include "protocol/control_buffer.h"
@@ -8,6 +7,7 @@
 #include "protocol/list_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
+#include "shared/bounded_string.h"
 
 #define OPEN_FLAGS_READ_ONLY OPEN_FLAG_SUPPRESS_OWN_ECHO
 #define OPEN_FLAGS_READ_WRITE (OPEN_FLAG_SUPPRESS_OWN_ECHO | OPEN_FLAG_WANT_WRITE)
@@ -34,7 +34,7 @@ void MirrorApp_Init(MirrorApp *self, TransportPort *hub, CanPort *can, uint32_t 
     self->interface_id = interface_id;
 
     if (interface_name != NULL && interface_name[0] != '\0') {
-        snprintf(self->interface_name, sizeof(self->interface_name), "%s", interface_name);
+        BoundedString_Copy(self->interface_name, sizeof(self->interface_name), interface_name);
         self->state = kMIRROR_RESOLVING;
         return;
     }
@@ -44,7 +44,7 @@ void MirrorApp_Init(MirrorApp *self, TransportPort *hub, CanPort *can, uint32_t 
 
 void MirrorApp_SetName(MirrorApp *self, const char *name)
 {
-    snprintf(self->name, sizeof(self->name), "%s", name);
+    BoundedString_Copy(self->name, sizeof(self->name), name);
 }
 
 void MirrorApp_SetReliable(MirrorApp *self, bool reliable)
