@@ -351,6 +351,12 @@ add_unit_test(test_broker
 )
 target_link_libraries(test_broker PRIVATE port_mocks)
 
+add_unit_test(test_frame_spec
+    SOURCES
+        client/test_frame_spec.cpp
+        ${ROOT_SRC_DIR}/client/frame_spec.c
+)
+
 add_unit_test(test_client
     SOURCES
         client/test_client.cpp

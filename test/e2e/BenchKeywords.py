@@ -20,7 +20,7 @@ from lib import (
     AgentConfig, CanAgent, CanClient, CanCli, CanHub, ClientConfig, HubConfig,
 )
 from lib.binaries import BIN_DIR, binary
-from lib.rows import parse_candump
+from lib.rows import normalise_spec, parse_candump, parse_candump_specs
 from lib.silent_connections import SilentConnections
 
 CONSUME_SCRIPT = "/work/test/e2e/scripts/consume.py"
@@ -51,6 +51,10 @@ class BenchKeywords:
     @keyword("Create VCAN On ${server}")
     def create_vcan_on(self, server, name="vcan0"):
         return server.make_vcan(name)
+
+    @keyword("Enable CAN FD On ${server}")
+    def enable_can_fd_on(self, server, name="vcan0"):
+        server.enable_can_fd(name)
 
     # ---------- configuration builders ----------
 
@@ -249,6 +253,15 @@ class BenchKeywords:
     @keyword("Start Candump On ${server}")
     def start_candump_on(self, server, interface="vcan0"):
         return server.candump(interface)
+
+    @keyword("Candump ${process} Should Show ${spec}")
+    def candump_should_show(self, process, spec, timeout=5):
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            if normalise_spec(spec) in parse_candump_specs(process.read_log()):
+                return
+            time.sleep(0.1)
+        raise AssertionError(f"candump did not capture {spec}\n{process.read_log()}")
 
     @keyword("Candump ${process} Should Capture ${can_id}#${data}")
     def candump_should_capture(self, process, can_id, data, timeout=5):

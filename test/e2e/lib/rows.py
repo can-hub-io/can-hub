@@ -149,6 +149,26 @@ def parse_candump(text: str) -> list[Frame]:
     return frames
 
 
+CANFD_FDF_FLAG = 0x04
+FD_SEPARATOR = "##"
+
+
+def parse_candump_specs(text: str) -> list[str]:
+    """candump -L frames in cansend syntax (``123##1DEADBEEF``, ``123#R``), see normalise_spec."""
+    return [normalise_spec(fields[2]) for fields in (line.split() for line in text.splitlines())
+            if len(fields) == 3 and fields[0].startswith("(")]
+
+
+def normalise_spec(spec: str) -> str:
+    """Upper-case, and drop CANFD_FDF from FD flags: kernels >= 6.2 set it on every FD frame."""
+    spec = spec.upper()
+    if FD_SEPARATOR not in spec:
+        return spec
+    can_id, rest = spec.split(FD_SEPARATOR, 1)
+    flags = int(rest[0], 16) & ~CANFD_FDF_FLAG
+    return f"{can_id}{FD_SEPARATOR}{flags:X}{rest[1:]}"
+
+
 def parse_client_dump(text: str) -> list[Frame]:
     """can-hub-client dump: ``(1780847295.078524) 123 [4] DE AD BE EF``."""
     frames = []

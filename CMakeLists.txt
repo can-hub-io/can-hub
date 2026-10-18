@@ -248,6 +248,7 @@ add_executable(can-hub-agent src/platform/linux/agent_main.c ${COMMON_SOURCES} $
 target_link_libraries(can-hub-agent PRIVATE ngtcp2_static can_hub_tls)
 set(CLIENT_SOURCES
     src/client/client.c
+    src/client/frame_spec.c
     src/platform/linux/clock/clock.c
     src/platform/linux/shared/connect_url.c
     src/platform/linux/shared/epoll_registry.c
