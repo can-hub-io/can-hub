@@ -84,6 +84,7 @@ static void applyDefaultListen(ListenAddress *listen_address, const char *bind_a
 static bool startListeners(const char *unix_path, const char *certificate, const char *key, bool explicit_listen);
 static bool muxSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool muxSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
+static bool muxFrameFits(void *context, uint32_t peer_id, uint8_t channel, size_t size);
 static void muxSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
 static void muxClosePeer(void *context, uint32_t peer_id);
 static HubTransportPort *portForPeer(uint32_t peer_id);
@@ -277,6 +278,7 @@ static bool startListeners(const char *unix_path, const char *certificate, const
     mux_port.context = NULL;
     mux_port.send_control = muxSendControl;
     mux_port.send_frame = muxSendFrame;
+    mux_port.frame_fits = muxFrameFits;
     mux_port.set_channel_mode = muxSetChannelMode;
     mux_port.close_peer = muxClosePeer;
 
@@ -420,6 +422,15 @@ static bool muxSendFrame(void *context, uint32_t peer_id, uint8_t channel, const
     (void)context;
 
     return destination->send_frame(destination->context, peer_id, channel, data, size);
+}
+
+static bool muxFrameFits(void *context, uint32_t peer_id, uint8_t channel, size_t size)
+{
+    HubTransportPort *destination = portForPeer(peer_id);
+
+    (void)context;
+
+    return destination->frame_fits(destination->context, peer_id, channel, size);
 }
 
 static void muxSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable)

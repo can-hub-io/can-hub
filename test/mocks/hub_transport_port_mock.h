@@ -26,6 +26,7 @@ typedef struct {
     bool last_channel_mode_reliable;
     bool control_result;
     bool frame_result;
+    uint32_t full_peer;
 } HubTransportPortMock;
 
 void HubTransportPortMock_Reset(HubTransportPortMock *self);

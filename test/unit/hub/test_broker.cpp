@@ -37,6 +37,10 @@ static IdentityStorePort overreporting_identity_store;
 static HubTransportEvents events;
 static uint8_t client_channel;
 static const RegisterMessage truck_registration = { "truck42", 2, { "can0", "can1" } };
+
+static void openSubscribersBehindOneFullReliableClient(void);
+static bool sendAgentFrame(void);
+static uint8_t framesTo(uint32_t peer_id);
 static const RegisterMessage bus_registration = { "bus7", 1, { "can0" } };
 
 static uint8_t injectFrom(uint32_t client_peer_id, uint8_t channel);
@@ -533,6 +537,45 @@ describe("broker", []() {
             interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
 
             expect(openReliableStatus(CLIENT_PEER, interface_id)).toBe(OPEN_STATUS_RELIABLE_UNSUPPORTED);
+        });
+    });
+
+    describe("reliable delivery with a full destination", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            events = Broker_Events(&broker);
+            BrokerDriver_ConnectAgentWithCapabilities(
+                &events,
+                &transport,
+                AGENT_PEER,
+                &truck_registration,
+                HELLO_CAP_RELIABLE_CHANNELS
+            );
+            openSubscribersBehindOneFullReliableClient();
+        });
+
+        it("sends a frame nowhere while one of its reliable routes is full", []() {
+            bool accepted;
+
+            accepted = sendAgentFrame();
+
+            expect(accepted).toBe(false);
+            expect(transport.frame_count).toBe(0);
+        });
+
+        it("delivers the redelivered frame exactly once to every route", []() {
+            bool accepted;
+
+            sendAgentFrame();
+            transport.full_peer = 0;
+
+            accepted = sendAgentFrame();
+
+            expect(accepted).toBe(true);
+            expect(framesTo(CLIENT_PEER)).toBe((uint8_t)1);
+            expect(framesTo(CLIENT_PEER + 1)).toBe((uint8_t)1);
+            expect(framesTo(CLIENT_PEER + 2)).toBe((uint8_t)1);
         });
     });
 
@@ -1805,4 +1848,40 @@ static FrameMessage relayedFrameAt(uint16_t index)
     FrameMessage_Decode(&relayed, transport.frame_log[index] + MESSAGE_HEADER_SIZE, header.length);
 
     return relayed;
+}
+
+static void openSubscribersBehindOneFullReliableClient(void)
+{
+    uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+
+    BrokerDriver_ConnectClientWithCapabilities(&events, CLIENT_PEER, HELLO_CAP_RELIABLE_CHANNELS);
+    BrokerDriver_ConnectClientWithCapabilities(&events, CLIENT_PEER + 1, HELLO_CAP_RELIABLE_CHANNELS);
+    BrokerDriver_ConnectClient(&events, CLIENT_PEER + 2);
+    BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, OPEN_FLAG_RELIABLE);
+    BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER + 1, interface_id, OPEN_FLAG_RELIABLE);
+    BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER + 2, interface_id, 0);
+    transport.full_peer = CLIENT_PEER + 1;
+}
+
+static bool sendAgentFrame(void)
+{
+    FrameMessage frame = { 0x123, 1000, 0, 1, 0, 0, { 0xAA } };
+    uint8_t encoded[128];
+    size_t encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+
+    return events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
+}
+
+static uint8_t framesTo(uint32_t peer_id)
+{
+    uint8_t count = 0;
+    uint16_t i;
+
+    for(i=0; i<transport.frame_count; i++) {
+        if (transport.frame_peers[i] == peer_id) {
+            count++;
+        }
+    }
+
+    return count;
 }

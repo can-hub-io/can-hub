@@ -4,6 +4,7 @@
 
 static bool mockSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool mockSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
+static bool mockFrameFits(void *context, uint32_t peer_id, uint8_t channel, size_t size);
 static void mockSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
 static void mockClosePeer(void *context, uint32_t peer_id);
 
@@ -15,6 +16,7 @@ void HubTransportPortMock_Reset(HubTransportPortMock *self)
     self->port.context = self;
     self->port.send_control = mockSendControl;
     self->port.send_frame = mockSendFrame;
+    self->port.frame_fits = mockFrameFits;
     self->port.set_channel_mode = mockSetChannelMode;
     self->port.close_peer = mockClosePeer;
     self->control_result = true;
@@ -46,7 +48,7 @@ static bool mockSendFrame(void *context, uint32_t peer_id, uint8_t channel, cons
 {
     HubTransportPortMock *self = context;
 
-    if (!self->frame_result) {
+    if (!mockFrameFits(context, peer_id, channel, size)) {
         return false;
     }
     if (self->frame_count >= HUB_MOCK_FRAME_LOG_MAX || size > HUB_MOCK_FRAME_SIZE) {
@@ -60,6 +62,16 @@ static bool mockSendFrame(void *context, uint32_t peer_id, uint8_t channel, cons
     self->frame_count++;
 
     return true;
+}
+
+static bool mockFrameFits(void *context, uint32_t peer_id, uint8_t channel, size_t size)
+{
+    HubTransportPortMock *self = context;
+
+    (void)channel;
+    (void)size;
+
+    return self->frame_result && peer_id != self->full_peer;
 }
 
 static void mockSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable)

@@ -25,6 +25,7 @@
 
 static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
+static bool portFrameFits(void *context, uint32_t peer_id, uint8_t channel, size_t size);
 static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
 static void portClosePeer(void *context, uint32_t peer_id);
 static TlsServerPeer *findPeer(TlsServerTransport *self, uint32_t peer_id);
@@ -67,6 +68,7 @@ bool TlsServerTransport_Init(
     self->port.context = self;
     self->port.send_control = portSendControl;
     self->port.send_frame = portSendFrame;
+    self->port.frame_fits = portFrameFits;
     self->port.set_channel_mode = portSetChannelMode;
     self->port.close_peer = portClosePeer;
     self->events = *events;
@@ -220,19 +222,21 @@ static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data
 
 static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size)
 {
+    if (!portFrameFits(context, peer_id, channel, size)) {
+        return false;
+    }
+
+    return portSendControl(context, peer_id, data, size);
+}
+
+static bool portFrameFits(void *context, uint32_t peer_id, uint8_t channel, size_t size)
+{
     TlsServerTransport *self = context;
     TlsServerPeer *peer = findPeer(self, peer_id);
 
     (void)channel;
 
-    if (peer == NULL) {
-        return false;
-    }
-    if (TlsChannel_FreeTxSpace(&peer->channel) < size) {
-        return false;
-    }
-
-    return portSendControl(context, peer_id, data, size);
+    return peer != NULL && TlsChannel_FreeTxSpace(&peer->channel) >= size;
 }
 
 static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable)
