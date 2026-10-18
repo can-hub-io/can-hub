@@ -7,8 +7,6 @@ extern "C" {
 }
 
 #include <arpa/inet.h>
-#include <netinet/tcp.h>
-#include <unistd.h>
 
 static struct sockaddr_storage address;
 static socklen_t address_length;
@@ -110,23 +108,5 @@ describe("listen_endpoint_format_host", []() {
         ListenEndpoint_FormatHost(&address, host, sizeof(host));
 
         expect((const char *)host).toBe("::1");
-    });
-});
-
-describe("listen_endpoint_enable_keepalive", []() {
-    it("bounds how long a silent peer can hold its socket", []() {
-        int32_t fd = socket(AF_INET, SOCK_STREAM, 0);
-        int32_t keepalive = 0;
-        uint32_t user_timeout_ms = 0;
-        socklen_t keepalive_size = sizeof(keepalive);
-        socklen_t user_timeout_size = sizeof(user_timeout_ms);
-
-        ListenEndpoint_EnableKeepalive(fd);
-        getsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &keepalive, &keepalive_size);
-        getsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &user_timeout_ms, &user_timeout_size);
-        close(fd);
-
-        expect(keepalive).toBe(1);
-        expect(user_timeout_ms > 0).toBe(true);
     });
 });

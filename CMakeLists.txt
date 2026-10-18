@@ -103,6 +103,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/platform/linux/quic/quic_reliable_streams.c
         src/platform/windows/quic/quic_udp_endpoint.c
         src/platform/windows/quic/quic_client_transport.c
+        src/platform/windows/shared/tcp_keepalive.c
         src/platform/windows/tcp/tcp_channel.c
         src/platform/windows/tcp/tcp_client_transport.c
         src/platform/windows/tls/tls_client_transport.c
@@ -177,6 +178,7 @@ set(AGENT_SOURCES
     src/platform/linux/shared/tls_aead.c
     src/platform/linux/shared/tls_aes_armv8.c
     src/platform/linux/shared/message_framer.c
+    src/platform/linux/shared/tcp_keepalive.c
     src/platform/linux/socketcan/socketcan_adapter.c
     src/platform/linux/socketcan/can_netlink.c
     src/platform/linux/tcp/tcp_channel.c
@@ -219,6 +221,7 @@ set(HUB_SOURCES
     src/platform/linux/shared/tls_aead.c
     src/platform/linux/shared/tls_aes_armv8.c
     src/platform/linux/shared/message_framer.c
+    src/platform/linux/shared/tcp_keepalive.c
     src/platform/linux/tcp/tcp_channel.c
     src/platform/linux/tcp/tcp_server_transport.c
     src/platform/linux/tls/tls_channel.c
@@ -244,6 +247,7 @@ set(CLIENT_SOURCES
     src/platform/linux/shared/connect_url.c
     src/platform/linux/shared/epoll_registry.c
     src/platform/linux/shared/message_framer.c
+    src/platform/linux/shared/tcp_keepalive.c
     src/platform/linux/tcp/tcp_channel.c
     src/platform/linux/tcp/tcp_client_transport.c
 )

@@ -16,6 +16,7 @@
 
 #include "platform/linux/clock/clock.h"
 #include "platform/linux/shared/listen_endpoint.h"
+#include "platform/linux/shared/tcp_keepalive.h"
 #include "protocol/message_header.h"
 
 #define LISTEN_BACKLOG 8
@@ -156,7 +157,7 @@ void TcpServerTransport_OnAcceptReady(TcpServerTransport *self)
         origin[0] = '\0';
         origin_host[0] = '\0';
         if (!self->local) {
-            ListenEndpoint_EnableKeepalive(peer_fd);
+            TcpKeepalive_Enable(peer_fd);
             ListenEndpoint_FormatOrigin(&remote, origin, sizeof(origin));
             ListenEndpoint_FormatHost(&remote, origin_host, sizeof(origin_host));
         }

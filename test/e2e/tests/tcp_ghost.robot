@@ -4,6 +4,8 @@ Documentation     A plaintext agent that loses its link without a FIN leaves a
 ...               registers, so neither its FIN nor any reply to a keepalive probe
 ...               ever reaches the hub. Reconnecting from the same host must
 ...               displace the zombie at once; left alone, the hub must reap it.
+...               An agent left running on a link that goes silent both ways must
+...               notice on its own and reconnect over a fresh port.
 Library           BenchKeywords
 Library           BuiltIn
 Variables         bench_variables.py
@@ -44,3 +46,18 @@ The Hub Reaps A Silent Plaintext Agent
     Stop CAN Agent ${agent}
 
     Wait Until Agent ${agent} Is Gone From ${hub}    45
+
+A Silent Plaintext Agent Reconnects On Its Own
+    Create VCAN On ${WAN_SERVER}    vcan0
+
+    ${hub_cfg}=    Benchmark Hub Configuration
+    ${hub}=    Start CAN HUB On ${LOCAL_SERVER} With ${hub_cfg}
+
+    ${agent_cfg}=    Agent Configuration    tcp://local:7228    zombie3    vcan0
+    ${agent}=    Start CAN Agent On ${WAN_SERVER} With ${agent_cfg}
+    Wait Until Agent ${agent} Registered On ${hub}
+    ${old_port}=    Source Port Of Agent ${agent} On ${hub}
+
+    Silence TCP Port ${old_port} On ${WAN_SERVER}
+
+    Wait Until Agent ${agent} Replaces Port ${old_port} On ${hub}    45

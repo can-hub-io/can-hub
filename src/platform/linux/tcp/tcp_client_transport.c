@@ -12,6 +12,7 @@
 #include <sys/un.h>
 
 #include "platform/linux/clock/clock.h"
+#include "platform/linux/shared/tcp_keepalive.h"
 #include "protocol/message_header.h"
 
 static bool portConnect(void *context);
@@ -222,6 +223,7 @@ static bool connectTcp(TcpClientTransport *self, int32_t *connected_fd)
         if (tcp_fd < 0) {
             continue;
         }
+        TcpKeepalive_Enable(tcp_fd);
         connect_result = connect(tcp_fd, candidate->ai_addr, candidate->ai_addrlen);
         if (connect_result == 0 || errno == EINPROGRESS) {
             break;

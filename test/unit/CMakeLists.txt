@@ -172,6 +172,12 @@ add_unit_test(test_listen_endpoint
         ${ROOT_SRC_DIR}/platform/linux/shared/listen_endpoint.c
 )
 
+add_unit_test(test_tcp_keepalive
+    SOURCES
+        platform/test_tcp_keepalive.cpp
+        ${ROOT_SRC_DIR}/platform/linux/shared/tcp_keepalive.c
+)
+
 add_unit_test(test_quic_datagram_backlog
     SOURCES
         platform/test_quic_datagram_backlog.cpp
