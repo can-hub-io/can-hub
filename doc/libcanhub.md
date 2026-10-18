@@ -73,6 +73,13 @@ printf("paced out %llu, ring lost %llu\n",
        (unsigned long long)stats.frames_ring_dropped);
 ```
 
+A session is not thread-safe: `canhub_recv`, `canhub_send` and the rest all
+drive the same connection and receive ring, so calls on one session must not
+overlap. Serialise them yourself when several threads share a session, and
+keep the lock out of a long blocking `canhub_recv` — receive in short
+timeouts and release in between, so a sender is not starved. The python-can
+backend does exactly that. Separate sessions are independent.
+
 `canhub_connect` returns NULL for every failure, so there is no session to
 ask. `canhub_last_error(NULL)` returns the reason for the last failed
 connect on the calling thread — bad url, unreadable identity, unreachable

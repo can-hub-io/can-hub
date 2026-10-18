@@ -1,8 +1,11 @@
+import threading
+import time
+
 import pytest
-from can import CanInitializationError, CanOperationError
+from can import CanInitializationError, CanOperationError, Message
 
 import canhub._native as native
-from canhub.bus import CanHubBus
+from canhub.bus import RECEIVE_SLICE_MS, CanHubBus, _FairLock
 
 SESSION = 0x1234
 DETECT_RESULT = [{"interface": "canhub", "channel": "agent/iface"}]
@@ -102,6 +105,70 @@ class TestDetectAvailableConfigs:
         assert CanHubBus._detect_available_configs() == []
 
 
+
+class TestApplyFilters:
+    def test_it_installs_filters_on_the_hub(self, monkeypatch):
+        bus, installed = given_bus_recording_filters(monkeypatch)
+
+        bus._apply_filters([{"can_id": 0x123, "can_mask": 0x7FF}])
+
+        assert installed == [(SESSION, 1)]
+        assert bus._filters_applied
+
+    def test_it_clears_the_hub_filters_when_reset(self, monkeypatch):
+        bus, installed = given_bus_recording_filters(monkeypatch)
+
+        bus._apply_filters(None)
+
+        assert installed == [(SESSION, 0)]
+        assert not bus._filters_applied
+
+    def test_it_clears_the_hub_filters_when_there_are_too_many(self, monkeypatch):
+        bus, installed = given_bus_recording_filters(monkeypatch)
+        too_many = [{"can_id": slot, "can_mask": 0x7FF} for slot in range(native.FILTERS_MAX + 1)]
+
+        bus._apply_filters(too_many)
+
+        assert installed == [(SESSION, 0)]
+        assert not bus._filters_applied
+
+
+class TestConcurrentUse:
+    def test_it_lets_a_send_through_while_a_receive_waits(self, monkeypatch):
+        bus, hub = given_bus_on_idle_hub(monkeypatch)
+        receiver = given_receiving_in_background(bus, hub, timeout=0.5)
+
+        elapsed = send_and_time(bus)
+
+        receiver.join()
+        assert elapsed < 0.1
+        assert hub.most_concurrent_calls == 1
+
+    def test_it_waits_in_short_slices_until_the_timeout(self, monkeypatch):
+        bus, hub = given_bus_on_idle_hub(monkeypatch)
+
+        message, _ = bus._recv_internal(0.05)
+
+        assert message is None
+        assert len(hub.receive_timeouts) > 1
+        assert max(hub.receive_timeouts) <= RECEIVE_SLICE_MS
+
+
+
+class TestFairLock:
+    def test_it_serves_a_waiting_thread_before_the_holder_takes_it_back(self):
+        lock = _FairLock()
+        order = []
+
+        with lock:
+            waiter = given_waiting_for(lock, order)
+        with lock:
+            order.append("holder")
+
+        waiter.join()
+        assert order == ["waiter", "holder"]
+
+
 def make_interface(agent, name):
     info = native.CanHubInterfaceInfo()
     info.agent = agent.encode()
@@ -155,3 +222,87 @@ def given_detect_raises(monkeypatch):
 def clear_identity_environment(monkeypatch):
     for name in ("CANHUB_IDENTITY_CERT", "CANHUB_IDENTITY_KEY", "CANHUB_HUB_FINGERPRINT"):
         monkeypatch.delenv(name, raising=False)
+
+
+def given_bus_recording_filters(monkeypatch):
+    installed = []
+
+    def record(session, filters, count):
+        installed.append((session, count))
+        return native.OK
+
+    bus = make_bare_bus()
+    monkeypatch.setattr(native.lib, "canhub_set_filters", record)
+    return bus, installed
+
+
+class IdleHub:
+    def __init__(self):
+        self.receiving = threading.Event()
+        self.receive_timeouts = []
+        self.most_concurrent_calls = 0
+        self._concurrent_calls = 0
+        self._counter = threading.Lock()
+
+    def recv(self, session, frame, timeout_ms):
+        self._enter()
+        self.receive_timeouts.append(timeout_ms)
+        self.receiving.set()
+        time.sleep(timeout_ms / 1000)
+        self._leave()
+        return native.ERR_TIMEOUT
+
+    def send(self, session, frame):
+        self._enter()
+        self._leave()
+        return native.OK
+
+    def _enter(self):
+        with self._counter:
+            self._concurrent_calls += 1
+            self.most_concurrent_calls = max(self.most_concurrent_calls, self._concurrent_calls)
+
+    def _leave(self):
+        with self._counter:
+            self._concurrent_calls -= 1
+
+
+def make_bare_bus():
+    bus = CanHubBus.__new__(CanHubBus)
+    bus._lock = _FairLock()
+    bus._session = SESSION
+    bus._writable = True
+    return bus
+
+
+def given_bus_on_idle_hub(monkeypatch):
+    hub = IdleHub()
+    monkeypatch.setattr(native.lib, "canhub_recv", hub.recv)
+    monkeypatch.setattr(native.lib, "canhub_send", hub.send)
+    return make_bare_bus(), hub
+
+
+def given_receiving_in_background(bus, hub, timeout):
+    receiver = threading.Thread(target=bus._recv_internal, args=(timeout,))
+    receiver.start()
+    hub.receiving.wait(timeout)
+    return receiver
+
+
+def send_and_time(bus):
+    started = time.monotonic()
+    bus.send(Message(arbitration_id=0x123, data=b"\x01", is_extended_id=False))
+    return time.monotonic() - started
+
+
+def given_waiting_for(lock, order):
+    def wait_then_record():
+        with lock:
+            order.append("waiter")
+
+    waiter = threading.Thread(target=wait_then_record)
+    waiter.start()
+    deadline = time.monotonic() + 1.0
+    while lock._next_ticket < 2 and time.monotonic() < deadline:
+        time.sleep(0.001)
+    return waiter

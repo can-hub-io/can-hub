@@ -31,6 +31,11 @@ for message in bus:
 Write access follows the hub client ACLs: if the ACL grants read-only, the
 bus opens read-only and `send()` raises.
 
+The bus is thread-safe: a `can.Notifier` receiving in its thread while other
+threads call `send()` is supported. Calls into the native session are
+serialised first come, first served, and a blocking receive gives way to a
+waiting send within about 10 ms.
+
 ## Drop counters
 
 Two drops happen inside the library and never reach the hub, so the hub's own

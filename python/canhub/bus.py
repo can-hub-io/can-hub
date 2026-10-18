@@ -2,6 +2,8 @@
 
 import ctypes
 import os
+import threading
+import time
 from typing import List, Optional, Tuple
 
 from can import BusABC, CanInitializationError, CanOperationError, Message
@@ -10,6 +12,7 @@ from . import _native as native
 
 DEFAULT_TIMEOUT_MS = 5000
 FINGERPRINT_HEX_LENGTH = 64
+RECEIVE_SLICE_MS = 10
 
 
 def _is_fingerprint(text: str) -> bool:
@@ -48,6 +51,7 @@ class CanHubBus(BusABC):
         reliable: bool = False,
         **kwargs,
     ):
+        self._lock = _FairLock()
         self._session = None
         self._writable = False
 
@@ -123,15 +127,17 @@ class CanHubBus(BusABC):
 
     def _recv_internal(self, timeout: Optional[float]) -> Tuple[Optional[Message], bool]:
         frame = native.CanHubFrame()
-        timeout_ms = -1 if timeout is None else max(0, int(timeout * 1000))
+        deadline = None if timeout is None else time.monotonic() + max(0.0, timeout)
 
-        result = native.lib.canhub_recv(self._session, ctypes.byref(frame), timeout_ms)
-        if result == native.RECEIVED:
-            return self._to_message(frame), self._filters_applied
-        if result == native.ERR_TIMEOUT:
-            return None, self._filters_applied
-
-        raise CanOperationError(native.last_error(self._session))
+        while True:
+            with self._lock:
+                result = native.lib.canhub_recv(self._session, ctypes.byref(frame), _slice_ms(deadline))
+            if result == native.RECEIVED:
+                return self._to_message(frame), self._filters_applied
+            if result != native.ERR_TIMEOUT:
+                raise CanOperationError(native.last_error(self._session))
+            if deadline is not None and time.monotonic() >= deadline:
+                return None, self._filters_applied
 
     def send(self, msg: Message, timeout: Optional[float] = None) -> None:
         frame = native.CanHubFrame()
@@ -155,18 +161,21 @@ class CanHubBus(BusABC):
         frame.length = len(data)
         frame.payload[: len(data)] = data
 
-        result = native.lib.canhub_send(self._session, ctypes.byref(frame))
+        with self._lock:
+            result = native.lib.canhub_send(self._session, ctypes.byref(frame))
         if result != native.OK:
             raise CanOperationError(native.last_error(self._session))
 
     def drop_counters(self) -> dict:
-        return native.drop_counters(self._session)
+        with self._lock:
+            return native.drop_counters(self._session)
 
     def shutdown(self) -> None:
         super().shutdown()
-        if self._session:
-            native.lib.canhub_close(self._session)
-            self._session = None
+        with self._lock:
+            if self._session:
+                native.lib.canhub_close(self._session)
+                self._session = None
 
     @property
     def _filters_applied(self) -> bool:
@@ -174,6 +183,8 @@ class CanHubBus(BusABC):
 
     def _apply_filters(self, filters) -> None:
         if not filters or len(filters) > native.FILTERS_MAX:
+            with self._lock:
+                native.lib.canhub_set_filters(self._session, None, 0)
             self._hardware_filtered = False
             return
 
@@ -181,7 +192,8 @@ class CanHubBus(BusABC):
         for slot, can_filter in zip(native_filters, filters):
             slot.can_id = can_filter["can_id"]
             slot.can_mask = can_filter["can_mask"]
-        result = native.lib.canhub_set_filters(self._session, native_filters, len(filters))
+        with self._lock:
+            result = native.lib.canhub_set_filters(self._session, native_filters, len(filters))
         self._hardware_filtered = result == native.OK
 
     def _open(self, channel: str, receive_own_messages: bool, reliable: bool) -> None:
@@ -249,3 +261,34 @@ class CanHubBus(BusABC):
             dlc=frame.length,
             data=bytes(frame.payload[: frame.length]),
         )
+
+
+class _FairLock:
+    """Serialises the native calls on one session, first come first served.
+
+    A plain Lock would let the receive loop take it back before a waiting
+    send ever runs: it releases and re-acquires while still holding the GIL.
+    """
+
+    def __init__(self):
+        self._condition = threading.Condition()
+        self._next_ticket = 0
+        self._serving = 0
+
+    def __enter__(self):
+        with self._condition:
+            ticket = self._next_ticket
+            self._next_ticket += 1
+            self._condition.wait_for(lambda: self._serving == ticket)
+
+    def __exit__(self, *exc_info):
+        with self._condition:
+            self._serving += 1
+            self._condition.notify_all()
+
+
+def _slice_ms(deadline: Optional[float]) -> int:
+    if deadline is None:
+        return RECEIVE_SLICE_MS
+    remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
+    return min(RECEIVE_SLICE_MS, remaining_ms)

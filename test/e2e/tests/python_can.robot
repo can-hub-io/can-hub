@@ -32,6 +32,16 @@ Python Bus Sends Onto The Bus
     Should Be True    ${result.ok}
     Candump ${candump} Should Capture 1A0#CAFE
 
+Python Bus Sends While A Notifier Receives
+    ${candump}=    Start Candump On ${LOCAL_SERVER}
+    ${duplex}=    Start Python ${PROBE} On ${LOCAL_SERVER}    ${CONNECT}    truck42/vcan0    duplex    1D0    50
+    Log Of ${duplex} Should Contain notifier on truck42/vcan0
+    Inject CAN Frame On ${LOCAL_SERVER}    vcan0    2D0#ABCD
+    Log Of ${duplex} Should Contain 2D0#ABCD
+    Log Of ${duplex} Should Contain sent 50
+    Candump ${candump} Should Capture 1D0#00
+    Candump ${candump} Should Capture 1D0#31
+
 Python Bus Lists The Interfaces The Hub Exports
     ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${CONNECT}    truck42/vcan0    list
     Should Be True    ${result.ok}

@@ -2,6 +2,7 @@
 
 usage: pycan_probe.py <url> <channel> dump [options]
        pycan_probe.py <url> <channel> send <can-id-hex> <payload-hex> [options]
+       pycan_probe.py <url> <channel> duplex <can-id-hex> <count> [options]
        pycan_probe.py <url> <channel> list [options]
        pycan_probe.py <url> <channel> detect [options]
 
@@ -10,17 +11,20 @@ options: --state-dir PATH --cert PATH --key PATH --hub-fingerprint HEX
 
 import argparse
 import os
+import time
 
 import can
 
 from canhub import CanHubBus
+
+DUPLEX_SEND_GAP_S = 0.02
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("url")
     parser.add_argument("channel")
-    parser.add_argument("action", choices=["dump", "send", "list", "detect"])
+    parser.add_argument("action", choices=["dump", "send", "duplex", "list", "detect"])
     parser.add_argument("frame_arguments", nargs="*")
     parser.add_argument("--state-dir")
     parser.add_argument("--cert")
@@ -58,11 +62,33 @@ def main():
         bus.shutdown()
         return
 
+    if arguments.action == "duplex":
+        duplex(bus, arguments)
+        return
+
     print(f"dumping {arguments.channel}", flush=True)
     while True:
         message = bus.recv(timeout=1.0)
         if message is not None:
-            print(f"{message.arbitration_id:03X}#{message.data.hex().upper()}", flush=True)
+            print_message(message)
+
+
+def duplex(bus, arguments):
+    can_id = int(arguments.frame_arguments[0], 16)
+    count = int(arguments.frame_arguments[1])
+
+    can.Notifier(bus, [print_message])
+    print(f"notifier on {arguments.channel}", flush=True)
+    for index in range(count):
+        bus.send(can.Message(arbitration_id=can_id, data=bytes([index]), is_extended_id=False))
+        time.sleep(DUPLEX_SEND_GAP_S)
+    print(f"sent {count}", flush=True)
+    while True:
+        time.sleep(1.0)
+
+
+def print_message(message):
+    print(f"{message.arbitration_id:03X}#{message.data.hex().upper()}", flush=True)
 
 
 def list_interfaces(arguments):
