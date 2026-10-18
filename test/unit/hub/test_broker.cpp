@@ -688,7 +688,7 @@ describe("broker", []() {
 
         it("forwards an agent frame to the subscribed client", []() {
             FrameMessage frame = { 0x123, 1000, 1, 2, 0, 0, { 0xAA, 0xBB } };
-            FrameMessage routed;
+            FrameMessage routed = { 0 };
             MessageHeader header;
             uint8_t encoded[128];
             size_t encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
@@ -701,7 +701,7 @@ describe("broker", []() {
             expect(transport.frame_peers[0]).toBe((uint32_t)CLIENT_PEER);
             expect(routed.can_id).toBe((uint32_t)0x123);
             expect(routed.channel).toBe(client_channel);
-            expect(routed.payload).toEqualMemory(frame.payload, 2);
+            expect(routed.payload).toEqual(frame.payload);
         });
 
         it("forwards a client frame to the owning agent with its channel", []() {

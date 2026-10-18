@@ -17,7 +17,7 @@ make test               # build + run all unit tests (CEST, host x86_64)
 make clean
 ```
 
-`make test` builds `test/` into `build/test/` and runs them with `test/vendor/cest-runner_linux_x86_64` under `setarch -R` — the runner is an ASan build and ASan shadow memory collides with high-entropy mmap ASLR on kernels >= 6.5. Do not remove that workaround.
+`make test` builds `test/` into `build/test/` with ASan and UBSan (our sources and the tests alike; LSan suppressions in `test/lsan.supp`) and runs them with `test/vendor/cest-runner_linux_x86_64`. No `setarch -R`: since CEST v5 the runner is built with GCC 13, whose ASan re-executes itself without ASLR when its shadow memory collides with the high-entropy mmap ASLR of kernels >= 6.5; the vendored pre-v5 runner (GCC 12) segfaulted there.
 
 Run a single test: build with `make test` (or `cmake --build build/test`), then execute the test binary directly:
 

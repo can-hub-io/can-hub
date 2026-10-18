@@ -1,189 +1,205 @@
 #pragma once
-    #include <string> // string
-#include <stdexcept> // runtime_error
-// #include <nlohmann/detail/meta/identity_tag.hpp>
-#include <algorithm> // copy
-#include <type_traits> // enable_if, is_base_of, is_pointer, is_integral, remove_pointer
-#include <functional>
-// #include <nlohmann/detail/string_concat.hpp>
-#include <cstdio> // snprintf
-#include <limits>  // numeric_limits
-#include <initializer_list>
-    #include <ranges> // enable_borrowed_range
-#include <type_traits> // false_type, is_constructible, is_integral, is_same, true_type
-#include <tuple> // tuple, make_tuple
-#include <type_traits> // is_arithmetic, is_same, is_enum, underlying_type, is_convertible
-#include <iterator> // inserter, front_inserter, end
-#include <cmath> // ldexp
-#include <cstddef> // nullptr_t
-#include <cstring>
-#include <exception> // exception
-#include <utility> // pair
-#include <limits> // max
-#include <limits> // numeric_limits
-#include <type_traits>
-#include <chrono>
-// #include <nlohmann/detail/macro_scope.hpp>
-#include <functional> // function
-#include <type_traits> // conditional, is_const, remove_const
-    #include <iosfwd> // ostream
-    #include <cassert> // assert
-    #include <map> // map
-// #include <nlohmann/detail/conversions/to_json.hpp>
-#include <cmath>   // signbit, isfinite
-#include <algorithm> // all_of, find, for_each
-#include <algorithm> // generate_n
-#include <type_traits> // conditional, is_same
-// #include <nlohmann/detail/output/serializer.hpp>
-#include <memory> // shared_ptr, make_shared, addressof
-#include <utility> // declval
-// #include <nlohmann/detail/iterators/iteration_proxy.hpp>
-#include <cstdint> // intN_t, uintN_t
-#include <unordered_map> // unordered_map
-#include <type_traits> // is_same
-#include <string> // char_traits, string
-#include <cctype> // isdigit
-// #include <nlohmann/detail/conversions/to_chars.hpp>
-#include <sanitizer/lsan_interface.h>
-#include <map>
-#include <valarray> // valarray
-    #include <iosfwd> // istream, ostream
-#include <tuple> // tie
-#include <string>
-// #include <nlohmann/detail/input/input_adapters.hpp>
-#include <cstdint> // uint8_t, uint16_t, uint32_t, uint64_t
-    #include <vector> // vector
-#include <string> // string
-// #include <nlohmann/detail/json_custom_base_class.hpp>
-// #include <nlohmann/byte_container_with_subtype.hpp>
-#include <utility> // index_sequence, make_index_sequence, index_sequence_for
-#include <cstdint> // size_t
-#include <cstdlib> // strtoull
-// #include <nlohmann/thirdparty/hedley/hedley_undef.hpp>
-// #include <nlohmann/json_fwd.hpp>
-#include <iterator> // input_iterator_tag, iterator_traits
-#include <numeric> // accumulate
-#include <cerrno> // errno, ERANGE
-// #include <nlohmann/detail/conversions/from_json.hpp>
-#include <utility> // declval, pair
-    #include <stdint.h>
 // #include <nlohmann/detail/iterators/iterator_traits.hpp>
-// #include <nlohmann/detail/value_t.hpp>
-    #include <ostream>  // basic_ostream
-#include <cstdint> // uint8_t, uint64_t
-#include <memory> // unique_ptr
-#include <iterator> // iterator, random_access_iterator_tag, bidirectional_iterator_tag, advance, next
-#include <functional> // equal_to, less
-        #include <any>
-// #include <nlohmann/detail/iterators/iter_impl.hpp>
-#include <string> // string, stoi, to_string
-        #include <version>
-    #include <memory> // allocator
-#include <utility> // move
-// #include <nlohmann/detail/meta/type_traits.hpp>
-#include <sstream>
-#include <cstdlib> // strtof, strtod, strtold, strtoll, strtoull
-#include <cmath> // labs, isfinite, isnan, signbit
-// #include <nlohmann/detail/meta/cpp_future.hpp>
-#include <iomanip> // setfill, setw
-// #include <nlohmann/detail/string_escape.hpp>
-#include <string> // string, char_traits
-// #include <nlohmann/detail/meta/is_sax.hpp>
-#include <algorithm> // reverse
-    #include <cstdint> // int64_t, uint64_t
-// #include <nlohmann/detail/abi_macros.hpp>
-#include <array> // array
-#include <cstdint> // uint8_t
-// #include <nlohmann/detail/meta/std_fs.hpp>
-#include <random>
-#include <fcntl.h>
-// #include <nlohmann/detail/macro_unscope.hpp>
-#include <filesystem>
-#include <string> // char_traits
-#include <cstddef>
 #include <forward_list> // forward_list
-#include <cstring> // memcpy
-// #include <nlohmann/detail/input/lexer.hpp>
-// #include <nlohmann/detail/json_ref.hpp>
-#include <string> // string, to_string
-#include <unistd.h>
-// #include <nlohmann/detail/output/binary_writer.hpp>
-#include <initializer_list> // initializer_list
-#include <utility> // pair, declval
-// #include <nlohmann/detail/input/json_sax.hpp>
-#include <memory> // shared_ptr, make_shared
-#include <functional> // hash, less
-#include <utility> // move, forward, declval, pair
+#include <cmath> // isfinite
+#include <type_traits> // is_same
+// #include <nlohmann/detail/conversions/to_json.hpp>
+#include <memory> // shared_ptr, make_shared, addressof
 #include <algorithm> // reverse, remove, fill, find, none_of
+#include <type_traits>
+// #include <nlohmann/thirdparty/hedley/hedley_undef.hpp>
 #include <iterator> // random_access_iterator_tag
-// #include <nlohmann/detail/iterators/json_reverse_iterator.hpp>
-    #include <istream>  // istream
-// #include <nlohmann/detail/meta/call_std/begin.hpp>
-#include <string> // basic_string
-#include <type_traits> // enable_if, is_convertible
-#include <type_traits> // conditional, enable_if, false_type, integral_constant, is_constructible, is_integral, is_same, remove_cv, remove_reference, true_type
-#include <functional> // hash
-#include <memory> // allocator
-#include <utility> // make_pair, move
-#include <cstring> // memcpy, memmove
-// #include <nlohmann/adl_serializer.hpp>
-    // #include <nlohmann/detail/abi_macros.hpp>
-#include <fstream>
-// #include <nlohmann/detail/input/binary_reader.hpp>
-// #include <nlohmann/detail/input/position_t.hpp>
 #include <clocale> // localeconv
-// #include <nlohmann/detail/hash.hpp>
-#include <iterator> // input_iterator_tag
-    #include <cstdio>   // FILE *
-#include <csetjmp>
+#include <type_traits> // conditional, is_const, remove_const
+#include <memory> // allocator
+#include <iterator> // reverse_iterator
+#include <utility> // index_sequence, make_index_sequence, index_sequence_for
+#include <cstdint> // intN_t, uintN_t
+#include <string> // string, char_traits
+#include <utility> // declval
+#include <memory> // shared_ptr, make_shared
+#include <string> // char_traits
+// #include <nlohmann/detail/input/json_sax.hpp>
 #include <vector>
-    #include <compare> // partial_ordering
+#include <stdexcept> // for out_of_range
+#include <type_traits> // enable_if, is_base_of, is_pointer, is_integral, remove_pointer
+#include <deque>
+    #include <cassert> // assert
+#include <type_traits> // conditional, enable_if, false_type, integral_constant, is_constructible, is_integral, is_same, remove_cv, remove_reference, true_type
+// #include <nlohmann/detail/input/binary_reader.hpp>
+#include <cstdint> // uint8_t, uint16_t, uint32_t, uint64_t
+#include <string> // basic_string
+#include <cstdlib> // strtof, strtod, strtold, strtoll, strtoull
+#include <algorithm> // copy
+// #include <nlohmann/detail/input/lexer.hpp>
+    #include <cstdint> // int64_t, uint64_t
+#include <cstddef> // nullptr_t, ptrdiff_t, size_t
+    #include <map> // map
+#include <functional> // hash
+// #include <nlohmann/adl_serializer.hpp>
+// #include <nlohmann/detail/input/position_t.hpp>
+#include <utility> // pair
+#ifndef _WIN32
+#include <sanitizer/lsan_interface.h>
+#endif
+// #include <nlohmann/detail/json_custom_base_class.hpp>
+// #include <nlohmann/detail/iterators/primitive_iterator.hpp>
+#include <csetjmp>
+#include <tuple> // tuple
+#include <utility>
+#include <string> // string, stoi, to_string
+#include <algorithm> // all_of
+// #include <nlohmann/detail/value_t.hpp>
+#include <sstream>
 #include <cstddef> // ptrdiff_t
 // #include <nlohmann/ordered_map.hpp>
-#include <utility> // forward
-#include <iostream>
-#include <map> // map
-#include <iterator> // begin, end
-#include <string> // to_string
-#include <cmath> // isfinite
-// #include <nlohmann/detail/json_pointer.hpp>
-#include <utility>
-#include <tuple> // tuple
-// #include <nlohmann/detail/meta/detected.hpp>
-#include <regex>
-#include <tuple> // tuple_size, get, tuple_element
-    #include <string_view>
-#include <cstddef> // nullptr_t, ptrdiff_t, size_t
-#include <cmath>
-// #include <nlohmann/detail/meta/void_t.hpp>
-#include <vector> // vector
-#include <utility> // declval, forward, move, pair, swap
-#include <stdexcept>
-#include <cmath> // isnan, isinf
-    #include <ios>      // streamsize
-#include <iterator> // begin, end, iterator_traits, random_access_iterator_tag, distance, next
-// #include <nlohmann/detail/output/output_adapters.hpp>
-    #include <numeric> // accumulate
-#include <csignal>
-#include <algorithm> // all_of
-// #include <nlohmann/thirdparty/hedley/hedley.hpp>
-#include <cstddef> // size_t, ptrdiff_t
-#include <cstddef> // size_t
+#include <cstdint> // size_t
 // #include <nlohmann/detail/exceptions.hpp>
-#include <iterator> // reverse_iterator
+#include <array> // array
+// #include <nlohmann/detail/meta/type_traits.hpp>
+#include <functional>
+#include <cstdint> // uint8_t
+#include <cstdint> // uint8_t, uint64_t
+    #include <iosfwd> // ostream
+#include <initializer_list> // initializer_list
+// #include <nlohmann/detail/iterators/iter_impl.hpp>
+    #include <istream>  // istream
+// #include <nlohmann/detail/meta/void_t.hpp>
+#include <cstring> // memcpy, memmove
+#include <string> // string, to_string
 // #include <nlohmann/detail/iterators/internal_iterator.hpp>
-#include <tuple> // tuple, get
-// #include <nlohmann/detail/input/parser.hpp>
-#include <algorithm> // transform
-    #include <cstdlib>
-// #include <nlohmann/detail/meta/call_std/end.hpp>
+#include <cstdlib> // strtoull
+#include <algorithm> // reverse
+#include <chrono>
+#include <cstdio> // snprintf
+// #include <nlohmann/detail/meta/cpp_future.hpp>
+// #include <nlohmann/detail/json_ref.hpp>
+    #include <memory> // allocator
+    #include <ranges> // enable_borrowed_range
+#include <string> // to_string
+        #include <any>
+#include <iostream>
+#include <string>
+    #include <iosfwd> // istream, ostream
+#include <random>
+#include <set>
+// #include <nlohmann/detail/meta/call_std/begin.hpp>
+// #include <nlohmann/detail/meta/identity_tag.hpp>
+// #include <nlohmann/detail/meta/std_fs.hpp>
+// #include <nlohmann/detail/meta/is_sax.hpp>
+#include <map>
+    // #include <nlohmann/detail/abi_macros.hpp>
+#include <type_traits> // false_type, is_constructible, is_integral, is_same, true_type
+// #include <nlohmann/json_fwd.hpp>
+#include <algorithm> // generate_n
+#include <iterator> // inserter, front_inserter, end
+#include <iterator> // input_iterator_tag, iterator_traits
+#include <initializer_list>
+#include <utility> // forward
+    #include <ios>      // streamsize
+#include <memory>
+#include <utility> // move, forward, declval, pair
+#include <array>
+#include <tuple> // tie
+#include <string_view>
+// #include <nlohmann/detail/iterators/json_reverse_iterator.hpp>
+// #include <nlohmann/detail/macro_unscope.hpp>
+// #include <nlohmann/detail/conversions/from_json.hpp>
+// #include <nlohmann/detail/output/binary_writer.hpp>
+#include <unordered_map> // unordered_map
+#include <cstddef> // size_t
+    #include <stdint.h>
+    #include <string> // string
+// #include <nlohmann/detail/output/serializer.hpp>
+#include <iterator>
+#include <iterator> // iterator, random_access_iterator_tag, bidirectional_iterator_tag, advance, next
+        #include <version>
+// #include <nlohmann/detail/input/input_adapters.hpp>
+#include <cmath> // isnan, isinf
+#include <algorithm> // all_of, find, for_each
+#include <utility> // make_pair, move
 #include <type_traits> // conditional
-// #include <nlohmann/detail/iterators/primitive_iterator.hpp>
+#include <utility> // declval, forward, move, pair, swap
+#include <cmath>   // signbit, isfinite
+#include <iterator> // input_iterator_tag
+// #include <nlohmann/detail/output/output_adapters.hpp>
+#include <optional>
+#include <cstddef>
+#include <vector> // vector
+#include <bitset>
+#include <tuple> // tuple, make_tuple
+#include <cerrno> // errno, ERANGE
+// #include <nlohmann/detail/macro_scope.hpp>
+    #include <cstdio>   // FILE *
+#include <functional> // equal_to, less
+// #include <nlohmann/detail/iterators/iteration_proxy.hpp>
+#include <cstring> // memcpy
+#include <regex>
 #include <iterator> // back_inserter
-#include <type_traits> // is_same, is_constructible, is_floating_point, is_enum, underlying_type
-#include <cstring> // strlen
-#include <stdexcept> // for out_of_range
+#include <type_traits> // enable_if, is_convertible
+#include <complex>
+#include <filesystem>
+#include <stdexcept>
+#include <unordered_set>
+#include <forward_list>
+    #include <numeric> // accumulate
+#include <utility> // pair, declval
+// #include <nlohmann/byte_container_with_subtype.hpp>
+#include <cstring>
+// #include <nlohmann/detail/string_concat.hpp>
+#include <utility> // move
+// #include <nlohmann/detail/conversions/to_chars.hpp>
+    #include <ostream>  // basic_ostream
+#include <valarray> // valarray
+// #include <nlohmann/detail/abi_macros.hpp>
+// #include <nlohmann/detail/json_pointer.hpp>
+#include <cstddef> // size_t, ptrdiff_t
+#include <iomanip> // setfill, setw
+#include <algorithm> // transform
+#include <limits> // max
+#include <map> // map
+#include <list>
+#include <tuple> // tuple, get
+#include <exception> // exception
+#include <cmath> // labs, isfinite, isnan, signbit
+// #include <nlohmann/detail/meta/call_std/end.hpp>
+#include <functional> // hash, less
+#include <cmath> // ldexp
+#include <type_traits> // conditional, is_same
+#include <tuple> // tuple_size, get, tuple_element
 #include <clocale> // localeconv, lconv
+    #include <vector> // vector
+    #include <cstdlib>
+#include <iterator> // begin, end
+#include <numeric> // accumulate
+#include <cctype> // isdigit
+// #include <nlohmann/detail/string_escape.hpp>
+#include <tuple>
+#include <utility> // declval, pair
+#include <iterator> // begin, end, iterator_traits, random_access_iterator_tag, distance, next
+// #include <nlohmann/detail/input/parser.hpp>
+// #include <nlohmann/thirdparty/hedley/hedley.hpp>
+    #include <compare> // partial_ordering
+#include <csignal>
+#include <stdexcept> // runtime_error
+// #include <nlohmann/detail/meta/detected.hpp>
+#include <type_traits> // is_same, is_constructible, is_floating_point, is_enum, underlying_type
+#include <string> // string
+#include <cstring> // strlen
+#include <string> // char_traits, string
+#include <memory> // unique_ptr
+#include <limits>  // numeric_limits
+    #include <string_view>
+#include <fcntl.h>
+#include <unistd.h>
+#include <type_traits> // is_arithmetic, is_same, is_enum, underlying_type, is_convertible
+#include <cstddef> // nullptr_t
+#include <fstream>
+#include <unordered_map>
+#include <functional> // function
+// #include <nlohmann/detail/hash.hpp>
+#include <cmath>
+#include <limits> // numeric_limits
 
 
 namespace cest
@@ -199,7 +215,8 @@ namespace cest
   {
     Normal,
     Skipped,
-    Focused
+    Focused,
+    Todo
   };
 
   struct TestCase
@@ -211,18 +228,19 @@ namespace cest
     std::string failure_message;
     std::string failure_file;
     int failure_line;
+    int64_t duration_us = 0;
   };
 
   struct TestSuite
   {
     std::string name;
+    TestCaseCondition condition = TestCaseCondition::Normal;
     TestFunction before_each;
     TestFunction after_each;
     TestFunction before_all;
     TestFunction after_all;
     std::vector<TestCase *> test_cases;
-    std::map<std::string, TestSuite *> test_suites;
-    TestSuite *parent;
+    std::vector<TestSuite *> test_suites;
   };
 
   class AssertionError : public std::exception
@@ -249,6 +267,7 @@ namespace cest
     bool only_test_suite_result;
     bool tree_test_suite_result;
     bool print_test_list;
+    std::string filter;
 
     CommandLineOptions() :
       help(false),
@@ -269,6 +288,7 @@ namespace cest
     jmp_buf jump_env;
     bool leaks_detected;
     int saved_stderr;
+    std::vector<std::string> registration_errors;
 
     CestGlobals() :
       current_test_suite(nullptr),
@@ -288,8 +308,8 @@ namespace cest
       }
     }
 
-    for (auto &pair : suite->test_suites)
-      any_test_failed |= anyTestInSuiteFailed(pair.second);
+    for (cest::TestSuite *nested_suite : suite->test_suites)
+      any_test_failed |= anyTestInSuiteFailed(nested_suite);
 
     return any_test_failed;
   }
@@ -304,8 +324,8 @@ namespace cest
         num_tests++;
     }
 
-    for (auto &pair : suite->test_suites)
-      num_tests += countTestsMatching(pair.second, condition);
+    for (cest::TestSuite *nested_suite : suite->test_suites)
+      num_tests += countTestsMatching(nested_suite, condition);
 
     return num_tests;
   }
@@ -313,7 +333,7 @@ namespace cest
   int numPassedTests(cest::TestSuite *suite)
   {
     return countTestsMatching(suite, [](cest::TestCase *test_case) {
-      return !test_case->failed && test_case->condition != TestCaseCondition::Skipped;
+      return !test_case->failed && test_case->condition != TestCaseCondition::Skipped && test_case->condition != TestCaseCondition::Todo;
     });
   }
 
@@ -331,6 +351,13 @@ namespace cest
     });
   }
 
+  int numTodoTests(cest::TestSuite *suite)
+  {
+    return countTestsMatching(suite, [](cest::TestCase *test_case) {
+      return test_case->condition == TestCaseCondition::Todo;
+    });
+  }
+
   std::string findSuiteSourceFile(cest::TestSuite *suite)
   {
     if (suite->test_cases.size() > 0)
@@ -339,8 +366,8 @@ namespace cest
     }
     else
     {
-      for (const auto &pair : suite->test_suites)
-        return findSuiteSourceFile(pair.second);
+      for (cest::TestSuite *nested_suite : suite->test_suites)
+        return findSuiteSourceFile(nested_suite);
     }
 
     return "";
@@ -356,9 +383,9 @@ namespace cest
         out.push_back(test_case);
     }
 
-    for (const auto &pair : suite->test_suites)
+    for (cest::TestSuite *nested_suite : suite->test_suites)
     {
-      auto nested = findFailedTestCases(pair.second);
+      auto nested = findFailedTestCases(nested_suite);
       out.insert(out.end(), nested.begin(), nested.end());
     }
 
@@ -388,6 +415,14 @@ static cest::CestGlobals __cest_globals;
 
 namespace cest
 {
+  std::string formatDuration(int64_t duration_us)
+  {
+    if (duration_us < 1000)
+      return "< 1 ms";
+
+    return std::to_string(duration_us / 1000) + " ms";
+  }
+
   void tryPrintFailedLines(cest::TestCase *test_case)
   {
     if (!test_case->failed) return;
@@ -434,14 +469,19 @@ namespace cest
     std::cout << "    -s/--seed <seed>: Inject seed for randomization uses (unsigned integer)";
     std::cout << "    -j/--json: Print test results as JSON";
     std::cout << "    -l/--print-test-list: Print JSON list of included test cases";
+    std::cout << "    -g/--grep <pattern>: Only run tests whose name contains <pattern>";
     std::cout << std::endl;
   }
 
-  void printTestBadge(bool failed, bool skipped = false)
+  void printTestBadge(bool failed, bool skipped = false, bool todo = false)
   {
     if (failed)
     {
       std::cout << ASCII_BACKGROUND_RED << ASCII_BLACK << ASCII_BOLD << " FAIL " << ASCII_RESET;
+    }
+    else if (todo)
+    {
+      std::cout << ASCII_BACKGROUND_MAGENTA << ASCII_BLACK << ASCII_BOLD << " TODO " << ASCII_RESET;
     }
     else if (skipped)
     {
@@ -455,8 +495,13 @@ namespace cest
 
   void printTestCaseResult(cest::TestCase *test_case)
   {
-    printTestBadge(test_case->failed, test_case->condition == cest::TestCaseCondition::Skipped);
-    std::cout << ASCII_GRAY << " " << test_case->fn.file << ":" << test_case->fn.line << ASCII_RESET << ASCII_BOLD << " " << test_case->name << ASCII_RESET << std::endl;
+    printTestBadge(test_case->failed, test_case->condition == cest::TestCaseCondition::Skipped, test_case->condition == cest::TestCaseCondition::Todo);
+    std::cout << ASCII_GRAY << " " << test_case->fn.file << ":" << test_case->fn.line << ASCII_RESET << ASCII_BOLD << " " << test_case->name << ASCII_RESET;
+
+    if (test_case->condition != cest::TestCaseCondition::Skipped && test_case->condition != cest::TestCaseCondition::Todo)
+      std::cout << ASCII_GRAY << " (" << formatDuration(test_case->duration_us) << ")" << ASCII_RESET;
+
+    std::cout << std::endl;
 
     if (test_case->failed)
     {
@@ -470,12 +515,22 @@ namespace cest
     for (cest::TestCase *test_case : suite->test_cases)
       printTestCaseResult(test_case);
 
-    for (auto &pair : suite->test_suites)
-      printTestSuiteResult(pair.second);
+    for (cest::TestSuite *nested_suite : suite->test_suites)
+      printTestSuiteResult(nested_suite);
   }
 
   void printTreeSuiteResult(cest::TestSuite *suite, int indentation = 0)
   {
+    bool is_root = suite == &__cest_globals.root_test_suite;
+
+    if (is_root)
+    {
+      for (cest::TestSuite *nested_suite : suite->test_suites)
+        printTreeSuiteResult(nested_suite, indentation);
+
+      return;
+    }
+
     std::string spacing = "  ";
 
     for (int i = 0; i < indentation; ++i)
@@ -487,12 +542,19 @@ namespace cest
     {
       if (test_case->failed)
         std::cout << "  " << spacing << ASCII_RED << ASCII_CROSS << ASCII_RESET;
+      else if (test_case->condition == cest::TestCaseCondition::Todo)
+        std::cout << "  " << spacing << ASCII_YELLOW << ASCII_TRIANGLE << ASCII_RESET;
       else if (test_case->condition == cest::TestCaseCondition::Skipped)
         std::cout << "  " << spacing << ASCII_YELLOW << ASCII_TRIANGLE << ASCII_RESET;
       else
         std::cout << "  " << spacing << ASCII_GREEN << ASCII_CHECK << ASCII_RESET;
 
-      std::cout << " " << ASCII_GRAY << test_case->name << ASCII_RESET << std::endl;
+      std::cout << " " << ASCII_GRAY << test_case->name;
+
+      if (test_case->condition != cest::TestCaseCondition::Skipped && test_case->condition != cest::TestCaseCondition::Todo)
+        std::cout << " (" << formatDuration(test_case->duration_us) << ")";
+
+      std::cout << ASCII_RESET << std::endl;
 
       if (test_case->failed)
       {
@@ -502,8 +564,8 @@ namespace cest
       }
     }
 
-    for (auto &pair : suite->test_suites)
-      printTreeSuiteResult(pair.second, indentation + 1);
+    for (cest::TestSuite *nested_suite : suite->test_suites)
+      printTreeSuiteResult(nested_suite, indentation + 1);
   }
 
   void printSuiteSummaryResult(cest::TestSuite *suite)
@@ -592,6 +654,12 @@ namespace cest
             catch (const std::invalid_argument &err) {}
           }
         }
+
+        if (arg == "-g" || arg == "--grep")
+        {
+          if (i + 1 < argc)
+            options.filter = std::string(argv[i + 1]);
+        }
       }
     }
 
@@ -635,9 +703,12 @@ namespace cest
 #define P(x,y) PP(x,y)
 
 #define describe(...) __attribute__((unused)) static int P(dummy, __LINE__) = cest::describeFn(__VA_ARGS__)
+#define xdescribe(...) __attribute__((unused)) static int P(dummy, __LINE__) = cest::xdescribeFn(__VA_ARGS__)
+#define fdescribe(...) __attribute__((unused)) static int P(dummy, __LINE__) = cest::fdescribeFn(__VA_ARGS__)
 #define it(...) cest::itFn(__FILE__, __LINE__, __VA_ARGS__)
 #define xit(...) cest::xitFn(__FILE__, __LINE__, __VA_ARGS__)
 #define fit(...) cest::fitFn(__FILE__, __LINE__, __VA_ARGS__)
+#define todo(...) cest::todoFn(__FILE__, __LINE__, __VA_ARGS__)
 #define beforeEach(x) cest::beforeEachFn(__FILE__, __LINE__, x)
 #define afterEach(x) cest::afterEachFn(__FILE__, __LINE__, x)
 #define beforeAll(x) cest::beforeAllFn(__FILE__, __LINE__, x)
@@ -680,32 +751,68 @@ namespace cest
     }
   };
 
-  int describeFn(std::string name, std::function<void()> fn)
+  bool suiteNameAlreadyUsed(TestSuite *parent, const std::string &name)
   {
-    if (__cest_globals.current_test_suite == nullptr)
+    for (TestSuite *sibling : parent->test_suites)
     {
-      __cest_globals.current_test_suite = &__cest_globals.root_test_suite;
-    }
-    else
-    {
-      TestSuite *new_suite = new TestSuite();
-      new_suite->parent = __cest_globals.current_test_suite;
-      __cest_globals.current_test_suite->test_suites[name] = new_suite;
-      __cest_globals.current_test_suite = new_suite;
+      if (sibling->name == name)
+        return true;
     }
 
-    __cest_globals.current_test_suite->name = name;
+    return false;
+  }
 
+  int describeFnWithCondition(std::string name, std::function<void()> fn, TestCaseCondition condition)
+  {
+    TestSuite *parent = &__cest_globals.root_test_suite;
+
+    if (__cest_globals.current_test_suite != nullptr)
+      parent = __cest_globals.current_test_suite;
+
+    if (suiteNameAlreadyUsed(parent, name))
+    {
+      __cest_globals.registration_errors.push_back(
+        "Duplicate test suite name \"" + name + "\" at the same level.");
+    }
+
+    TestSuite *suite = new TestSuite();
+    suite->name = name;
+    suite->condition = condition;
+    parent->test_suites.push_back(suite);
+
+    __cest_globals.current_test_suite = suite;
     fn();
-
-    __cest_globals.current_test_suite = __cest_globals.current_test_suite->parent;
+    __cest_globals.current_test_suite = parent;
 
     return 0;
   }
 
+  int describeFn(std::string name, std::function<void()> fn)
+  {
+    return describeFnWithCondition(name, fn, TestCaseCondition::Normal);
+  }
+
+  int xdescribeFn(std::string name, std::function<void()> fn)
+  {
+    return describeFnWithCondition(name, fn, TestCaseCondition::Skipped);
+  }
+
+  int fdescribeFn(std::string name, std::function<void()> fn)
+  {
+    return describeFnWithCondition(name, fn, TestCaseCondition::Focused);
+  }
+
   void itFn(std::string file, int line, std::string name, std::function<void()> fn)
   {
-    TestCase *test = TestCaseBuilder(file, line, name, fn).build();
+    TestCaseCondition suite_condition = __cest_globals.current_test_suite->condition;
+    TestCaseBuilder builder(file, line, name, fn);
+
+    if (suite_condition == TestCaseCondition::Skipped)
+      builder.skipped();
+    else if (suite_condition == TestCaseCondition::Focused)
+      builder.Focused();
+
+    TestCase *test = builder.build();
     __cest_globals.current_test_suite->test_cases.push_back(test);
   }
 
@@ -718,6 +825,17 @@ namespace cest
   void xitFn(std::string file, int line, std::string name, std::function<void()> fn)
   {
     TestCase *test = TestCaseBuilder(file, line, name, fn).skipped()->build();
+    __cest_globals.current_test_suite->test_cases.push_back(test);
+  }
+
+  void todoFn(std::string file, int line, std::string name)
+  {
+    TestCase *test = new TestCase();
+    test->name = name;
+    test->condition = TestCaseCondition::Todo;
+    test->fn.file = file;
+    test->fn.line = line;
+    test->failed = false;
     __cest_globals.current_test_suite->test_cases.push_back(test);
   }
 
@@ -744,11 +862,56 @@ namespace cest
 
 
 
+
+namespace cest
+{
+#if defined(_WIN32)
+  inline std::string platformSignalName(int sig)
+  {
+    switch (sig)
+    {
+      case SIGSEGV: return "Segmentation fault";
+      case SIGFPE:  return "Floating point exception";
+      case SIGILL:  return "Illegal instruction";
+      case SIGTERM: return "Terminated";
+      case SIGABRT: return "Aborted";
+      default:      return "Unknown signal (" + std::to_string(sig) + ")";
+    }
+  }
+
+  template<typename Handler>
+  void configurePlatformSignals(Handler handler)
+  {
+    signal(SIGSEGV, handler);
+    signal(SIGFPE, handler);
+    signal(SIGILL, handler);
+    signal(SIGTERM, handler);
+  }
+#else
+  inline std::string platformSignalName(int sig)
+  {
+    return std::string(strsignal(sig));
+  }
+
+  template<typename Handler>
+  void configurePlatformSignals(Handler handler)
+  {
+    signal(SIGSEGV, handler);
+    signal(SIGFPE, handler);
+    signal(SIGBUS, handler);
+    signal(SIGILL, handler);
+    signal(SIGTERM, handler);
+    signal(SIGXCPU, handler);
+    signal(SIGXFSZ, handler);
+  }
+#endif
+}
+
 namespace cest
 {
   void onSignalRaised(int sig)
   {
-    std::string signal_as_string(strsignal(sig));
+    std::string signal_as_string = cest::platformSignalName(sig);
     cest::TestCase *test_case = __cest_globals.current_test_case;
 
     test_case->failed = true;
@@ -761,13 +924,7 @@ namespace cest
 
   void configureSignals()
   {
-    signal(SIGSEGV, cest::onSignalRaised);
-    signal(SIGFPE, cest::onSignalRaised);
-    signal(SIGBUS, cest::onSignalRaised);
-    signal(SIGILL, cest::onSignalRaised);
-    signal(SIGTERM, cest::onSignalRaised);
-    signal(SIGXCPU, cest::onSignalRaised);
-    signal(SIGXFSZ, cest::onSignalRaised);
+    cest::configurePlatformSignals(cest::onSignalRaised);
   }
 
   void registerSignalHandler()
@@ -776,14 +933,7 @@ namespace cest
   }
 }
 
-#ifndef __SANITIZE_ADDRESS__
-namespace cest
-{
-  bool leaksDetected() { return false; }
-  void initAddressSanitizer() {}
-  void deinitAddressSanitizer() {}
-}
-#else
+#if defined(__SANITIZE_ADDRESS__) && !defined(_WIN32)
 
 namespace cest
 {
@@ -806,6 +956,13 @@ namespace cest
     return has_leaks;
   }
 }
+#else
+namespace cest
+{
+  bool leaksDetected() { return false; }
+  void initAddressSanitizer() {}
+  void deinitAddressSanitizer() {}
+}
 #endif
 
 namespace cest
@@ -825,10 +982,12 @@ namespace cest
 
     for (cest::TestCase *test_case : suite->test_cases)
     {
-      if (test_case->condition == cest::TestCaseCondition::Skipped)
+      if (test_case->condition == cest::TestCaseCondition::Skipped || test_case->condition == cest::TestCaseCondition::Todo)
         continue;
 
       __cest_globals.current_test_case = test_case;
+
+      auto test_start = std::chrono::steady_clock::now();
 
       if (suite->before_each.fn)
         suite->before_each.fn();
@@ -868,13 +1027,16 @@ namespace cest
 
       if (suite->after_each.fn)
         suite->after_each.fn();
+
+      auto test_end = std::chrono::steady_clock::now();
+      test_case->duration_us = std::chrono::duration_cast<std::chrono::microseconds>(test_end - test_start).count();
     }
 
     if (suite->after_all.fn)
       suite->after_all.fn();
 
-    for (auto &pair : suite->test_suites)
-      runTestSuite(pair.second);
+    for (cest::TestSuite *nested_suite : suite->test_suites)
+      runTestSuite(nested_suite);
   }
 
   void cleanUpSingleSuite(
@@ -888,8 +1050,8 @@ namespace cest
     for (const auto test : test_suite->test_cases)
       tests_to_delete.push_back(test);
 
-    for (auto &pair : test_suite->test_suites)
-      cleanUpSingleSuite(pair.second, suites_to_delete, tests_to_delete);
+    for (cest::TestSuite *nested_suite : test_suite->test_suites)
+      cleanUpSingleSuite(nested_suite, suites_to_delete, tests_to_delete);
   }
 
   void cleanUpTestSuite(cest::TestSuite *test_suite)
@@ -908,41 +1070,29 @@ namespace cest
 }
 
 
-#define CLIP_STRING_LENGTH 16
-
-#define expect(...) cest::expectFunction(__FILE__, ((__LINE__ - 1)), __VA_ARGS__)
-#define passTest() cest::forcedPass()
-#define failTest() cest::forcedFailure(__FILE__, __LINE__)
-#define Regex(x) x, std::regex(x)
 
 namespace cest
 {
-  void forcedPass()
-  {
-    throw ForcedPassError();
-  }
+  template <typename T, typename = void>
+  struct is_streamable : std::false_type {};
 
-  void forcedFailure(std::string file, int line)
-  {
-    throw AssertionError(file, line, "Test failure forced manually");
-  }
+  template <typename T>
+  struct is_streamable<T, std::void_t<decltype(std::declval<std::ostream&>() << std::declval<const T&>())>>
+    : std::true_type {};
 
-  template <class T>
-  void assertRaises(std::function<void()> expression)
+  template <typename T>
+  std::string formatValue(const T& value)
   {
-    std::string file = __cest_globals.current_test_case->fn.file;
-    int line = __cest_globals.current_test_case->fn.line;
-
-    try
+    if constexpr (is_streamable<T>::value)
     {
-      expression();
+      std::stringstream ss;
+      ss << value;
+      return ss.str();
     }
-    catch (const T &err)
+    else
     {
-      return;
+      return "<non-printable>";
     }
-
-    throw AssertionError(file, line, "Expected exception not raised");
   }
 
   template <class T>
@@ -975,29 +1125,108 @@ namespace cest
     void toBeTruthy()
     {
       if (!actual ^ this->negated)
-        throw AssertionError(assertion_file, assertion_line, "Expresion is not truthy");
+      {
+        std::string message = "Expected " + formatValue(actual) + (negated ? " not" : "") + " to be truthy";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
     }
 
     void toBeFalsy()
     {
       if (actual ^ this->negated)
-        throw AssertionError(assertion_file, assertion_line, "Expresion is not falsy");
+      {
+        std::string message = "Expected " + formatValue(actual) + (negated ? " not" : "") + " to be falsy";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
     }
 
-    void toBe(T expected)
+    void toBe(T expected) requires requires(T a, T b) { { a != b }; }
     {
       if ((expected != actual) ^ this->negated)
       {
+        std::string message = "Expected " + formatValue(actual) + (negated ? " not" : "") + " to be " + formatValue(expected);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
 
-        std::stringstream message;
-        message << "Expected " << expected << ", was " << actual;
-        throw AssertionError(assertion_file, assertion_line, message.str());
+    void toBe(T expected) requires (std::is_enum_v<T> && !requires(T a, T b) { { a != b }; })
+    {
+      bool differs = std::memcmp(&actual, &expected, sizeof(T)) != 0;
+      if (differs ^ negated)
+      {
+        std::string message = "Expected value" + std::string(negated ? " not" : "") + " to be the expected enum value";
+        throw AssertionError(assertion_file, assertion_line, message);
       }
     }
 
     void toEqual(T expected)
     {
       toBe(expected);
+    }
+
+    void toBeGreaterThan(T expected) requires requires(T a, T b) { { a > b }; }
+    {
+      if (!(actual > expected) ^ negated)
+      {
+        std::string message = "Expected " + formatValue(actual) + (negated ? " not" : "") + " to be greater than " + formatValue(expected);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toBeLessThan(T expected) requires requires(T a, T b) { { a < b }; }
+    {
+      if (!(actual < expected) ^ negated)
+      {
+        std::string message = "Expected " + formatValue(actual) + (negated ? " not" : "") + " to be less than " + formatValue(expected);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toBeInRange(T min, T max) requires requires(T a, T b) { { a >= b }; { a <= b }; }
+    {
+      bool in_range = actual >= min && actual <= max;
+      if (!in_range ^ negated)
+      {
+        std::string message = "Expected " + formatValue(actual) + (negated ? " not" : "") + " to be in range [" + formatValue(min) + ", " + formatValue(max) + "]";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveBitsSet(T mask) requires std::is_integral_v<T>
+    {
+      bool has_bits = (actual & mask) == mask;
+      if (!has_bits ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected 0x" << std::hex << std::uppercase << actual
+                << (negated ? " not" : "") << " to have bits 0x"
+                << std::hex << std::uppercase << mask << " set";
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toHaveBitsClear(T mask) requires std::is_integral_v<T>
+    {
+      bool bits_clear = (actual & mask) == 0;
+      if (!bits_clear ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected 0x" << std::hex << std::uppercase << actual
+                << (negated ? " not" : "") << " to have bits 0x"
+                << std::hex << std::uppercase << mask << " clear";
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toEqualBytes(T expected) requires std::is_trivially_copyable_v<T>
+    {
+      bool differs = std::memcmp(&actual, &expected, sizeof(T)) != 0;
+      if (differs ^ negated)
+      {
+        std::string message = "Expected value" + std::string(negated ? "" : " not") +
+                              " to be byte-equal (memcmp of " + std::to_string(sizeof(T)) + " bytes)";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
     }
 
     void toEqualMemory(T expected, int64_t length)
@@ -1011,8 +1240,10 @@ namespace cest
       if (any_byte_differs ^ negated)
       {
         std::stringstream message;
-        message << "Memory mismatch at byte " << i << ", expected ";
-        message << std::hex << std::uppercase << (int)expected[i] << " but was " << std::hex << std::uppercase << (int)actual[i];
+        if (negated)
+          message << "Expected memory not to match";
+        else
+          message << "Expected byte " << i << " to be 0x" << std::hex << std::uppercase << (int)expected[i] << ", was 0x" << std::hex << std::uppercase << (int)actual[i];
         throw AssertionError(assertion_file, assertion_line, message.str());
       }
     }
@@ -1021,9 +1252,8 @@ namespace cest
     {
       if ((actual == NULL) ^ negated)
       {
-        std::stringstream message;
-        message << "Expected 0x" << std::hex << std::uppercase << actual << " to be not null";
-        throw AssertionError(assertion_file, assertion_line, message.str());
+        std::string message = std::string("Expected value") + (negated ? "" : " not") + " to be null";
+        throw AssertionError(assertion_file, assertion_line, message);
       }
     }
 
@@ -1032,7 +1262,7 @@ namespace cest
       if ((actual != NULL) ^ negated)
       {
         std::stringstream message;
-        message << "Expected 0x" << std::hex << std::uppercase << actual << " to be null";
+        message << "Expected 0x" << std::hex << std::uppercase << actual << (negated ? " not" : "") << " to be null";
         throw AssertionError(assertion_file, assertion_line, message.str());
       }
     }
@@ -1045,7 +1275,106 @@ namespace cest
     std::string assertion_file;
     int assertion_line;
   };
+}
 
+
+namespace cest
+{
+  class CallableAssertion
+  {
+  public:
+    CallableAssertion(const char *file, int line, std::function<void()> fn, bool negated = false)
+      : fn(fn), assertion_file(file), assertion_line(line), negated(negated)
+    {
+      if (!negated)
+      {
+        this->Not = new CallableAssertion(file, line, fn, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~CallableAssertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toThrow()
+    {
+      bool threw = false;
+      try { fn(); }
+      catch (...) { threw = true; }
+
+      if (!threw ^ negated)
+      {
+        std::string message = negated
+          ? "Expected function not to throw"
+          : "Expected function to throw";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    template <class E>
+    void toThrow()
+    {
+      bool threw_expected = false;
+      bool threw_something = false;
+      try { fn(); }
+      catch (const E&) { threw_expected = true; threw_something = true; }
+      catch (...) { threw_something = true; }
+
+      if (!threw_expected ^ negated)
+      {
+        std::string message;
+        if (negated)
+          message = "Expected function not to throw specific exception type";
+        else if (threw_something)
+          message = "Expected function to throw specific exception type, but a different exception was thrown";
+        else
+          message = "Expected function to throw, but no exception was thrown";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toThrowMessage(std::string expected_message)
+    {
+      std::string actual_message;
+      bool threw = false;
+      try { fn(); }
+      catch (const std::exception& e) { threw = true; actual_message = e.what(); }
+      catch (...) { threw = true; }
+
+      bool matches = threw && actual_message == expected_message;
+      if (!matches ^ negated)
+      {
+        std::string message;
+        if (negated)
+          message = "Expected function not to throw with message \"" + expected_message + "\"";
+        else if (!threw)
+          message = "Expected function to throw, but no exception was thrown";
+        else
+          message = "Expected exception message \"" + expected_message + "\", got \"" + actual_message + "\"";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    CallableAssertion *Not;
+
+  private:
+    std::function<void()> fn;
+    std::string assertion_file;
+    int assertion_line;
+    bool negated;
+  };
+}
+
+
+namespace cest
+{
   template <>
   class Assertion<double>
   {
@@ -1078,7 +1407,7 @@ namespace cest
       if ((fabs(actual - expected) > epsilon) ^ negated)
       {
         std::stringstream message;
-        message << "Expected " << expected << ", was " << actual;
+        message << "Expected " << actual << (negated ? " not" : "") << " to be " << expected;
         throw AssertionError(assertion_file, assertion_line, message.str());
       }
     }
@@ -1093,7 +1422,7 @@ namespace cest
       if ((actual < expected) ^ negated)
       {
         std::stringstream message;
-        message << "Expected " << expected << " to be greather than" << actual;
+        message << "Expected " << actual << (negated ? " not" : "") << " to be greater than " << expected;
         throw AssertionError(assertion_file, assertion_line, message.str());
       }
     }
@@ -1103,7 +1432,18 @@ namespace cest
       if ((actual > expected) ^ negated)
       {
         std::stringstream message;
-        message << "Expected " << expected << " to be less than" << actual;
+        message << "Expected " << actual << (negated ? " not" : "") << " to be less than " << expected;
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toBeInRange(double min, double max)
+    {
+      bool in_range = actual >= min && actual <= max;
+      if (!in_range ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected " << actual << (negated ? " not" : "") << " to be in range [" << min << ", " << max << "]";
         throw AssertionError(assertion_file, assertion_line, message.str());
       }
     }
@@ -1116,7 +1456,11 @@ namespace cest
     std::string assertion_file;
     int assertion_line;
   };
+}
 
+
+namespace cest
+{
   template <>
   class Assertion<float>
   {
@@ -1149,7 +1493,7 @@ namespace cest
       if ((fabs(actual - expected) > epsilon) ^ negated)
       {
         std::stringstream message;
-        message << "Expected " << expected << ", was " << actual;
+        message << "Expected " << actual << (negated ? " not" : "") << " to be " << expected;
         throw AssertionError(assertion_file, assertion_line, message.str());
       }
     }
@@ -1164,7 +1508,7 @@ namespace cest
       if ((actual < expected) ^ negated)
       {
         std::stringstream message;
-        message << "Expected " << expected << " to be greather than" << actual;
+        message << "Expected " << actual << (negated ? " not" : "") << " to be greater than " << expected;
         throw AssertionError(assertion_file, assertion_line, message.str());
       }
     }
@@ -1174,7 +1518,18 @@ namespace cest
       if ((actual > expected) ^ negated)
       {
         std::stringstream message;
-        message << "Expected " << expected << " to be less than" << actual;
+        message << "Expected " << actual << (negated ? " not" : "") << " to be less than " << expected;
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toBeInRange(float min, float max)
+    {
+      bool in_range = actual >= min && actual <= max;
+      if (!in_range ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected " << actual << (negated ? " not" : "") << " to be in range [" << min << ", " << max << "]";
         throw AssertionError(assertion_file, assertion_line, message.str());
       }
     }
@@ -1187,7 +1542,11 @@ namespace cest
     std::string assertion_file;
     int assertion_line;
   };
+}
 
+
+namespace cest
+{
   template <class T>
   class Assertion<std::vector<T>>
   {
@@ -1217,11 +1576,16 @@ namespace cest
 
     void toBe(std::vector<T> expected)
     {
-      if ((expected.size() != actual.size()) ^ negated)
+      if (expected.size() != actual.size())
       {
-        std::stringstream message;
-        message << "Vector sizes do not match, expected " << expected.size() << " items but had " << actual.size() << " items";
-        throw AssertionError(assertion_file, assertion_line, message.str());
+        if (!negated)
+        {
+          std::stringstream message;
+          message << "Expected vector of size " << actual.size() << " to have " << expected.size() << " items";
+          throw AssertionError(assertion_file, assertion_line, message.str());
+        }
+
+        return;
       }
 
       bool any_item_differs = false;
@@ -1237,9 +1601,8 @@ namespace cest
 
       if (any_item_differs ^ negated)
       {
-        std::stringstream message;
-        message << "Vector item mismatch at position " << found_difference << ", expected " << expected[found_difference] << " but was " << actual[found_difference];
-        throw AssertionError(assertion_file, assertion_line, message.str());
+        std::string message = "Expected " + formatValue(actual[found_difference]) + " at position " + std::to_string(found_difference) + (negated ? " not" : "") + " to be " + formatValue(expected[found_difference]);
+        throw AssertionError(assertion_file, assertion_line, message);
       }
     }
 
@@ -1263,9 +1626,8 @@ namespace cest
 
       if (!found ^ negated)
       {
-        std::stringstream message;
-        message << "Item " << item << " not found in vector";
-        throw AssertionError(assertion_file, assertion_line, message.str());
+        std::string message = "Expected vector" + std::string(negated ? " not" : "") + " to contain " + formatValue(item);
+        throw AssertionError(assertion_file, assertion_line, message);
       }
     }
 
@@ -1274,7 +1636,7 @@ namespace cest
       if ((actual.size() != size) ^ negated)
       {
         std::stringstream message;
-        message << "Vector sizes does not match, expected " << size << " items but had " << actual.size() << " items";
+        message << "Expected vector" << (negated ? " not" : "") << " to have length " << size << ", was " << actual.size();
         throw AssertionError(assertion_file, assertion_line, message.str());
       }
     }
@@ -1287,7 +1649,13 @@ namespace cest
     std::string assertion_file;
     int assertion_line;
   };
+}
 
+
+#define CLIP_STRING_LENGTH 16
+
+namespace cest
+{
   template <>
   class Assertion<std::string>
   {
@@ -1323,13 +1691,13 @@ namespace cest
 
         if (expected.size() > CLIP_STRING_LENGTH || actual.size() > CLIP_STRING_LENGTH)
         {
-          message << "String mismatch," << std::endl;
+          message << "Expected string" << (negated ? " not" : "") << " to be" << std::endl;
           message << "  Expected: \"" << expected << "\"" << std::endl;
-          message << "  Actual  : \"" << actual << "\"";
+          message << "  Actual:   \"" << actual << "\"";
         }
         else
         {
-          message << "Expected \"" << expected << "\", was \"" << actual << "\"";
+          message << "Expected \"" << actual << "\"" << (negated ? " not" : "") << " to be \"" << expected << "\"";
         }
 
         throw AssertionError(assertion_file, assertion_line, message.str());
@@ -1348,13 +1716,13 @@ namespace cest
         std::stringstream message;
         if (expected_string.size() > CLIP_STRING_LENGTH || actual.size() > CLIP_STRING_LENGTH)
         {
-          message << "Expected pattern mismatch," << std::endl;
-          message << "  Regexp: \"" << expected_string << "\"" << std::endl;
-          message << "  Actual: \"" << actual << "\"";
+          message << "Expected string" << (negated ? " not" : "") << " to match pattern" << std::endl;
+          message << "  Pattern: \"" << expected_string << "\"" << std::endl;
+          message << "  Actual:  \"" << actual << "\"";
         }
         else
         {
-          message << "Expected pattern \"" << expected_string << "\" did not match with \"" << actual << "\"";
+          message << "Expected \"" << actual << "\"" << (negated ? " not" : "") << " to match pattern \"" << expected_string << "\"";
         }
 
         throw AssertionError(assertion_file, assertion_line, message.str());
@@ -1374,13 +1742,13 @@ namespace cest
 
         if (expected.size() > CLIP_STRING_LENGTH || actual.size() > CLIP_STRING_LENGTH)
         {
-          message << "Substring not found," << std::endl;
-          message << "  Expected: \"" << expected << "\"" << std::endl;
-          message << "  Actual  : \"" << actual << "\"";
+          message << "Expected string" << (negated ? " not" : "") << " to contain" << std::endl;
+          message << "  Substring: \"" << expected << "\"" << std::endl;
+          message << "  Actual:    \"" << actual << "\"";
         }
         else
         {
-          message << "\"" << expected << "\" not present inside \"" << actual << "\"";
+          message << "Expected \"" << actual << "\"" << (negated ? " not" : "") << " to contain \"" << expected << "\"";
         }
 
         throw AssertionError(assertion_file, assertion_line, message.str());
@@ -1392,7 +1760,7 @@ namespace cest
       if ((actual.length() != length) ^ negated)
       {
         std::stringstream message;
-        message << "Length of \"" << actual << "\" expected to be " << length << ", was " << actual.length();
+        message << "Expected \"" << actual << "\"" << (negated ? " not" : "") << " to have length " << length << ", was " << actual.length();
         throw AssertionError(assertion_file, assertion_line, message.str());
       }
     }
@@ -1406,11 +1774,1973 @@ namespace cest
 
     int assertion_line;
   };
+}
+
+
+namespace cest
+{
+  template <class T>
+  class Assertion<std::set<T>>
+  {
+  public:
+    Assertion(const char *file, int line, std::set<T> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::set<T>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::set<T> expected)
+    {
+      if ((expected != actual) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected set of size " << actual.size() << (negated ? " not" : "") << " to be " << expected.size() << " items";
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toEqual(std::set<T> expected)
+    {
+      toBe(expected);
+    }
+
+    void toInclude(T item)
+    {
+      if (!actual.count(item) ^ negated)
+      {
+        std::string message = "Expected set" + std::string(negated ? " not" : "") + " to include " + formatValue(item);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveSize(size_t size)
+    {
+      if ((actual.size() != size) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected set" << (negated ? " not" : "") << " to have size " << size << ", was " << actual.size();
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    Assertion<std::set<T>> *Not;
+
+  private:
+    bool negated;
+    std::set<T> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+
+  template <class T>
+  class Assertion<std::unordered_set<T>>
+  {
+  public:
+    Assertion(const char *file, int line, std::unordered_set<T> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::unordered_set<T>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::unordered_set<T> expected)
+    {
+      if ((expected != actual) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected unordered_set of size " << actual.size() << (negated ? " not" : "") << " to be " << expected.size() << " items";
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toEqual(std::unordered_set<T> expected)
+    {
+      toBe(expected);
+    }
+
+    void toInclude(T item)
+    {
+      if (!actual.count(item) ^ negated)
+      {
+        std::string message = "Expected unordered_set" + std::string(negated ? " not" : "") + " to include " + formatValue(item);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveSize(size_t size)
+    {
+      if ((actual.size() != size) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected unordered_set" << (negated ? " not" : "") << " to have size " << size << ", was " << actual.size();
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    Assertion<std::unordered_set<T>> *Not;
+
+  private:
+    bool negated;
+    std::unordered_set<T> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+}
+
+
+namespace cest
+{
+  template <class K, class V>
+  class Assertion<std::map<K, V>>
+  {
+  public:
+    Assertion(const char *file, int line, std::map<K, V> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::map<K, V>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::map<K, V> expected)
+    {
+      if ((expected != actual) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected map of size " << actual.size() << (negated ? " not" : "") << " to have " << expected.size() << " entries";
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toEqual(std::map<K, V> expected)
+    {
+      toBe(expected);
+    }
+
+    void toInclude(std::pair<K, V> entry)
+    {
+      auto it = actual.find(entry.first);
+      bool found = it != actual.end() && it->second == entry.second;
+
+      if (!found ^ negated)
+      {
+        std::string message = "Expected map" + std::string(negated ? " not" : "") + " to include {" + formatValue(entry.first) + ": " + formatValue(entry.second) + "}";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveKey(K key)
+    {
+      if (!actual.count(key) ^ negated)
+      {
+        std::string message = "Expected map" + std::string(negated ? " not" : "") + " to have key " + formatValue(key);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveSize(size_t size)
+    {
+      if ((actual.size() != size) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected map" << (negated ? " not" : "") << " to have size " << size << ", was " << actual.size();
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    Assertion<std::map<K, V>> *Not;
+
+  private:
+    bool negated;
+    std::map<K, V> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+
+  template <class K, class V>
+  class Assertion<std::unordered_map<K, V>>
+  {
+  public:
+    Assertion(const char *file, int line, std::unordered_map<K, V> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::unordered_map<K, V>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::unordered_map<K, V> expected)
+    {
+      if ((expected != actual) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected unordered_map of size " << actual.size() << (negated ? " not" : "") << " to have " << expected.size() << " entries";
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toEqual(std::unordered_map<K, V> expected)
+    {
+      toBe(expected);
+    }
+
+    void toInclude(std::pair<K, V> entry)
+    {
+      auto it = actual.find(entry.first);
+      bool found = it != actual.end() && it->second == entry.second;
+
+      if (!found ^ negated)
+      {
+        std::string message = "Expected unordered_map" + std::string(negated ? " not" : "") + " to include {" + formatValue(entry.first) + ": " + formatValue(entry.second) + "}";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveKey(K key)
+    {
+      if (!actual.count(key) ^ negated)
+      {
+        std::string message = "Expected unordered_map" + std::string(negated ? " not" : "") + " to have key " + formatValue(key);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveSize(size_t size)
+    {
+      if ((actual.size() != size) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected unordered_map" << (negated ? " not" : "") << " to have size " << size << ", was " << actual.size();
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    Assertion<std::unordered_map<K, V>> *Not;
+
+  private:
+    bool negated;
+    std::unordered_map<K, V> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+}
+
+
+namespace cest
+{
+  template <class T, std::size_t N>
+  class Assertion<std::array<T, N>>
+  {
+  public:
+    Assertion(const char *file, int line, std::array<T, N> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::array<T, N>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::array<T, N> expected)
+    {
+      bool any_item_differs = false;
+      size_t found_difference = 0;
+
+      for (size_t i = 0; i < N; ++i)
+      {
+        any_item_differs |= expected[i] != actual[i];
+
+        if (expected[i] != actual[i])
+          found_difference = i;
+      }
+
+      if (any_item_differs ^ negated)
+      {
+        std::string message = "Expected " + formatValue(actual[found_difference]) + " at position " + std::to_string(found_difference) + (negated ? " not" : "") + " to be " + formatValue(expected[found_difference]);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toEqual(std::array<T, N> expected)
+    {
+      toBe(expected);
+    }
+
+    void toContain(T item)
+    {
+      bool found = false;
+
+      for (size_t i = 0; i < N; ++i)
+      {
+        if (actual[i] == item)
+        {
+          found = true;
+          break;
+        }
+      }
+
+      if (!found ^ negated)
+      {
+        std::string message = "Expected array" + std::string(negated ? " not" : "") + " to contain " + formatValue(item);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveLength(size_t size)
+    {
+      if ((N != size) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected array" << (negated ? " not" : "") << " to have length " << size << ", was " << N;
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    Assertion<std::array<T, N>> *Not;
+
+  private:
+    bool negated;
+    std::array<T, N> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+}
+
+
+namespace cest
+{
+  template <class T, std::size_t N>
+  class Assertion<T[N]>
+  {
+  public:
+    Assertion(const char *file, int line, const T (&value)[N], bool negated = false) : negated(false)
+    {
+      for (size_t i = 0; i < N; ++i)
+        actual[i] = value[i];
+
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<T[N]>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(const T (&expected)[N])
+    {
+      bool any_item_differs = false;
+      size_t found_difference = 0;
+
+      for (size_t i = 0; i < N; ++i)
+      {
+        any_item_differs |= expected[i] != actual[i];
+
+        if (expected[i] != actual[i])
+          found_difference = i;
+      }
+
+      if (any_item_differs ^ negated)
+      {
+        std::string message = "Expected " + formatValue(actual[found_difference]) + " at position " + std::to_string(found_difference) + (negated ? " not" : "") + " to be " + formatValue(expected[found_difference]);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toEqual(const T (&expected)[N])
+    {
+      toBe(expected);
+    }
+
+    void toContain(T item)
+    {
+      bool found = false;
+
+      for (size_t i = 0; i < N; ++i)
+      {
+        if (actual[i] == item)
+        {
+          found = true;
+          break;
+        }
+      }
+
+      if (!found ^ negated)
+      {
+        std::string message = "Expected array" + std::string(negated ? " not" : "") + " to contain " + formatValue(item);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveLength(size_t size)
+    {
+      if ((N != size) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected array" << (negated ? " not" : "") << " to have length " << size << ", was " << N;
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    Assertion<T[N]> *Not;
+
+  private:
+    bool negated;
+    T actual[N];
+    std::string assertion_file;
+    int assertion_line;
+  };
+}
+
+
+namespace cest
+{
+  template <class T>
+  class Assertion<std::optional<T>>
+  {
+  public:
+    Assertion(const char *file, int line, std::optional<T> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::optional<T>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::optional<T> expected)
+    {
+      if ((expected != actual) ^ negated)
+      {
+        std::stringstream message;
+        if (!expected.has_value())
+          message << "Expected " << formatValue(*actual) << (negated ? " not" : "") << " to be std::nullopt";
+        else if (!actual.has_value())
+          message << "Expected std::nullopt" << (negated ? " not" : "") << " to be " << formatValue(*expected);
+        else
+          message << "Expected " << formatValue(*actual) << (negated ? " not" : "") << " to be " << formatValue(*expected);
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toEqual(std::optional<T> expected)
+    {
+      toBe(expected);
+    }
+
+    void toHaveValue()
+    {
+      if (!actual.has_value() ^ negated)
+      {
+        throw AssertionError(assertion_file, assertion_line, std::string("Expected optional") + (negated ? " not" : "") + " to have a value");
+      }
+    }
+
+    void toHaveValue(T expected)
+    {
+      bool matches = actual.has_value() && *actual == expected;
+
+      if (!matches ^ negated)
+      {
+        std::stringstream message;
+        if (!actual.has_value())
+          message << "Expected optional" << (negated ? " not" : "") << " to have value " << formatValue(expected) << ", was std::nullopt";
+        else
+          message << "Expected optional value " << formatValue(*actual) << (negated ? " not" : "") << " to be " << formatValue(expected);
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toBeEmpty()
+    {
+      if (actual.has_value() ^ negated)
+      {
+        std::string message = std::string("Expected optional") + (negated ? " not" : "") + " to be empty, but had value " + formatValue(*actual);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    Assertion<std::optional<T>> *Not;
+
+  private:
+    bool negated;
+    std::optional<T> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+}
+
+
+namespace cest
+{
+  template <class T, class U>
+  class Assertion<std::pair<T, U>>
+  {
+  public:
+    Assertion(const char *file, int line, std::pair<T, U> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::pair<T, U>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::pair<T, U> expected)
+    {
+      if ((expected != actual) ^ negated)
+      {
+        std::string message;
+        if (expected.first != actual.first)
+          message = "Expected pair first element " + formatValue(actual.first) + std::string(negated ? " not" : "") + " to be " + formatValue(expected.first);
+        else
+          message = "Expected pair second element " + formatValue(actual.second) + std::string(negated ? " not" : "") + " to be " + formatValue(expected.second);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toEqual(std::pair<T, U> expected)
+    {
+      toBe(expected);
+    }
+
+    Assertion<std::pair<T, U>> *Not;
+
+  private:
+    bool negated;
+    std::pair<T, U> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+
+  template <class... Ts>
+  class Assertion<std::tuple<Ts...>>
+  {
+  public:
+    Assertion(const char *file, int line, std::tuple<Ts...> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::tuple<Ts...>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::tuple<Ts...> expected)
+    {
+      if ((expected != actual) ^ negated)
+      {
+        size_t mismatch_index = findMismatchIndex(expected, std::index_sequence_for<Ts...>{});
+        std::stringstream message;
+        message << "Expected tuple" << (negated ? " not" : "") << " to match at position " << mismatch_index;
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toEqual(std::tuple<Ts...> expected)
+    {
+      toBe(expected);
+    }
+
+    Assertion<std::tuple<Ts...>> *Not;
+
+  private:
+    bool negated;
+    std::tuple<Ts...> actual;
+    std::string assertion_file;
+    int assertion_line;
+
+    template <std::size_t... Is>
+    size_t findMismatchIndex(const std::tuple<Ts...> &expected, std::index_sequence<Is...>)
+    {
+      size_t index = 0;
+      (void)((std::get<Is>(expected) != std::get<Is>(actual) ? (index = Is, true) : false) || ...);
+      return index;
+    }
+  };
+}
+
+
+namespace cest
+{
+  template <class T>
+  class Assertion<std::deque<T>>
+  {
+  public:
+    Assertion(const char *file, int line, std::deque<T> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::deque<T>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::deque<T> expected)
+    {
+      if (expected.size() != actual.size())
+      {
+        if (!negated)
+        {
+          std::stringstream message;
+          message << "Expected deque of size " << actual.size() << " to have " << expected.size() << " items";
+          throw AssertionError(assertion_file, assertion_line, message.str());
+        }
+
+        return;
+      }
+
+      bool any_item_differs = false;
+      size_t found_difference = 0;
+
+      for (size_t i = 0; i < expected.size(); ++i)
+      {
+        any_item_differs |= expected[i] != actual[i];
+
+        if (expected[i] != actual[i])
+          found_difference = i;
+      }
+
+      if (any_item_differs ^ negated)
+      {
+        std::string message = "Expected " + formatValue(actual[found_difference]) + " at position " + std::to_string(found_difference) + (negated ? " not" : "") + " to be " + formatValue(expected[found_difference]);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toEqual(std::deque<T> expected)
+    {
+      toBe(expected);
+    }
+
+    void toContain(T item)
+    {
+      bool found = false;
+
+      for (size_t i = 0; i < actual.size(); ++i)
+      {
+        if (actual[i] == item)
+        {
+          found = true;
+          break;
+        }
+      }
+
+      if (!found ^ negated)
+      {
+        std::string message = "Expected deque" + std::string(negated ? " not" : "") + " to contain " + formatValue(item);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveLength(size_t size)
+    {
+      if ((actual.size() != size) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected deque" << (negated ? " not" : "") << " to have length " << size << ", was " << actual.size();
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    Assertion<std::deque<T>> *Not;
+
+  private:
+    bool negated;
+    std::deque<T> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+}
+
+
+namespace cest
+{
+  template <class T>
+  class Assertion<std::list<T>>
+  {
+  public:
+    Assertion(const char *file, int line, std::list<T> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::list<T>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::list<T> expected)
+    {
+      if (expected.size() != actual.size())
+      {
+        if (!negated)
+        {
+          std::stringstream message;
+          message << "Expected list of size " << actual.size() << " to have " << expected.size() << " items";
+          throw AssertionError(assertion_file, assertion_line, message.str());
+        }
+
+        return;
+      }
+
+      auto it_expected = expected.begin();
+      auto it_actual = actual.begin();
+      size_t position = 0;
+
+      while (it_expected != expected.end())
+      {
+        if (*it_expected != *it_actual)
+        {
+          if (!negated)
+          {
+            std::string message = "Expected " + formatValue(*it_actual) + " at position " + std::to_string(position) + " to be " + formatValue(*it_expected);
+            throw AssertionError(assertion_file, assertion_line, message);
+          }
+
+          return;
+        }
+
+        ++it_expected;
+        ++it_actual;
+        ++position;
+      }
+
+      if (negated)
+      {
+        throw AssertionError(assertion_file, assertion_line, "Expected list not to be equal");
+      }
+    }
+
+    void toEqual(std::list<T> expected)
+    {
+      toBe(expected);
+    }
+
+    void toContain(T item)
+    {
+      bool found = false;
+
+      for (const auto &element : actual)
+      {
+        if (element == item)
+        {
+          found = true;
+          break;
+        }
+      }
+
+      if (!found ^ negated)
+      {
+        std::string message = "Expected list" + std::string(negated ? " not" : "") + " to contain " + formatValue(item);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveSize(size_t size)
+    {
+      if ((actual.size() != size) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected list" << (negated ? " not" : "") << " to have size " << size << ", was " << actual.size();
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    Assertion<std::list<T>> *Not;
+
+  private:
+    bool negated;
+    std::list<T> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+
+  template <class T>
+  class Assertion<std::forward_list<T>>
+  {
+  public:
+    Assertion(const char *file, int line, std::forward_list<T> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::forward_list<T>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::forward_list<T> expected)
+    {
+      auto it_expected = expected.begin();
+      auto it_actual = actual.begin();
+      size_t position = 0;
+
+      while (it_expected != expected.end() && it_actual != actual.end())
+      {
+        if (*it_expected != *it_actual)
+        {
+          if (!negated)
+          {
+            std::string message = "Expected " + formatValue(*it_actual) + " at position " + std::to_string(position) + " to be " + formatValue(*it_expected);
+            throw AssertionError(assertion_file, assertion_line, message);
+          }
+
+          return;
+        }
+
+        ++it_expected;
+        ++it_actual;
+        ++position;
+      }
+
+      bool same_length = (it_expected == expected.end() && it_actual == actual.end());
+
+      if (!same_length)
+      {
+        if (!negated)
+        {
+          size_t expected_size = std::distance(expected.begin(), expected.end());
+          size_t actual_size = std::distance(actual.begin(), actual.end());
+          std::stringstream message;
+          message << "Expected forward_list of size " << actual_size << " to have " << expected_size << " items";
+          throw AssertionError(assertion_file, assertion_line, message.str());
+        }
+
+        return;
+      }
+
+      if (negated)
+      {
+        throw AssertionError(assertion_file, assertion_line, "Expected forward_list not to be equal");
+      }
+    }
+
+    void toEqual(std::forward_list<T> expected)
+    {
+      toBe(expected);
+    }
+
+    void toContain(T item)
+    {
+      bool found = false;
+
+      for (const auto &element : actual)
+      {
+        if (element == item)
+        {
+          found = true;
+          break;
+        }
+      }
+
+      if (!found ^ negated)
+      {
+        std::string message = "Expected forward_list" + std::string(negated ? " not" : "") + " to contain " + formatValue(item);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveSize(size_t size)
+    {
+      size_t actual_size = std::distance(actual.begin(), actual.end());
+
+      if ((actual_size != size) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected forward_list" << (negated ? " not" : "") << " to have size " << size << ", was " << actual_size;
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    Assertion<std::forward_list<T>> *Not;
+
+  private:
+    bool negated;
+    std::forward_list<T> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+}
+
+
+namespace cest
+{
+  template <class T>
+  class Assertion<std::multiset<T>>
+  {
+  public:
+    Assertion(const char *file, int line, std::multiset<T> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::multiset<T>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::multiset<T> expected)
+    {
+      if ((expected != actual) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected multiset of size " << actual.size() << (negated ? " not" : "") << " to be " << expected.size() << " items";
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toEqual(std::multiset<T> expected)
+    {
+      toBe(expected);
+    }
+
+    void toInclude(T item)
+    {
+      if (!actual.count(item) ^ negated)
+      {
+        std::string message = "Expected multiset" + std::string(negated ? " not" : "") + " to include " + formatValue(item);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveSize(size_t size)
+    {
+      if ((actual.size() != size) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected multiset" << (negated ? " not" : "") << " to have size " << size << ", was " << actual.size();
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    Assertion<std::multiset<T>> *Not;
+
+  private:
+    bool negated;
+    std::multiset<T> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+
+  template <class T>
+  class Assertion<std::unordered_multiset<T>>
+  {
+  public:
+    Assertion(const char *file, int line, std::unordered_multiset<T> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::unordered_multiset<T>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::unordered_multiset<T> expected)
+    {
+      if ((expected != actual) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected unordered_multiset of size " << actual.size() << (negated ? " not" : "") << " to be " << expected.size() << " items";
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toEqual(std::unordered_multiset<T> expected)
+    {
+      toBe(expected);
+    }
+
+    void toInclude(T item)
+    {
+      if (!actual.count(item) ^ negated)
+      {
+        std::string message = "Expected unordered_multiset" + std::string(negated ? " not" : "") + " to include " + formatValue(item);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveSize(size_t size)
+    {
+      if ((actual.size() != size) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected unordered_multiset" << (negated ? " not" : "") << " to have size " << size << ", was " << actual.size();
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    Assertion<std::unordered_multiset<T>> *Not;
+
+  private:
+    bool negated;
+    std::unordered_multiset<T> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+
+  template <class K, class V>
+  class Assertion<std::multimap<K, V>>
+  {
+  public:
+    Assertion(const char *file, int line, std::multimap<K, V> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::multimap<K, V>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::multimap<K, V> expected)
+    {
+      if ((expected != actual) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected multimap of size " << actual.size() << (negated ? " not" : "") << " to have " << expected.size() << " entries";
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toEqual(std::multimap<K, V> expected)
+    {
+      toBe(expected);
+    }
+
+    void toInclude(std::pair<K, V> entry)
+    {
+      bool found = false;
+      auto range = actual.equal_range(entry.first);
+
+      for (auto it = range.first; it != range.second; ++it)
+      {
+        if (it->second == entry.second)
+        {
+          found = true;
+          break;
+        }
+      }
+
+      if (!found ^ negated)
+      {
+        std::string message = "Expected multimap" + std::string(negated ? " not" : "") + " to include {" + formatValue(entry.first) + ": " + formatValue(entry.second) + "}";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveKey(K key)
+    {
+      if (!actual.count(key) ^ negated)
+      {
+        std::string message = "Expected multimap" + std::string(negated ? " not" : "") + " to have key " + formatValue(key);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveSize(size_t size)
+    {
+      if ((actual.size() != size) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected multimap" << (negated ? " not" : "") << " to have size " << size << ", was " << actual.size();
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    Assertion<std::multimap<K, V>> *Not;
+
+  private:
+    bool negated;
+    std::multimap<K, V> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+
+  template <class K, class V>
+  class Assertion<std::unordered_multimap<K, V>>
+  {
+  public:
+    Assertion(const char *file, int line, std::unordered_multimap<K, V> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::unordered_multimap<K, V>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::unordered_multimap<K, V> expected)
+    {
+      if ((expected != actual) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected unordered_multimap of size " << actual.size() << (negated ? " not" : "") << " to have " << expected.size() << " entries";
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toEqual(std::unordered_multimap<K, V> expected)
+    {
+      toBe(expected);
+    }
+
+    void toInclude(std::pair<K, V> entry)
+    {
+      bool found = false;
+      auto range = actual.equal_range(entry.first);
+
+      for (auto it = range.first; it != range.second; ++it)
+      {
+        if (it->second == entry.second)
+        {
+          found = true;
+          break;
+        }
+      }
+
+      if (!found ^ negated)
+      {
+        std::string message = "Expected unordered_multimap" + std::string(negated ? " not" : "") + " to include {" + formatValue(entry.first) + ": " + formatValue(entry.second) + "}";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveKey(K key)
+    {
+      if (!actual.count(key) ^ negated)
+      {
+        std::string message = "Expected unordered_multimap" + std::string(negated ? " not" : "") + " to have key " + formatValue(key);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveSize(size_t size)
+    {
+      if ((actual.size() != size) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected unordered_multimap" << (negated ? " not" : "") << " to have size " << size << ", was " << actual.size();
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    Assertion<std::unordered_multimap<K, V>> *Not;
+
+  private:
+    bool negated;
+    std::unordered_multimap<K, V> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+}
+
+
+namespace cest
+{
+  template <class T>
+  class AssertionSharedPtr
+  {
+  public:
+    AssertionSharedPtr(const char *file, int line, T *raw, long use_count, bool negated = false) : negated(false)
+    {
+      actual = raw;
+      actual_use_count = use_count;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new AssertionSharedPtr<T>(file, line, raw, use_count, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~AssertionSharedPtr()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBeNull()
+    {
+      if ((actual != nullptr) ^ negated)
+      {
+        throw AssertionError(assertion_file, assertion_line, std::string("Expected shared_ptr") + (negated ? " not" : "") + " to be null");
+      }
+    }
+
+    void toBeNotNull()
+    {
+      if ((actual == nullptr) ^ negated)
+      {
+        throw AssertionError(assertion_file, assertion_line, std::string("Expected shared_ptr") + (negated ? "" : " not") + " to be null");
+      }
+    }
+
+    void toPointTo(T expected)
+    {
+      if (actual == nullptr)
+      {
+        if (!negated)
+          throw AssertionError(assertion_file, assertion_line, "Expected shared_ptr to point to " + formatValue(expected) + ", but was null");
+        return;
+      }
+
+      if ((*actual != expected) ^ negated)
+      {
+        std::string message = "Expected shared_ptr value " + formatValue(*actual) + (negated ? " not" : "") + " to be " + formatValue(expected);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveUseCount(long expected)
+    {
+      if ((actual_use_count != expected) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected use_count " << actual_use_count << (negated ? " not" : "") << " to be " << expected;
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    AssertionSharedPtr<T> *Not;
+
+  private:
+    bool negated;
+    T *actual;
+    long actual_use_count;
+    std::string assertion_file;
+    int assertion_line;
+  };
+
+  template <class T>
+  AssertionSharedPtr<T> expectFunction(const char *file, int line, const std::shared_ptr<T> &actual)
+  {
+    return AssertionSharedPtr<T>(file, line, actual.get(), actual.use_count());
+  }
+
+  template <class T>
+  class AssertionUniquePtr
+  {
+  public:
+    AssertionUniquePtr(const char *file, int line, T *raw, bool negated = false) : negated(false)
+    {
+      actual = raw;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new AssertionUniquePtr<T>(file, line, raw, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~AssertionUniquePtr()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBeNull()
+    {
+      if ((actual != nullptr) ^ negated)
+      {
+        throw AssertionError(assertion_file, assertion_line, std::string("Expected unique_ptr") + (negated ? " not" : "") + " to be null");
+      }
+    }
+
+    void toBeNotNull()
+    {
+      if ((actual == nullptr) ^ negated)
+      {
+        throw AssertionError(assertion_file, assertion_line, std::string("Expected unique_ptr") + (negated ? "" : " not") + " to be null");
+      }
+    }
+
+    void toPointTo(T expected)
+    {
+      if (actual == nullptr)
+      {
+        if (!negated)
+          throw AssertionError(assertion_file, assertion_line, "Expected unique_ptr to point to " + formatValue(expected) + ", but was null");
+        return;
+      }
+
+      if ((*actual != expected) ^ negated)
+      {
+        std::string message = "Expected unique_ptr value " + formatValue(*actual) + (negated ? " not" : "") + " to be " + formatValue(expected);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    AssertionUniquePtr<T> *Not;
+
+  private:
+    bool negated;
+    T *actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+
+  template <class T>
+  AssertionUniquePtr<T> expectFunction(const char *file, int line, const std::unique_ptr<T> &actual)
+  {
+    return AssertionUniquePtr<T>(file, line, actual.get());
+  }
+}
+
+
+namespace cest
+{
+  template <class Rep, class Period>
+  std::string formatDuration(std::chrono::duration<Rep, Period> d)
+  {
+    auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(d).count();
+
+    std::stringstream ss;
+
+    if (ns == 0)
+      ss << "0s";
+    else if (std::abs(ns) >= 1000000000)
+      ss << std::chrono::duration_cast<std::chrono::milliseconds>(d).count() / 1000.0 << "s";
+    else if (std::abs(ns) >= 1000000)
+      ss << std::chrono::duration_cast<std::chrono::microseconds>(d).count() / 1000.0 << "ms";
+    else if (std::abs(ns) >= 1000)
+      ss << ns / 1000.0 << "us";
+    else
+      ss << ns << "ns";
+
+    return ss.str();
+  }
+
+  template <class Rep, class Period>
+  class Assertion<std::chrono::duration<Rep, Period>>
+  {
+  public:
+    using DurationType = std::chrono::duration<Rep, Period>;
+
+    Assertion(const char *file, int line, DurationType value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<DurationType>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(DurationType expected)
+    {
+      if ((expected != actual) ^ negated)
+      {
+        std::string message = "Expected " + formatDuration(actual) + std::string(negated ? " not" : "") + " to be " + formatDuration(expected);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toEqual(DurationType expected)
+    {
+      toBe(expected);
+    }
+
+    void toBeGreaterThan(DurationType expected)
+    {
+      if ((actual <= expected) ^ negated)
+      {
+        std::string message = "Expected " + formatDuration(actual) + std::string(negated ? " not" : "") + " to be greater than " + formatDuration(expected);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toBeLessThan(DurationType expected)
+    {
+      if ((actual >= expected) ^ negated)
+      {
+        std::string message = "Expected " + formatDuration(actual) + std::string(negated ? " not" : "") + " to be less than " + formatDuration(expected);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toBeCloseTo(DurationType expected, DurationType tolerance)
+    {
+      auto diff = actual - expected;
+      auto abs_diff = diff.count() < 0 ? -diff : diff;
+      bool within = abs_diff <= tolerance;
+
+      if (!within ^ negated)
+      {
+        std::string message = "Expected " + formatDuration(actual) + std::string(negated ? " not" : "") + " to be within " + formatDuration(tolerance) + " of " + formatDuration(expected);
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    Assertion<DurationType> *Not;
+
+  private:
+    bool negated;
+    DurationType actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+}
+
+
+namespace cest
+{
+  template <>
+  class Assertion<std::filesystem::path>
+  {
+  public:
+    Assertion(const char *file, int line, std::filesystem::path value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::filesystem::path>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::filesystem::path expected)
+    {
+      if ((expected != actual) ^ negated)
+      {
+        std::string message = "Expected path \"" + actual.string() + "\"" + (negated ? " not" : "") + " to be \"" + expected.string() + "\"";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toEqual(std::filesystem::path expected)
+    {
+      toBe(expected);
+    }
+
+    void toHaveExtension(std::string ext)
+    {
+      std::string actual_ext = actual.extension().string();
+
+      if ((actual_ext != ext) ^ negated)
+      {
+        std::string message = "Expected extension \"" + actual_ext + "\"" + (negated ? " not" : "") + " to be \"" + ext + "\" in path \"" + actual.string() + "\"";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveFilename(std::string name)
+    {
+      std::string actual_name = actual.filename().string();
+
+      if ((actual_name != name) ^ negated)
+      {
+        std::string message = "Expected filename \"" + actual_name + "\"" + (negated ? " not" : "") + " to be \"" + name + "\" in path \"" + actual.string() + "\"";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toBeAbsolute()
+    {
+      if (!actual.is_absolute() ^ negated)
+      {
+        std::string message = "Expected path \"" + actual.string() + "\"" + (negated ? " not" : "") + " to be absolute";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toBeRelative()
+    {
+      if (!actual.is_relative() ^ negated)
+      {
+        std::string message = "Expected path \"" + actual.string() + "\"" + (negated ? " not" : "") + " to be relative";
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    Assertion<std::filesystem::path> *Not;
+
+  private:
+    bool negated;
+    std::filesystem::path actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+}
+
+
+namespace cest
+{
+  template <class T>
+  class Assertion<std::complex<T>>
+  {
+  public:
+    Assertion(const char *file, int line, std::complex<T> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::complex<T>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::complex<T> expected, T epsilon = static_cast<T>(0.0000001))
+    {
+      bool real_matches = std::fabs(actual.real() - expected.real()) <= epsilon;
+      bool imag_matches = std::fabs(actual.imag() - expected.imag()) <= epsilon;
+
+      if (!(real_matches && imag_matches) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected (" << actual.real() << " + " << actual.imag() << "i)";
+        message << (negated ? " not" : "") << " to be (" << expected.real() << " + " << expected.imag() << "i)";
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toEqual(std::complex<T> expected, T epsilon = static_cast<T>(0.0000001))
+    {
+      toBe(expected, epsilon);
+    }
+
+    void toHaveReal(T expected, T epsilon = static_cast<T>(0.0000001))
+    {
+      if ((std::fabs(actual.real() - expected) > epsilon) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected real part " << actual.real() << (negated ? " not" : "") << " to be " << expected;
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toHaveImaginary(T expected, T epsilon = static_cast<T>(0.0000001))
+    {
+      if ((std::fabs(actual.imag() - expected) > epsilon) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected imaginary part " << actual.imag() << (negated ? " not" : "") << " to be " << expected;
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    Assertion<std::complex<T>> *Not;
+
+  private:
+    bool negated;
+    std::complex<T> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+}
+
+
+namespace cest
+{
+  template <std::size_t N>
+  class Assertion<std::bitset<N>>
+  {
+  public:
+    Assertion(const char *file, int line, std::bitset<N> value, bool negated = false) : negated(false)
+    {
+      actual = value;
+      assertion_file = std::string(file);
+      assertion_line = line;
+
+      if (!negated)
+      {
+        this->Not = new Assertion<std::bitset<N>>(file, line, value, true);
+      }
+      else
+      {
+        this->Not = nullptr;
+        this->negated = true;
+      }
+    }
+
+    ~Assertion()
+    {
+      if (this->Not)
+        delete this->Not;
+    }
+
+    void toBe(std::bitset<N> expected)
+    {
+      if ((expected != actual) ^ negated)
+      {
+        std::string message = "Expected " + actual.to_string() + std::string(negated ? " not" : "") + " to be " + expected.to_string();
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toEqual(std::bitset<N> expected)
+    {
+      toBe(expected);
+    }
+
+    void toHaveBitSet(size_t pos)
+    {
+      if (!actual.test(pos) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected bit " << pos << (negated ? " not" : "") << " to be set in " << actual.to_string();
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toHaveCount(size_t n)
+    {
+      if ((actual.count() != n) ^ negated)
+      {
+        std::stringstream message;
+        message << "Expected " << actual.count() << " bits" << (negated ? " not" : "") << " to be " << n << " in " << actual.to_string();
+        throw AssertionError(assertion_file, assertion_line, message.str());
+      }
+    }
+
+    void toHaveAll()
+    {
+      if (!actual.all() ^ negated)
+      {
+        std::string message = std::string("Expected") + (negated ? " not" : "") + " all bits set in " + actual.to_string();
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    void toHaveNone()
+    {
+      if (!actual.none() ^ negated)
+      {
+        std::string message = std::string("Expected") + (negated ? " not" : "") + " no bits set in " + actual.to_string();
+        throw AssertionError(assertion_file, assertion_line, message);
+      }
+    }
+
+    Assertion<std::bitset<N>> *Not;
+
+  private:
+    bool negated;
+    std::bitset<N> actual;
+    std::string assertion_file;
+    int assertion_line;
+  };
+}
+
+#define expect(...) cest::expectFunction(__FILE__, ((__LINE__ - 1)), __VA_ARGS__)
+#define passTest() cest::forcedPass()
+#define failTest() cest::forcedFailure(__FILE__, __LINE__)
+#define Regex(x) x, std::regex(x)
+
+namespace cest
+{
+  void forcedPass()
+  {
+    throw ForcedPassError();
+  }
+
+  void forcedFailure(std::string file, int line)
+  {
+    throw AssertionError(file, line, "Test failure forced manually");
+  }
+
+  template <class T>
+  void assertRaises(std::function<void()> expression)
+  {
+    std::string file = __cest_globals.current_test_case->fn.file;
+    int line = __cest_globals.current_test_case->fn.line;
+
+    try
+    {
+      expression();
+    }
+    catch (const T &err)
+    {
+      return;
+    }
+
+    throw AssertionError(file, line, "Expected function to throw, but no exception was thrown");
+  }
 
   template <class T>
   Assertion<T> expectFunction(const char *file, int line, T actual)
   {
     return Assertion<T>(file, line, actual);
+  }
+
+  template <class T, std::size_t N>
+  Assertion<T[N]> expectFunction(const char *file, int line, const T (&actual)[N])
+  {
+    return Assertion<T[N]>(file, line, actual);
   }
 
   Assertion<bool> expectFunction(const char *file, int line, bool actual)
@@ -1430,7 +3760,23 @@ namespace cest
 
   Assertion<std::string> expectFunction(const char *file, int line, const char *actual)
   {
-    return Assertion<std::string>(file, line, (std::string)actual);
+    if (actual == NULL)
+    {
+      throw AssertionError(file, line, "expect() received a NULL string pointer — use expect((void*)ptr) for null checks");
+    }
+    return Assertion<std::string>(file, line, std::string(actual));
+  }
+
+  Assertion<std::string> expectFunction(const char *file, int line, std::string_view actual)
+  {
+    return Assertion<std::string>(file, line, std::string(actual));
+  }
+
+  template <class Fn>
+    requires std::is_invocable_r_v<void, Fn>
+  CallableAssertion expectFunction(const char *file, int line, Fn actual)
+  {
+    return CallableAssertion(file, line, std::function<void()>(actual));
   }
 }
 
@@ -1447,8 +3793,8 @@ namespace cest
   {
     random_fn(seed, suite);
 
-    for (auto &pair : suite->test_suites)
-      randomizeTests(pair.second, seed, random_fn);
+    for (cest::TestSuite *nested_suite : suite->test_suites)
+      randomizeTests(nested_suite, seed, random_fn);
   }
 }
 
@@ -1474,13 +3820,27 @@ namespace cest
       {
         cest::TestCase *test_case = test_suite->test_cases[i];
 
-        if (i != focused_test_idx)
+        if (i != focused_test_idx && test_case->condition != cest::TestCaseCondition::Todo)
           test_case->condition = cest::TestCaseCondition::Skipped;
       }
     }
 
-    for (auto &pair : test_suite->test_suites)
-      configureFocusedTestSuite(pair.second);
+    for (cest::TestSuite *nested_suite : test_suite->test_suites)
+      configureFocusedTestSuite(nested_suite);
+  }
+
+  void filterTestSuite(cest::TestSuite *suite, const std::string& filter)
+  {
+    for (cest::TestCase *test_case : suite->test_cases)
+    {
+      if (test_case->condition == cest::TestCaseCondition::Todo)
+        continue;
+      if (test_case->name.find(filter) == std::string::npos)
+        test_case->condition = cest::TestCaseCondition::Skipped;
+    }
+
+    for (cest::TestSuite *nested_suite : suite->test_suites)
+      filterTestSuite(nested_suite, filter);
   }
 }
 
@@ -1501,6 +3861,7 @@ namespace cest
     int passed_tests = numPassedTests(root_suite);
     int failed_tests = numFailedTests(root_suite);
     int skipped_tests = numSkippedTests(root_suite);
+    int todo_tests = numTodoTests(root_suite);
 
     buffer
       << findSuiteSourceFile(root_suite)
@@ -1511,9 +3872,12 @@ namespace cest
       << "|"
       << failed_tests
       << "|"
-      << skipped_tests;
+      << skipped_tests
+      << "|"
+      << todo_tests;
 
-    writeTextFile("/tmp/cest_" + file_name, buffer.str());
+    auto results_path = (std::filesystem::temp_directory_path() / ("cest_" + file_name)).string();
+    writeTextFile(results_path, buffer.str());
   }
 }
 
@@ -25818,6 +28182,16 @@ namespace cest
     cest::TestSuite *test_suite,
     nlohmann::json& output)
   {
+    bool is_root = test_suite == &__cest_globals.root_test_suite;
+
+    if (is_root)
+    {
+      for (cest::TestSuite *nested_suite : test_suite->test_suites)
+        addSuiteJsonResult(nested_suite, output);
+
+      return;
+    }
+
     nlohmann::json suite;
 
     suite["tests"] = std::vector<nlohmann::json>();
@@ -25828,6 +28202,9 @@ namespace cest
       nlohmann::json test;
       test["name"] = test_case->name;
       test["failed"] = test_case->failed;
+      test["skipped"] = test_case->condition == cest::TestCaseCondition::Skipped;
+      test["todo"] = test_case->condition == cest::TestCaseCondition::Todo;
+      test["duration_ms"] = test_case->duration_us / 1000;
 
       if (test_case->failed)
       {
@@ -25840,8 +28217,8 @@ namespace cest
 
     output["suites"].push_back(suite);
 
-    for (auto &pair : test_suite->test_suites)
-      addSuiteJsonResult(pair.second, output);
+    for (cest::TestSuite *nested_suite : test_suite->test_suites)
+      addSuiteJsonResult(nested_suite, output);
   }
 
   void dumpJsonResult(cest::TestSuite *root_suite)
@@ -25863,8 +28240,8 @@ namespace cest
     for (auto &test_case : test_suite->test_cases)
       output["test_cases"].push_back(test_case->name);
 
-    for (auto &pair : test_suite->test_suites)
-      addSuiteJsonTestCases(pair.second, output);
+    for (cest::TestSuite *nested_suite : test_suite->test_suites)
+      addSuiteJsonTestCases(nested_suite, output);
   }
 
   void dumpJsonTestList(cest::TestSuite *root_suite)
@@ -25881,8 +28258,7 @@ namespace cest
 
 static std::string binaryPath(const char *argv)
 {
-  std::string binary_path(argv);
-  return binary_path.substr(binary_path.rfind('/') + 1);
+  return std::filesystem::path(argv).filename().string();
 }
 
 int main(int argc, const char *argv[])
@@ -25896,6 +28272,14 @@ int main(int argc, const char *argv[])
   {
     cest::showHelp(argv[0]);
     return 0;
+  }
+
+  if (!__cest_globals.registration_errors.empty())
+  {
+    for (const std::string &error : __cest_globals.registration_errors)
+      std::cout << error << std::endl;
+
+    return 1;
   }
 
   if (command_line_options.print_test_list)
@@ -25913,6 +28297,10 @@ int main(int argc, const char *argv[])
   }
 
   cest::configureFocusedTestSuite(root_suite);
+
+  if (!command_line_options.filter.empty())
+    cest::filterTestSuite(root_suite, command_line_options.filter);
+
   cest::initAddressSanitizer();
 
   cest::runTestSuite(root_suite);

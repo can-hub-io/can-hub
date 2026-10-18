@@ -188,7 +188,7 @@ describe("agent", []() {
 
         it("forwards can frames with the assigned channel", []() {
             FrameMessage frame = { 0x123, 1000, 0, 2, 0, 0, { 0xAA, 0xBB } };
-            FrameMessage sent_frame;
+            FrameMessage sent_frame = { 0 };
             MessageHeader sent_header;
 
             Agent_OnCanFrame(&agent, 1, &frame);
@@ -198,7 +198,7 @@ describe("agent", []() {
             expect(transport.frame_count).toBe(1);
             expect(sent_frame.channel).toBe(9);
             expect(sent_frame.can_id).toBe((uint32_t)0x123);
-            expect(sent_frame.payload).toEqualMemory(frame.payload, 2);
+            expect(sent_frame.payload).toEqual(frame.payload);
         });
 
         it("injects transport frames into the owning interface", []() {
