@@ -6,6 +6,7 @@
 #include <net/if.h>
 #include <sys/socket.h>
 
+#include <linux/can.h>
 #include <linux/can/netlink.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
@@ -13,6 +14,7 @@
 #define NETLINK_BUFFER_SIZE 512
 #define NETLINK_RESPONSE_SIZE 4096
 #define ATTRIBUTE_TYPE_MASK 0x3FFF
+#define VCAN_KIND "vcan"
 
 static bool sendAndAck(const void *request, uint32_t length);
 static struct rtattr *appendAttribute(
@@ -137,6 +139,37 @@ uint32_t CanNetlink_GetBitrate(const char *interface_name)
     info = NLMSG_DATA(header);
 
     return parseBitrate(IFLA_RTA(info), IFLA_PAYLOAD(header));
+}
+
+bool CanNetlink_InterfaceExists(const char *interface_name)
+{
+    return if_nametoindex(interface_name) != 0;
+}
+
+bool CanNetlink_CreateVcan(const char *interface_name)
+{
+    uint8_t buffer[NETLINK_BUFFER_SIZE];
+    struct nlmsghdr *header = (struct nlmsghdr *)buffer;
+    struct ifinfomsg *info;
+    struct rtattr *link_info;
+    uint32_t mtu = CANFD_MTU;
+
+    memset(buffer, 0, sizeof(buffer));
+    header->nlmsg_len = NLMSG_LENGTH(sizeof(*info));
+    header->nlmsg_type = RTM_NEWLINK;
+    header->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_EXCL;
+    info = NLMSG_DATA(header);
+    info->ifi_family = AF_UNSPEC;
+    info->ifi_change = IFF_UP;
+    info->ifi_flags = IFF_UP;
+
+    appendAttribute(header, sizeof(buffer), IFLA_IFNAME, interface_name, (uint16_t)(strlen(interface_name) + 1));
+    appendAttribute(header, sizeof(buffer), IFLA_MTU, &mtu, sizeof(mtu));
+    link_info = beginNested(header, sizeof(buffer), IFLA_LINKINFO);
+    appendAttribute(header, sizeof(buffer), IFLA_INFO_KIND, VCAN_KIND, sizeof(VCAN_KIND));
+    endNested(header, link_info);
+
+    return sendAndAck(buffer, header->nlmsg_len);
 }
 
 /* ---------- private ---------- */
