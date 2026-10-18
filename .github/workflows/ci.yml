@@ -30,6 +30,10 @@ jobs:
         run: make test
       - name: release build
         run: make release
+      - name: interop against the last openssl release
+        run: |
+          python3 -m pip install --break-system-packages pytest
+          make interop
       - uses: actions/upload-artifact@v4
         with:
           name: can-hub-x86_64
@@ -139,6 +143,11 @@ jobs:
           key: arm64-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
       - name: release build
         run: make release ARCH=arm64
+      # Native on this runner, so the ARMv8 AES engine meets an OpenSSL peer.
+      - name: interop against the last openssl release
+        run: |
+          python3 -m pip install --break-system-packages pytest
+          make interop ARCH=arm64
       # Timings from a shared runner are indicative (#193); agreement is not,
       # and agreement is what this gates.
       - name: arm64 aead agreement
