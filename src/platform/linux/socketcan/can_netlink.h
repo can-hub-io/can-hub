@@ -18,3 +18,10 @@ bool CanNetlink_SetBitrate(const char *interface_name, uint32_t bitrate);
  * interface is unknown, is not a CAN device, or has no bit timing set.
  */
 uint32_t CanNetlink_GetBitrate(const char *interface_name);
+bool CanNetlink_InterfaceExists(const char *interface_name);
+
+/*
+ * Create a vcan, already up and with the CAN FD MTU so it carries FD frames
+ * too (needs CAP_NET_ADMIN). Fails if the name is taken.
+ */
+bool CanNetlink_CreateVcan(const char *interface_name);

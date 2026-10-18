@@ -64,14 +64,22 @@ Requires a write grant when connected on tls/quic — see
 ## attach — mirror into a local vcan
 
 ```sh
-sudo ip link add dev vcan0 type vcan && sudo ip link set up vcan0   # once
 can-hub-client --connect tls://hub.example.com:7227 attach truck42/can0 vcan0
 ```
 
-Bidirectional mirror between a remote bus and a pre-existing local `vcan`
-(no `CAP_NET_ADMIN` needed): `candump`, `cansend`, SavvyCAN, Wireshark and
-python-can now work against the remote bus with zero changes. Without a
-write grant it downgrades to read-only — frames still flow remote→local,
+Bidirectional mirror between a remote bus and a local `vcan`: `candump`,
+`cansend`, SavvyCAN, Wireshark and python-can now work against the remote bus
+with zero changes. When the vcan does not exist, `attach` creates it, up and
+with the CAN FD MTU; that needs `CAP_NET_ADMIN` (root, or
+`sudo setcap cap_net_admin+ep $(command -v can-hub-client)`). The vcan stays
+after the client exits and is reused next time. With a vcan created
+beforehand no privilege is needed:
+
+```sh
+sudo ip link add dev vcan0 type vcan && sudo ip link set up vcan0
+```
+
+Without a write grant it downgrades to read-only — frames still flow remote→local,
 local writes are refused at the hub.
 
 ## socketcand — bridge server

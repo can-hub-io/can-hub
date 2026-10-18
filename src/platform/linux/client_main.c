@@ -17,6 +17,7 @@
 #include "platform/linux/shared/hub_defaults.h"
 #include "platform/linux/shared/log.h"
 #include "platform/linux/shared/tls_identity.h"
+#include "platform/linux/socketcan/can_netlink.h"
 #include "platform/linux/socketcan/socketcan_adapter.h"
 #include "platform/linux/socketcand/socketcand_server.h"
 #include "platform/linux/tcp/tcp_client_transport.h"
@@ -99,6 +100,7 @@ static int32_t runSocketcandServer(const char *host, const char *port_text);
 static int32_t runSocketcandLoop(void);
 static int32_t runAttach(const char *host, const char *port_text);
 static int32_t runAttachLoop(void);
+static bool ensureAttachVcan(void);
 static void drainCanFrames(void);
 static void corkHubTransport(void);
 static void uncorkHubTransport(void);
@@ -198,7 +200,7 @@ static void printUsage(FILE *stream, const char *program)
     fprintf(stream, "       | send <interface> <frame>   (cansend syntax: 123#DEADBEEF, 123##1DEADBEEF, 123#R)\n");
     fprintf(stream, "       | socketcand [--listen [<bind-ip>:]<port>] [--no-beacon]\n");
     fprintf(stream, "                                           local socketcand server (default 127.0.0.1:" SOCKETCAND_DEFAULT_PORT_TEXT ")\n");
-    fprintf(stream, "       | attach <interface> <vcan>   mirror a remote bus into a local pre-created vcan (bidirectional)\n");
+    fprintf(stream, "       | attach <interface> <vcan>   mirror a remote bus into a local vcan, created if missing (bidirectional)\n");
     fprintf(stream, "       <interface> is the numeric id (from list) or the namespaced name agent/iface\n");
     fprintf(stream, "       %s --show-identity [--state-dir <path>]   print this client's TLS fingerprint\n", program);
     fprintf(stream, "       [--log-level error|warn|info|debug]\n");
@@ -831,8 +833,11 @@ static int32_t runAttach(const char *host, const char *port_text)
         LOG_ERROR("could not initialize transport");
         return 1;
     }
+    if (!ensureAttachVcan()) {
+        return 1;
+    }
     if (!SocketCanAdapter_Open(&mirror_can_adapter, &registration, false)) {
-        LOG_ERROR("could not open vcan %s (does it exist?)", attach_interface_name);
+        LOG_ERROR("could not open vcan %s", attach_interface_name);
         return 1;
     }
 
@@ -858,6 +863,27 @@ static int32_t runAttach(const char *host, const char *port_text)
     LOG_INFO("mirroring interface %s to %s, ctrl-c to stop", target_interface_text, attach_interface_name);
 
     return runAttachLoop();
+}
+
+static bool ensureAttachVcan(void)
+{
+    if (CanNetlink_InterfaceExists(attach_interface_name)) {
+        return true;
+    }
+    if (!CanNetlink_CreateVcan(attach_interface_name)) {
+        LOG_ERROR(
+            "could not create vcan %s: needs CAP_NET_ADMIN, or create it first"
+            " (ip link add dev %s type vcan && ip link set up %s)",
+            attach_interface_name,
+            attach_interface_name,
+            attach_interface_name
+        );
+        return false;
+    }
+
+    LOG_INFO("created vcan %s", attach_interface_name);
+
+    return true;
 }
 
 static int32_t runAttachLoop(void)
