@@ -12,6 +12,9 @@ set(CMAKE_C_FLAGS_DEBUG "-O0 -g")
 
 add_compile_options(-Wall -Wextra)
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/compiler_launcher.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/strict_warnings.cmake)
+
 option(CAN_HUB_STATIC "Fully static binaries" OFF)
 
 include(ProcessorCount)
@@ -126,6 +129,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 
     add_executable(canhub-dump examples/canhub_dump.c)
     target_link_libraries(canhub-dump PRIVATE canhub)
+    can_hub_strict_warnings(canhub canhub_shared canhub-dump)
 
     return()
 endif()
@@ -327,10 +331,12 @@ if(NOT CAN_HUB_STATIC)
         LINK_DEPENDS ${LIBCANHUB_EXPORT_MAP}
     )
     install(TARGETS canhub_shared LIBRARY DESTINATION lib)
+    can_hub_strict_warnings(canhub_shared)
 endif()
 
 add_executable(canhub-dump examples/canhub_dump.c)
 target_link_libraries(canhub-dump PRIVATE canhub)
+can_hub_strict_warnings(can-hub can-hub-agent can-hub-client can-hub-cli canhub canhub-dump)
 
 install(TARGETS can-hub can-hub-agent can-hub-cli can-hub-client RUNTIME DESTINATION bin)
 install(TARGETS canhub ARCHIVE DESTINATION lib)

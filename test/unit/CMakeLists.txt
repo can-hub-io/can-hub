@@ -17,7 +17,7 @@ function(add_unit_test TEST_NAME)
     add_executable(${TEST_NAME} ${ARG_SOURCES})
 
     target_compile_features(${TEST_NAME} PRIVATE cxx_std_20)
-    target_compile_options(${TEST_NAME} PRIVATE -Wall -Wextra -Wno-unused-parameter)
+    target_compile_options(${TEST_NAME} PRIVATE -Wall -Wextra -Wno-unused-parameter ${CAN_HUB_TEST_WARNINGS})
 
     target_include_directories(${TEST_NAME} PRIVATE
         ${CEST_DIR}

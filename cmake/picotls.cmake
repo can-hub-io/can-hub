@@ -209,10 +209,11 @@ if(NOT EXISTS "${CAN_HUB_PICOTLS_BUILD}/libpicotls-core.a")
         COMMAND ${CMAKE_COMMAND} -S "${CAN_HUB_PICOTLS_PREFIX}" -B "${CAN_HUB_PICOTLS_BUILD}"
                 -DCMAKE_BUILD_TYPE=Release
                 -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+                "-DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}"
                 -DCMAKE_POSITION_INDEPENDENT_CODE=ON
                 ${_picotls_cross}
                 ${_picotls_fusion_option}
-                "-DCMAKE_C_FLAGS=-ffunction-sections -fdata-sections ${_picotls_platform_flags}"
+                "-DCMAKE_C_FLAGS=-w -ffunction-sections -fdata-sections ${_picotls_platform_flags}"
         RESULT_VARIABLE _picotls_configure
     )
     if(NOT _picotls_configure EQUAL 0)
@@ -262,10 +263,10 @@ if(CAN_HUB_TLS_FUSION)
         target_compile_definitions(picotls INTERFACE CAN_HUB_TLS_FUSION_NO_AESNI256)
     endif()
 endif()
-target_include_directories(picotls INTERFACE "${PICOTLS_INCLUDE_DIR}" "${CAN_HUB_PICOTLS_PREFIX}/lib")
+target_include_directories(picotls SYSTEM INTERFACE "${PICOTLS_INCLUDE_DIR}" "${CAN_HUB_PICOTLS_PREFIX}/lib")
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     # wincompat.h ships under the Visual Studio project, not under include/
-    target_include_directories(picotls INTERFACE "${_picotls_wincompat}")
+    target_include_directories(picotls SYSTEM INTERFACE "${_picotls_wincompat}")
     target_compile_definitions(picotls INTERFACE _WINDOWS)
 endif()
 target_link_libraries(picotls INTERFACE ${PICOTLS_LIBRARIES})

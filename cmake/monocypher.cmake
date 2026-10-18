@@ -62,8 +62,9 @@ add_library(monocypher STATIC
     "${CAN_HUB_MONOCYPHER_PREFIX}/src/monocypher.c"
     "${CAN_HUB_MONOCYPHER_PREFIX}/src/optional/monocypher-ed25519.c"
 )
-target_include_directories(monocypher PUBLIC
+target_include_directories(monocypher SYSTEM PUBLIC
     "${CAN_HUB_MONOCYPHER_PREFIX}/src"
     "${CAN_HUB_MONOCYPHER_PREFIX}/src/optional"
 )
 set_target_properties(monocypher PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_compile_options(monocypher PRIVATE -w)

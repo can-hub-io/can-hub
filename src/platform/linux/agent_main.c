@@ -437,9 +437,11 @@ static void dispatchEvent(const struct epoll_event *event, const CanEvents *can_
     int32_t event_fd = (int32_t)event->data.u32;
     struct signalfd_siginfo signal_info;
     uint8_t interface_index;
+    ssize_t bytes_read;
 
     if (event_fd == signal_fd) {
-        (void)read(signal_fd, &signal_info, sizeof(signal_info));
+        bytes_read = read(signal_fd, &signal_info, sizeof(signal_info));
+        (void)bytes_read;
         should_shutdown = true;
         return;
     }
