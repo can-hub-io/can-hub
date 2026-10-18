@@ -315,10 +315,13 @@ if(NOT CAN_HUB_STATIC)
     add_library(canhub_shared SHARED ${COMMON_SOURCES} ${LIBCANHUB_SOURCES})
     target_include_directories(canhub_shared PUBLIC include)
     target_link_libraries(canhub_shared PRIVATE ngtcp2_static can_hub_tls)
+    set(LIBCANHUB_EXPORT_MAP ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/linux/libcanhub/canhub.map)
+    target_link_options(canhub_shared PRIVATE "-Wl,--version-script=${LIBCANHUB_EXPORT_MAP}")
     set_target_properties(canhub_shared PROPERTIES
         OUTPUT_NAME canhub
         C_VISIBILITY_PRESET hidden
         SOVERSION 0
+        LINK_DEPENDS ${LIBCANHUB_EXPORT_MAP}
     )
     install(TARGETS canhub_shared LIBRARY DESTINATION lib)
 endif()
