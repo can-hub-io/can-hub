@@ -56,10 +56,12 @@ bool QuicConnection_OpenServer(
     QuicConnection *self,
     ngtcp2_crypto_picotls_ctx *tls_context,
     const ngtcp2_path *path,
-    const ngtcp2_pkt_hd *initial_header
+    const ngtcp2_pkt_hd *initial_header,
+    const ngtcp2_cid *retried_original_dcid
 );
 void QuicConnection_Close(QuicConnection *self);
 bool QuicConnection_IsOpen(const QuicConnection *self);
+const ngtcp2_path *QuicConnection_Path(const QuicConnection *self);
 bool QuicConnection_HasLocalCid(const QuicConnection *self, const ngtcp2_cid *cid);
 bool QuicConnection_ReadPacket(QuicConnection *self, const ngtcp2_path *path, const uint8_t *data, size_t size);
 bool QuicConnection_HandleExpiry(QuicConnection *self);

@@ -42,7 +42,7 @@ describe("quic_datagram_backlog", []() {
         pushByte(1);
         pushByte(2);
 
-        expect(QuicDatagramBacklog_Count(&backlog)).toBe((size_t)2);
+        expect(QuicDatagramBacklog_Count(&backlog)).toBe((uint16_t)2);
     });
 
     it("preserves fifo order", []() {

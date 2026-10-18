@@ -10,6 +10,7 @@
 #include "hub/ports/hub_transport_port.h"
 
 #define TLS_SERVER_PEERS_MAX 64
+#define TLS_SERVER_HANDSHAKES_MAX (TLS_SERVER_PEERS_MAX / 2)
 #define TLS_SERVER_ORIGIN_SIZE 56
 
 /*
@@ -24,6 +25,7 @@ typedef struct {
     int32_t fd;
     uint32_t peer_id;
     bool announced;
+    uint64_t handshake_deadline_us;
     char origin[TLS_SERVER_ORIGIN_SIZE];
     char origin_host[TLS_SERVER_ORIGIN_SIZE];
 } TlsServerPeer;
@@ -53,3 +55,4 @@ bool TlsServerTransport_SlotWantsWritable(const TlsServerTransport *self, uint8_
 void TlsServerTransport_OnAcceptReady(TlsServerTransport *self);
 void TlsServerTransport_OnSlotReadable(TlsServerTransport *self, uint8_t slot);
 void TlsServerTransport_OnSlotWritable(TlsServerTransport *self, uint8_t slot);
+void TlsServerTransport_Tick(TlsServerTransport *self, uint64_t now_us);

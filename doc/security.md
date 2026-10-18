@@ -49,9 +49,36 @@ offers it and ChaCha20-Poly1305 against one that does not, both RFC 8446 suites.
 **QUIC Initial packets are the exception.** RFC 9001 fixes AES-128-GCM for them
 whatever the connection later negotiates, so a hub with no hardware AES pays the
 software cost on every connection attempt, including from peers it has never
-heard of — one core saturates at roughly 250 attempts per second. On such a
-machine, prefer `tls://` for an internet-facing hub, or put address validation
-in front of it.
+heard of — one core saturates at roughly 250 attempts per second. Once QUIC
+handshakes pile up the hub validates addresses with a Retry before decrypting
+anything (see below), but on such a machine `tls://` remains the cheaper choice
+for an internet-facing hub.
+
+## Connections that never finish the handshake
+
+A peer holds a slot from its first packet, before it has proven anything, so
+the hub bounds that phase on every transport:
+
+- **One host, four at a time.** A source address may have at most four
+  connections mid-handshake on each encrypted listener, and four peers awaiting
+  HELLO hub-wide. Further attempts are refused until one completes or expires.
+- **Half the table stays for peers past the handshake.** Handshakes in flight
+  may fill at most half of each listener's table, and peers awaiting HELLO at
+  most half of the hub's.
+- **Stalled handshakes expire.** TLS and QUIC handshakes are dropped after
+  10 s, and a peer that has not sent HELLO after 5 s.
+- **QUIC Retry under pressure.** With eight or more QUIC handshakes in flight,
+  an Initial without a valid Retry token gets a Retry instead of a slot, so a
+  spoofed source never gets a slot or a TLS session. Below that the hub answers
+  directly and connecting costs no extra round trip.
+- **The QUIC peer address is the validated path.** The hub sends to the address
+  ngtcp2 has validated for the connection, not to the source of whichever packet
+  arrived last, so a rewritten source address cannot redirect a live session.
+
+These bounds only cover the phase before HELLO. A peer that completes the
+handshake with a self-signed certificate and says HELLO holds its slot like any
+other: in TOFU mode a connection that finished the handshake is not a trusted
+one.
 
 ## Plaintext transports are network-trusted
 

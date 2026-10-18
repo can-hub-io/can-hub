@@ -158,6 +158,9 @@ int main(int argc, char **argv)
         corkQuic();
         HubApp_Tick(&app, Clock_MonotonicUs());
         uncorkQuic();
+        if (tls_enabled) {
+            TlsServerTransport_Tick(&tls_transport, Clock_MonotonicUs());
+        }
     }
 }
 

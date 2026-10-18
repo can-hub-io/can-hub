@@ -11,11 +11,11 @@
 void TcpKeepalive_Enable(int32_t fd)
 {
     SOCKET tcp_socket = (SOCKET)fd;
-    BOOL enabled = TRUE;
-    DWORD idle_seconds = KEEPALIVE_IDLE_SECONDS;
-    DWORD interval_seconds = KEEPALIVE_INTERVAL_SECONDS;
-    DWORD probes = KEEPALIVE_PROBES;
-    DWORD max_retransmit_seconds = KEEPALIVE_MAX_RETRANSMIT_SECONDS;
+    int32_t enabled = 1;
+    uint32_t idle_seconds = KEEPALIVE_IDLE_SECONDS;
+    uint32_t interval_seconds = KEEPALIVE_INTERVAL_SECONDS;
+    uint32_t probes = KEEPALIVE_PROBES;
+    uint32_t max_retransmit_seconds = KEEPALIVE_MAX_RETRANSMIT_SECONDS;
 
     setsockopt(tcp_socket, SOL_SOCKET, SO_KEEPALIVE, (const char *)&enabled, sizeof(enabled));
     setsockopt(tcp_socket, IPPROTO_TCP, TCP_KEEPIDLE, (const char *)&idle_seconds, sizeof(idle_seconds));

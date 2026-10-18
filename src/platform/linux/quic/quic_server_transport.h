@@ -13,12 +13,16 @@
 #include "platform/linux/quic/quic_datagram_backlog.h"
 #include "platform/linux/quic/quic_egress.h"
 #include "platform/linux/quic/quic_reliable_streams.h"
+#include "platform/linux/quic/quic_retry.h"
 #include "platform/linux/quic/quic_server_security.h"
 #include "platform/linux/shared/tls_identity.h"
 #include "hub/ports/hub_transport_events.h"
 #include "hub/ports/hub_transport_port.h"
 
 #define QUIC_SERVER_PEERS_MAX 64
+#define QUIC_SERVER_HANDSHAKES_MAX (QUIC_SERVER_PEERS_MAX / 2)
+#define QUIC_SERVER_RETRY_THRESHOLD 8
+#define QUIC_SERVER_ORIGIN_SIZE 56
 
 /*
  * QUIC server transport for the hub: one UDP socket multiplexing every
@@ -35,6 +39,11 @@
  * flush leaves some behind the peer refuses new ones, so the core queues
  * them. ReceiveOverflows is the kernel's count of packets dropped because
  * the socket's receive buffer was full.
+ * Admission: once QUIC_SERVER_RETRY_THRESHOLD handshakes are in flight, an
+ * Initial without a valid Retry token gets a Retry instead of a slot; one
+ * host may hold HANDSHAKES_PER_HOST_MAX handshakes and all of them together
+ * half the table. The remote address is the path ngtcp2 has validated,
+ * never the source of whichever packet arrived last.
  */
 typedef struct QuicServerTransport QuicServerTransport;
 
@@ -50,6 +59,7 @@ typedef struct {
     char fingerprint_hex[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
     struct sockaddr_storage remote_address;
     socklen_t remote_address_length;
+    char origin_host[QUIC_SERVER_ORIGIN_SIZE];
     uint32_t peer_id;
     bool connected;
     bool close_pending;
@@ -60,6 +70,7 @@ struct QuicServerTransport {
     HubTransportPort port;
     HubTransportEvents events;
     QuicServerSecurity security;
+    QuicRetry retry;
     int32_t udp_fd;
     int32_t timer_fd;
     uint32_t next_peer_id;

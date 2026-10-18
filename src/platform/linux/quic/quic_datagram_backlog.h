@@ -23,15 +23,15 @@ typedef struct {
 
 typedef struct {
     QuicDatagramSlot *slots;
-    size_t capacity;
-    size_t head;
-    size_t count;
+    uint16_t capacity;
+    uint16_t head;
+    uint16_t count;
 } QuicDatagramBacklog;
 
-void QuicDatagramBacklog_Init(QuicDatagramBacklog *self, QuicDatagramSlot *slots, size_t capacity);
+void QuicDatagramBacklog_Init(QuicDatagramBacklog *self, QuicDatagramSlot *slots, uint16_t capacity);
 void QuicDatagramBacklog_Reset(QuicDatagramBacklog *self);
 bool QuicDatagramBacklog_IsEmpty(const QuicDatagramBacklog *self);
-size_t QuicDatagramBacklog_Count(const QuicDatagramBacklog *self);
+uint16_t QuicDatagramBacklog_Count(const QuicDatagramBacklog *self);
 bool QuicDatagramBacklog_Push(QuicDatagramBacklog *self, const uint8_t *data, size_t size);
 const uint8_t *QuicDatagramBacklog_Front(const QuicDatagramBacklog *self, size_t *size);
 void QuicDatagramBacklog_PopFront(QuicDatagramBacklog *self);

@@ -27,6 +27,11 @@ extern "C" {
 #define BUS_INTERFACE_INDEX 2
 #define CLIENT_TOKEN 2
 #define SUPPRESS_ECHO_AND_WRITE (OPEN_FLAG_SUPPRESS_OWN_ECHO | OPEN_FLAG_WANT_WRITE)
+#define AWAITING_PEER_BASE 1000
+#define CROWDED_HOST "198.51.100.7"
+#define QUIET_HOST "198.51.100.8"
+#define PER_HOST_SHARE 4
+#define HUB_WIDE_SHARE 32
 
 static Broker broker;
 static HubTransportPortMock transport;
@@ -50,6 +55,10 @@ static const RegisterMessage bus_registration = { "bus7", 1, { "can0" } };
 static uint8_t injectFrom(uint32_t client_peer_id, uint8_t channel);
 static void sendEchoFromAgent(uint32_t agent_peer_id, uint8_t token);
 static FrameMessage relayedFrameAt(uint16_t index);
+static void connectPeerFrom(uint32_t peer_id, const char *host);
+static void connectPeersAwaitingHelloFrom(const char *host, uint32_t count);
+static void connectPeersAwaitingHelloFromDistinctHosts(uint32_t count);
+static void sayHelloAsClient(uint32_t peer_id);
 
 static void connectPeer(uint32_t peer_id, const char *fingerprint, bool local)
 {
@@ -977,6 +986,50 @@ describe("broker", []() {
             expect(transport.control_count).toBe(1);
             expect(reply.type).toBe(kMESSAGE_TYPE_PING);
             expect(reply.flags).toBe(0x01);
+        });
+    });
+
+    describe("admission before hello", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            events = Broker_Events(&broker);
+        });
+
+        it("refuses a host that already has four peers awaiting hello", []() {
+            connectPeersAwaitingHelloFrom(CROWDED_HOST, PER_HOST_SHARE + 1);
+
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)(AWAITING_PEER_BASE + PER_HOST_SHARE));
+        });
+
+        it("admits another host while one host is at its share", []() {
+            connectPeersAwaitingHelloFrom(CROWDED_HOST, PER_HOST_SHARE);
+            connectPeerFrom(AWAITING_PEER_BASE + PER_HOST_SHARE, QUIET_HOST);
+
+            expect(transport.close_count).toBe(0);
+        });
+
+        it("frees the host's share once a peer says hello", []() {
+            connectPeersAwaitingHelloFrom(CROWDED_HOST, PER_HOST_SHARE);
+            sayHelloAsClient(AWAITING_PEER_BASE);
+            connectPeerFrom(AWAITING_PEER_BASE + PER_HOST_SHARE, CROWDED_HOST);
+
+            expect(transport.close_count).toBe(0);
+        });
+
+        it("keeps half the table for peers that said hello", []() {
+            connectPeersAwaitingHelloFromDistinctHosts(HUB_WIDE_SHARE + 1);
+
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)(AWAITING_PEER_BASE + HUB_WIDE_SHARE));
+        });
+
+        it("always admits a local peer", []() {
+            connectPeersAwaitingHelloFromDistinctHosts(HUB_WIDE_SHARE);
+            connectPeer(ADMIN_PEER, NULL, true);
+
+            expect(transport.close_count).toBe(0);
         });
     });
 
@@ -2051,3 +2104,40 @@ static void reconnectReliableAgent(void)
         HELLO_CAP_RELIABLE_CHANNELS
     );
 }
+
+static void connectPeerFrom(uint32_t peer_id, const char *host)
+{
+    HubPeerConnectInfo info = { NULL, NULL, host, kPEER_TRANSPORT_TCP, false };
+
+    events.on_peer_connected(events.context, peer_id, &info, 0);
+}
+
+static void connectPeersAwaitingHelloFrom(const char *host, uint32_t count)
+{
+    uint32_t i;
+
+    for(i=0; i<count; i++) {
+        connectPeerFrom(AWAITING_PEER_BASE + i, host);
+    }
+}
+
+static void connectPeersAwaitingHelloFromDistinctHosts(uint32_t count)
+{
+    char host[32];
+    uint32_t i;
+
+    for(i=0; i<count; i++) {
+        snprintf(host, sizeof(host), "203.0.113.%u", i);
+        connectPeerFrom(AWAITING_PEER_BASE + i, host);
+    }
+}
+
+static void sayHelloAsClient(uint32_t peer_id)
+{
+    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0, "" };
+    uint8_t encoded[128];
+    size_t encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+
+    events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
+}
+

@@ -27,6 +27,12 @@ static ngtcp2_conn *getConnection(ngtcp2_crypto_conn_ref *connection_ref);
 static void buildCallbacks(ngtcp2_callbacks *callbacks, bool is_server);
 static void buildSettings(ngtcp2_settings *settings);
 static void buildParams(ngtcp2_transport_params *params);
+static void acceptRetriedAddress(
+    ngtcp2_settings *settings,
+    ngtcp2_transport_params *params,
+    const ngtcp2_pkt_hd *initial_header,
+    const ngtcp2_cid *retried_original_dcid
+);
 static void randomCid(ngtcp2_cid *cid);
 static void randCallback(uint8_t *destination, size_t destination_length, const ngtcp2_rand_ctx *rand_context);
 static int getNewConnectionIdCallback(
@@ -182,7 +188,8 @@ bool QuicConnection_OpenServer(
     QuicConnection *self,
     ngtcp2_crypto_picotls_ctx *tls_context,
     const ngtcp2_path *path,
-    const ngtcp2_pkt_hd *initial_header
+    const ngtcp2_pkt_hd *initial_header,
+    const ngtcp2_cid *retried_original_dcid
 )
 {
     ngtcp2_callbacks callbacks;
@@ -196,6 +203,9 @@ bool QuicConnection_OpenServer(
     buildParams(&params);
     params.original_dcid = initial_header->dcid;
     params.original_dcid_present = 1;
+    if (retried_original_dcid != NULL) {
+        acceptRetriedAddress(&settings, &params, initial_header, retried_original_dcid);
+    }
     randomCid(&source_cid);
 
     result = ngtcp2_conn_server_new(
@@ -232,6 +242,11 @@ void QuicConnection_Close(QuicConnection *self)
 bool QuicConnection_IsOpen(const QuicConnection *self)
 {
     return self->connection != NULL;
+}
+
+const ngtcp2_path *QuicConnection_Path(const QuicConnection *self)
+{
+    return ngtcp2_conn_get_path(self->connection);
 }
 
 bool QuicConnection_HasLocalCid(const QuicConnection *self, const ngtcp2_cid *cid)
@@ -479,6 +494,21 @@ static void buildParams(ngtcp2_transport_params *params)
     params->max_datagram_frame_size = MAX_DATAGRAM_FRAME_SIZE;
 }
 
+static void acceptRetriedAddress(
+    ngtcp2_settings *settings,
+    ngtcp2_transport_params *params,
+    const ngtcp2_pkt_hd *initial_header,
+    const ngtcp2_cid *retried_original_dcid
+)
+{
+    params->original_dcid = *retried_original_dcid;
+    params->retry_scid = initial_header->dcid;
+    params->retry_scid_present = 1;
+    settings->token = initial_header->token;
+    settings->tokenlen = initial_header->tokenlen;
+    settings->token_type = NGTCP2_TOKEN_TYPE_RETRY;
+}
+
 static void randomCid(ngtcp2_cid *cid)
 {
     ptls_minicrypto_random_bytes(cid->data, QUIC_CONNECTION_CID_LENGTH);
@@ -649,7 +679,7 @@ static ngtcp2_ssize writeDatagram(
     ngtcp2_path_storage path_storage;
     ngtcp2_pkt_info packet_info;
     ngtcp2_ssize bytes_written;
-    int accepted_flag = 0;
+    int32_t accepted_flag = 0;
 
     ngtcp2_path_storage_zero(&path_storage);
     bytes_written = ngtcp2_conn_writev_datagram(
