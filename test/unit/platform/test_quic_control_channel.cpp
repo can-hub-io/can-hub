@@ -104,6 +104,41 @@ describe("quic_control_channel", []() {
         expect(next_message).toEqualMemory(message, sizeof(message));
     });
 
+    it("holds the finish back until every queued byte is sent", []() {
+        uint8_t chunk[4] = { 1, 2, 3, 4 };
+        bool due_with_bytes_pending;
+        bool due_once_sent;
+
+        QuicControlChannel_QueueTx(&channel, chunk, sizeof(chunk));
+        QuicControlChannel_RequestFinish(&channel);
+        due_with_bytes_pending = QuicControlChannel_FinishDue(&channel);
+        QuicControlChannel_MarkSent(&channel, sizeof(chunk));
+        due_once_sent = QuicControlChannel_FinishDue(&channel);
+
+        expect(due_with_bytes_pending).toBe(false);
+        expect(due_once_sent).toBe(true);
+    });
+
+    it("refuses new bytes once the finish is requested", []() {
+        uint8_t chunk[4] = { 1, 2, 3, 4 };
+        bool queued;
+
+        QuicControlChannel_RequestFinish(&channel);
+        queued = QuicControlChannel_QueueTx(&channel, chunk, sizeof(chunk));
+
+        expect(queued).toBe(false);
+    });
+
+    it("sends the finish only once", []() {
+        bool due;
+
+        QuicControlChannel_RequestFinish(&channel);
+        QuicControlChannel_MarkFinishSent(&channel);
+        due = QuicControlChannel_FinishDue(&channel);
+
+        expect(due).toBe(false);
+    });
+
     it("consumes a message and exposes the next one", []() {
         MessageHeader header = { kMESSAGE_TYPE_PING, 0, 0 };
         uint8_t message[MESSAGE_HEADER_SIZE] = { 0 };

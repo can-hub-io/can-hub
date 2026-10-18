@@ -21,7 +21,10 @@ class HubStatus:
 class PeerRow:
     peer_id: int
     role: str
-    agent: str
+    via: str
+    name: str
+    origin: str
+    uptime: str
     forwarded: int
     dropped: int
     fingerprint: str
@@ -95,9 +98,9 @@ def _data_rows(text: str) -> list[list[str]]:
 def parse_peers(text: str) -> list[PeerRow]:
     rows = []
     for f in _data_rows(text):
-        if len(f) < 6:
+        if len(f) < 9:
             continue
-        rows.append(PeerRow(int(f[0], 16), f[1], f[2], int(f[3]), int(f[4]), f[5]))
+        rows.append(PeerRow(int(f[0], 16), f[1], f[2], f[3], f[4], f[5], int(f[6]), int(f[7]), f[8]))
     return rows
 
 

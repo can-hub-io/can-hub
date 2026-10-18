@@ -3,6 +3,8 @@
 #include <stdlib.h>
 
 static QuicReliableStream *findFree(QuicReliableStreamSet *self);
+static void beginClosing(QuicReliableStream *reliable);
+static void releaseStream(QuicReliableStream *reliable);
 static bool attachStorage(QuicReliableStream *reliable);
 static void drainAndCredit(QuicReliableStream *reliable, QuicConnection *connection, QuicReliableFrameSink sink, void *context);
 
@@ -13,11 +15,7 @@ void QuicReliableStreams_Reset(QuicReliableStreamSet *self)
     uint8_t i;
 
     for(i=0; i<QUIC_RELIABLE_STREAMS_MAX; i++) {
-        free(self->streams[i].tx_storage);
-        free(self->streams[i].rx_storage);
-        self->streams[i].tx_storage = NULL;
-        self->streams[i].rx_storage = NULL;
-        self->streams[i].in_use = false;
+        releaseStream(&self->streams[i]);
     }
 }
 
@@ -28,7 +26,7 @@ QuicReliableStream *QuicReliableStreams_FindByChannel(QuicReliableStreamSet *sel
 
     for(i=0; i<QUIC_RELIABLE_STREAMS_MAX; i++) {
         reliable = &self->streams[i];
-        if (reliable->in_use && reliable->has_channel && reliable->channel == channel) {
+        if (reliable->in_use && !reliable->closing && reliable->has_channel && reliable->channel == channel) {
             return reliable;
         }
     }
@@ -102,6 +100,45 @@ QuicReliableStream *QuicReliableStreams_Adopt(QuicReliableStreamSet *self, int64
     return reliable;
 }
 
+QuicReliableStream *QuicReliableStreams_Close(QuicReliableStreamSet *self, uint8_t channel)
+{
+    QuicReliableStream *reliable = QuicReliableStreams_FindByChannel(self, channel);
+
+    if (reliable == NULL) {
+        return NULL;
+    }
+
+    beginClosing(reliable);
+
+    return reliable;
+}
+
+void QuicReliableStreams_Finish(QuicReliableStreamSet *self, int64_t stream_id)
+{
+    QuicReliableStream *reliable = QuicReliableStreams_FindById(self, stream_id);
+
+    if (reliable == NULL || reliable->closing) {
+        return;
+    }
+
+    beginClosing(reliable);
+}
+
+void QuicReliableStreams_Release(QuicReliableStreamSet *self, int64_t stream_id)
+{
+    QuicReliableStream *reliable = QuicReliableStreams_FindById(self, stream_id);
+
+    if (reliable == NULL) {
+        return;
+    }
+    if (QuicControlChannel_RxPending(&reliable->stream) > 0) {
+        reliable->closed = true;
+        return;
+    }
+
+    releaseStream(reliable);
+}
+
 void QuicReliableStreams_Receive(
     QuicReliableStream *reliable,
     QuicConnection *connection,
@@ -147,6 +184,9 @@ void QuicReliableStreams_RetryDrain(
         if (self->streams[i].in_use && QuicControlChannel_RxPending(&self->streams[i].stream) > 0) {
             drainAndCredit(&self->streams[i], connection, sink, context);
         }
+        if (self->streams[i].closed && QuicControlChannel_RxPending(&self->streams[i].stream) == 0) {
+            releaseStream(&self->streams[i]);
+        }
     }
 }
 
@@ -179,6 +219,23 @@ static QuicReliableStream *findFree(QuicReliableStreamSet *self)
     }
 
     return NULL;
+}
+
+static void beginClosing(QuicReliableStream *reliable)
+{
+    reliable->closing = true;
+    QuicControlChannel_RequestFinish(&reliable->stream);
+}
+
+static void releaseStream(QuicReliableStream *reliable)
+{
+    free(reliable->tx_storage);
+    free(reliable->rx_storage);
+    reliable->tx_storage = NULL;
+    reliable->rx_storage = NULL;
+    reliable->in_use = false;
+    reliable->closing = false;
+    reliable->closed = false;
 }
 
 static bool attachStorage(QuicReliableStream *reliable)

@@ -37,10 +37,14 @@ static IdentityStorePort overreporting_identity_store;
 static HubTransportEvents events;
 static uint8_t client_channel;
 static const RegisterMessage truck_registration = { "truck42", 2, { "can0", "can1" } };
+static uint32_t reliable_interface_id;
 
 static void openSubscribersBehindOneFullReliableClient(void);
 static bool sendAgentFrame(void);
 static uint8_t framesTo(uint32_t peer_id);
+static uint8_t openReliableChannel(uint32_t client_peer_id);
+static void closeChannel(uint32_t client_peer_id, uint8_t channel);
+static void reconnectReliableAgent(void);
 static const RegisterMessage bus_registration = { "bus7", 1, { "can0" } };
 
 static uint8_t injectFrom(uint32_t client_peer_id, uint8_t channel);
@@ -54,15 +58,20 @@ static void connectPeer(uint32_t peer_id, const char *fingerprint, bool local)
     events.on_peer_connected(events.context, peer_id, &info, 0);
 }
 
-static void connectClientWithFingerprint(uint32_t peer_id, const char *fingerprint)
+static void connectClientWithFingerprintAndCapabilities(uint32_t peer_id, const char *fingerprint, uint32_t capabilities)
 {
-    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0, "" };
+    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, capabilities, "" };
     uint8_t encoded[128];
     size_t encoded_size;
 
     connectPeer(peer_id, fingerprint, false);
     encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
     events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
+}
+
+static void connectClientWithFingerprint(uint32_t peer_id, const char *fingerprint)
+{
+    connectClientWithFingerprintAndCapabilities(peer_id, fingerprint, 0);
 }
 
 static uint8_t openInterface(uint32_t peer_id, uint32_t interface_id, uint8_t open_flags)
@@ -576,6 +585,91 @@ describe("broker", []() {
             expect(framesTo(CLIENT_PEER)).toBe((uint8_t)1);
             expect(framesTo(CLIENT_PEER + 1)).toBe((uint8_t)1);
             expect(framesTo(CLIENT_PEER + 2)).toBe((uint8_t)1);
+        });
+    });
+
+    describe("reliable mode revert", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            AuthorizationMock_Reset(&authorization);
+            Broker_Init(&broker, &transport.port, NULL, &authorization.port, false);
+            events = Broker_Events(&broker);
+            BrokerDriver_ConnectAgentWithCapabilities(
+                &events,
+                &transport,
+                AGENT_PEER,
+                &truck_registration,
+                HELLO_CAP_RELIABLE_CHANNELS
+            );
+            BrokerDriver_ConnectClientWithCapabilities(&events, CLIENT_PEER, HELLO_CAP_RELIABLE_CHANNELS);
+            BrokerDriver_ConnectClientWithCapabilities(&events, CLIENT_PEER + 1, HELLO_CAP_RELIABLE_CHANNELS);
+            reliable_interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+        });
+
+        it("reverts the agent channel when its last reliable client disconnects", []() {
+            openReliableChannel(CLIENT_PEER);
+
+            events.on_peer_disconnected(events.context, CLIENT_PEER, 0);
+
+            expect(transport.channel_mode_count).toBe((uint32_t)1);
+            expect(transport.channel_mode_peers[0]).toBe((uint32_t)AGENT_PEER);
+            expect(transport.channel_mode_reliable[0]).toBe(false);
+        });
+
+        it("keeps the agent channel reliable while another client still holds it", []() {
+            openReliableChannel(CLIENT_PEER);
+            openReliableChannel(CLIENT_PEER + 1);
+
+            events.on_peer_disconnected(events.context, CLIENT_PEER, 0);
+
+            expect(transport.channel_mode_count).toBe((uint32_t)0);
+        });
+
+        it("closes the client leg and then the agent leg on CLOSE", []() {
+            uint8_t channel = openReliableChannel(CLIENT_PEER);
+
+            closeChannel(CLIENT_PEER, channel);
+
+            expect(transport.channel_mode_count).toBe((uint32_t)2);
+            expect(transport.channel_mode_peers[0]).toBe((uint32_t)CLIENT_PEER);
+            expect(transport.channel_mode_channels[0]).toBe(channel);
+            expect(transport.channel_mode_reliable[0]).toBe(false);
+            expect(transport.channel_mode_peers[1]).toBe((uint32_t)AGENT_PEER);
+            expect(transport.channel_mode_reliable[1]).toBe(false);
+        });
+
+        it("closes the client leg of a reliable channel closed while its agent is away", []() {
+            uint8_t channel = openReliableChannel(CLIENT_PEER);
+
+            events.on_peer_disconnected(events.context, AGENT_PEER, 0);
+            closeChannel(CLIENT_PEER, channel);
+
+            expect(transport.channel_mode_count).toBe((uint32_t)1);
+            expect(transport.channel_mode_peers[0]).toBe((uint32_t)CLIENT_PEER);
+            expect(transport.channel_mode_channels[0]).toBe(channel);
+            expect(transport.channel_mode_reliable[0]).toBe(false);
+        });
+
+        it("closes the client leg when the agent returns and the client may no longer read", []() {
+            uint8_t channel;
+
+            connectClientWithFingerprintAndCapabilities(CLIENT_PEER + 2, TRUCK_FINGERPRINT, HELLO_CAP_RELIABLE_CHANNELS);
+            channel = openReliableChannel(CLIENT_PEER + 2);
+            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", false, false);
+
+            reconnectReliableAgent();
+
+            expect(transport.channel_mode_peers[0]).toBe((uint32_t)(CLIENT_PEER + 2));
+            expect(transport.channel_mode_channels[0]).toBe(channel);
+            expect(transport.channel_mode_reliable[0]).toBe(false);
+        });
+
+        it("leaves channel modes alone when a lossy channel closes", []() {
+            uint8_t channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, reliable_interface_id, 0);
+
+            closeChannel(CLIENT_PEER, channel);
+
+            expect(transport.channel_mode_count).toBe((uint32_t)0);
         });
     });
 
@@ -1884,4 +1978,40 @@ static uint8_t framesTo(uint32_t peer_id)
     }
 
     return count;
+}
+
+static uint8_t openReliableChannel(uint32_t client_peer_id)
+{
+    uint8_t channel = BrokerDriver_OpenInterface(
+        &events,
+        &transport,
+        client_peer_id,
+        reliable_interface_id,
+        OPEN_FLAG_RELIABLE
+    );
+
+    transport.channel_mode_count = 0;
+
+    return channel;
+}
+
+static void closeChannel(uint32_t client_peer_id, uint8_t channel)
+{
+    CloseMessage close = { channel };
+    uint8_t encoded[64];
+    size_t encoded_size = CloseMessage_Encode(&close, encoded, sizeof(encoded));
+
+    events.on_peer_control(events.context, client_peer_id, encoded, encoded_size, 0);
+}
+
+static void reconnectReliableAgent(void)
+{
+    events.on_peer_disconnected(events.context, AGENT_PEER, 0);
+    BrokerDriver_ConnectAgentWithCapabilities(
+        &events,
+        &transport,
+        AGENT_PEER,
+        &truck_registration,
+        HELLO_CAP_RELIABLE_CHANNELS
+    );
 }

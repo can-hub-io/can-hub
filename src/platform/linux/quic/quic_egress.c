@@ -10,6 +10,13 @@
 #define EGRESS_BATCH_SIZE (GSO_SEGMENT_SIZE * EGRESS_BATCH_SEGMENTS)
 
 static void flushBatch(const QuicEgressSink *sink, const uint8_t *batch, size_t length);
+static ngtcp2_ssize writeNextPacket(
+    QuicConnection *connection,
+    QuicControlChannel *control,
+    bool control_writable,
+    uint8_t *packet,
+    size_t *consumed
+);
 
 bool QuicEgress_FlushDatagram(
     QuicConnection *connection,
@@ -43,33 +50,13 @@ bool QuicEgress_FlushDatagram(
 bool QuicEgress_Drain(QuicConnection *connection, QuicControlChannel *control, const QuicEgressSink *sink)
 {
     uint8_t batch[EGRESS_BATCH_SIZE];
-    const uint8_t *pending_data = NULL;
-    size_t pending_size = 0;
     size_t batch_length = 0;
     size_t consumed;
     bool control_writable = control->stream_id != QUIC_CONTROL_NO_STREAM;
     ngtcp2_ssize bytes_written;
 
     for (;;) {
-        if (control_writable) {
-            pending_size = QuicControlChannel_PendingTx(control, &pending_data);
-        }
-
-        if (control_writable && pending_size > 0) {
-            bytes_written = QuicConnection_WriteStream(
-                connection,
-                batch + batch_length,
-                GSO_SEGMENT_SIZE,
-                control->stream_id,
-                pending_data,
-                pending_size,
-                &consumed
-            );
-        } else {
-            bytes_written = QuicConnection_WritePacket(connection, batch + batch_length, GSO_SEGMENT_SIZE);
-            consumed = 0;
-        }
-
+        bytes_written = writeNextPacket(connection, control, control_writable, batch + batch_length, &consumed);
         if (bytes_written == NGTCP2_ERR_STREAM_DATA_BLOCKED) {
             control_writable = false;
             continue;
@@ -92,6 +79,52 @@ bool QuicEgress_Drain(QuicConnection *connection, QuicControlChannel *control, c
 }
 
 /* ---------- private ---------- */
+
+static ngtcp2_ssize writeNextPacket(
+    QuicConnection *connection,
+    QuicControlChannel *control,
+    bool control_writable,
+    uint8_t *packet,
+    size_t *consumed
+)
+{
+    const uint8_t *pending_data = NULL;
+    size_t pending_size = 0;
+    ngtcp2_ssize bytes_written;
+    bool finished;
+
+    *consumed = 0;
+    if (control_writable) {
+        pending_size = QuicControlChannel_PendingTx(control, &pending_data);
+    }
+    if (control_writable && pending_size > 0) {
+        return QuicConnection_WriteStream(
+            connection,
+            packet,
+            GSO_SEGMENT_SIZE,
+            control->stream_id,
+            pending_data,
+            pending_size,
+            consumed
+        );
+    }
+    if (!control_writable || !QuicControlChannel_FinishDue(control)) {
+        return QuicConnection_WritePacket(connection, packet, GSO_SEGMENT_SIZE);
+    }
+
+    bytes_written = QuicConnection_WriteStreamFinish(
+        connection,
+        packet,
+        GSO_SEGMENT_SIZE,
+        control->stream_id,
+        &finished
+    );
+    if (finished) {
+        QuicControlChannel_MarkFinishSent(control);
+    }
+
+    return bytes_written;
+}
 
 static void flushBatch(const QuicEgressSink *sink, const uint8_t *batch, size_t length)
 {

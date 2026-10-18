@@ -45,5 +45,11 @@ class CanAgent:
             f"agent {self.config.name} did not register {want} interfaces\n{self.process.read_log()}"
         )
 
+    def peer_id_on(self, hub) -> int:
+        mine = [peer.peer_id for peer in hub.peers() if peer.role == "agent" and peer.name == self.config.name]
+        if len(mine) != 1:
+            raise AssertionError(f"agent {self.config.name} expected once among hub peers, found {len(mine)}")
+        return mine[0]
+
     def stop(self) -> None:
         self.process.stop()
