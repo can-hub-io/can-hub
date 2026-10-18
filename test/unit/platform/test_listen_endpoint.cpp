@@ -7,11 +7,14 @@ extern "C" {
 }
 
 #include <arpa/inet.h>
+#include <netinet/tcp.h>
+#include <unistd.h>
 
 static struct sockaddr_storage address;
 static socklen_t address_length;
 static bool built;
 static char origin[64];
+static char host[64];
 
 describe("listen_endpoint_build_sockaddr", []() {
     it("maps the any address to the IPv6 wildcard for a dual-stack socket", []() {
@@ -84,5 +87,46 @@ describe("listen_endpoint_format_origin", []() {
         ListenEndpoint_FormatOrigin(&address, origin, sizeof(origin));
 
         expect((const char *)origin).toBe("[::1]:7227");
+    });
+});
+
+describe("listen_endpoint_format_host", []() {
+    it("renders a plain IPv4 peer without its port", []() {
+        ListenEndpoint_BuildSockaddr(AF_INET, "10.0.0.5", "7228", &address, &address_length);
+        ListenEndpoint_FormatHost(&address, host, sizeof(host));
+
+        expect((const char *)host).toBe("10.0.0.5");
+    });
+
+    it("unmaps a v4-mapped peer back to plain IPv4", []() {
+        ListenEndpoint_BuildSockaddr(AF_INET6, "127.0.0.1", "7227", &address, &address_length);
+        ListenEndpoint_FormatHost(&address, host, sizeof(host));
+
+        expect((const char *)host).toBe("127.0.0.1");
+    });
+
+    it("renders a native IPv6 peer without brackets", []() {
+        ListenEndpoint_BuildSockaddr(AF_INET6, "::1", "7227", &address, &address_length);
+        ListenEndpoint_FormatHost(&address, host, sizeof(host));
+
+        expect((const char *)host).toBe("::1");
+    });
+});
+
+describe("listen_endpoint_enable_keepalive", []() {
+    it("bounds how long a silent peer can hold its socket", []() {
+        int32_t fd = socket(AF_INET, SOCK_STREAM, 0);
+        int32_t keepalive = 0;
+        uint32_t user_timeout_ms = 0;
+        socklen_t keepalive_size = sizeof(keepalive);
+        socklen_t user_timeout_size = sizeof(user_timeout_ms);
+
+        ListenEndpoint_EnableKeepalive(fd);
+        getsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &keepalive, &keepalive_size);
+        getsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &user_timeout_ms, &user_timeout_size);
+        close(fd);
+
+        expect(keepalive).toBe(1);
+        expect(user_timeout_ms > 0).toBe(true);
     });
 });

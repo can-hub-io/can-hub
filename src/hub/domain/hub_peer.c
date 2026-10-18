@@ -4,6 +4,8 @@
 
 #include "protocol/hello_message.h"
 
+static bool isSamePlaintextAgent(const HubPeer *self, const HubPeer *other);
+
 /* ---------- public ---------- */
 
 bool HubPeer_AdoptRole(HubPeer *self, uint8_t wire_role)
@@ -26,6 +28,15 @@ void HubPeer_SetAgentName(HubPeer *self, const char *agent_name)
     strncpy(self->agent_name, agent_name, REGISTER_AGENT_NAME_SIZE - 1);
 }
 
+bool HubPeer_IsSameAgent(const HubPeer *self, const HubPeer *other)
+{
+    if (self->fingerprint_hex[0] != '\0' || other->fingerprint_hex[0] != '\0') {
+        return strcmp(self->fingerprint_hex, other->fingerprint_hex) == 0;
+    }
+
+    return isSamePlaintextAgent(self, other);
+}
+
 void HubPeer_FillAdminEntry(const HubPeer *self, AdminPeersReplyEntry *entry, uint64_t now_us)
 {
     memset(entry, 0, sizeof(*entry));
@@ -40,4 +51,18 @@ void HubPeer_FillAdminEntry(const HubPeer *self, AdminPeersReplyEntry *entry, ui
     memcpy(entry->agent_name, self->agent_name, REGISTER_AGENT_NAME_SIZE);
     memcpy(entry->fingerprint_hex, self->fingerprint_hex, IDENTITY_FINGERPRINT_HEX_SIZE);
     memcpy(entry->origin, self->origin, HUB_PEER_ORIGIN_SIZE < ADMIN_ORIGIN_SIZE ? HUB_PEER_ORIGIN_SIZE : ADMIN_ORIGIN_SIZE);
+}
+
+/* ---------- private ---------- */
+
+static bool isSamePlaintextAgent(const HubPeer *self, const HubPeer *other)
+{
+    if (self->transport_kind != other->transport_kind) {
+        return false;
+    }
+    if (self->local && other->local) {
+        return true;
+    }
+
+    return self->origin_host[0] != '\0' && strcmp(self->origin_host, other->origin_host) == 0;
 }

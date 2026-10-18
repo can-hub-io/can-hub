@@ -53,7 +53,7 @@ static FrameMessage relayedFrameAt(uint16_t index);
 
 static void connectPeer(uint32_t peer_id, const char *fingerprint, bool local)
 {
-    HubPeerConnectInfo info = { fingerprint, NULL, kPEER_TRANSPORT_TCP, local };
+    HubPeerConnectInfo info = { fingerprint, NULL, NULL, kPEER_TRANSPORT_TCP, local };
 
     events.on_peer_connected(events.context, peer_id, &info, 0);
 }
@@ -91,17 +91,31 @@ static uint8_t openInterface(uint32_t peer_id, uint32_t interface_id, uint8_t op
     return ack.status == OPEN_STATUS_OK ? ack.channel : 0xFF;
 }
 
-static void registerAgentWithFingerprint(uint32_t peer_id, const char *fingerprint)
+static void registerAgentWith(uint32_t peer_id, const HubPeerConnectInfo *info)
 {
     HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_AGENT, 0, "" };
     uint8_t encoded[512];
     size_t encoded_size;
 
-    connectPeer(peer_id, fingerprint, false);
+    events.on_peer_connected(events.context, peer_id, info, 0);
     encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
     events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
     encoded_size = RegisterMessage_Encode(&truck_registration, encoded, sizeof(encoded));
     events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
+}
+
+static void registerAgentWithFingerprint(uint32_t peer_id, const char *fingerprint)
+{
+    HubPeerConnectInfo info = { fingerprint, NULL, NULL, kPEER_TRANSPORT_TCP, false };
+
+    registerAgentWith(peer_id, &info);
+}
+
+static void registerPlaintextAgentFrom(uint32_t peer_id, const char *host)
+{
+    HubPeerConnectInfo info = { NULL, NULL, host, kPEER_TRANSPORT_TCP, false };
+
+    registerAgentWith(peer_id, &info);
 }
 
 static uint8_t registerAckStatus(void)
@@ -287,10 +301,20 @@ describe("broker", []() {
             expect(transport.last_closed_peer).toBe((uint32_t)(AGENT_PEER + 1));
         });
 
-        it("does not displace when neither peer carries a fingerprint", []() {
-            registerAgentWithFingerprint(AGENT_PEER, NULL);
+        it("displaces a plaintext ghost when the agent reconnects from the same host", []() {
+            registerPlaintextAgentFrom(AGENT_PEER, "203.0.113.7");
             HubTransportPortMock_Reset(&transport);
-            registerAgentWithFingerprint(AGENT_PEER + 1, NULL);
+            registerPlaintextAgentFrom(AGENT_PEER + 1, "203.0.113.7");
+
+            expect(registerAckStatus()).toBe(REGISTER_STATUS_OK);
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)AGENT_PEER);
+        });
+
+        it("rejects a plaintext same-name agent from another host", []() {
+            registerPlaintextAgentFrom(AGENT_PEER, "203.0.113.7");
+            HubTransportPortMock_Reset(&transport);
+            registerPlaintextAgentFrom(AGENT_PEER + 1, "198.51.100.9");
 
             expect(registerAckStatus()).toBe(1);
             expect(transport.close_count).toBe(1);

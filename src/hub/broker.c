@@ -245,6 +245,9 @@ static void onPeerConnected(void *context, uint32_t peer_id, const HubPeerConnec
     if (info->origin != NULL) {
         strncpy(peer->origin, info->origin, HUB_PEER_ORIGIN_SIZE - 1);
     }
+    if (info->origin_host != NULL) {
+        strncpy(peer->origin_host, info->origin_host, HUB_PEER_ORIGIN_SIZE - 1);
+    }
 }
 
 static void onPeerDisconnected(void *context, uint32_t peer_id, uint64_t now_us)
@@ -1241,9 +1244,6 @@ static bool displaceGhostPeer(Broker *self, const HubPeer *peer, const RegisterM
     HubPeer *ghost;
     uint32_t ghost_peer_id;
 
-    if (peer->fingerprint_hex[0] == '\0') {
-        return false;
-    }
     if (!InterfaceRegistry_CollidingPeer(&self->registry, registration, &ghost_peer_id)) {
         return false;
     }
@@ -1252,7 +1252,7 @@ static bool displaceGhostPeer(Broker *self, const HubPeer *peer, const RegisterM
     }
 
     ghost = PeerDirectory_Find(&self->directory, ghost_peer_id);
-    if (ghost == NULL || strcmp(ghost->fingerprint_hex, peer->fingerprint_hex) != 0) {
+    if (ghost == NULL || !HubPeer_IsSameAgent(peer, ghost)) {
         return false;
     }
 

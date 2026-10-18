@@ -40,10 +40,12 @@ typedef struct {
     char fingerprint_hex[IDENTITY_FINGERPRINT_HEX_SIZE];
     char agent_name[REGISTER_AGENT_NAME_SIZE];
     char origin[HUB_PEER_ORIGIN_SIZE];
+    char origin_host[HUB_PEER_ORIGIN_SIZE];
     ClientSession session;
     EgressQueue egress;
 } HubPeer;
 
 bool HubPeer_AdoptRole(HubPeer *self, uint8_t wire_role);
 void HubPeer_SetAgentName(HubPeer *self, const char *agent_name);
+bool HubPeer_IsSameAgent(const HubPeer *self, const HubPeer *other);
 void HubPeer_FillAdminEntry(const HubPeer *self, AdminPeersReplyEntry *entry, uint64_t now_us);

@@ -5,10 +5,20 @@
 #include <string.h>
 
 #include <arpa/inet.h>
+#include <netinet/tcp.h>
 #include <unistd.h>
+
+#define V4_MAPPED_OFFSET 12
+#define KEEPALIVE_IDLE_SECONDS 10
+#define KEEPALIVE_INTERVAL_SECONDS 5
+#define KEEPALIVE_PROBES 4
+#define KEEPALIVE_USER_TIMEOUT_MS 30000
 
 static bool buildSockaddrIn6(const char *bind_address, const char *port, struct sockaddr_storage *out, socklen_t *out_length);
 static bool buildSockaddrIn(const char *bind_address, const char *port, struct sockaddr_storage *out, socklen_t *out_length);
+static bool isNativeIpv6(const struct sockaddr_storage *address);
+static uint16_t portOf(const struct sockaddr_storage *address);
+static void formatAddress(int32_t family, const void *address, char *out, size_t size);
 
 int32_t ListenEndpoint_OpenSocket(int32_t socktype, int32_t *address_family)
 {
@@ -42,35 +52,53 @@ bool ListenEndpoint_BuildSockaddr(int32_t address_family, const char *bind_addre
 
 void ListenEndpoint_FormatOrigin(const struct sockaddr_storage *address, char *out, size_t size)
 {
-    const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)address;
-    const struct sockaddr_in *in = (const struct sockaddr_in *)address;
-    struct in_addr mapped;
-    char ip[INET6_ADDRSTRLEN];
+    char host[INET6_ADDRSTRLEN];
 
-    if (address->ss_family == AF_INET6 && IN6_IS_ADDR_V4MAPPED(&in6->sin6_addr)) {
-        memcpy(&mapped, &in6->sin6_addr.s6_addr[12], sizeof(mapped));
-        if (inet_ntop(AF_INET, &mapped, ip, sizeof(ip)) == NULL) {
-            out[0] = '\0';
-            return;
-        }
-        snprintf(out, size, "%s:%u", ip, ntohs(in6->sin6_port));
-        return;
-    }
-
-    if (address->ss_family == AF_INET6) {
-        if (inet_ntop(AF_INET6, &in6->sin6_addr, ip, sizeof(ip)) == NULL) {
-            out[0] = '\0';
-            return;
-        }
-        snprintf(out, size, "[%s]:%u", ip, ntohs(in6->sin6_port));
-        return;
-    }
-
-    if (inet_ntop(AF_INET, &in->sin_addr, ip, sizeof(ip)) == NULL) {
+    ListenEndpoint_FormatHost(address, host, sizeof(host));
+    if (host[0] == '\0') {
         out[0] = '\0';
         return;
     }
-    snprintf(out, size, "%s:%u", ip, ntohs(in->sin_port));
+    if (isNativeIpv6(address)) {
+        snprintf(out, size, "[%s]:%u", host, portOf(address));
+        return;
+    }
+
+    snprintf(out, size, "%s:%u", host, portOf(address));
+}
+
+void ListenEndpoint_FormatHost(const struct sockaddr_storage *address, char *out, size_t size)
+{
+    const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)address;
+    const struct sockaddr_in *in = (const struct sockaddr_in *)address;
+    struct in_addr mapped;
+
+    if (isNativeIpv6(address)) {
+        formatAddress(AF_INET6, &in6->sin6_addr, out, size);
+        return;
+    }
+    if (address->ss_family == AF_INET6) {
+        memcpy(&mapped, &in6->sin6_addr.s6_addr[V4_MAPPED_OFFSET], sizeof(mapped));
+        formatAddress(AF_INET, &mapped, out, size);
+        return;
+    }
+
+    formatAddress(AF_INET, &in->sin_addr, out, size);
+}
+
+void ListenEndpoint_EnableKeepalive(int32_t fd)
+{
+    int32_t enabled = 1;
+    int32_t idle_seconds = KEEPALIVE_IDLE_SECONDS;
+    int32_t interval_seconds = KEEPALIVE_INTERVAL_SECONDS;
+    int32_t probes = KEEPALIVE_PROBES;
+    uint32_t user_timeout_ms = KEEPALIVE_USER_TIMEOUT_MS;
+
+    setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &enabled, sizeof(enabled));
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle_seconds, sizeof(idle_seconds));
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &interval_seconds, sizeof(interval_seconds));
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &probes, sizeof(probes));
+    setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &user_timeout_ms, sizeof(user_timeout_ms));
 }
 
 static bool buildSockaddrIn6(const char *bind_address, const char *port, struct sockaddr_storage *out, socklen_t *out_length)
@@ -115,4 +143,30 @@ static bool buildSockaddrIn(const char *bind_address, const char *port, struct s
     }
 
     return inet_pton(AF_INET, bind_address, &address->sin_addr) == 1;
+}
+
+static bool isNativeIpv6(const struct sockaddr_storage *address)
+{
+    const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)address;
+
+    return address->ss_family == AF_INET6 && !IN6_IS_ADDR_V4MAPPED(&in6->sin6_addr);
+}
+
+static uint16_t portOf(const struct sockaddr_storage *address)
+{
+    const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)address;
+    const struct sockaddr_in *in = (const struct sockaddr_in *)address;
+
+    if (address->ss_family == AF_INET6) {
+        return ntohs(in6->sin6_port);
+    }
+
+    return ntohs(in->sin_port);
+}
+
+static void formatAddress(int32_t family, const void *address, char *out, size_t size)
+{
+    if (inet_ntop(family, address, out, (socklen_t)size) == NULL) {
+        out[0] = '\0';
+    }
 }

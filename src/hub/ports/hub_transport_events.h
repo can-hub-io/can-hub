@@ -23,6 +23,7 @@ typedef enum tpeer_transport_e {
 typedef struct {
     const char *fingerprint_hex;
     const char *origin;
+    const char *origin_host;
     uint8_t transport_kind;
     bool local;
 } HubPeerConnectInfo;

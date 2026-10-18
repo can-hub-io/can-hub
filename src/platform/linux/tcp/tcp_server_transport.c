@@ -133,6 +133,7 @@ void TcpServerTransport_OnAcceptReady(TcpServerTransport *self)
     struct sockaddr_storage remote;
     socklen_t remote_size = sizeof(remote);
     char origin[ORIGIN_TEXT_SIZE];
+    char origin_host[ORIGIN_TEXT_SIZE];
     int32_t peer_fd;
     int32_t nodelay = 1;
 
@@ -153,11 +154,15 @@ void TcpServerTransport_OnAcceptReady(TcpServerTransport *self)
         peer->peer_id = self->next_peer_id++;
 
         origin[0] = '\0';
+        origin_host[0] = '\0';
         if (!self->local) {
+            ListenEndpoint_EnableKeepalive(peer_fd);
             ListenEndpoint_FormatOrigin(&remote, origin, sizeof(origin));
+            ListenEndpoint_FormatHost(&remote, origin_host, sizeof(origin_host));
         }
         info.fingerprint_hex = NULL;
         info.origin = self->local ? NULL : origin;
+        info.origin_host = self->local ? NULL : origin_host;
         info.transport_kind = self->local ? kPEER_TRANSPORT_UNIX : kPEER_TRANSPORT_TCP;
         info.local = self->local;
         self->events.on_peer_connected(self->events.context, peer->peer_id, &info, Clock_MonotonicUs());
