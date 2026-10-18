@@ -18,6 +18,8 @@
 #define CONTROL_BUFFER_SIZE 4096
 #define PING_REPLY_FLAG 0x01
 #define HELLO_TIMEOUT_US 5000000
+#define AWAITING_HELLO_MAX (PEER_DIRECTORY_MAX / 2)
+#define AWAITING_HELLO_PER_HOST_MAX 4
 #define FRAME_PAYLOAD_LENGTH_OFFSET (MESSAGE_HEADER_SIZE + 13)
 #define FRAME_BUFFER_SIZE (MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD)
 #define FRAME_PACE_OVERHEAD_BITS 64
@@ -32,6 +34,7 @@ typedef void (*TControlHandler)(
 );
 
 static void onPeerConnected(void *context, uint32_t peer_id, const HubPeerConnectInfo *info, uint64_t now_us);
+static bool admitsPeerAwaitingHello(Broker *self, const HubPeerConnectInfo *info);
 static void onPeerDisconnected(void *context, uint32_t peer_id, uint64_t now_us);
 static void onPeerControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size, uint64_t now_us);
 static bool onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
@@ -226,10 +229,17 @@ int32_t Broker_NextTimeoutMs(Broker *self, int32_t cap_ms)
 static void onPeerConnected(void *context, uint32_t peer_id, const HubPeerConnectInfo *info, uint64_t now_us)
 {
     Broker *self = context;
-    HubPeer *peer = PeerDirectory_Allocate(&self->directory, peer_id);
+    HubPeer *peer;
 
     self->now_us = now_us;
 
+    if (!admitsPeerAwaitingHello(self, info)) {
+        sendError(self, peer_id, kERROR_CODE_HUB_FULL, "too many peers awaiting hello");
+        self->transport->close_peer(self->transport->context, peer_id);
+        return;
+    }
+
+    peer = PeerDirectory_Allocate(&self->directory, peer_id);
     if (peer == NULL) {
         sendError(self, peer_id, kERROR_CODE_HUB_FULL, "no peer slot available");
         self->transport->close_peer(self->transport->context, peer_id);
@@ -248,6 +258,21 @@ static void onPeerConnected(void *context, uint32_t peer_id, const HubPeerConnec
     if (info->origin_host != NULL) {
         strncpy(peer->origin_host, info->origin_host, HUB_PEER_ORIGIN_SIZE - 1);
     }
+}
+
+static bool admitsPeerAwaitingHello(Broker *self, const HubPeerConnectInfo *info)
+{
+    if (info->local) {
+        return true;
+    }
+    if (PeerDirectory_CountRole(&self->directory, kHUB_PEER_ROLE_UNKNOWN) >= AWAITING_HELLO_MAX) {
+        return false;
+    }
+    if (info->origin_host == NULL) {
+        return true;
+    }
+
+    return PeerDirectory_CountAwaitingHelloFrom(&self->directory, info->origin_host) < AWAITING_HELLO_PER_HOST_MAX;
 }
 
 static void onPeerDisconnected(void *context, uint32_t peer_id, uint64_t now_us)

@@ -107,6 +107,22 @@ uint16_t PeerDirectory_CountRole(const PeerDirectory *self, uint8_t role)
     return count;
 }
 
+uint16_t PeerDirectory_CountAwaitingHelloFrom(const PeerDirectory *self, const char *origin_host)
+{
+    const HubPeer *peer;
+    uint16_t count = 0;
+    uint8_t i;
+
+    for(i=0; i<PEER_DIRECTORY_MAX; i++) {
+        peer = &self->peers[i];
+        if (peer->in_use && peer->role == kHUB_PEER_ROLE_UNKNOWN && strcmp(peer->origin_host, origin_host) == 0) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
 void PeerDirectory_List(const PeerDirectory *self, uint16_t offset, AdminPeersReplyMessage *reply, uint64_t now_us)
 {
     const HubPeer *peer;

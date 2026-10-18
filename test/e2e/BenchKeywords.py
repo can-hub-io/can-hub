@@ -21,6 +21,7 @@ from lib import (
 )
 from lib.binaries import BIN_DIR, binary
 from lib.rows import parse_candump
+from lib.silent_connections import SilentConnections
 
 CONSUME_SCRIPT = "/work/test/e2e/scripts/consume.py"
 PRODUCE_SCRIPT = "/work/test/e2e/scripts/produce.py"
@@ -165,6 +166,18 @@ class BenchKeywords:
     def silence_tcp_port(self, port, server):
         server.exec("iptables", "-A", "OUTPUT", "-p", "tcp", "--sport", str(port), "-j", "DROP")
         server.exec("iptables", "-A", "INPUT", "-p", "tcp", "--dport", str(port), "-j", "DROP")
+
+    @keyword("Drop UDP From Source Port ${port} On ${server}")
+    def drop_udp_from_source_port(self, port, server):
+        server.exec("iptables", "-A", "INPUT", "-p", "udp", "--sport", str(port), "-j", "DROP")
+
+    @keyword("Open ${count} Silent TCP Connections From ${server} To ${host} Port ${port}")
+    def open_silent_connections(self, count, server, host, port, timeout=15):
+        return SilentConnections.open(server, host, int(port), int(count), float(timeout))
+
+    @keyword("Count Of ${connections} Closed Between ${low}s And ${high}s")
+    def count_closed_between(self, connections, low, high):
+        return connections.count_closed_between(float(low), float(high))
 
     @keyword("Flush Firewall On ${server}")
     def flush_firewall(self, server):

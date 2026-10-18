@@ -234,6 +234,7 @@ set(HUB_SOURCES
     src/platform/linux/quic/quic_egress.c
     src/platform/linux/quic/quic_udp_gso.c
     src/platform/linux/quic/quic_reliable_streams.c
+    src/platform/linux/quic/quic_retry.c
     src/platform/linux/quic/quic_server_security.c
     src/platform/linux/quic/quic_server_transport.c
     src/platform/linux/sqlite/identity_database.c

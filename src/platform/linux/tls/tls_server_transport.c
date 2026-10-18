@@ -14,6 +14,7 @@
 #include <sys/socket.h>
 
 #include "platform/linux/clock/clock.h"
+#include "platform/linux/shared/handshake_limits.h"
 #include "platform/linux/shared/listen_endpoint.h"
 #include "platform/linux/shared/log.h"
 #include "platform/linux/shared/tcp_keepalive.h"
@@ -31,6 +32,9 @@ static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel,
 static void portClosePeer(void *context, uint32_t peer_id);
 static TlsServerPeer *findPeer(TlsServerTransport *self, uint32_t peer_id);
 static TlsServerPeer *findFreeSlot(TlsServerTransport *self);
+static bool adoptPeer(TlsServerTransport *self, int32_t peer_fd, const struct sockaddr_storage *remote);
+static bool admitsHandshake(const TlsServerTransport *self, const char *origin_host);
+static bool isHandshaking(const TlsServerPeer *peer);
 typedef struct {
     TlsServerTransport *transport;
     TlsServerPeer *peer;
@@ -125,38 +129,19 @@ bool TlsServerTransport_SlotWantsWritable(const TlsServerTransport *self, uint8_
 
 void TlsServerTransport_OnAcceptReady(TlsServerTransport *self)
 {
-    TlsServerPeer *peer;
-    ptls_t *tls;
     struct sockaddr_storage remote;
-    socklen_t remote_size = sizeof(remote);
+    socklen_t remote_size;
     int32_t peer_fd;
-    int32_t nodelay = 1;
 
     for (;;) {
+        remote_size = sizeof(remote);
         peer_fd = accept4(self->listen_fd, (struct sockaddr *)&remote, &remote_size, SOCK_NONBLOCK);
         if (peer_fd < 0) {
             return;
         }
-
-        peer = findFreeSlot(self);
-        if (peer == NULL) {
+        if (!adoptPeer(self, peer_fd, &remote)) {
             close(peer_fd);
-            continue;
         }
-        if (!TlsServerSecurity_NewSession(&self->security, &tls)) {
-            close(peer_fd);
-            continue;
-        }
-
-        setsockopt(peer_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
-        TcpKeepalive_Enable(peer_fd);
-        TlsChannel_Bind(&peer->channel, tls, NULL);
-        peer->fd = peer_fd;
-        peer->peer_id = self->next_peer_id++;
-        peer->announced = false;
-        ListenEndpoint_FormatOrigin(&remote, peer->origin, sizeof(peer->origin));
-        ListenEndpoint_FormatHost(&remote, peer->origin_host, sizeof(peer->origin_host));
-        pumpHandshake(self, peer);
     }
 }
 
@@ -199,6 +184,19 @@ void TlsServerTransport_OnSlotWritable(TlsServerTransport *self, uint8_t slot)
 
     if (self->events.on_peer_writable != NULL) {
         self->events.on_peer_writable(self->events.context, peer->peer_id);
+    }
+}
+
+void TlsServerTransport_Tick(TlsServerTransport *self, uint64_t now_us)
+{
+    TlsServerPeer *peer;
+    uint8_t slot;
+
+    for(slot=0; slot<TLS_SERVER_PEERS_MAX; slot++) {
+        peer = &self->peers[slot];
+        if (isHandshaking(peer) && now_us >= peer->handshake_deadline_us) {
+            closePeer(self, peer, false);
+        }
     }
 }
 
@@ -420,6 +418,62 @@ static void dispatchMessage(void *context, const uint8_t *message, size_t size)
             Clock_MonotonicUs()
         );
     }
+}
+
+static bool adoptPeer(TlsServerTransport *self, int32_t peer_fd, const struct sockaddr_storage *remote)
+{
+    char origin_host[TLS_SERVER_ORIGIN_SIZE];
+    TlsServerPeer *peer;
+    ptls_t *tls;
+    int32_t nodelay = 1;
+
+    ListenEndpoint_FormatHost(remote, origin_host, sizeof(origin_host));
+    if (!admitsHandshake(self, origin_host)) {
+        return false;
+    }
+    peer = findFreeSlot(self);
+    if (peer == NULL || !TlsServerSecurity_NewSession(&self->security, &tls)) {
+        return false;
+    }
+
+    setsockopt(peer_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+    TcpKeepalive_Enable(peer_fd);
+    TlsChannel_Bind(&peer->channel, tls, NULL);
+    peer->fd = peer_fd;
+    peer->peer_id = self->next_peer_id++;
+    peer->announced = false;
+    peer->handshake_deadline_us = Clock_MonotonicUs() + HANDSHAKE_TIMEOUT_US;
+    ListenEndpoint_FormatOrigin(remote, peer->origin, sizeof(peer->origin));
+    memcpy(peer->origin_host, origin_host, sizeof(peer->origin_host));
+    pumpHandshake(self, peer);
+
+    return true;
+}
+
+static bool admitsHandshake(const TlsServerTransport *self, const char *origin_host)
+{
+    const TlsServerPeer *peer;
+    uint8_t handshaking = 0;
+    uint8_t from_host = 0;
+    uint8_t slot;
+
+    for(slot=0; slot<TLS_SERVER_PEERS_MAX; slot++) {
+        peer = &self->peers[slot];
+        if (!isHandshaking(peer)) {
+            continue;
+        }
+        handshaking++;
+        if (strcmp(peer->origin_host, origin_host) == 0) {
+            from_host++;
+        }
+    }
+
+    return handshaking < TLS_SERVER_HANDSHAKES_MAX && from_host < HANDSHAKES_PER_HOST_MAX;
+}
+
+static bool isHandshaking(const TlsServerPeer *peer)
+{
+    return peer->fd != TLS_CHANNEL_NO_SOCKET && !peer->announced;
 }
 
 static void closePeer(TlsServerTransport *self, TlsServerPeer *peer, bool notify)

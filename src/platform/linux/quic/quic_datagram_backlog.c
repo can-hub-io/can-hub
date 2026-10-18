@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-void QuicDatagramBacklog_Init(QuicDatagramBacklog *self, QuicDatagramSlot *slots, size_t capacity)
+void QuicDatagramBacklog_Init(QuicDatagramBacklog *self, QuicDatagramSlot *slots, uint16_t capacity)
 {
     self->slots = slots;
     self->capacity = capacity;
@@ -20,14 +20,14 @@ bool QuicDatagramBacklog_IsEmpty(const QuicDatagramBacklog *self)
     return self->count == 0;
 }
 
-size_t QuicDatagramBacklog_Count(const QuicDatagramBacklog *self)
+uint16_t QuicDatagramBacklog_Count(const QuicDatagramBacklog *self)
 {
     return self->count;
 }
 
 bool QuicDatagramBacklog_Push(QuicDatagramBacklog *self, const uint8_t *data, size_t size)
 {
-    size_t tail;
+    uint16_t tail;
 
     if (size > FRAME_WIRE_SIZE || self->count == self->capacity) {
         return false;

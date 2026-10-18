@@ -13,13 +13,13 @@
 #include "platform/linux/clock/clock.h"
 #include "platform/linux/quic/quic_egress.h"
 #include "platform/linux/quic/quic_udp_gso.h"
+#include "platform/linux/shared/handshake_limits.h"
 #include "platform/linux/shared/listen_endpoint.h"
 #include "platform/linux/shared/log.h"
 #include "protocol/message_header.h"
 
 #define UDP_PACKET_BUFFER_SIZE 1452
 #define UDP_SOCKET_BUFFER_BYTES (4 * 1024 * 1024)
-#define QUIC_SERVER_ORIGIN_SIZE 56
 
 static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
@@ -28,11 +28,6 @@ static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel,
 static void portClosePeer(void *context, uint32_t peer_id);
 static QuicServerPeer *findPeerById(QuicServerTransport *self, uint32_t peer_id);
 static QuicServerPeer *findPeerByDcid(QuicServerTransport *self, const uint8_t *packet, size_t packet_size);
-static void refreshPeerAddress(
-    QuicServerPeer *peer,
-    const struct sockaddr_storage *address,
-    socklen_t address_length
-);
 static QuicServerPeer *acceptPeer(
     QuicServerTransport *self,
     const struct sockaddr_storage *address,
@@ -40,7 +35,30 @@ static QuicServerPeer *acceptPeer(
     const uint8_t *packet,
     size_t packet_size
 );
-static void makePeerPath(QuicServerTransport *self, QuicServerPeer *peer, ngtcp2_path *path);
+static QuicServerPeer *openPeer(
+    QuicServerTransport *self,
+    const ngtcp2_pkt_hd *initial_header,
+    const struct sockaddr_storage *address,
+    socklen_t address_length,
+    const ngtcp2_cid *retried_original_dcid
+);
+static void sendRetry(
+    QuicServerTransport *self,
+    const ngtcp2_pkt_hd *initial_header,
+    const struct sockaddr_storage *address,
+    socklen_t address_length
+);
+static bool admitsHandshake(const QuicServerTransport *self, const char *origin_host);
+static uint8_t countHandshakes(const QuicServerTransport *self);
+static bool isHandshaking(const QuicServerPeer *peer);
+static QuicServerPeer *findFreePeer(QuicServerTransport *self);
+static void makePacketPath(
+    const QuicServerTransport *self,
+    const struct sockaddr_storage *address,
+    socklen_t address_length,
+    ngtcp2_path *path
+);
+static void followValidatedPath(QuicServerPeer *peer);
 static ssize_t receivePacket(
     QuicServerTransport *self,
     uint8_t *packet,
@@ -108,6 +126,7 @@ bool QuicServerTransport_Init(
     self->port.close_peer = portClosePeer;
     self->events = *events;
     self->next_peer_id = peer_id_base;
+    QuicRetry_Init(&self->retry);
 
     if (!QuicServerSecurity_Init(&self->security, certificate_file, key_file)) {
         return false;
@@ -393,22 +412,40 @@ static QuicServerPeer *findPeerByDcid(QuicServerTransport *self, const uint8_t *
     return NULL;
 }
 
-static void refreshPeerAddress(
-    QuicServerPeer *peer,
-    const struct sockaddr_storage *address,
-    socklen_t address_length
-)
-{
-    memcpy(&peer->remote_address, address, address_length);
-    peer->remote_address_length = address_length;
-}
-
 static QuicServerPeer *acceptPeer(
     QuicServerTransport *self,
     const struct sockaddr_storage *address,
     socklen_t address_length,
     const uint8_t *packet,
     size_t packet_size
+)
+{
+    ngtcp2_pkt_hd initial_header;
+    ngtcp2_cid original_dcid;
+    bool retried;
+
+    if (ngtcp2_accept(&initial_header, packet, packet_size) != 0) {
+        return NULL;
+    }
+
+    retried = QuicRetry_HasToken(&initial_header);
+    if (retried && !QuicRetry_Verify(&self->retry, &initial_header, address, address_length, &original_dcid)) {
+        return NULL;
+    }
+    if (!retried && countHandshakes(self) >= QUIC_SERVER_RETRY_THRESHOLD) {
+        sendRetry(self, &initial_header, address, address_length);
+        return NULL;
+    }
+
+    return openPeer(self, &initial_header, address, address_length, retried ? &original_dcid : NULL);
+}
+
+static QuicServerPeer *openPeer(
+    QuicServerTransport *self,
+    const ngtcp2_pkt_hd *initial_header,
+    const struct sockaddr_storage *address,
+    socklen_t address_length,
+    const ngtcp2_cid *retried_original_dcid
 )
 {
     QuicConnectionEvents connection_events = {
@@ -419,21 +456,15 @@ static QuicServerPeer *acceptPeer(
         .on_stream_finished = onStreamFinished,
         .on_stream_closed = onStreamClosed,
     };
-    ngtcp2_pkt_hd initial_header;
-    QuicServerPeer *peer = NULL;
+    char origin_host[QUIC_SERVER_ORIGIN_SIZE];
+    QuicServerPeer *peer;
     ngtcp2_path path;
-    uint8_t i;
 
-    if (ngtcp2_accept(&initial_header, packet, packet_size) != 0) {
+    ListenEndpoint_FormatHost(address, origin_host, sizeof(origin_host));
+    if (!admitsHandshake(self, origin_host)) {
         return NULL;
     }
-
-    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
-        if (!QuicConnection_IsOpen(&self->peers[i].connection)) {
-            peer = &self->peers[i];
-            break;
-        }
-    }
+    peer = findFreePeer(self);
     if (peer == NULL) {
         return NULL;
     }
@@ -444,31 +475,126 @@ static QuicServerPeer *acceptPeer(
     connection_events.context = peer;
     QuicConnection_Bind(&peer->connection, &connection_events);
     QuicControlChannel_Reset(&peer->control);
-    peer->original_dcid = initial_header.dcid;
+    peer->original_dcid = initial_header->dcid;
     memcpy(&peer->remote_address, address, address_length);
     peer->remote_address_length = address_length;
+    memcpy(peer->origin_host, origin_host, sizeof(peer->origin_host));
     peer->peer_id = self->next_peer_id++;
 
     if (!QuicServerSecurity_NewSession(&self->security, &peer->session, QuicConnection_Ref(&peer->connection))) {
         return NULL;
     }
 
-    makePeerPath(self, peer, &path);
-    if (!QuicConnection_OpenServer(&peer->connection, &peer->session.tls_context, &path, &initial_header)) {
+    makePacketPath(self, address, address_length, &path);
+    if (!QuicConnection_OpenServer(&peer->connection, &peer->session.tls_context, &path, initial_header, retried_original_dcid)) {
         QuicServerSecurity_FreeSession(&peer->session);
         return NULL;
     }
 
+    LOG_DEBUG("quic: handshake %u from %s", peer->peer_id, peer->origin_host);
+
     return peer;
 }
 
-static void makePeerPath(QuicServerTransport *self, QuicServerPeer *peer, ngtcp2_path *path)
+static void sendRetry(
+    QuicServerTransport *self,
+    const ngtcp2_pkt_hd *initial_header,
+    const struct sockaddr_storage *address,
+    socklen_t address_length
+)
+{
+    uint8_t packet[UDP_PACKET_BUFFER_SIZE];
+    ngtcp2_ssize packet_size = QuicRetry_Write(&self->retry, initial_header, address, address_length, packet, sizeof(packet));
+
+    if (packet_size <= 0) {
+        return;
+    }
+
+    LOG_DEBUG("quic: handshakes in flight, sent a retry");
+    QuicUdpGso_Send(
+        self->udp_fd,
+        (const struct sockaddr *)address,
+        address_length,
+        packet,
+        (size_t)packet_size,
+        (size_t)packet_size,
+        &self->gso_unsupported
+    );
+}
+
+static bool admitsHandshake(const QuicServerTransport *self, const char *origin_host)
+{
+    const QuicServerPeer *peer;
+    uint8_t handshaking = 0;
+    uint8_t from_host = 0;
+    uint8_t i;
+
+    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
+        peer = &self->peers[i];
+        if (!isHandshaking(peer)) {
+            continue;
+        }
+        handshaking++;
+        if (strcmp(peer->origin_host, origin_host) == 0) {
+            from_host++;
+        }
+    }
+
+    return handshaking < QUIC_SERVER_HANDSHAKES_MAX && from_host < HANDSHAKES_PER_HOST_MAX;
+}
+
+static uint8_t countHandshakes(const QuicServerTransport *self)
+{
+    uint8_t handshaking = 0;
+    uint8_t i;
+
+    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
+        if (isHandshaking(&self->peers[i])) {
+            handshaking++;
+        }
+    }
+
+    return handshaking;
+}
+
+static bool isHandshaking(const QuicServerPeer *peer)
+{
+    return QuicConnection_IsOpen(&peer->connection) && !peer->connected;
+}
+
+static QuicServerPeer *findFreePeer(QuicServerTransport *self)
+{
+    uint8_t i;
+
+    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
+        if (!QuicConnection_IsOpen(&self->peers[i].connection)) {
+            return &self->peers[i];
+        }
+    }
+
+    return NULL;
+}
+
+static void makePacketPath(
+    const QuicServerTransport *self,
+    const struct sockaddr_storage *address,
+    socklen_t address_length,
+    ngtcp2_path *path
+)
 {
     path->local.addr = (ngtcp2_sockaddr *)&self->local_address;
     path->local.addrlen = self->local_address_length;
-    path->remote.addr = (ngtcp2_sockaddr *)&peer->remote_address;
-    path->remote.addrlen = peer->remote_address_length;
+    path->remote.addr = (ngtcp2_sockaddr *)address;
+    path->remote.addrlen = address_length;
     path->user_data = NULL;
+}
+
+static void followValidatedPath(QuicServerPeer *peer)
+{
+    const ngtcp2_path *path = QuicConnection_Path(&peer->connection);
+
+    memcpy(&peer->remote_address, path->remote.addr, path->remote.addrlen);
+    peer->remote_address_length = path->remote.addrlen;
 }
 
 /* ---------- private: egress ---------- */
@@ -531,11 +657,9 @@ static void dispatchPacket(
         if (peer == NULL) {
             return;
         }
-    } else {
-        refreshPeerAddress(peer, address, address_length);
     }
 
-    makePeerPath(self, peer, &path);
+    makePacketPath(self, address, address_length, &path);
     self->dispatching = true;
     self->dispatching_peer = peer;
     if (!QuicConnection_ReadPacket(&peer->connection, &path, packet, packet_size)) {
@@ -546,6 +670,7 @@ static void dispatchPacket(
     }
     self->dispatching = false;
     self->dispatching_peer = NULL;
+    followValidatedPath(peer);
 
     if (peer->close_pending) {
         flushPeer(self, peer);

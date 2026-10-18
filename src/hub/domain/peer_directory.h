@@ -26,4 +26,5 @@ HubPeer *PeerDirectory_FindAgentByName(PeerDirectory *self, const char *agent_na
 uint8_t PeerDirectory_SlotOf(const PeerDirectory *self, const HubPeer *peer);
 uint16_t PeerDirectory_Count(const PeerDirectory *self);
 uint16_t PeerDirectory_CountRole(const PeerDirectory *self, uint8_t role);
+uint16_t PeerDirectory_CountAwaitingHelloFrom(const PeerDirectory *self, const char *origin_host);
 void PeerDirectory_List(const PeerDirectory *self, uint16_t offset, AdminPeersReplyMessage *reply, uint64_t now_us);
