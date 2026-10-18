@@ -10,6 +10,8 @@
 #   make deb-debug [ARCH=armv7|arm64|x86_64] Static debug agent .deb (-O0 -g,
 #                                            unstripped, musl, docker).
 #   make test                                Build + run host unit tests (CEST).
+#   make interop [ARCH=x86_64|arm64]         Current build against the last OpenSSL
+#                                            release: quic/tls both ways, forced suites.
 #   make bump VERSION=x.y.z                   Set the version across C, Python, Rust.
 #   make clean                               Remove build trees.
 
@@ -25,8 +27,11 @@ _BUILD_DEB := build/$(ARCH)/package
 _BUILD_TEST := build/test
 _SANITIZERS := -fsanitize=address,undefined -fno-omit-frame-pointer -g
 _CEST_RUNNER := test/vendor/cest-runner_linux_x86_64
+INTEROP_BASELINE := 0.3.0
+_BUILD_INTEROP := build/interop/v$(INTEROP_BASELINE)-$(ARCH)
+_INTEROP_URL := https://github.com/can-hub-io/can-hub/releases/download/v$(INTEROP_BASELINE)/can-hub-v$(INTEROP_BASELINE)-linux-$(ARCH)-static.tar.gz
 
-.PHONY: release debug install deb static deb-debug test e2e e2e-image web-daemon windows bump clean
+.PHONY: release debug install deb static deb-debug test interop e2e e2e-image web-daemon windows bump clean
 
 _BUILD_WINDOWS := build/mingw-x86_64/release
 
@@ -95,6 +100,14 @@ test:
 	LSAN_OPTIONS=suppressions=$(abspath test/lsan.supp) \
 	UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 	$(_CEST_RUNNER) $(_BUILD_TEST)
+
+# Interop against the last release built on OpenSSL: its static binaries are the
+# foreign TLS/QUIC stack, and openssl s_client forces each TLS 1.3 suite.
+interop: release
+	@test -x $(_BUILD_INTEROP)/can-hub || { mkdir -p $(_BUILD_INTEROP) && \
+	    curl -sSfL $(_INTEROP_URL) | tar xz -C $(_BUILD_INTEROP); }
+	INTEROP_CURRENT_BIN=$(abspath $(_BUILD_RELEASE)) INTEROP_BASELINE_BIN=$(abspath $(_BUILD_INTEROP)) \
+	    python3 -m pytest test/interop
 
 # End-to-end bench (Robot Framework). One privileged container: vcan + per-Server
 # network namespaces + netem. Needs the release binaries and the host modules.
