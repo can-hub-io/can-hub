@@ -148,11 +148,13 @@ void TlsServerTransport_OnAcceptReady(TlsServerTransport *self)
         }
 
         setsockopt(peer_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+        ListenEndpoint_EnableKeepalive(peer_fd);
         TlsChannel_Bind(&peer->channel, tls, NULL);
         peer->fd = peer_fd;
         peer->peer_id = self->next_peer_id++;
         peer->announced = false;
         ListenEndpoint_FormatOrigin(&remote, peer->origin, sizeof(peer->origin));
+        ListenEndpoint_FormatHost(&remote, peer->origin_host, sizeof(peer->origin_host));
         pumpHandshake(self, peer);
     }
 }
@@ -308,6 +310,7 @@ static void announcePeer(TlsServerTransport *self, TlsServerPeer *peer)
              cipherSuiteOrUnknown(TlsChannel_CipherSuiteName(&peer->channel)));
     info.fingerprint_hex = has_fingerprint ? fingerprint_hex : NULL;
     info.origin = peer->origin;
+    info.origin_host = peer->origin_host;
     info.transport_kind = kPEER_TRANSPORT_TLS;
     info.local = false;
     self->events.on_peer_connected(self->events.context, peer->peer_id, &info, Clock_MonotonicUs());

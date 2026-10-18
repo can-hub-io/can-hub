@@ -141,6 +141,30 @@ class BenchKeywords:
     def stop_can_client(self, client):
         client.stop()
 
+    @keyword("Stop CAN Agent ${agent}")
+    def stop_can_agent(self, agent):
+        agent.stop()
+
+    @keyword("Source Port Of Agent ${agent} On ${hub}")
+    def source_port_of_agent(self, agent, hub) -> int:
+        return agent.source_port_on(hub)
+
+    @keyword("Wait Until Agent ${agent} Replaces Port ${old_port} On ${hub}")
+    def wait_until_agent_replaces_port(self, agent, old_port, hub, timeout=5):
+        agent.wait_replaced_port(hub, int(old_port), float(timeout))
+
+    @keyword("Wait Until Agent ${agent} Is Gone From ${hub}")
+    def wait_until_agent_gone(self, agent, hub, timeout=45):
+        agent.wait_gone_from(hub, float(timeout))
+
+    @keyword("Blackhole TCP Source Port ${port} On ${server}")
+    def blackhole_tcp_source_port(self, port, server):
+        server.exec("iptables", "-A", "OUTPUT", "-p", "tcp", "--sport", str(port), "-j", "DROP")
+
+    @keyword("Flush Firewall On ${server}")
+    def flush_firewall(self, server):
+        server.exec("iptables", "-F", "OUTPUT", check=False)
+
     @keyword("Peer Id Of Agent ${agent} On ${hub}")
     def peer_id_of_agent(self, agent, hub) -> int:
         return agent.peer_id_on(hub)

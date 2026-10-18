@@ -628,14 +628,17 @@ static void onHandshakeCompleted(void *context)
     QuicServerPeer *peer = context;
     HubPeerConnectInfo info;
     char origin[QUIC_SERVER_ORIGIN_SIZE];
+    char origin_host[QUIC_SERVER_ORIGIN_SIZE];
 
     capturePeerFingerprint(peer);
     peer->connected = true;
     ListenEndpoint_FormatOrigin(&peer->remote_address, origin, sizeof(origin));
+    ListenEndpoint_FormatHost(&peer->remote_address, origin_host, sizeof(origin_host));
     LOG_INFO("peer %u on quic:// from %s negotiated %s", peer->peer_id, origin,
              cipherSuiteOrUnknown(QuicConnection_CipherSuiteName(&peer->connection)));
     info.fingerprint_hex = peer->fingerprint_hex[0] != '\0' ? peer->fingerprint_hex : NULL;
     info.origin = origin;
+    info.origin_host = origin_host;
     info.transport_kind = kPEER_TRANSPORT_QUIC;
     info.local = false;
     peer->transport->events.on_peer_connected(

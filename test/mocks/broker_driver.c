@@ -126,7 +126,7 @@ static void sendHello(const HubTransportEvents *events, uint32_t peer_id, uint8_
 
 static void connectPeer(const HubTransportEvents *events, uint32_t peer_id, bool local)
 {
-    HubPeerConnectInfo info = { NULL, NULL, kPEER_TRANSPORT_TCP, local };
+    HubPeerConnectInfo info = { NULL, NULL, NULL, kPEER_TRANSPORT_TCP, local };
 
     events->on_peer_connected(events->context, peer_id, &info, 0);
 }

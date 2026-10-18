@@ -25,6 +25,7 @@ typedef struct {
     uint32_t peer_id;
     bool announced;
     char origin[TLS_SERVER_ORIGIN_SIZE];
+    char origin_host[TLS_SERVER_ORIGIN_SIZE];
 } TlsServerPeer;
 
 typedef struct {
