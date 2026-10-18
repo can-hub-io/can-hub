@@ -8,6 +8,7 @@ extern "C" {
 #include "protocol/frame_message.h"
 #include "protocol/interface_status_message.h"
 #include "protocol/list_message.h"
+#include "protocol/hello_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
 #include "protocol/subscribe_message.h"
@@ -41,6 +42,7 @@ static void feedPaceRate(uint8_t channel, uint32_t rate, uint64_t now_us);
 static void feedHubFrame(uint8_t channel, uint32_t can_id, uint8_t byte0);
 static void feedHubError(uint16_t code, const char *detail);
 static uint8_t sentMessageType(uint8_t slot);
+static void decodeSentHello(uint8_t slot, HelloMessage *hello);
 static void decodeSentOpen(uint8_t slot, OpenMessage *open);
 static void decodeSentList(uint8_t slot, ListMessage *list);
 static void decodeSentSubscribe(uint8_t slot, SubscribeMessage *subscribe);
@@ -59,6 +61,17 @@ describe("client", []() {
         resetCallbackLog();
         Client_Init(&client, &hub.port, &events);
         hub_events = Client_TransportEvents(&client);
+    });
+
+    it("says HELLO with no name once the name is cleared", []() {
+        HelloMessage hello;
+
+        Client_SetName(&client, "bridge");
+        Client_SetName(&client, NULL);
+        connect();
+        decodeSentHello(0, &hello);
+
+        expect((const char *)hello.name).toBe("");
     });
 
     it("sends HELLO on connect", []() {
@@ -490,3 +503,12 @@ static void onDisconnected(void *context)
 
     disconnect_count++;
 }
+
+static void decodeSentHello(uint8_t slot, HelloMessage *hello)
+{
+    MessageHeader header;
+
+    MessageHeader_Decode(&header, hub.control_log[slot], hub.control_sizes[slot]);
+    HelloMessage_Decode(hello, hub.control_log[slot] + MESSAGE_HEADER_SIZE, header.length);
+}
+

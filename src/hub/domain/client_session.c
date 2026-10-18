@@ -1,7 +1,8 @@
 #include "hub/domain/client_session.h"
 
-#include <stdio.h>
 #include <string.h>
+
+#include "shared/bounded_string.h"
 
 static ChannelBinding *findByChannel(ClientSession *self, uint8_t channel);
 static ChannelBinding *findFree(ClientSession *self);
@@ -29,8 +30,8 @@ bool ClientSession_OpenInterface(ClientSession *self, const ChannelOpenRequest *
     binding->reliable = request->reliable;
     binding->interface_id = request->interface_id;
     binding->channel = *channel;
-    snprintf(binding->agent_name, sizeof(binding->agent_name), "%s", request->agent_name);
-    snprintf(binding->interface_name, sizeof(binding->interface_name), "%s", request->interface_name);
+    BoundedString_Copy(binding->agent_name, sizeof(binding->agent_name), request->agent_name);
+    BoundedString_Copy(binding->interface_name, sizeof(binding->interface_name), request->interface_name);
 
     return true;
 }

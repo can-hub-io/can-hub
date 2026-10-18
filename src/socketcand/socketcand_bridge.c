@@ -8,6 +8,7 @@
 #include "protocol/list_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
+#include "shared/bounded_string.h"
 #include "socketcand/domain/beacon_xml.h"
 #include "socketcand/domain/socketcand_codec.h"
 
@@ -45,7 +46,6 @@ static void emitBeacon(SocketcandBridge *self);
 static void closeAllConnections(SocketcandBridge *self);
 static void closeConnection(SocketcandBridge *self, SocketcandConnection *connection, const char *detail);
 static void sendAscii(SocketcandBridge *self, uint32_t connection_id, const char *text, size_t length);
-static void copyString(char *destination, size_t destination_size, const char *source);
 
 /* ---------- public ---------- */
 
@@ -58,13 +58,13 @@ void SocketcandBridge_Init(SocketcandBridge *self, TransportPort *hub, Socketcan
     ConnectionTable_Reset(&self->connections);
     self->hub_state = kSOCKETCAND_HUB_DISCONNECTED;
     self->beacon_enabled = beacon_enabled;
-    copyString(self->device_name, sizeof(self->device_name), device_name);
-    copyString(self->beacon_url, sizeof(self->beacon_url), beacon_url);
+    BoundedString_Copy(self->device_name, sizeof(self->device_name), device_name);
+    BoundedString_Copy(self->beacon_url, sizeof(self->beacon_url), beacon_url);
 }
 
 void SocketcandBridge_SetName(SocketcandBridge *self, const char *name)
 {
-    copyString(self->name, sizeof(self->name), name);
+    BoundedString_Copy(self->name, sizeof(self->name), name);
 }
 
 TransportEvents SocketcandBridge_TransportEvents(SocketcandBridge *self)
@@ -388,7 +388,7 @@ static bool openBus(SocketcandBridge *self, SocketcandConnection *connection, co
     connection->interface_id = interface_id;
     connection->open_state = kSOCKETCAND_OPEN_PENDING_WRITE;
     connection->open_seq = ConnectionTable_NextOpenSeq(&self->connections);
-    copyString(connection->bus, sizeof(connection->bus), bus);
+    BoundedString_Copy(connection->bus, sizeof(connection->bus), bus);
     sendOpen(self, interface_id, OPEN_FLAGS_READ_WRITE);
 
     return true;
@@ -509,15 +509,4 @@ static void sendAscii(SocketcandBridge *self, uint32_t connection_id, const char
         return;
     }
     self->server->write_client(self->server->context, connection_id, (const uint8_t *)text, length);
-}
-
-static void copyString(char *destination, size_t destination_size, const char *source)
-{
-    size_t length = strlen(source);
-
-    if (length >= destination_size) {
-        length = destination_size - 1;
-    }
-    memcpy(destination, source, length);
-    destination[length] = '\0';
 }

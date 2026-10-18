@@ -172,6 +172,12 @@ add_unit_test(test_listen_endpoint
         ${ROOT_SRC_DIR}/platform/linux/shared/listen_endpoint.c
 )
 
+add_unit_test(test_bounded_string
+    SOURCES
+        shared/test_bounded_string.cpp
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
+)
+
 add_unit_test(test_tcp_keepalive
     SOURCES
         platform/test_tcp_keepalive.cpp
@@ -253,6 +259,7 @@ add_unit_test(test_client_session
     SOURCES
         hub/domain/test_client_session.cpp
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
 )
 
 add_unit_test(test_admin_views
@@ -269,6 +276,7 @@ add_unit_test(test_admin_views
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/register_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
 )
 
 add_unit_test(test_hub_peer
@@ -276,6 +284,7 @@ add_unit_test(test_hub_peer
         hub/domain/test_hub_peer.cpp
         ${ROOT_SRC_DIR}/hub/domain/hub_peer.c
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
 )
 
 add_unit_test(test_echo_tokens
@@ -310,6 +319,7 @@ add_unit_test(test_frame_routes
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/register_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
 )
 
 add_unit_test(test_broker
@@ -337,6 +347,7 @@ add_unit_test(test_broker
         ${ROOT_SRC_DIR}/protocol/ifconfig_message.c
         ${ROOT_SRC_DIR}/protocol/interface_status_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
 )
 target_link_libraries(test_broker PRIVATE port_mocks)
 
@@ -356,6 +367,7 @@ add_unit_test(test_client
         ${ROOT_SRC_DIR}/protocol/subscribe_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
         ${ROOT_SRC_DIR}/shared/egress_shaper.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
 )
 target_link_libraries(test_client PRIVATE port_mocks)
 
@@ -371,6 +383,7 @@ add_unit_test(test_mirror_app
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/register_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
 )
 target_link_libraries(test_mirror_app PRIVATE port_mocks)
 
@@ -382,6 +395,7 @@ add_unit_test(test_interface_name
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/register_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
 )
 
 add_unit_test(test_ascii_framer
@@ -424,5 +438,6 @@ add_unit_test(test_socketcand_bridge
         ${ROOT_SRC_DIR}/protocol/open_message.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/wire.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
 )
 target_link_libraries(test_socketcand_bridge PRIVATE port_mocks)

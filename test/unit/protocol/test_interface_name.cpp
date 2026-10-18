@@ -37,6 +37,16 @@ describe("interface_name", []() {
         expect(interface_id).toBe((uint32_t)9);
     });
 
+    it("misses an agent whose name only prefixes the requested one", []() {
+        uint32_t interface_id = 0;
+        bool found;
+
+        addEntry("truck4", "can0", 3);
+        found = InterfaceName_Find(&reply, "truck42/can0", &interface_id);
+
+        expect(found).toBe(false);
+    });
+
     it("misses a name absent from the page", []() {
         uint32_t interface_id = 0;
         bool found;
