@@ -72,6 +72,9 @@ static bool registerStaticPollFds(void);
 static void syncStreamRegistration(void);
 static void dispatchEvent(const struct epoll_event *event, const CanEvents *can_events);
 static void drainCanInterface(uint8_t interface_index, const CanEvents *can_events);
+static void readCanFrames(uint8_t interface_index, const CanEvents *can_events);
+static void corkTransport(void);
+static void uncorkTransport(void);
 static void resumePausedCanInterfaces(const CanEvents *can_events);
 static int32_t showIdentity(void);
 
@@ -478,6 +481,13 @@ static void dispatchEvent(const struct epoll_event *event, const CanEvents *can_
 
 static void drainCanInterface(uint8_t interface_index, const CanEvents *can_events)
 {
+    corkTransport();
+    readCanFrames(interface_index, can_events);
+    uncorkTransport();
+}
+
+static void readCanFrames(uint8_t interface_index, const CanEvents *can_events)
+{
     int32_t fd;
 
     while (SocketCanAdapter_ReadFrame(&can_adapter, interface_index, &pending_can_frame[interface_index])) {
@@ -507,6 +517,20 @@ static void resumePausedCanInterfaces(const CanEvents *can_events)
         fd = SocketCanAdapter_Fd(&can_adapter, interface_index);
         EpollRegistry_SetStaticInterest(&poll_registry, fd, EPOLLIN, (uint32_t)fd);
         drainCanInterface(interface_index, can_events);
+    }
+}
+
+static void corkTransport(void)
+{
+    if (transport_scheme == kCONNECT_SCHEME_QUIC) {
+        QuicClientTransport_Cork(&quic_transport);
+    }
+}
+
+static void uncorkTransport(void)
+{
+    if (transport_scheme == kCONNECT_SCHEME_QUIC) {
+        QuicClientTransport_Uncork(&quic_transport);
     }
 }
 

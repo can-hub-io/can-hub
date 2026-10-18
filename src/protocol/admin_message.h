@@ -59,6 +59,7 @@ typedef struct {
     uint16_t agent_count;
     uint16_t client_count;
     uint16_t interface_count;
+    uint32_t receive_overflows;
     uint64_t frames_received;
     uint64_t frames_forwarded;
     uint64_t frames_dropped;

@@ -5,6 +5,7 @@ export interface Status {
   agentCount: number
   clientCount: number
   interfaceCount: number
+  receiveOverflows: number
   framesReceived: number
   framesForwarded: number
   framesDropped: number

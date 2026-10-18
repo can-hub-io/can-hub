@@ -1,5 +1,7 @@
 #include "platform/linux/quic/quic_egress.h"
 
+#include "platform/linux/clock/clock.h"
+
 #define PACKET_BUFFER_SIZE 1452
 /* Must equal the connection's fixed max_tx_udp_payload (size shaping disabled):
  * ngtcp2 then fills stream packets to exactly this size while data remains, so
@@ -10,6 +12,7 @@
 #define EGRESS_BATCH_SIZE (GSO_SEGMENT_SIZE * EGRESS_BATCH_SEGMENTS)
 
 static void flushBatch(const QuicEgressSink *sink, const uint8_t *batch, size_t length);
+static bool finishOpenPacket(QuicConnection *connection, const QuicEgressSink *sink, const QuicPacketBuffer *packet);
 static ngtcp2_ssize writeNextPacket(
     QuicConnection *connection,
     QuicControlChannel *control,
@@ -45,6 +48,46 @@ bool QuicEgress_FlushDatagram(
     }
 
     return true;
+}
+
+bool QuicEgress_FlushDatagrams(QuicConnection *connection, const QuicEgressSink *sink, QuicDatagramBacklog *backlog)
+{
+    uint8_t packet_data[PACKET_BUFFER_SIZE];
+    QuicPacketBuffer packet = { packet_data, sizeof(packet_data), Clock_MonotonicNs() };
+    const uint8_t *front;
+    size_t front_size;
+    ngtcp2_ssize bytes_written;
+    bool accepted;
+    bool packet_open = false;
+
+    while (!QuicDatagramBacklog_IsEmpty(backlog)) {
+        front = QuicDatagramBacklog_Front(backlog, &front_size);
+        bytes_written = QuicConnection_PackDatagram(connection, &packet, front, front_size, &accepted);
+        if (bytes_written == NGTCP2_ERR_WRITE_MORE) {
+            QuicDatagramBacklog_PopFront(backlog);
+            packet_open = true;
+            continue;
+        }
+        if (bytes_written < 0) {
+            return false;
+        }
+
+        packet_open = false;
+        if (bytes_written > 0) {
+            sink->send(sink->context, packet_data, (size_t)bytes_written, (size_t)bytes_written);
+        }
+        if (accepted) {
+            QuicDatagramBacklog_PopFront(backlog);
+        } else if (bytes_written == 0) {
+            break;
+        }
+    }
+
+    if (!packet_open) {
+        return true;
+    }
+
+    return finishOpenPacket(connection, sink, &packet);
 }
 
 bool QuicEgress_Drain(QuicConnection *connection, QuicControlChannel *control, const QuicEgressSink *sink)
@@ -133,4 +176,18 @@ static void flushBatch(const QuicEgressSink *sink, const uint8_t *batch, size_t 
     }
 
     sink->send(sink->context, batch, length, GSO_SEGMENT_SIZE);
+}
+
+static bool finishOpenPacket(QuicConnection *connection, const QuicEgressSink *sink, const QuicPacketBuffer *packet)
+{
+    ngtcp2_ssize bytes_written = QuicConnection_FinishPacket(connection, packet);
+
+    if (bytes_written < 0) {
+        return false;
+    }
+    if (bytes_written > 0) {
+        sink->send(sink->context, packet->data, (size_t)bytes_written, (size_t)bytes_written);
+    }
+
+    return true;
 }

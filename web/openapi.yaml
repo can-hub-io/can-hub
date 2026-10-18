@@ -728,13 +728,14 @@ components:
     Status:
       type: object
       required:
-        [peerCount, agentCount, clientCount, interfaceCount,
+        [peerCount, agentCount, clientCount, interfaceCount, receiveOverflows,
          framesReceived, framesForwarded, framesDropped, framesUnroutable]
       properties:
         peerCount: { type: integer, format: uint16 }
         agentCount: { type: integer, format: uint16 }
         clientCount: { type: integer, format: uint16 }
         interfaceCount: { type: integer, format: uint16 }
+        receiveOverflows: { type: integer, format: uint32 }
         framesReceived: { type: integer, format: uint64 }
         framesForwarded: { type: integer, format: uint64 }
         framesDropped: { type: integer, format: uint64 }

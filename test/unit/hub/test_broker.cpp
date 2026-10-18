@@ -1766,6 +1766,18 @@ describe("broker", []() {
             expect(reply.frames_unroutable).toBe((uint64_t)1);
         });
 
+        it("reports the packets its transports lost before reading them", []() {
+            AdminStatusReplyMessage reply;
+            uint8_t encoded[128];
+            size_t encoded_size = AdminStatusMessage_Encode(encoded, sizeof(encoded));
+
+            transport.receive_overflows = 70;
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            lastReply(&reply, AdminStatusReplyMessage_Decode);
+
+            expect(reply.receive_overflows).toBe((uint32_t)70);
+        });
+
         it("lists interfaces with their traffic through the admin plane", []() {
             FrameMessage frame = { 0x123, 1000, 0, 1, 0, 0, { 0x55 } };
             AdminInterfacesMessage request = { 0 };

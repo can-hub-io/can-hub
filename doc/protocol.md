@@ -249,7 +249,7 @@ ADMIN_STATUS_REPLY (total 48)
 @6   agent_count u16
 @8   client_count u16
 @10  interface_count u16
-@12  reserved u32
+@12  receive_overflows u32  (packets the kernel dropped before the hub read them: receive buffer full)
 @16  frames_received u64    (valid data-plane frames accepted by the hub)
 @24  frames_forwarded u64   (frame deliveries that reached a peer)
 @32  frames_dropped u64     (deliveries dropped, destination TX budget full)

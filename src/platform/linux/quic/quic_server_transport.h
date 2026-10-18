@@ -10,6 +10,8 @@
 
 #include "platform/linux/quic/quic_connection.h"
 #include "platform/linux/quic/quic_control_channel.h"
+#include "platform/linux/quic/quic_datagram_backlog.h"
+#include "platform/linux/quic/quic_egress.h"
 #include "platform/linux/quic/quic_reliable_streams.h"
 #include "platform/linux/quic/quic_server_security.h"
 #include "platform/linux/shared/tls_identity.h"
@@ -28,6 +30,11 @@
  * per channel (set_channel_mode) for that channel's frames; an incoming
  * stream that is neither the control nor a known reliable stream is adopted
  * for receive (its frames carry their own channel).
+ * Datagrams for a peer are staged while one incoming packet (or one corked
+ * event) is handled and leave packed into as few packets as fit; while a
+ * flush leaves some behind the peer refuses new ones, so the core queues
+ * them. ReceiveOverflows is the kernel's count of packets dropped because
+ * the socket's receive buffer was full.
  */
 typedef struct QuicServerTransport QuicServerTransport;
 
@@ -37,6 +44,8 @@ typedef struct {
     QuicServerSession session;
     QuicControlChannel control;
     QuicReliableStreamSet reliable_streams;
+    QuicDatagramSlot egress_slots[QUIC_CORKED_DATAGRAMS_MAX];
+    QuicDatagramBacklog egress_backlog;
     ngtcp2_cid original_dcid;
     char fingerprint_hex[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
     struct sockaddr_storage remote_address;
@@ -44,6 +53,7 @@ typedef struct {
     uint32_t peer_id;
     bool connected;
     bool close_pending;
+    bool egress_blocked;
 } QuicServerPeer;
 
 struct QuicServerTransport {
@@ -54,7 +64,9 @@ struct QuicServerTransport {
     int32_t timer_fd;
     uint32_t next_peer_id;
     bool dispatching;
+    bool corked;
     bool gso_unsupported;
+    uint32_t receive_overflows;
     QuicServerPeer *dispatching_peer;
     struct sockaddr_storage local_address;
     socklen_t local_address_length;
@@ -75,3 +87,6 @@ int32_t QuicServerTransport_UdpFd(const QuicServerTransport *self);
 int32_t QuicServerTransport_TimerFd(const QuicServerTransport *self);
 void QuicServerTransport_OnUdpReadable(QuicServerTransport *self);
 void QuicServerTransport_OnTimer(QuicServerTransport *self);
+void QuicServerTransport_Cork(QuicServerTransport *self);
+void QuicServerTransport_Uncork(QuicServerTransport *self);
+uint32_t QuicServerTransport_ReceiveOverflows(const QuicServerTransport *self);

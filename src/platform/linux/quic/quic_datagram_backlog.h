@@ -7,15 +7,14 @@
 #include "protocol/control_buffer.h"
 
 /*
- * Bounded mitigation buffer for data-plane datagrams ngtcp2 could not take right
- * away (congestion window full): ngtcp2 does not buffer unaccepted datagrams, so
- * without this a short burst loses the frames the window briefly refuses. This
- * only absorbs that transient; a push that overflows the ring still fails and
- * the frame is dropped (the plane stays lossy). It is not reliability and not
- * bus-rate pacing -- proper rate-matching is the design issue, not this buffer.
+ * Bounded FIFO of data-plane datagrams waiting for the egress pump: the ones
+ * staged while one event is handled, so the pump packs them into as few QUIC
+ * packets as it can, and the ones ngtcp2 could not take right away (congestion
+ * window full), since ngtcp2 does not buffer unaccepted datagrams. A push that
+ * overflows the ring fails and the frame is dropped (the plane stays lossy). It
+ * is not reliability and not bus-rate pacing. The owner provides the slots, so
+ * each transport sizes its own ring.
  */
-
-#define QUIC_DATAGRAM_BACKLOG_SLOTS 1024
 
 typedef struct {
     uint8_t data[FRAME_WIRE_SIZE];
@@ -23,13 +22,16 @@ typedef struct {
 } QuicDatagramSlot;
 
 typedef struct {
-    QuicDatagramSlot slots[QUIC_DATAGRAM_BACKLOG_SLOTS];
+    QuicDatagramSlot *slots;
+    size_t capacity;
     size_t head;
     size_t count;
 } QuicDatagramBacklog;
 
+void QuicDatagramBacklog_Init(QuicDatagramBacklog *self, QuicDatagramSlot *slots, size_t capacity);
 void QuicDatagramBacklog_Reset(QuicDatagramBacklog *self);
 bool QuicDatagramBacklog_IsEmpty(const QuicDatagramBacklog *self);
+size_t QuicDatagramBacklog_Count(const QuicDatagramBacklog *self);
 bool QuicDatagramBacklog_Push(QuicDatagramBacklog *self, const uint8_t *data, size_t size);
 const uint8_t *QuicDatagramBacklog_Front(const QuicDatagramBacklog *self, size_t *size);
 void QuicDatagramBacklog_PopFront(QuicDatagramBacklog *self);

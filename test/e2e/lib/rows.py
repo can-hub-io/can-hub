@@ -15,6 +15,7 @@ class HubStatus:
     forwarded: int
     dropped: int
     unroutable: int
+    receive_overflows: int
 
 
 @dataclass
@@ -72,7 +73,8 @@ def parse_status(text: str) -> HubStatus:
         r"frames:\s*received\s*(\d+),\s*forwarded\s*(\d+),\s*dropped\s*(\d+),\s*unroutable\s*(\d+)",
         text,
     )
-    if not peers or not frames:
+    overflows = re.search(r"receive overflows:\s*(\d+)", text)
+    if not peers or not frames or not overflows:
         raise ValueError(f"unparsable status:\n{text}")
     return HubStatus(
         peers=int(peers.group(1)),
@@ -82,6 +84,7 @@ def parse_status(text: str) -> HubStatus:
         forwarded=int(frames.group(2)),
         dropped=int(frames.group(3)),
         unroutable=int(frames.group(4)),
+        receive_overflows=int(overflows.group(1)),
     )
 
 

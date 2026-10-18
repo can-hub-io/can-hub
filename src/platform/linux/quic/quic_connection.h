@@ -14,6 +14,9 @@
  * Thin wrapper around one ngtcp2 connection (client or server side): owns
  * the ngtcp2_conn, registers the callback table and forwards the
  * interesting events. No I/O, no buffering — packets in, packets out.
+ * PackDatagram keeps adding datagrams to one packet until FinishPacket closes
+ * it; ngtcp2 requires the same QuicPacketBuffer (buffer and timestamp) for
+ * every call in between.
  */
 
 #define QUIC_CONNECTION_CID_LENGTH 16
@@ -27,6 +30,12 @@ typedef struct {
     void (*on_stream_finished)(void *context, int64_t stream_id);
     void (*on_stream_closed)(void *context, int64_t stream_id);
 } QuicConnectionEvents;
+
+typedef struct {
+    uint8_t *data;
+    size_t size;
+    uint64_t now_ns;
+} QuicPacketBuffer;
 
 typedef struct {
     ngtcp2_conn *connection;
@@ -65,6 +74,14 @@ ngtcp2_ssize QuicConnection_WriteDatagram(
     size_t payload_size,
     bool *accepted
 );
+ngtcp2_ssize QuicConnection_PackDatagram(
+    QuicConnection *self,
+    const QuicPacketBuffer *packet,
+    const uint8_t *payload,
+    size_t payload_size,
+    bool *accepted
+);
+ngtcp2_ssize QuicConnection_FinishPacket(QuicConnection *self, const QuicPacketBuffer *packet);
 ngtcp2_ssize QuicConnection_WriteStream(
     QuicConnection *self,
     uint8_t *packet_buffer,

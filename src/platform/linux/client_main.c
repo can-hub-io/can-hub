@@ -99,6 +99,8 @@ static int32_t runSocketcandLoop(void);
 static int32_t runAttach(const char *host, const char *port_text);
 static int32_t runAttachLoop(void);
 static void drainCanFrames(void);
+static void corkHubTransport(void);
+static void uncorkHubTransport(void);
 static void dispatchAttachEvent(const struct epoll_event *event);
 static void syncHubStream(EpollRegistry *poll_registry);
 static uint32_t socketcandSlotMask(uint8_t slot);
@@ -812,7 +814,9 @@ static void dispatchSocketcandEvent(const struct epoll_event *event)
         return;
     }
     if (tag >= SC_TAG_SC_SLOT_BASE && tag < SC_TAG_SC_SLOT_BASE + SOCKETCAND_SERVER_SLOTS_MAX) {
+        corkHubTransport();
         handleSocketcandSlotEvent((uint8_t)(tag - SC_TAG_SC_SLOT_BASE), event);
+        uncorkHubTransport();
         return;
     }
     if (tag == SC_TAG_HUB_QUIC_UDP) {
@@ -942,8 +946,24 @@ static void drainCanFrames(void)
 {
     FrameMessage frame;
 
+    corkHubTransport();
     while (SocketCanAdapter_ReadFrame(&mirror_can_adapter, 0, &frame)) {
         MirrorApp_OnCanFrame(&mirror_app, &frame);
+    }
+    uncorkHubTransport();
+}
+
+static void corkHubTransport(void)
+{
+    if (connect_scheme == kCONNECT_SCHEME_QUIC) {
+        QuicClientTransport_Cork(&quic_transport);
+    }
+}
+
+static void uncorkHubTransport(void)
+{
+    if (connect_scheme == kCONNECT_SCHEME_QUIC) {
+        QuicClientTransport_Uncork(&quic_transport);
     }
 }
 

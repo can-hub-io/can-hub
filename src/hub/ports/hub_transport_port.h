@@ -7,7 +7,9 @@
 /*
  * Outbound multi-peer transport for the hub core: send to or close one of
  * the N connected peers. peer_id is assigned by the platform transport and
- * is opaque to the core. Counterpart of HubTransportEvents.
+ * is opaque to the core. receive_overflows counts the packets the transports
+ * lost before reading them (receive buffer full). Counterpart of
+ * HubTransportEvents.
  */
 typedef struct {
     void *context;
@@ -16,4 +18,5 @@ typedef struct {
     bool (*frame_fits)(void *context, uint32_t peer_id, uint8_t channel, size_t size);
     void (*set_channel_mode)(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
     void (*close_peer)(void *context, uint32_t peer_id);
+    uint32_t (*receive_overflows)(void *context);
 } HubTransportPort;

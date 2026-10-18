@@ -87,11 +87,14 @@ static bool muxSendFrame(void *context, uint32_t peer_id, uint8_t channel, const
 static bool muxFrameFits(void *context, uint32_t peer_id, uint8_t channel, size_t size);
 static void muxSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
 static void muxClosePeer(void *context, uint32_t peer_id);
+static uint32_t muxReceiveOverflows(void *context);
 static HubTransportPort *portForPeer(uint32_t peer_id);
 static bool registerStaticPollFds(void);
 static void syncStreamSlotRegistrations(TcpServerTransport *transport, uint8_t slot_offset);
 static void syncTlsSlotRegistrations(void);
 static void dispatchEvent(const struct epoll_event *event);
+static void corkQuic(void);
+static void uncorkQuic(void);
 static void dispatchStreamSlotEvent(const struct epoll_event *event);
 
 int main(int argc, char **argv)
@@ -147,10 +150,14 @@ int main(int argc, char **argv)
         event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, HubApp_NextTimeoutMs(&app, POLL_PERIOD_MS));
 
         for(i=0; i<event_count; i++) {
+            corkQuic();
             dispatchEvent(&events[i]);
+            uncorkQuic();
         }
 
+        corkQuic();
         HubApp_Tick(&app, Clock_MonotonicUs());
+        uncorkQuic();
     }
 }
 
@@ -281,6 +288,7 @@ static bool startListeners(const char *unix_path, const char *certificate, const
     mux_port.frame_fits = muxFrameFits;
     mux_port.set_channel_mode = muxSetChannelMode;
     mux_port.close_peer = muxClosePeer;
+    mux_port.receive_overflows = muxReceiveOverflows;
 
     if (tcp_listen.requested) {
         bool tcp_started = TcpServerTransport_Init(
@@ -451,6 +459,17 @@ static void muxClosePeer(void *context, uint32_t peer_id)
     destination->close_peer(destination->context, peer_id);
 }
 
+static uint32_t muxReceiveOverflows(void *context)
+{
+    (void)context;
+
+    if (!quic_enabled) {
+        return 0;
+    }
+
+    return QuicServerTransport_ReceiveOverflows(&quic_transport);
+}
+
 static HubTransportPort *portForPeer(uint32_t peer_id)
 {
     if (peer_id >= TLS_PEER_ID_BASE) {
@@ -558,6 +577,20 @@ static void dispatchEvent(const struct epoll_event *event)
     }
 
     dispatchStreamSlotEvent(event);
+}
+
+static void corkQuic(void)
+{
+    if (quic_enabled) {
+        QuicServerTransport_Cork(&quic_transport);
+    }
+}
+
+static void uncorkQuic(void)
+{
+    if (quic_enabled) {
+        QuicServerTransport_Uncork(&quic_transport);
+    }
 }
 
 static void dispatchStreamSlotEvent(const struct epoll_event *event)

@@ -16,6 +16,7 @@ static bool portSendFrame(void *context, uint8_t channel, const uint8_t *data, s
 static void portSetChannelMode(void *context, uint8_t channel, bool reliable);
 static void teardown(QuicClientTransport *self, bool notify);
 static bool flushEgress(QuicClientTransport *self);
+static bool deferFlush(QuicClientTransport *self);
 static void sendPacket(void *context, const uint8_t *data, size_t size, size_t segment_size);
 static void rearmTimer(QuicClientTransport *self);
 static void dispatchControlMessages(QuicClientTransport *self);
@@ -63,7 +64,7 @@ bool QuicClientTransport_Init(
     }
     QuicConnection_Bind(&self->connection, &connection_events);
     QuicControlChannel_Reset(&self->control);
-    QuicDatagramBacklog_Reset(&self->egress_backlog);
+    QuicDatagramBacklog_Init(&self->egress_backlog, self->egress_slots, QUIC_CLIENT_DATAGRAM_SLOTS);
     snprintf(self->server.host, QUIC_HOST_MAX, "%s", host);
     snprintf(self->server.port_text, QUIC_PORT_TEXT_MAX, "%s", port);
 
@@ -142,6 +143,24 @@ void QuicClientTransport_OnTimer(QuicClientTransport *self)
     }
 
     flushEgress(self);
+}
+
+void QuicClientTransport_Cork(QuicClientTransport *self)
+{
+    self->corked = true;
+}
+
+void QuicClientTransport_Uncork(QuicClientTransport *self)
+{
+    self->corked = false;
+    if (!self->flush_deferred) {
+        return;
+    }
+
+    self->flush_deferred = false;
+    if (self->connected && !self->dispatching) {
+        flushEgress(self);
+    }
 }
 
 /* ---------- private: transport port ---------- */
@@ -227,11 +246,11 @@ static bool portSendFrame(void *context, uint8_t channel, const uint8_t *data, s
         if (!QuicControlChannel_QueueTx(&reliable->stream, data, size)) {
             return false;
         }
-    } else {
-        QuicDatagramBacklog_Push(&self->egress_backlog, data, size);
+    } else if (!QuicDatagramBacklog_Push(&self->egress_backlog, data, size)) {
+        return false;
     }
 
-    if (!self->dispatching) {
+    if (!deferFlush(self)) {
         flushEgress(self);
     }
 
@@ -270,6 +289,7 @@ static void teardown(QuicClientTransport *self, bool notify)
     QuicUdpEndpoint_ReopenSocket(&self->udp);
     self->connected = false;
     self->disconnect_pending = false;
+    self->flush_deferred = false;
 
     if (notify) {
         self->events.on_disconnected(self->events.context, Clock_MonotonicUs());
@@ -281,25 +301,14 @@ static void teardown(QuicClientTransport *self, bool notify)
 static bool flushEgress(QuicClientTransport *self)
 {
     QuicEgressSink sink = { self, sendPacket };
-    const uint8_t *front;
-    size_t front_size;
-    bool datagram_accepted;
 
     if (!QuicConnection_IsOpen(&self->connection)) {
         return false;
     }
 
-    while (!QuicDatagramBacklog_IsEmpty(&self->egress_backlog)) {
-        front = QuicDatagramBacklog_Front(&self->egress_backlog, &front_size);
-        datagram_accepted = true;
-        if (!QuicEgress_FlushDatagram(&self->connection, &sink, front, front_size, &datagram_accepted)) {
-            teardown(self, true);
-            return false;
-        }
-        if (!datagram_accepted) {
-            break;
-        }
-        QuicDatagramBacklog_PopFront(&self->egress_backlog);
+    if (!QuicEgress_FlushDatagrams(&self->connection, &sink, &self->egress_backlog)) {
+        teardown(self, true);
+        return false;
     }
 
     if (!QuicEgress_Drain(&self->connection, &self->control, &sink)) {
@@ -313,6 +322,20 @@ static bool flushEgress(QuicClientTransport *self)
     }
 
     rearmTimer(self);
+
+    return true;
+}
+
+static bool deferFlush(QuicClientTransport *self)
+{
+    if (self->dispatching) {
+        return true;
+    }
+    if (!self->corked || QuicDatagramBacklog_Count(&self->egress_backlog) >= QUIC_CORKED_DATAGRAMS_MAX) {
+        return false;
+    }
+
+    self->flush_deferred = true;
 
     return true;
 }

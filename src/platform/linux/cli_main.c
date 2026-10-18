@@ -713,6 +713,7 @@ static void handleStatusReply(const uint8_t *payload, uint16_t payload_length)
         (unsigned long long)reply.frames_dropped,
         (unsigned long long)reply.frames_unroutable
     );
+    printf("receive overflows: %u\n", reply.receive_overflows);
     exit_code = 0;
 }
 

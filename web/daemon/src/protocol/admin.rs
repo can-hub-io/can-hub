@@ -28,6 +28,7 @@ pub struct Status {
     pub agent_count: u16,
     pub client_count: u16,
     pub interface_count: u16,
+    pub receive_overflows: u32,
     pub frames_received: u64,
     pub frames_forwarded: u64,
     pub frames_dropped: u64,
@@ -295,6 +296,7 @@ pub fn decode_status_reply(buffer: &[u8]) -> Result<Status, DecodeError> {
         agent_count: read_u16(buffer, 6),
         client_count: read_u16(buffer, 8),
         interface_count: read_u16(buffer, 10),
+        receive_overflows: read_u32(buffer, 12),
         frames_received: read_u64(buffer, 16),
         frames_forwarded: read_u64(buffer, 24),
         frames_dropped: read_u64(buffer, 32),
@@ -456,6 +458,7 @@ mod tests {
         buffer[6..8].copy_from_slice(&1u16.to_le_bytes()); // agent_count
         buffer[8..10].copy_from_slice(&2u16.to_le_bytes()); // client_count
         buffer[10..12].copy_from_slice(&4u16.to_le_bytes()); // interface_count
+        buffer[12..16].copy_from_slice(&7u32.to_le_bytes()); // receive_overflows
         buffer[16..24].copy_from_slice(&1000u64.to_le_bytes());
         buffer[24..32].copy_from_slice(&900u64.to_le_bytes());
         buffer[32..40].copy_from_slice(&50u64.to_le_bytes());
@@ -464,6 +467,7 @@ mod tests {
         let status = decode_status_reply(&buffer).unwrap();
         assert_eq!(status.peer_count, 3);
         assert_eq!(status.interface_count, 4);
+        assert_eq!(status.receive_overflows, 7);
         assert_eq!(status.frames_received, 1000);
         assert_eq!(status.frames_unroutable, 10);
     }

@@ -12,6 +12,8 @@ from pathlib import Path
 from .process import Process
 from .shell import Result, netns_argv, run
 
+CANDUMP_RECEIVE_BUFFER_BYTES = 4 * 1024 * 1024
+
 
 class Server:
     def __init__(self, name: str, ip: str, latency_ms: float, bench, work_dir: Path):
@@ -52,7 +54,8 @@ class Server:
         return self.exec(*argv, background=True, log_name="cangen")
 
     def candump(self, *interfaces: str, log_name: str = "candump") -> Process:
-        return self.exec("candump", "-L", *interfaces, background=True, log_name=log_name)
+        return self.exec("candump", "-L", "-r", str(CANDUMP_RECEIVE_BUFFER_BYTES), *interfaces,
+                         background=True, log_name=log_name)
 
     def reachable(self, other: "Server") -> bool:
         return self._bench.reachable(self, other)

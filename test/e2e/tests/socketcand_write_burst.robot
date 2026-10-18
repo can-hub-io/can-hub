@@ -6,7 +6,10 @@ Documentation     Write burst through a socketcand bridge (the firmware-upgrade
 ...               (2 KiB) used to be pushed whole into the 512 B AsciiFramer, which
 ...               overflowed and dropped the buffer, so a burst larger than the
 ...               framer lost almost everything. The framer now ingests
-...               incrementally; the whole burst must reach the bus.
+...               incrementally; the whole burst must reach the bus. Each
+...               frame used to leave in its own QUIC packet, so the burst
+...               overflowed the hub's UDP receive buffer; frames now travel
+...               packed and the kernel must drop nothing.
 Library           BenchKeywords
 Variables         bench_variables.py
 Suite Setup       Setup Bench    ${BENCH}
@@ -42,3 +45,5 @@ Socketcand Write Burst Reaches The Bus In Full
     ${delivered}=    Frames Captured By ${capture}
     Log    delivered to bus: ${delivered}/${BURST}    console=True
     Should Be Equal As Integers    ${delivered}    ${BURST}
+    ${overflows}=    Receive Overflows On ${hub}
+    Should Be Equal As Integers    ${overflows}    0
