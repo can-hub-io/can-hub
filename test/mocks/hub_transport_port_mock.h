@@ -31,6 +31,7 @@ typedef struct {
     bool control_result;
     bool frame_result;
     uint32_t full_peer;
+    uint32_t receive_overflows;
 } HubTransportPortMock;
 
 void HubTransportPortMock_Reset(HubTransportPortMock *self);

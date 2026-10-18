@@ -570,6 +570,10 @@ class BenchKeywords:
                 return
             time.sleep(0.2)
 
+    @keyword("Receive Overflows On ${hub}")
+    def receive_overflows_on(self, hub):
+        return hub.status().receive_overflows
+
     @keyword("Channel Drops On ${hub}")
     def channel_drops_on(self, hub):
         return {r.interface: r.dropped for r in hub.clients() if r.channel != "-"}

@@ -70,6 +70,14 @@ static int streamCloseCallback(
     void *user_data,
     void *stream_user_data
 );
+static ngtcp2_ssize writeDatagram(
+    QuicConnection *self,
+    const QuicPacketBuffer *packet,
+    uint32_t flags,
+    const uint8_t *payload,
+    size_t payload_size,
+    bool *accepted
+);
 static ngtcp2_ssize writeStream(
     QuicConnection *self,
     uint8_t *packet_buffer,
@@ -288,30 +296,42 @@ ngtcp2_ssize QuicConnection_WriteDatagram(
     bool *accepted
 )
 {
-    ngtcp2_vec data_vector = { (uint8_t *)payload, payload_size };
+    QuicPacketBuffer packet = { packet_buffer, packet_buffer_size, Clock_MonotonicNs() };
+
+    return writeDatagram(self, &packet, NGTCP2_WRITE_DATAGRAM_FLAG_NONE, payload, payload_size, accepted);
+}
+
+ngtcp2_ssize QuicConnection_PackDatagram(
+    QuicConnection *self,
+    const QuicPacketBuffer *packet,
+    const uint8_t *payload,
+    size_t payload_size,
+    bool *accepted
+)
+{
+    return writeDatagram(self, packet, NGTCP2_WRITE_DATAGRAM_FLAG_MORE, payload, payload_size, accepted);
+}
+
+ngtcp2_ssize QuicConnection_FinishPacket(QuicConnection *self, const QuicPacketBuffer *packet)
+{
     ngtcp2_path_storage path_storage;
     ngtcp2_pkt_info packet_info;
-    ngtcp2_ssize bytes_written;
-    int accepted_flag = 0;
 
     ngtcp2_path_storage_zero(&path_storage);
-    bytes_written = ngtcp2_conn_writev_datagram(
+
+    return ngtcp2_conn_writev_stream(
         self->connection,
         &path_storage.path,
         &packet_info,
-        packet_buffer,
-        packet_buffer_size,
-        &accepted_flag,
-        NGTCP2_WRITE_DATAGRAM_FLAG_NONE,
-        ++self->next_datagram_id,
-        &data_vector,
-        1,
-        Clock_MonotonicNs()
+        packet->data,
+        packet->size,
+        NULL,
+        NGTCP2_WRITE_STREAM_FLAG_NONE,
+        NO_STREAM,
+        NULL,
+        0,
+        packet->now_ns
     );
-
-    *accepted = accepted_flag != 0;
-
-    return bytes_written;
 }
 
 ngtcp2_ssize QuicConnection_WriteStream(
@@ -614,4 +634,39 @@ static ngtcp2_ssize writeStream(
         data == NULL ? 0 : 1,
         Clock_MonotonicNs()
     );
+}
+
+static ngtcp2_ssize writeDatagram(
+    QuicConnection *self,
+    const QuicPacketBuffer *packet,
+    uint32_t flags,
+    const uint8_t *payload,
+    size_t payload_size,
+    bool *accepted
+)
+{
+    ngtcp2_vec data_vector = { (uint8_t *)payload, payload_size };
+    ngtcp2_path_storage path_storage;
+    ngtcp2_pkt_info packet_info;
+    ngtcp2_ssize bytes_written;
+    int accepted_flag = 0;
+
+    ngtcp2_path_storage_zero(&path_storage);
+    bytes_written = ngtcp2_conn_writev_datagram(
+        self->connection,
+        &path_storage.path,
+        &packet_info,
+        packet->data,
+        packet->size,
+        &accepted_flag,
+        flags,
+        ++self->next_datagram_id,
+        &data_vector,
+        1,
+        packet->now_ns
+    );
+
+    *accepted = accepted_flag != 0;
+
+    return bytes_written;
 }

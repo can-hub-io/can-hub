@@ -7,6 +7,7 @@
 
 #include "platform/linux/quic/quic_connection.h"
 #include "platform/linux/quic/quic_control_channel.h"
+#include "platform/linux/quic/quic_datagram_backlog.h"
 
 /*
  * Shared egress pump for QUIC transports: writes pending control stream
@@ -17,7 +18,15 @@
  * passes it with a segment_size so the sink can send them in a single UDP GSO
  * sendmsg; segment_size == size means a lone packet. Every segment but the
  * last is segment_size bytes, so the kernel splits on the boundaries.
+ *
+ * FlushDatagrams packs the backlog front to back into as few packets as fit,
+ * popping each datagram ngtcp2 accepts; what the congestion window refuses
+ * stays queued for the next flush. A corked transport stages the datagrams one
+ * event produces and flushes them together once the event is handled, or as
+ * soon as QUIC_CORKED_DATAGRAMS_MAX are staged.
  */
+#define QUIC_CORKED_DATAGRAMS_MAX 64
+
 typedef struct QuicEgressSink {
     void *context;
     void (*send)(void *context, const uint8_t *data, size_t size, size_t segment_size);
@@ -30,6 +39,7 @@ bool QuicEgress_FlushDatagram(
     size_t datagram_size,
     bool *accepted
 );
+bool QuicEgress_FlushDatagrams(QuicConnection *connection, const QuicEgressSink *sink, QuicDatagramBacklog *backlog);
 bool QuicEgress_Drain(QuicConnection *connection, QuicControlChannel *control, const QuicEgressSink *sink);
 
 #endif

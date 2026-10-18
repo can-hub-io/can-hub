@@ -41,7 +41,25 @@ static QuicServerPeer *acceptPeer(
     size_t packet_size
 );
 static void makePeerPath(QuicServerTransport *self, QuicServerPeer *peer, ngtcp2_path *path);
-static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *datagram, size_t datagram_size);
+static ssize_t receivePacket(
+    QuicServerTransport *self,
+    uint8_t *packet,
+    size_t packet_size,
+    struct sockaddr_storage *address,
+    socklen_t *address_length
+);
+static void captureReceiveOverflows(QuicServerTransport *self, struct msghdr *message);
+static void dispatchPacket(
+    QuicServerTransport *self,
+    const uint8_t *packet,
+    size_t packet_size,
+    const struct sockaddr_storage *address,
+    socklen_t address_length
+);
+static bool stageDatagram(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *data, size_t size);
+static bool deferFlush(const QuicServerTransport *self, const QuicServerPeer *peer);
+static void flushStagedPeers(QuicServerTransport *self);
+static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer);
 static void notifyWritable(QuicServerTransport *self, QuicServerPeer *peer);
 static void sendPacketToPeer(void *context, const uint8_t *data, size_t size, size_t segment_size);
 static void sendToPeer(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *data, size_t size, size_t segment_size);
@@ -79,6 +97,7 @@ bool QuicServerTransport_Init(
     socklen_t address_length;
     int32_t address_family;
     int32_t buffer_bytes;
+    int32_t report_overflows = 1;
 
     memset(self, 0, sizeof(*self));
     self->port.context = self;
@@ -103,6 +122,7 @@ bool QuicServerTransport_Init(
     buffer_bytes = UDP_SOCKET_BUFFER_BYTES;
     setsockopt(self->udp_fd, SOL_SOCKET, SO_RCVBUF, &buffer_bytes, sizeof(buffer_bytes));
     setsockopt(self->udp_fd, SOL_SOCKET, SO_SNDBUF, &buffer_bytes, sizeof(buffer_bytes));
+    setsockopt(self->udp_fd, SOL_SOCKET, SO_RXQ_OVFL, &report_overflows, sizeof(report_overflows));
 
     if (!ListenEndpoint_BuildSockaddr(address_family, bind_address, port, &address, &address_length)) {
         return false;
@@ -137,53 +157,16 @@ void QuicServerTransport_OnUdpReadable(QuicServerTransport *self)
     uint8_t packet[UDP_PACKET_BUFFER_SIZE];
     struct sockaddr_storage peer_address;
     socklen_t peer_address_length;
-    QuicServerPeer *peer;
-    ngtcp2_path path;
     ssize_t bytes_received;
 
     for (;;) {
-        peer_address_length = sizeof(peer_address);
-        bytes_received = recvfrom(
-            self->udp_fd,
-            packet,
-            sizeof(packet),
-            0,
-            (struct sockaddr *)&peer_address,
-            &peer_address_length
-        );
+        bytes_received = receivePacket(self, packet, sizeof(packet), &peer_address, &peer_address_length);
         if (bytes_received <= 0) {
             break;
         }
 
-        peer = findPeerByDcid(self, packet, (size_t)bytes_received);
-        if (peer == NULL) {
-            peer = acceptPeer(self, &peer_address, peer_address_length, packet, (size_t)bytes_received);
-            if (peer == NULL) {
-                continue;
-            }
-        } else {
-            refreshPeerAddress(peer, &peer_address, peer_address_length);
-        }
-
-        makePeerPath(self, peer, &path);
-        self->dispatching = true;
-        self->dispatching_peer = peer;
-        if (!QuicConnection_ReadPacket(&peer->connection, &path, packet, (size_t)bytes_received)) {
-            self->dispatching = false;
-            self->dispatching_peer = NULL;
-            teardownPeer(self, peer, true);
-            continue;
-        }
-        self->dispatching = false;
-        self->dispatching_peer = NULL;
-
-        if (peer->close_pending) {
-            flushPeer(self, peer, NULL, 0);
-            teardownPeer(self, peer, false);
-            continue;
-        }
-        flushPeer(self, peer, NULL, 0);
-        notifyWritable(self, peer);
+        dispatchPacket(self, packet, (size_t)bytes_received, &peer_address, peer_address_length);
+        flushStagedPeers(self);
     }
 
     retryStalledReliableStreams(self);
@@ -222,16 +205,33 @@ void QuicServerTransport_OnTimer(QuicServerTransport *self)
         self->dispatching_peer = NULL;
 
         if (peer->close_pending) {
-            flushPeer(self, peer, NULL, 0);
+            flushPeer(self, peer);
             teardownPeer(self, peer, false);
             continue;
         }
-        flushPeer(self, peer, NULL, 0);
+        flushPeer(self, peer);
         notifyWritable(self, peer);
     }
 
+    flushStagedPeers(self);
     retryStalledReliableStreams(self);
     rearmTimer(self);
+}
+
+void QuicServerTransport_Cork(QuicServerTransport *self)
+{
+    self->corked = true;
+}
+
+void QuicServerTransport_Uncork(QuicServerTransport *self)
+{
+    self->corked = false;
+    flushStagedPeers(self);
+}
+
+uint32_t QuicServerTransport_ReceiveOverflows(const QuicServerTransport *self)
+{
+    return self->receive_overflows;
 }
 
 /* ---------- private: hub transport port ---------- */
@@ -251,7 +251,7 @@ static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data
         return true;
     }
 
-    return flushPeer(self, peer, NULL, 0);
+    return flushPeer(self, peer);
 }
 
 static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size)
@@ -266,7 +266,7 @@ static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, cons
 
     reliable = QuicReliableStreams_FindByChannel(&peer->reliable_streams, channel);
     if (reliable == NULL) {
-        return flushPeer(self, peer, data, size);
+        return stageDatagram(self, peer, data, size);
     }
     if (!QuicControlChannel_QueueTx(&reliable->stream, data, size)) {
         return false;
@@ -275,7 +275,7 @@ static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, cons
         return true;
     }
 
-    return flushPeer(self, peer, NULL, 0);
+    return flushPeer(self, peer);
 }
 
 static bool portFrameFits(void *context, uint32_t peer_id, uint8_t channel, size_t size)
@@ -440,6 +440,7 @@ static QuicServerPeer *acceptPeer(
 
     memset(peer, 0, sizeof(*peer));
     peer->transport = self;
+    QuicDatagramBacklog_Init(&peer->egress_backlog, peer->egress_slots, QUIC_CORKED_DATAGRAMS_MAX);
     connection_events.context = peer;
     QuicConnection_Bind(&peer->connection, &connection_events);
     QuicControlChannel_Reset(&peer->control);
@@ -472,17 +473,136 @@ static void makePeerPath(QuicServerTransport *self, QuicServerPeer *peer, ngtcp2
 
 /* ---------- private: egress ---------- */
 
-static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *datagram, size_t datagram_size)
+static ssize_t receivePacket(
+    QuicServerTransport *self,
+    uint8_t *packet,
+    size_t packet_size,
+    struct sockaddr_storage *address,
+    socklen_t *address_length
+)
 {
-    QuicEgressSink sink = { peer, sendPacketToPeer };
-    bool accepted = true;
+    uint8_t control_buffer[CMSG_SPACE(sizeof(uint32_t))];
+    struct iovec io_vector = { packet, packet_size };
+    struct msghdr message;
+    ssize_t bytes_received;
 
-    if (datagram != NULL) {
-        if (!QuicEgress_FlushDatagram(&peer->connection, &sink, datagram, datagram_size, &accepted)) {
-            teardownPeer(self, peer, true);
-            return false;
+    memset(&message, 0, sizeof(message));
+    message.msg_name = address;
+    message.msg_namelen = sizeof(*address);
+    message.msg_iov = &io_vector;
+    message.msg_iovlen = 1;
+    message.msg_control = control_buffer;
+    message.msg_controllen = sizeof(control_buffer);
+
+    bytes_received = recvmsg(self->udp_fd, &message, 0);
+    if (bytes_received > 0) {
+        *address_length = message.msg_namelen;
+        captureReceiveOverflows(self, &message);
+    }
+
+    return bytes_received;
+}
+
+static void captureReceiveOverflows(QuicServerTransport *self, struct msghdr *message)
+{
+    struct cmsghdr *control_message;
+
+    for(control_message=CMSG_FIRSTHDR(message); control_message!=NULL; control_message=CMSG_NXTHDR(message, control_message)) {
+        if (control_message->cmsg_level == SOL_SOCKET && control_message->cmsg_type == SO_RXQ_OVFL) {
+            memcpy(&self->receive_overflows, CMSG_DATA(control_message), sizeof(self->receive_overflows));
         }
     }
+}
+
+static void dispatchPacket(
+    QuicServerTransport *self,
+    const uint8_t *packet,
+    size_t packet_size,
+    const struct sockaddr_storage *address,
+    socklen_t address_length
+)
+{
+    QuicServerPeer *peer;
+    ngtcp2_path path;
+
+    peer = findPeerByDcid(self, packet, packet_size);
+    if (peer == NULL) {
+        peer = acceptPeer(self, address, address_length, packet, packet_size);
+        if (peer == NULL) {
+            return;
+        }
+    } else {
+        refreshPeerAddress(peer, address, address_length);
+    }
+
+    makePeerPath(self, peer, &path);
+    self->dispatching = true;
+    self->dispatching_peer = peer;
+    if (!QuicConnection_ReadPacket(&peer->connection, &path, packet, packet_size)) {
+        self->dispatching = false;
+        self->dispatching_peer = NULL;
+        teardownPeer(self, peer, true);
+        return;
+    }
+    self->dispatching = false;
+    self->dispatching_peer = NULL;
+
+    if (peer->close_pending) {
+        flushPeer(self, peer);
+        teardownPeer(self, peer, false);
+        return;
+    }
+    flushPeer(self, peer);
+    notifyWritable(self, peer);
+}
+
+static bool stageDatagram(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *data, size_t size)
+{
+    if (peer->egress_blocked || !QuicDatagramBacklog_Push(&peer->egress_backlog, data, size)) {
+        return false;
+    }
+    if (!deferFlush(self, peer)) {
+        flushPeer(self, peer);
+    }
+
+    return true;
+}
+
+static bool deferFlush(const QuicServerTransport *self, const QuicServerPeer *peer)
+{
+    if (self->dispatching && peer == self->dispatching_peer) {
+        return true;
+    }
+    if (QuicDatagramBacklog_Count(&peer->egress_backlog) >= QUIC_CORKED_DATAGRAMS_MAX) {
+        return false;
+    }
+
+    return self->corked || self->dispatching;
+}
+
+static void flushStagedPeers(QuicServerTransport *self)
+{
+    QuicServerPeer *peer;
+    uint8_t i;
+
+    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
+        peer = &self->peers[i];
+        if (!peer->connected || peer->egress_blocked || QuicDatagramBacklog_IsEmpty(&peer->egress_backlog)) {
+            continue;
+        }
+        flushPeer(self, peer);
+    }
+}
+
+static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer)
+{
+    QuicEgressSink sink = { peer, sendPacketToPeer };
+
+    if (!QuicEgress_FlushDatagrams(&peer->connection, &sink, &peer->egress_backlog)) {
+        teardownPeer(self, peer, true);
+        return false;
+    }
+    peer->egress_blocked = !QuicDatagramBacklog_IsEmpty(&peer->egress_backlog);
 
     if (!QuicEgress_Drain(&peer->connection, &peer->control, &sink)) {
         teardownPeer(self, peer, true);
@@ -496,7 +616,7 @@ static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer, const uin
 
     rearmTimer(self);
 
-    return accepted;
+    return true;
 }
 
 static void retryStalledReliableStreams(QuicServerTransport *self)
@@ -510,7 +630,7 @@ static void retryStalledReliableStreams(QuicServerTransport *self)
     }
     for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
         if (QuicConnection_IsOpen(&self->peers[i].connection)) {
-            flushPeer(self, &self->peers[i], NULL, 0);
+            flushPeer(self, &self->peers[i]);
         }
     }
 }
@@ -581,8 +701,10 @@ static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool n
     QuicConnection_Close(&peer->connection);
     QuicControlChannel_Reset(&peer->control);
     QuicReliableStreams_Reset(&peer->reliable_streams);
+    QuicDatagramBacklog_Reset(&peer->egress_backlog);
     peer->connected = false;
     peer->close_pending = false;
+    peer->egress_blocked = false;
 
     if (notify && was_connected) {
         self->events.on_peer_disconnected(self->events.context, peer_id, Clock_MonotonicUs());

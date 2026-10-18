@@ -6,6 +6,9 @@ extern "C" {
 #include "platform/linux/quic/quic_datagram_backlog.h"
 }
 
+#define BACKLOG_SLOTS 16
+
+static QuicDatagramSlot slots[BACKLOG_SLOTS];
 static QuicDatagramBacklog backlog;
 
 static bool pushByte(uint8_t value);
@@ -13,7 +16,7 @@ static uint8_t frontByte();
 
 describe("quic_datagram_backlog", []() {
     beforeEach([]() {
-        QuicDatagramBacklog_Reset(&backlog);
+        QuicDatagramBacklog_Init(&backlog, slots, BACKLOG_SLOTS);
     });
 
     it("starts empty", []() {
@@ -35,6 +38,13 @@ describe("quic_datagram_backlog", []() {
         expect(QuicDatagramBacklog_IsEmpty(&backlog)).toBe(true);
     });
 
+    it("counts the datagrams it holds", []() {
+        pushByte(1);
+        pushByte(2);
+
+        expect(QuicDatagramBacklog_Count(&backlog)).toBe((size_t)2);
+    });
+
     it("preserves fifo order", []() {
         pushByte(1);
         pushByte(2);
@@ -50,7 +60,7 @@ describe("quic_datagram_backlog", []() {
     it("rejects a push once full", []() {
         int slot;
 
-        for(slot=0; slot<QUIC_DATAGRAM_BACKLOG_SLOTS; slot++) {
+        for(slot=0; slot<BACKLOG_SLOTS; slot++) {
             expect(pushByte((uint8_t)slot)).toBe(true);
         }
 
@@ -68,7 +78,7 @@ describe("quic_datagram_backlog", []() {
     it("keeps fifo order across ring wraparound", []() {
         int cycle;
 
-        for(cycle=0; cycle<QUIC_DATAGRAM_BACKLOG_SLOTS * 3; cycle++) {
+        for(cycle=0; cycle<BACKLOG_SLOTS * 3; cycle++) {
             expect(pushByte((uint8_t)cycle)).toBe(true);
             expect((int)frontByte()).toBe((uint8_t)cycle);
             QuicDatagramBacklog_PopFront(&backlog);

@@ -15,6 +15,7 @@
 
 #define QUIC_HOST_MAX 256
 #define QUIC_PORT_TEXT_MAX 16
+#define QUIC_CLIENT_DATAGRAM_SLOTS 1024
 
 /*
  * QUIC client adapter for the agent: implements TransportPort over ngtcp2.
@@ -38,9 +39,12 @@ typedef struct {
     QuicControlChannel control;
     QuicReliableStreamSet reliable_streams;
     QuicConnection connection;
+    QuicDatagramSlot egress_slots[QUIC_CLIENT_DATAGRAM_SLOTS];
     QuicDatagramBacklog egress_backlog;
     bool connected;
     bool dispatching;
+    bool corked;
+    bool flush_deferred;
     bool disconnect_pending;
 } QuicClientTransport;
 
@@ -56,3 +60,5 @@ int32_t QuicClientTransport_UdpFd(const QuicClientTransport *self);
 int32_t QuicClientTransport_TimerFd(const QuicClientTransport *self);
 void QuicClientTransport_OnUdpReadable(QuicClientTransport *self);
 void QuicClientTransport_OnTimer(QuicClientTransport *self);
+void QuicClientTransport_Cork(QuicClientTransport *self);
+void QuicClientTransport_Uncork(QuicClientTransport *self);

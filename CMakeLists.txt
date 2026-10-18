@@ -99,6 +99,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/platform/linux/quic/quic_client_security.c
         src/platform/linux/quic/quic_connection.c
         src/platform/linux/quic/quic_control_channel.c
+        src/platform/linux/quic/quic_datagram_backlog.c
         src/platform/linux/quic/quic_egress.c
         src/platform/linux/quic/quic_reliable_streams.c
         src/platform/windows/quic/quic_udp_endpoint.c
@@ -229,6 +230,7 @@ set(HUB_SOURCES
     src/platform/linux/tls/tls_server_transport.c
     src/platform/linux/quic/quic_connection.c
     src/platform/linux/quic/quic_control_channel.c
+    src/platform/linux/quic/quic_datagram_backlog.c
     src/platform/linux/quic/quic_egress.c
     src/platform/linux/quic/quic_udp_gso.c
     src/platform/linux/quic/quic_reliable_streams.c

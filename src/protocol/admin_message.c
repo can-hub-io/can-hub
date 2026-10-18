@@ -9,6 +9,7 @@
 #define AGENT_COUNT_OFFSET 2
 #define CLIENT_COUNT_OFFSET 4
 #define INTERFACE_COUNT_OFFSET 6
+#define RECEIVE_OVERFLOWS_OFFSET 8
 #define FRAMES_RECEIVED_OFFSET 12
 #define FRAMES_FORWARDED_OFFSET 20
 #define FRAMES_DROPPED_OFFSET 28
@@ -119,6 +120,7 @@ size_t AdminStatusReplyMessage_Encode(const AdminStatusReplyMessage *self, uint8
     Wire_WriteU16(body + AGENT_COUNT_OFFSET, self->agent_count);
     Wire_WriteU16(body + CLIENT_COUNT_OFFSET, self->client_count);
     Wire_WriteU16(body + INTERFACE_COUNT_OFFSET, self->interface_count);
+    Wire_WriteU32(body + RECEIVE_OVERFLOWS_OFFSET, self->receive_overflows);
     Wire_WriteU64(body + FRAMES_RECEIVED_OFFSET, self->frames_received);
     Wire_WriteU64(body + FRAMES_FORWARDED_OFFSET, self->frames_forwarded);
     Wire_WriteU64(body + FRAMES_DROPPED_OFFSET, self->frames_dropped);
@@ -137,6 +139,7 @@ bool AdminStatusReplyMessage_Decode(AdminStatusReplyMessage *self, const uint8_t
     self->agent_count = Wire_ReadU16(payload + AGENT_COUNT_OFFSET);
     self->client_count = Wire_ReadU16(payload + CLIENT_COUNT_OFFSET);
     self->interface_count = Wire_ReadU16(payload + INTERFACE_COUNT_OFFSET);
+    self->receive_overflows = Wire_ReadU32(payload + RECEIVE_OVERFLOWS_OFFSET);
     self->frames_received = Wire_ReadU64(payload + FRAMES_RECEIVED_OFFSET);
     self->frames_forwarded = Wire_ReadU64(payload + FRAMES_FORWARDED_OFFSET);
     self->frames_dropped = Wire_ReadU64(payload + FRAMES_DROPPED_OFFSET);

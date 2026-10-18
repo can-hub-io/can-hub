@@ -25,7 +25,7 @@ describe("admin_status_message", []() {
     });
 
     it("round-trips the status reply counters", []() {
-        AdminStatusReplyMessage reply = { 5, 2, 3, 8, 5000000000ULL, 4999000000ULL, 999999, 1 };
+        AdminStatusReplyMessage reply = { 5, 2, 3, 8, 42, 5000000000ULL, 4999000000ULL, 999999, 1 };
         AdminStatusReplyMessage decoded;
         uint8_t buffer[64];
         size_t expected_size = MESSAGE_HEADER_SIZE + ADMIN_STATUS_REPLY_BODY_SIZE;
@@ -41,6 +41,7 @@ describe("admin_status_message", []() {
         expect(decoded.agent_count).toBe(2);
         expect(decoded.client_count).toBe(3);
         expect(decoded.interface_count).toBe(8);
+        expect(decoded.receive_overflows).toBe((uint32_t)42);
         expect(decoded.frames_received).toBe(5000000000ULL);
         expect(decoded.frames_forwarded).toBe(4999000000ULL);
         expect(decoded.frames_dropped).toBe((uint64_t)999999);

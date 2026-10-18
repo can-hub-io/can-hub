@@ -611,6 +611,7 @@ static void handleAdminStatus(Broker *self, HubPeer *peer, const MessageHeader *
     reply.agent_count = PeerDirectory_CountRole(&self->directory, kHUB_PEER_ROLE_AGENT);
     reply.client_count = PeerDirectory_CountRole(&self->directory, kHUB_PEER_ROLE_CLIENT);
     reply.interface_count = InterfaceRegistry_Count(&self->registry);
+    reply.receive_overflows = self->transport->receive_overflows(self->transport->context);
     reply.frames_received = self->metrics.frames_received;
     reply.frames_forwarded = self->metrics.frames_forwarded;
     reply.frames_dropped = self->metrics.frames_dropped;

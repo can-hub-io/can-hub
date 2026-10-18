@@ -7,6 +7,7 @@ static bool mockSendFrame(void *context, uint32_t peer_id, uint8_t channel, cons
 static bool mockFrameFits(void *context, uint32_t peer_id, uint8_t channel, size_t size);
 static void mockSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
 static void mockClosePeer(void *context, uint32_t peer_id);
+static uint32_t mockReceiveOverflows(void *context);
 
 /* ---------- public ---------- */
 
@@ -19,6 +20,7 @@ void HubTransportPortMock_Reset(HubTransportPortMock *self)
     self->port.frame_fits = mockFrameFits;
     self->port.set_channel_mode = mockSetChannelMode;
     self->port.close_peer = mockClosePeer;
+    self->port.receive_overflows = mockReceiveOverflows;
     self->control_result = true;
     self->frame_result = true;
 }
@@ -95,4 +97,11 @@ static void mockClosePeer(void *context, uint32_t peer_id)
 
     self->close_count++;
     self->last_closed_peer = peer_id;
+}
+
+static uint32_t mockReceiveOverflows(void *context)
+{
+    HubTransportPortMock *self = context;
+
+    return self->receive_overflows;
 }
