@@ -106,6 +106,22 @@ describe("mirror_app", []() {
         expect(hub.frame_count).toBe(0);
     });
 
+    it("keeps the reliable flag when it retries read-only", []() {
+        OpenMessage retry;
+
+        MirrorApp_SetReliable(&mirror, true);
+        connect();
+        feedOpenAck(OPEN_STATUS_WRITE_DENIED, 0);
+        decodeSentOpen(2, &retry);
+        feedOpenAck(OPEN_STATUS_OK, 6);
+
+        expect((retry.flags & OPEN_FLAG_WANT_WRITE) != 0).toBe(false);
+        expect((retry.flags & OPEN_FLAG_RELIABLE) != 0).toBe(true);
+        expect(hub.channel_mode_count).toBe((uint32_t)1);
+        expect(hub.last_channel_mode_channel).toBe((uint8_t)6);
+        expect(hub.last_channel_mode_reliable).toBe(true);
+    });
+
     it("fails on a rejected open", []() {
         connect();
         feedOpenAck(OPEN_STATUS_REJECTED, 0);

@@ -9,9 +9,12 @@ void ChannelMap_Reset(ChannelMap *self)
     memset(self, 0, sizeof(*self));
 }
 
-bool ChannelMap_AssignFromAck(ChannelMap *self, const RegisterAckMessage *ack)
+bool ChannelMap_AssignFromAck(ChannelMap *self, const RegisterAckMessage *ack, uint8_t registered_count)
 {
-    if (ack->status != REGISTER_STATUS_OK || ack->interface_count > REGISTER_INTERFACES_MAX) {
+    if (ack->status != REGISTER_STATUS_OK || ack->interface_count != registered_count) {
+        return false;
+    }
+    if (ack->interface_count > REGISTER_INTERFACES_MAX) {
         return false;
     }
 
