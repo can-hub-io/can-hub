@@ -141,6 +141,10 @@ class BenchKeywords:
     def stop_can_client(self, client):
         client.stop()
 
+    @keyword("Peer Id Of Agent ${agent} On ${hub}")
+    def peer_id_of_agent(self, agent, hub) -> int:
+        return agent.peer_id_on(hub)
+
     @keyword("Wait Until Hub ${hub} Logged ${text} ${count} Times")
     def wait_until_hub_logged(self, hub, text, count: int, timeout: float = 10):
         hub.wait_logged(text, count, timeout)

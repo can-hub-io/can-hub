@@ -162,17 +162,6 @@ ChannelBinding *ClientSession_BindingForChannel(ClientSession *self, uint8_t cha
     return findByChannel(self, channel);
 }
 
-void ClientSession_RemoveInterface(ClientSession *self, uint32_t interface_id)
-{
-    uint8_t i;
-
-    for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
-        if (self->bindings[i].in_use && self->bindings[i].interface_id == interface_id) {
-            memset(&self->bindings[i], 0, sizeof(self->bindings[i]));
-        }
-    }
-}
-
 bool ClientSession_HoldsReliable(const ClientSession *self, uint32_t interface_id)
 {
     uint8_t i;

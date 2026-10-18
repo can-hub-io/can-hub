@@ -13,8 +13,6 @@ Test Teardown     Reset Bench    ${BENCH}
 
 *** Variables ***
 ${CYCLES}         ${10}
-${OPENED}         reliable channel 0 opened
-${CLOSED}         reliable channel 0 closed
 
 *** Test Cases ***
 The Agent Uplink Leaves Reliable Mode When Its Last Reliable Client Leaves
@@ -26,13 +24,16 @@ The Agent Uplink Leaves Reliable Mode When Its Last Reliable Client Leaves
     ${agent_cfg}=    Agent Configuration    quic://local:7227    edge    vcan0
     ${agent}=    Start CAN Agent On ${LOCAL_SERVER} With ${agent_cfg}
     Wait Until Agent ${agent} Registered On ${hub}    8
+    ${agent_peer}=    Peer Id Of Agent ${agent} On ${hub}
+    ${opened}=    Set Variable    peer ${agent_peer} reliable channel 0 opened
+    ${closed}=    Set Variable    peer ${agent_peer} reliable channel 0 closed
 
     FOR    ${cycle}    IN RANGE    1    ${CYCLES + 1}
         ${reliable_cfg}=    Client Configuration    dump    edge/vcan0    connect=quic://local:7227    reliable=${True}
         ${reliable}=    Start CAN Client On ${LOCAL_SERVER} With ${reliable_cfg}
-        Wait Until Hub ${hub} Logged ${OPENED} ${cycle} Times
+        Wait Until Hub ${hub} Logged ${opened} ${cycle} Times
         Stop CAN Client ${reliable}
-        Wait Until Hub ${hub} Logged ${CLOSED} ${cycle} Times
+        Wait Until Hub ${hub} Logged ${closed} ${cycle} Times
     END
 
     ${lossy_cfg}=    Client Configuration    dump    edge/vcan0    connect=quic://local:7227

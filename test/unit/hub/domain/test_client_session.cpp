@@ -205,25 +205,6 @@ describe("client_session", []() {
         expect(binding == NULL).toBe(true);
     });
 
-    it("removes every binding of an interface", []() {
-        ChannelOpenRequest request = {
-            .interface_id = 7,
-            .suppress_echo = false,
-            .can_write = false,
-            .reliable = false,
-        };
-        uint8_t channel = 0;
-        bool channel_found;
-        uint8_t found_channel = 0;
-
-        ClientSession_OpenInterface(&session, &request, &channel);
-
-        ClientSession_RemoveInterface(&session, 7);
-        channel_found = ClientSession_ChannelForInterface(&session, 7, &found_channel);
-
-        expect(channel_found).toBe(false);
-    });
-
     it("accepts every frame on a channel with no filters", []() {
         ChannelOpenRequest request = {
             .interface_id = 7,

@@ -67,6 +67,8 @@ static uint8_t adminIfconfigStatus(uint8_t agent_status);
 static void countInterfaceFrame(Broker *self, const HubPeer *peer, uint8_t channel);
 static void disconnectPeer(Broker *self, uint32_t peer_id);
 static void releasePeer(Broker *self, HubPeer *peer);
+static void closeClientChannel(Broker *self, HubPeer *client, uint8_t channel);
+static void removeClientInterface(Broker *self, HubPeer *client, uint32_t interface_id);
 static void releaseReliableBindings(Broker *self, HubPeer *client);
 static void revertAgentChannelIfUnused(Broker *self, uint32_t interface_id);
 static bool displaceGhostPeer(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
@@ -543,9 +545,6 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
 static void handleClose(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
 {
     CloseMessage close;
-    uint32_t interface_id;
-    bool reliable;
-    bool attached;
 
     if (peer->role != kHUB_PEER_ROLE_CLIENT) {
         return;
@@ -554,15 +553,7 @@ static void handleClose(Broker *self, HubPeer *peer, const MessageHeader *header
         return;
     }
 
-    reliable = ClientSession_ChannelReliable(&peer->session, close.channel);
-    attached = ClientSession_InterfaceForChannel(&peer->session, close.channel, &interface_id);
-    ClientSession_CloseChannel(&peer->session, close.channel);
-    if (!reliable || !attached) {
-        return;
-    }
-
-    self->transport->set_channel_mode(self->transport->context, peer->peer_id, close.channel, false);
-    revertAgentChannelIfUnused(self, interface_id);
+    closeClientChannel(self, peer, close.channel);
 }
 
 static void handleSubscribe(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
@@ -1183,6 +1174,36 @@ static void releasePeer(Broker *self, HubPeer *peer)
     PeerDirectory_Release(&self->directory, peer_id);
 }
 
+static void closeClientChannel(Broker *self, HubPeer *client, uint8_t channel)
+{
+    ChannelBinding *binding = ClientSession_BindingForChannel(&client->session, channel);
+    uint32_t interface_id;
+    bool reliable;
+
+    if (binding == NULL) {
+        return;
+    }
+
+    interface_id = binding->interface_id;
+    reliable = binding->reliable;
+    ClientSession_CloseChannel(&client->session, channel);
+    if (!reliable) {
+        return;
+    }
+
+    self->transport->set_channel_mode(self->transport->context, client->peer_id, channel, false);
+    revertAgentChannelIfUnused(self, interface_id);
+}
+
+static void removeClientInterface(Broker *self, HubPeer *client, uint32_t interface_id)
+{
+    uint8_t channel;
+
+    while (ClientSession_ChannelForInterface(&client->session, interface_id, &channel)) {
+        closeClientChannel(self, client, channel);
+    }
+}
+
 static void releaseReliableBindings(Broker *self, HubPeer *client)
 {
     uint32_t interface_id;
@@ -1285,7 +1306,7 @@ static void reattachClientsToAgent(Broker *self, uint32_t agent_peer_id)
                 continue;
             }
             if (!clientCanRead(self, peer, entry)) {
-                ClientSession_RemoveInterface(&peer->session, entry->interface_id);
+                removeClientInterface(self, peer, entry->interface_id);
                 continue;
             }
             if (ClientSession_ChannelForInterface(&peer->session, entry->interface_id, &channel)

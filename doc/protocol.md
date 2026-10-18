@@ -503,6 +503,12 @@ window closes in turn — the flow paces itself to the bus with no datagram drop
 For a reliable channel this flow control *is* the rate-matching the lossy plane
 gets from explicit pacing credit (INTERFACE_STATUS).
 
+A frame is relayed to every route of the interface or to none: while any
+reliable route has no room, the hub leaves the frame on the source's stream and
+retries it later, so no route ever receives it twice. The cost is that the
+slowest reliable subscriber paces every subscriber of that interface, lossy ones
+included.
+
 **Lifecycle.** The hub drives teardown on both legs. CLOSE on a reliable channel
 finishes the client's stream; once no client holds the interface reliable (CLOSE
 or disconnect of the last one), the hub also finishes the agent's stream and the
