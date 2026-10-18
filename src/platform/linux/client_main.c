@@ -22,6 +22,7 @@
 #include "platform/linux/tcp/tcp_client_transport.h"
 #include "platform/linux/tls/tls_client_transport.h"
 #include "client/client.h"
+#include "client/frame_spec.h"
 #include "mirror/mirror_app.h"
 #include "protocol/error_message.h"
 #include "protocol/frame_message.h"
@@ -109,9 +110,7 @@ static void handleSocketcandSlotEvent(uint8_t slot, const struct epoll_event *ev
 static void handleHubStreamEvent(const struct epoll_event *event);
 static void resolveDeviceName(char *out, size_t out_size);
 static void buildBeaconUrl(char *out, size_t out_size);
-static bool parseFrameSpec(const char *text, FrameMessage *frame);
 static bool parseFilterSpec(const char *text, CanFilter *filter);
-static bool parseHexPayload(const char *text, FrameMessage *frame);
 static void sendFrameAndQuit(void);
 static void startClientCommand(void);
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *events);
@@ -196,7 +195,7 @@ static void printUsage(FILE *stream, const char *program)
 {
     fprintf(stream, "usage: %s [--connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>|unix://<path>]\n", program);
     fprintf(stream, "       [--state-dir <path>] [--name <label>] list | dump [--no-echo] [--reliable] <interface> [<id>[:<mask>] ...]\n");
-    fprintf(stream, "       | send <interface> <can-id>#<hex-payload>   (cansend syntax, e.g. 123#DEADBEEF)\n");
+    fprintf(stream, "       | send <interface> <frame>   (cansend syntax: 123#DEADBEEF, 123##1DEADBEEF, 123#R)\n");
     fprintf(stream, "       | socketcand [--listen [<bind-ip>:]<port>] [--no-beacon]\n");
     fprintf(stream, "                                           local socketcand server (default 127.0.0.1:" SOCKETCAND_DEFAULT_PORT_TEXT ")\n");
     fprintf(stream, "       | attach <interface> <vcan>   mirror a remote bus into a local pre-created vcan (bidirectional)\n");
@@ -251,7 +250,7 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
                 command = kCLIENT_COMMAND_SEND;
                 open_flags |= OPEN_FLAG_WANT_WRITE;
                 snprintf(target_interface_text, sizeof(target_interface_text), "%s", argv[++i]);
-                if (!parseFrameSpec(argv[++i], &frame_to_send)) {
+                if (!FrameSpec_Parse(argv[++i], &frame_to_send)) {
                     return false;
                 }
             } else if (strcmp(command_name, "attach") == 0 && i + 2 < argc) {
@@ -291,30 +290,6 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
     return ConnectUrl_Parse(connect_url, &connect_scheme, host, port_text);
 }
 
-static bool parseFrameSpec(const char *text, FrameMessage *frame)
-{
-    const char *separator = strchr(text, '#');
-    char *id_end = NULL;
-    size_t id_digits;
-
-    if (separator == NULL) {
-        return false;
-    }
-
-    memset(frame, 0, sizeof(*frame));
-    frame->can_id = (uint32_t)strtoul(text, &id_end, 16);
-    if (id_end != separator || id_end == text) {
-        return false;
-    }
-
-    id_digits = (size_t)(separator - text);
-    if (id_digits > 3 || frame->can_id > FRAME_CAN_ID_SFF_MAX) {
-        frame->can_id |= FRAME_CAN_ID_FLAG_EFF;
-    }
-
-    return parseHexPayload(separator + 1, frame);
-}
-
 static bool parseFilterSpec(const char *text, CanFilter *filter)
 {
     const char *separator = strchr(text, ':');
@@ -337,34 +312,6 @@ static bool parseFilterSpec(const char *text, CanFilter *filter)
 
     filter->can_mask = (uint32_t)strtoul(separator + 1, &mask_end, 16);
     return mask_end != separator + 1 && mask_end == text + strlen(text);
-}
-
-static bool parseHexPayload(const char *text, FrameMessage *frame)
-{
-    char byte_text[3] = { 0, 0, 0 };
-    char *byte_end = NULL;
-    size_t digits = strlen(text);
-    size_t i;
-
-    if (digits % 2 != 0 || digits / 2 > FRAME_PAYLOAD_MAX_FD) {
-        return false;
-    }
-
-    frame->payload_length = (uint8_t)(digits / 2);
-    if (frame->payload_length > FRAME_PAYLOAD_MAX_CLASSIC) {
-        frame->frame_flags |= FRAME_FLAG_FD;
-    }
-
-    for(i=0; i<frame->payload_length; i++) {
-        byte_text[0] = text[i * 2];
-        byte_text[1] = text[i * 2 + 1];
-        frame->payload[i] = (uint8_t)strtoul(byte_text, &byte_end, 16);
-        if (byte_end != byte_text + 2) {
-            return false;
-        }
-    }
-
-    return true;
 }
 
 static void sendFrameAndQuit(void)

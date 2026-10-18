@@ -13,6 +13,7 @@ from .process import Process
 from .shell import Result, netns_argv, run
 
 CANDUMP_RECEIVE_BUFFER_BYTES = 4 * 1024 * 1024
+CANFD_MTU = 72
 
 
 class Server:
@@ -45,6 +46,11 @@ class Server:
         self.exec("ip", "link", "add", "dev", name, "type", "vcan", check=False)
         self.exec("ip", "link", "set", name, "up")
         return name
+
+    def enable_can_fd(self, name: str) -> None:
+        self.exec("ip", "link", "set", name, "down")
+        self.exec("ip", "link", "set", name, "mtu", str(CANFD_MTU))
+        self.exec("ip", "link", "set", name, "up")
 
     def cangen(self, interface: str, gap_ms: float, count: int,
                can_id: str | None = None, length: int = 8) -> Process:

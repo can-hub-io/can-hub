@@ -48,9 +48,16 @@ can-hub-client dump truck42/can0 123 700:7F0
 can-hub-client send truck42/can0 123#DEADBEEF
 ```
 
-cansend syntax: hex id `#` hex payload. More than 3 id digits or an id above
-0x7FF selects an extended (EFF) frame; a payload longer than 8 bytes selects
-CAN FD. (`#R` for RTR and `##<flags>` for FD/BRS are not parsed yet.)
+cansend syntax, hex throughout:
+
+| Form | Frame |
+|---|---|
+| `123#DEADBEEF` | classic; more than 8 data bytes selects CAN FD |
+| `123##1DEADBEEF` | CAN FD; the digit after `##` is the flags, bit 0 = bit rate switch |
+| `123#R`, `123#R3` | remote request, optional length 0-8 |
+
+More than 3 id digits or an id above 0x7FF selects an extended (EFF) frame.
+Data bytes may be separated by `.` (`123#11.22.33`).
 Requires a write grant when connected on tls/quic — see
 [security](security.md#client-acls).
 

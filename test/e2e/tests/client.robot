@@ -23,6 +23,20 @@ Send By Namespaced Name Reaches The Bus
     Should Be True    ${result.ok}
     Candump ${candump} Should Capture 123#DEADBEEF
 
+Send A CAN FD Frame With Bit Rate Switch Reaches The Bus
+    ${candump}=    Start Candump On ${LOCAL_SERVER}
+    Sleep    0.3s    reason=let candump bind its socket before the one-shot send
+    ${result}=    Send Frame On ${LOCAL_SERVER}    truck42/vcan0    123##1DEADBEEF    connect=${CONNECT}
+    Should Be True    ${result.ok}
+    Candump ${candump} Should Show 123##1DEADBEEF
+
+Send A Remote Request Reaches The Bus
+    ${candump}=    Start Candump On ${LOCAL_SERVER}
+    Sleep    0.3s    reason=let candump bind its socket before the one-shot send
+    ${result}=    Send Frame On ${LOCAL_SERVER}    truck42/vcan0    123#R    connect=${CONNECT}
+    Should Be True    ${result.ok}
+    Candump ${candump} Should Show 123#R
+
 Send To An Unknown Interface Fails
     ${result}=    Send Frame On ${LOCAL_SERVER}    truck42/nope    123#11    connect=${CONNECT}
     Should Not Be True    ${result.ok}
@@ -42,6 +56,7 @@ Dump Honours Subscribe Filters
 Start Bus Hub And Agent
     Setup Bench    ${BENCH}
     Create VCAN On ${LOCAL_SERVER}    vcan0
+    Enable CAN FD On ${LOCAL_SERVER}    vcan0
     ${hub_cfg}=    Hub Configuration
     ${hub}=    Start CAN HUB On ${LOCAL_SERVER} With ${hub_cfg}
     Set Suite Variable    ${HUB}    ${hub}
