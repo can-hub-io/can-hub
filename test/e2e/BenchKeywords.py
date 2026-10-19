@@ -93,9 +93,12 @@ class BenchKeywords:
     def start_can_client_with(self, server, config) -> CanClient:
         return CanClient.start(server, config)
 
-    @keyword("Start ${count} CAN Clients On ${server} With ${config}")
-    def start_can_clients_with(self, count, server, config) -> list[CanClient]:
-        return [CanClient.start(server, config) for _ in range(int(count))]
+    @keyword("Dump ${interface} From ${count} Clients On ${hub}")
+    def dump_from_clients(self, interface, count, hub, timeout=30) -> list[CanClient]:
+        config = ClientConfig(command="dump", args=[interface], connect=f"unix://{hub.unix_socket}")
+        clients = [CanClient.start(hub.server, config) for _ in range(int(count))]
+        self.wait_until_channels_open(count, hub, timeout)
+        return clients
 
     # ---------- actions ----------
 
