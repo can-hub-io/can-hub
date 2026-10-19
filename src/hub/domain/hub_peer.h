@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "hub/domain/client_session.h"
+#include "hub/domain/echo_tokens.h"
 #include "hub/domain/egress_queue.h"
 #include "hub/ports/identity_store_port.h"
 #include "protocol/admin_message.h"
@@ -12,8 +13,9 @@
 /*
  * One live peer of the hub. Unknown until its HELLO declares a role; the
  * admin role is only adoptable by local peers (unix socket). Role values
- * match the wire roles of HELLO. Agent peers carry their registered name,
- * client peers their session.
+ * match the wire roles of HELLO. Agent peers carry their registered name
+ * and the echo tokens of the clients writing through them, client peers
+ * their session.
  */
 typedef enum thub_peer_role_e {
     kHUB_PEER_ROLE_UNKNOWN = 0,
@@ -42,6 +44,7 @@ typedef struct {
     char origin[HUB_PEER_ORIGIN_SIZE];
     char origin_host[HUB_PEER_ORIGIN_SIZE];
     ClientSession session;
+    EchoTokens echo_tokens;
     EgressQueue egress;
 } HubPeer;
 

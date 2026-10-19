@@ -4,9 +4,10 @@
 #include <stdint.h>
 
 #include "hub/domain/hub_peer.h"
+#include "hub/ports/hub_transport_port.h"
 #include "protocol/admin_message.h"
 
-#define PEER_DIRECTORY_MAX 64
+#define PEER_DIRECTORY_MAX HUB_PEERS_MAX
 
 /*
  * Collection of the live peers of the hub: allocation, lookup, counting
@@ -21,9 +22,8 @@ void PeerDirectory_Reset(PeerDirectory *self);
 HubPeer *PeerDirectory_Allocate(PeerDirectory *self, uint32_t peer_id);
 HubPeer *PeerDirectory_Find(PeerDirectory *self, uint32_t peer_id);
 void PeerDirectory_Release(PeerDirectory *self, uint32_t peer_id);
-HubPeer *PeerDirectory_At(PeerDirectory *self, uint8_t index);
+HubPeer *PeerDirectory_At(PeerDirectory *self, uint16_t index);
 HubPeer *PeerDirectory_FindAgentByName(PeerDirectory *self, const char *agent_name);
-uint8_t PeerDirectory_SlotOf(const PeerDirectory *self, const HubPeer *peer);
 uint16_t PeerDirectory_Count(const PeerDirectory *self);
 uint16_t PeerDirectory_CountRole(const PeerDirectory *self, uint8_t role);
 uint16_t PeerDirectory_CountAwaitingHelloFrom(const PeerDirectory *self, const char *origin_host);

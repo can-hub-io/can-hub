@@ -11,7 +11,7 @@ void PeerDirectory_Reset(PeerDirectory *self)
 
 HubPeer *PeerDirectory_Allocate(PeerDirectory *self, uint32_t peer_id)
 {
-    uint8_t i;
+    uint16_t i;
 
     for(i=0; i<PEER_DIRECTORY_MAX; i++) {
         if (!self->peers[i].in_use) {
@@ -29,7 +29,7 @@ HubPeer *PeerDirectory_Allocate(PeerDirectory *self, uint32_t peer_id)
 
 HubPeer *PeerDirectory_Find(PeerDirectory *self, uint32_t peer_id)
 {
-    uint8_t i;
+    uint16_t i;
 
     for(i=0; i<PEER_DIRECTORY_MAX; i++) {
         if (self->peers[i].in_use && self->peers[i].peer_id == peer_id) {
@@ -49,7 +49,7 @@ void PeerDirectory_Release(PeerDirectory *self, uint32_t peer_id)
     }
 }
 
-HubPeer *PeerDirectory_At(PeerDirectory *self, uint8_t index)
+HubPeer *PeerDirectory_At(PeerDirectory *self, uint16_t index)
 {
     if (index >= PEER_DIRECTORY_MAX || !self->peers[index].in_use) {
         return NULL;
@@ -60,7 +60,7 @@ HubPeer *PeerDirectory_At(PeerDirectory *self, uint8_t index)
 
 HubPeer *PeerDirectory_FindAgentByName(PeerDirectory *self, const char *agent_name)
 {
-    uint8_t i;
+    uint16_t i;
 
     for(i=0; i<PEER_DIRECTORY_MAX; i++) {
         if (!self->peers[i].in_use || self->peers[i].role != kHUB_PEER_ROLE_AGENT) {
@@ -74,15 +74,10 @@ HubPeer *PeerDirectory_FindAgentByName(PeerDirectory *self, const char *agent_na
     return NULL;
 }
 
-uint8_t PeerDirectory_SlotOf(const PeerDirectory *self, const HubPeer *peer)
-{
-    return (uint8_t)(peer - self->peers);
-}
-
 uint16_t PeerDirectory_Count(const PeerDirectory *self)
 {
     uint16_t count = 0;
-    uint8_t i;
+    uint16_t i;
 
     for(i=0; i<PEER_DIRECTORY_MAX; i++) {
         if (self->peers[i].in_use) {
@@ -96,7 +91,7 @@ uint16_t PeerDirectory_Count(const PeerDirectory *self)
 uint16_t PeerDirectory_CountRole(const PeerDirectory *self, uint8_t role)
 {
     uint16_t count = 0;
-    uint8_t i;
+    uint16_t i;
 
     for(i=0; i<PEER_DIRECTORY_MAX; i++) {
         if (self->peers[i].in_use && self->peers[i].role == role) {
@@ -111,7 +106,7 @@ uint16_t PeerDirectory_CountAwaitingHelloFrom(const PeerDirectory *self, const c
 {
     const HubPeer *peer;
     uint16_t count = 0;
-    uint8_t i;
+    uint16_t i;
 
     for(i=0; i<PEER_DIRECTORY_MAX; i++) {
         peer = &self->peers[i];
@@ -127,7 +122,7 @@ void PeerDirectory_List(const PeerDirectory *self, uint16_t offset, AdminPeersRe
 {
     const HubPeer *peer;
     uint16_t skipped = 0;
-    uint8_t i;
+    uint16_t i;
 
     memset(reply, 0, sizeof(*reply));
 

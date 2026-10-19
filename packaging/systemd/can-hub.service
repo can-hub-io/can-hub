@@ -13,6 +13,7 @@ EnvironmentFile=-/etc/can-hub/hub.conf
 ExecStart=/usr/bin/can-hub --state-dir /var/lib/can-hub $HUB_LISTEN_ARGS
 Restart=on-failure
 RestartSec=2
+LimitNOFILE=4096
 StateDirectory=can-hub
 RuntimeDirectory=can-hub
 RuntimeDirectoryMode=0755

@@ -49,7 +49,7 @@ static void sendRetry(
     socklen_t address_length
 );
 static bool admitsHandshake(const QuicServerTransport *self, const char *origin_host);
-static uint8_t countHandshakes(const QuicServerTransport *self);
+static uint16_t countHandshakes(const QuicServerTransport *self);
 static bool isHandshaking(const QuicServerPeer *peer);
 static QuicServerPeer *findFreePeer(QuicServerTransport *self);
 static void makePacketPath(
@@ -196,7 +196,7 @@ void QuicServerTransport_OnTimer(QuicServerTransport *self)
 {
     uint64_t expiration_count;
     uint64_t now_ns;
-    uint8_t i;
+    uint16_t i;
     ssize_t bytes_read;
 
     bytes_read = read(self->timer_fd, &expiration_count, sizeof(expiration_count));
@@ -370,7 +370,7 @@ static void portClosePeer(void *context, uint32_t peer_id)
 
 static QuicServerPeer *findPeerById(QuicServerTransport *self, uint32_t peer_id)
 {
-    uint8_t i;
+    uint16_t i;
 
     for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
         if (QuicConnection_IsOpen(&self->peers[i].connection) && self->peers[i].peer_id == peer_id) {
@@ -386,7 +386,7 @@ static QuicServerPeer *findPeerByDcid(QuicServerTransport *self, const uint8_t *
     ngtcp2_version_cid version_cid;
     ngtcp2_cid dcid;
     QuicServerPeer *peer;
-    uint8_t i;
+    uint16_t i;
 
     if (ngtcp2_pkt_decode_version_cid(&version_cid, packet, packet_size, QUIC_CONNECTION_CID_LENGTH) != 0) {
         return NULL;
@@ -525,9 +525,9 @@ static void sendRetry(
 static bool admitsHandshake(const QuicServerTransport *self, const char *origin_host)
 {
     const QuicServerPeer *peer;
-    uint8_t handshaking = 0;
-    uint8_t from_host = 0;
-    uint8_t i;
+    uint16_t handshaking = 0;
+    uint16_t from_host = 0;
+    uint16_t i;
 
     for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
         peer = &self->peers[i];
@@ -543,10 +543,10 @@ static bool admitsHandshake(const QuicServerTransport *self, const char *origin_
     return handshaking < QUIC_SERVER_HANDSHAKES_MAX && from_host < HANDSHAKES_PER_HOST_MAX;
 }
 
-static uint8_t countHandshakes(const QuicServerTransport *self)
+static uint16_t countHandshakes(const QuicServerTransport *self)
 {
-    uint8_t handshaking = 0;
-    uint8_t i;
+    uint16_t handshaking = 0;
+    uint16_t i;
 
     for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
         if (isHandshaking(&self->peers[i])) {
@@ -564,7 +564,7 @@ static bool isHandshaking(const QuicServerPeer *peer)
 
 static QuicServerPeer *findFreePeer(QuicServerTransport *self)
 {
-    uint8_t i;
+    uint16_t i;
 
     for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
         if (!QuicConnection_IsOpen(&self->peers[i].connection)) {
@@ -708,7 +708,7 @@ static bool deferFlush(const QuicServerTransport *self, const QuicServerPeer *pe
 static void flushStagedPeers(QuicServerTransport *self)
 {
     QuicServerPeer *peer;
-    uint8_t i;
+    uint16_t i;
 
     for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
         peer = &self->peers[i];
@@ -746,7 +746,7 @@ static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer)
 
 static void retryStalledReliableStreams(QuicServerTransport *self)
 {
-    uint8_t i;
+    uint16_t i;
 
     for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
         if (QuicConnection_IsOpen(&self->peers[i].connection)) {
@@ -794,7 +794,7 @@ static void rearmTimer(QuicServerTransport *self)
     struct itimerspec timer_specification;
     uint64_t earliest_ns = UINT64_MAX;
     uint64_t expiry_ns;
-    uint8_t i;
+    uint16_t i;
 
     for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
         if (!QuicConnection_IsOpen(&self->peers[i].connection)) {

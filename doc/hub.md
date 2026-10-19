@@ -90,6 +90,10 @@ spot how a peer is connected.
 
 ## Limits
 
+- 512 peers at once (agents, clients and admin sessions together); the
+  static tables cost about 100 MB of RAM.
+- 63 clients writing through one agent at a time with own-echo suppression;
+  a writer past that still writes, but sees its own echo.
 - 16 interfaces per agent; interface names 1–15 chars (Linux `IFNAMSIZ`).
 - Agent names up to 127 chars.
 - 16 CAN id filters per open channel.

@@ -93,6 +93,13 @@ class BenchKeywords:
     def start_can_client_with(self, server, config) -> CanClient:
         return CanClient.start(server, config)
 
+    @keyword("Dump ${interface} From ${count} Clients On ${hub}")
+    def dump_from_clients(self, interface, count, hub, timeout=30) -> list[CanClient]:
+        config = ClientConfig(command="dump", args=[interface], connect=f"unix://{hub.unix_socket}")
+        clients = [CanClient.start(hub.server, config) for _ in range(int(count))]
+        self.wait_until_channels_open(count, hub, timeout)
+        return clients
+
     # ---------- actions ----------
 
     @keyword("Fresh State Directory For ${role}")
@@ -300,6 +307,11 @@ class BenchKeywords:
         raise AssertionError(
             f"client did not receive {can_id}#{data}\n{client.process.read_log()}"
         )
+
+    @keyword("Every Client Of ${clients} Should Receive ${can_id}#${data}")
+    def every_client_should_receive(self, clients, can_id, data, timeout=5):
+        for client in clients:
+            self.client_should_receive(client, can_id, data, timeout)
 
     # ---------- fairness / backpressure ----------
 

@@ -117,12 +117,12 @@ int32_t TcpServerTransport_ListenFd(const TcpServerTransport *self)
     return self->listen_fd;
 }
 
-int32_t TcpServerTransport_SlotFd(const TcpServerTransport *self, uint8_t slot)
+int32_t TcpServerTransport_SlotFd(const TcpServerTransport *self, uint16_t slot)
 {
     return self->peers[slot].channel.fd;
 }
 
-bool TcpServerTransport_SlotWantsWritable(const TcpServerTransport *self, uint8_t slot)
+bool TcpServerTransport_SlotWantsWritable(const TcpServerTransport *self, uint16_t slot)
 {
     return TcpChannel_HasPendingTx(&self->peers[slot].channel);
 }
@@ -170,7 +170,7 @@ void TcpServerTransport_OnAcceptReady(TcpServerTransport *self)
     }
 }
 
-void TcpServerTransport_OnSlotReadable(TcpServerTransport *self, uint8_t slot)
+void TcpServerTransport_OnSlotReadable(TcpServerTransport *self, uint16_t slot)
 {
     TcpServerPeer *peer = &self->peers[slot];
     TcpServerDispatch dispatch = { self, peer };
@@ -185,7 +185,7 @@ void TcpServerTransport_OnSlotReadable(TcpServerTransport *self, uint8_t slot)
     }
 }
 
-void TcpServerTransport_OnSlotWritable(TcpServerTransport *self, uint8_t slot)
+void TcpServerTransport_OnSlotWritable(TcpServerTransport *self, uint16_t slot)
 {
     TcpServerPeer *peer = &self->peers[slot];
 
@@ -265,7 +265,7 @@ static void portClosePeer(void *context, uint32_t peer_id)
 
 static void initTransportBase(TcpServerTransport *self, uint32_t peer_id_base, const HubTransportEvents *events)
 {
-    uint8_t slot;
+    uint16_t slot;
 
     memset(self, 0, sizeof(*self));
     self->port.context = self;
@@ -283,7 +283,7 @@ static void initTransportBase(TcpServerTransport *self, uint32_t peer_id_base, c
 
 static TcpServerPeer *findPeer(TcpServerTransport *self, uint32_t peer_id)
 {
-    uint8_t slot;
+    uint16_t slot;
 
     for(slot=0; slot<TCP_SERVER_PEERS_MAX; slot++) {
         if (TcpChannel_IsBound(&self->peers[slot].channel) && self->peers[slot].peer_id == peer_id) {
@@ -296,7 +296,7 @@ static TcpServerPeer *findPeer(TcpServerTransport *self, uint32_t peer_id)
 
 static TcpServerPeer *findFreeSlot(TcpServerTransport *self)
 {
-    uint8_t slot;
+    uint16_t slot;
 
     for(slot=0; slot<TCP_SERVER_PEERS_MAX; slot++) {
         if (!TcpChannel_IsBound(&self->peers[slot].channel)) {
