@@ -155,7 +155,11 @@ OPEN (total 12)
               bit 2: reliable — carry this channel on a dedicated reliable
               QUIC stream instead of the lossy datagram plane (see Reliable
               channels). Requires the reliable-channels capability advertised
-              in HELLO, else the OPEN is rejected with status 4.)
+              in HELLO, else the OPEN is rejected with status 4.
+              bit 3: error frames — also deliver the bus error frames (FRAME
+              with can_id bit 29 set) on this channel; without it the hub
+              drops them for this channel, as a SocketCAN socket without
+              CAN_RAW_ERR_FILTER never sees them.)
 @9   reserved u8[3]
 
 OPEN_ACK (total 12)
@@ -182,7 +186,8 @@ Per-channel CAN id filter, hub-side, replace semantics: each SUBSCRIBE sets
 the channel's complete filter list (it does not accumulate). A frame is
 delivered on the channel when filter_count is 0, or when any filter matches
 SocketCAN-style: (frame.can_id & can_mask) == (can_id & can_mask) — the same
-mask test as struct can_filter, flag bits 29-31 included. The filter applies
+mask test as struct can_filter, flag bits 29-31 included. Error frames bypass
+the filters: the OPEN error frames flag alone decides. The filter applies
 only to frames the hub fans out toward the client; it never affects injection
 toward the agent. SUBSCRIBE on an unopened channel returns an ERROR and is
 otherwise ignored (no SUBSCRIBE_ACK).
@@ -446,6 +451,12 @@ fingerprint against its ACLs. OPEN is rejected up front with status read
 denied (3) or write denied (2) per the `want write` flag, and an injected
 frame on a non-writable channel is **dropped** regardless (the security
 boundary behind the honest-client OPEN check).
+
+Error frames: the agent subscribes to every error class its controller reports
+(CAN_ERR_MASK) and uplinks them as ordinary FRAMEs, can_id bit 29 set and the
+error class in the remaining id bits, payload the 8-byte SocketCAN error
+detail (linux/can/error.h). A client cannot inject one: the hub drops a client
+FRAME with bit 29 set.
 
 Injected frames become visible to the other subscribers of the interface only
 through their bus echo: the hub does not fan out client frames directly. The

@@ -254,6 +254,10 @@ class BenchKeywords:
     def start_candump_on(self, server, interface="vcan0"):
         return server.candump(interface)
 
+    @keyword("Start Candump With Error Frames On ${server}")
+    def start_candump_with_error_frames_on(self, server, interface="vcan0"):
+        return server.candump(interface, error_frames=True)
+
     @keyword("Candump ${process} Should Show ${spec}")
     def candump_should_show(self, process, spec, timeout=5):
         deadline = time.monotonic() + float(timeout)

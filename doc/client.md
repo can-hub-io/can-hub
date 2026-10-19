@@ -41,6 +41,10 @@ can-hub-client dump truck42/can0 123 700:7F0
   network.
 - `--no-echo` suppresses the bus echo of this client's own injections;
   by default you see your own frames come back once they hit the wire.
+- `--error-frames` also shows the bus error frames, like `candump -e`. They
+  print with the full SocketCAN id, `20000004 [8] ...` for a controller
+  problem, the error class in the low bits and the detail in the data bytes
+  (`linux/can/error.h`). Id filters do not apply to them.
 
 ## send
 
@@ -78,6 +82,9 @@ beforehand no privilege is needed:
 ```sh
 sudo ip link add dev vcan0 type vcan && sudo ip link set up vcan0
 ```
+
+Bus error frames reach the vcan too: a local socket sees them once it asks
+for them, `candump -e vcan0` or python-can's socketcan interface.
 
 Without a write grant it downgrades to read-only — frames still flow remote→local,
 local writes are refused at the hub.

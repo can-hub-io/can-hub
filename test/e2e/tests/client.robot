@@ -52,6 +52,14 @@ Dump Honours Subscribe Filters
     Client ${client} Should Receive 1A0#CAFE
     Client ${client} Should Not Receive 123#0BAD
 
+Dump With Error Frames Shows A Bus Error
+    ${client_cfg}=    Client Configuration    dump    truck42/vcan0    connect=${CONNECT}    error_frames=${True}
+    ${client}=    Start CAN Client On ${LOCAL_SERVER} With ${client_cfg}
+    Wait Until Client ${client} Has Open Channel    ${HUB}
+    Sleep    0.3s
+    Inject CAN Frame On ${LOCAL_SERVER}    vcan0    20000004#0004000000000000
+    Client ${client} Should Receive 20000004#0004000000000000
+
 *** Keywords ***
 Start Bus Hub And Agent
     Setup Bench    ${BENCH}

@@ -37,6 +37,8 @@ class CanHubBus(BusABC):
     :param state_dir: directory holding the client TLS identity and the
         TOFU pin store (tls/quic only); ``None`` uses the can-hub default.
     :param receive_own_messages: also receive the frames this bus sends.
+    :param ignore_rx_error_frames: do not receive the bus error frames, which
+        python-can's socketcan interface delivers by default.
     """
 
     def __init__(
@@ -49,6 +51,7 @@ class CanHubBus(BusABC):
         state_dir: Optional[str] = None,
         receive_own_messages: bool = False,
         reliable: bool = False,
+        ignore_rx_error_frames: bool = False,
         **kwargs,
     ):
         self._lock = _FairLock()
@@ -64,7 +67,7 @@ class CanHubBus(BusABC):
             detail = native.last_error(None)
             raise CanInitializationError(f"could not connect to {url or 'the local can-hub socket'}: {detail}")
 
-        self._open(str(channel), receive_own_messages, reliable)
+        self._open(str(channel), self._open_flags(receive_own_messages, reliable, ignore_rx_error_frames))
         self.channel_info = f"canhub {channel} via {url or 'unix socket'}"
         super().__init__(channel=channel, **kwargs)
 
@@ -196,13 +199,7 @@ class CanHubBus(BusABC):
             result = native.lib.canhub_set_filters(self._session, native_filters, len(filters))
         self._hardware_filtered = result == native.OK
 
-    def _open(self, channel: str, receive_own_messages: bool, reliable: bool) -> None:
-        flags = native.OPEN_FLAG_WRITE
-        if not receive_own_messages:
-            flags |= native.OPEN_FLAG_NO_ECHO
-        if reliable:
-            flags |= native.OPEN_FLAG_RELIABLE
-
+    def _open(self, channel: str, flags: int) -> None:
         result = native.lib.canhub_open(self._session, channel.encode(), flags, DEFAULT_TIMEOUT_MS)
         if result == native.ERR_WRITE_DENIED:
             result = native.lib.canhub_open(self._session, channel.encode(), flags & ~native.OPEN_FLAG_WRITE, DEFAULT_TIMEOUT_MS)
@@ -214,6 +211,17 @@ class CanHubBus(BusABC):
             native.lib.canhub_close(self._session)
             self._session = None
             raise CanInitializationError(f"could not open {channel}: {detail}")
+
+    @staticmethod
+    def _open_flags(receive_own_messages: bool, reliable: bool, ignore_rx_error_frames: bool) -> int:
+        flags = native.OPEN_FLAG_WRITE
+        if not receive_own_messages:
+            flags |= native.OPEN_FLAG_NO_ECHO
+        if reliable:
+            flags |= native.OPEN_FLAG_RELIABLE
+        if not ignore_rx_error_frames:
+            flags |= native.OPEN_FLAG_ERROR_FRAMES
+        return flags
 
     @staticmethod
     def _build_connect_config(

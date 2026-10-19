@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "protocol/frame_message.h"
 #include "shared/bounded_string.h"
 
 static ChannelBinding *findByChannel(ClientSession *self, uint8_t channel);
@@ -28,6 +29,7 @@ bool ClientSession_OpenInterface(ClientSession *self, const ChannelOpenRequest *
     binding->suppress_echo = request->suppress_echo;
     binding->can_write = request->can_write;
     binding->reliable = request->reliable;
+    binding->error_frames = request->error_frames;
     binding->interface_id = request->interface_id;
     binding->channel = *channel;
     BoundedString_Copy(binding->agent_name, sizeof(binding->agent_name), request->agent_name);
@@ -86,6 +88,9 @@ bool ClientSession_ChannelAccepts(const ClientSession *self, uint8_t channel, ui
     for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
         if (!self->bindings[i].in_use || self->bindings[i].channel != channel) {
             continue;
+        }
+        if (can_id & FRAME_CAN_ID_FLAG_ERR) {
+            return self->bindings[i].error_frames;
         }
         if (self->bindings[i].filter_count == 0) {
             return true;

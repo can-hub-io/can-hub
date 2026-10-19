@@ -116,6 +116,10 @@ int main(int argc, char **argv)
         LOG_ERROR("could not open CAN interfaces");
         return 1;
     }
+    if (!SocketCanAdapter_ReceiveErrorFrames(&can_adapter)) {
+        LOG_ERROR("could not subscribe to CAN error frames");
+        return 1;
+    }
     SocketCanAdapter_SetPaceRate(&can_adapter, pace_rate_override);
 
     agent_core_events = AgentApp_TransportEvents(&app);

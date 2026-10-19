@@ -9,8 +9,8 @@
 #include "protocol/open_message.h"
 #include "shared/bounded_string.h"
 
-#define OPEN_FLAGS_READ_ONLY OPEN_FLAG_SUPPRESS_OWN_ECHO
-#define OPEN_FLAGS_READ_WRITE (OPEN_FLAG_SUPPRESS_OWN_ECHO | OPEN_FLAG_WANT_WRITE)
+#define OPEN_FLAGS_READ_ONLY (OPEN_FLAG_SUPPRESS_OWN_ECHO | OPEN_FLAG_ERROR_FRAMES)
+#define OPEN_FLAGS_READ_WRITE (OPEN_FLAGS_READ_ONLY | OPEN_FLAG_WANT_WRITE)
 
 static void transportOnConnected(void *context);
 static void transportOnDisconnected(void *context, uint64_t now_us);

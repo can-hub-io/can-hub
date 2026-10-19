@@ -262,6 +262,9 @@ int32_t canhub_open(CanHubSession *session, const char *interface_name, uint32_t
     if ((flags & CANHUB_OPEN_FLAG_RELIABLE) != 0) {
         open_flags |= OPEN_FLAG_RELIABLE;
     }
+    if ((flags & CANHUB_OPEN_FLAG_ERROR_FRAMES) != 0) {
+        open_flags |= OPEN_FLAG_ERROR_FRAMES;
+    }
 
     session->open_done = false;
     session->open_result = CANHUB_OK;

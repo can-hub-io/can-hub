@@ -27,6 +27,9 @@ for message in bus:
 - `reliable`: carry the channel on a dedicated reliable QUIC stream (lossless,
   ordered) instead of the lossy datagram plane. Needs a `quic://` url and a hub
   that advertises the capability; otherwise the open fails.
+- `ignore_rx_error_frames`: drop the controller error frames
+  (`is_error_frame`), received by default as on python-can's socketcan
+  interface.
 
 Write access follows the hub client ACLs: if the ACL grants read-only, the
 bus opens read-only and `send()` raises.

@@ -31,6 +31,18 @@ class TestBuildConnectConfig:
         assert config.connect_timeout_ms == 1234
 
 
+class TestOpenFlags:
+    def test_it_asks_the_hub_for_error_frames_by_default(self):
+        flags = CanHubBus._open_flags(False, False, False)
+
+        assert flags & native.OPEN_FLAG_ERROR_FRAMES
+
+    def test_it_leaves_error_frames_out_when_ignored(self):
+        flags = CanHubBus._open_flags(False, False, True)
+
+        assert not flags & native.OPEN_FLAG_ERROR_FRAMES
+
+
 class TestToConfig:
     def test_it_namespaces_agent_and_interface_into_a_channel(self):
         config = CanHubBus._to_config(make_interface("can-agent", "vcan0"), {"url": "tcp://h:1"})

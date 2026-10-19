@@ -29,6 +29,13 @@ bool SocketCanAdapter_Open(SocketCanAdapter *self, const RegisterMessage *regist
  * value in effect.
  */
 void SocketCanAdapter_SetPaceRate(SocketCanAdapter *self, uint32_t pace_rate);
+
+/*
+ * Subscribe every interface to the controller's error frames (CAN_ERR_MASK).
+ * They arrive as FRAMEs with the ERR bit set; the hub hands them only to the
+ * channels that asked for them.
+ */
+bool SocketCanAdapter_ReceiveErrorFrames(SocketCanAdapter *self);
 void SocketCanAdapter_Close(SocketCanAdapter *self);
 CanPort *SocketCanAdapter_Port(SocketCanAdapter *self);
 int32_t SocketCanAdapter_Fd(const SocketCanAdapter *self, uint8_t interface_index);

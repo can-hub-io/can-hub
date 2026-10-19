@@ -2,6 +2,7 @@
 
 extern "C" {
 #include "hub/domain/client_session.h"
+#include "protocol/frame_message.h"
 }
 
 static ClientSession session;
@@ -273,6 +274,53 @@ describe("client_session", []() {
         ClientSession_SetFilters(&session, channel, NULL, 0);
 
         expect(ClientSession_ChannelAccepts(&session, channel, 0x300)).toBe(true);
+    });
+
+    it("withholds error frames from a channel that did not ask for them", []() {
+        ChannelOpenRequest request = {
+            .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
+            .error_frames = false,
+        };
+        uint8_t channel = 0;
+
+        ClientSession_OpenInterface(&session, &request, &channel);
+
+        expect(ClientSession_ChannelAccepts(&session, channel, FRAME_CAN_ID_FLAG_ERR | 0x004)).toBe(false);
+    });
+
+    it("delivers error frames to a channel that asked for them", []() {
+        ChannelOpenRequest request = {
+            .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
+            .error_frames = true,
+        };
+        uint8_t channel = 0;
+
+        ClientSession_OpenInterface(&session, &request, &channel);
+
+        expect(ClientSession_ChannelAccepts(&session, channel, FRAME_CAN_ID_FLAG_ERR | 0x004)).toBe(true);
+    });
+
+    it("delivers error frames past the id filters", []() {
+        ChannelOpenRequest request = {
+            .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
+            .error_frames = true,
+        };
+        uint8_t channel = 0;
+        CanFilter filters[1] = { { 0x123, 0x7FF } };
+
+        ClientSession_OpenInterface(&session, &request, &channel);
+        ClientSession_SetFilters(&session, channel, filters, 1);
+
+        expect(ClientSession_ChannelAccepts(&session, channel, FRAME_CAN_ID_FLAG_ERR | 0x004)).toBe(true);
     });
 
     it("rejects setting filters on an unopened channel", []() {

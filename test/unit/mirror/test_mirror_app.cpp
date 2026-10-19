@@ -63,6 +63,25 @@ describe("mirror_app", []() {
         expect((open.flags & OPEN_FLAG_WANT_WRITE) != 0).toBe(true);
     });
 
+    it("asks for the bus error frames when it opens", []() {
+        OpenMessage open;
+
+        connect();
+        decodeSentOpen(1, &open);
+
+        expect((open.flags & OPEN_FLAG_ERROR_FRAMES) != 0).toBe(true);
+    });
+
+    it("keeps asking for the bus error frames when it retries read-only", []() {
+        OpenMessage retry;
+
+        connect();
+        feedOpenAck(OPEN_STATUS_WRITE_DENIED, 0);
+        decodeSentOpen(2, &retry);
+
+        expect((retry.flags & OPEN_FLAG_ERROR_FRAMES) != 0).toBe(true);
+    });
+
     it("enters pumping with write granted on OPEN_ACK ok", []() {
         connect();
         feedOpenAck(OPEN_STATUS_OK, 5);

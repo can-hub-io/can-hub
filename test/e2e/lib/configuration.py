@@ -61,6 +61,7 @@ class ClientConfig:
     args: list[str] = field(default_factory=list)
     no_echo: bool = False
     reliable: bool = False
+    error_frames: bool = False
     state_dir: str | None = None
     extra: list[str] = field(default_factory=list)
 
@@ -74,5 +75,7 @@ class ClientConfig:
             argv += ["--no-echo"]
         if self.reliable:
             argv += ["--reliable"]
+        if self.error_frames:
+            argv += ["--error-frames"]
         argv += [self.command]
         return argv + list(self.extra) + list(self.args)

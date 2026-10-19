@@ -34,6 +34,7 @@ extern "C" {
 #define CANHUB_OPEN_FLAG_NO_ECHO (1u << 0)
 #define CANHUB_OPEN_FLAG_WRITE (1u << 1)
 #define CANHUB_OPEN_FLAG_RELIABLE (1u << 2)
+#define CANHUB_OPEN_FLAG_ERROR_FRAMES (1u << 3)
 
 #define CANHUB_OK 0
 #define CANHUB_RECEIVED 1
