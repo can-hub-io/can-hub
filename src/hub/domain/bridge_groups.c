@@ -73,7 +73,9 @@ bool BridgeGroups_Set(BridgeGroups *self, const char *name, uint8_t filter_count
         self->count++;
     }
     slot->group.filter_count = filter_count;
-    memcpy(slot->group.filters, filters, (size_t)filter_count * sizeof(filters[0]));
+    if (filter_count > 0) {
+        memcpy(slot->group.filters, filters, (size_t)filter_count * sizeof(filters[0]));
+    }
 
     return true;
 }
