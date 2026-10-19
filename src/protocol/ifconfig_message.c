@@ -64,6 +64,24 @@ bool InterfaceSettings_HasTimingConflict(const InterfaceSettings *self)
     return data_raw && (self->fields & INTERFACE_FIELDS_DATA_RATE);
 }
 
+const char *ConfigureStatus_Name(uint8_t status)
+{
+    if (status == CONFIGURE_STATUS_OK) {
+        return "ok";
+    }
+    if (status == CONFIGURE_STATUS_UNKNOWN_INTERFACE) {
+        return "unknown interface";
+    }
+    if (status == CONFIGURE_STATUS_AGENT_UNREACHABLE) {
+        return "agent unreachable";
+    }
+    if (status == CONFIGURE_STATUS_DENIED) {
+        return "not allowed to configure this interface";
+    }
+
+    return "apply failed";
+}
+
 size_t IfconfigMessage_Encode(const IfconfigMessage *self, uint8_t *buffer, size_t buffer_size)
 {
     uint8_t *body;

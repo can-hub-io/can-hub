@@ -554,7 +554,7 @@ static void clientOnConfigureReply(void *context, const ConfigureReplyMessage *r
         LOG_ERROR(
             "%s: %s%s%s",
             target_interface_text,
-            InterfaceSettingsText_ConfigureStatusName(reply->status),
+            ConfigureStatus_Name(reply->status),
             reply->detail[0] != '\0' ? ": " : "",
             reply->detail
         );

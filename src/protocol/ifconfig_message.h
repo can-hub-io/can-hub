@@ -127,6 +127,7 @@ typedef struct {
 } ConfigureReplyMessage;
 
 bool InterfaceSettings_HasTimingConflict(const InterfaceSettings *self);
+const char *ConfigureStatus_Name(uint8_t status);
 
 size_t IfconfigMessage_Encode(const IfconfigMessage *self, uint8_t *buffer, size_t buffer_size);
 bool IfconfigMessage_Decode(IfconfigMessage *self, const uint8_t *payload, size_t payload_length);

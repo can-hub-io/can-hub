@@ -120,7 +120,14 @@ can.Bus(interface="socketcand", host="127.0.0.1", port=29536,
 - `--listen [<bind-ip>:]<port>` moves it off loopback (socketcand clients
   are unauthenticated — expose deliberately); `--no-beacon` silences
   discovery.
-- Rawmode only: BCM, ISO-TP and control modes are parsed and rejected.
+- Rawmode only: BCM and ISO-TP are parsed and rejected.
+- Bus configuration before `< open >`: `< truck42/can0 B <bitrate>
+  <sample-point> <tq> <prop-seg> <phase-seg1> <phase-seg2> <sjw> <brp> >`
+  (sample point in tenths of a percent, 0 = not given) and `< truck42/can0 C
+  <listen-only> <loopback> <three-samples> >` (0/1) become a hub CONFIGURE,
+  so they need an `rwa` grant ([access control](#access-control)). The reply
+  is `< ok >` or `< error <reason>: <detail> >`, e.g. `< error apply failed:
+  Operation not supported >` on a vcan.
 - A bus without a write grant opens read-only; `< send >` on it is refused.
 - The client Debian package ships this as `can-hub-socketcand.service`
   ([installation](installation.md#socketcand-bridge-optional)).

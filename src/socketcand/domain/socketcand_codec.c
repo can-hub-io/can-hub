@@ -7,8 +7,33 @@
 #define DEC_DIGITS_U64_MAX 20
 #define USEC_DIGITS 6
 #define MICROSECONDS_PER_SECOND 1000000u
+#define BITTIMING_VALUES 8
+#define CONTROLMODE_VALUES 3
+#define REASON_SEPARATOR ": "
+
+typedef enum tbittiming_value_e {
+    kBITTIMING_VALUE_BITRATE = 0,
+    kBITTIMING_VALUE_SAMPLE_POINT,
+    kBITTIMING_VALUE_TQ,
+    kBITTIMING_VALUE_PROP_SEG,
+    kBITTIMING_VALUE_PHASE_SEG1,
+    kBITTIMING_VALUE_PHASE_SEG2,
+    kBITTIMING_VALUE_SJW,
+    kBITTIMING_VALUE_BRP,
+    kBITTIMING_VALUE_MAX,
+} TBITTIMING_VALUE;
+
+static const uint32_t CONTROLMODE_FLAGS[CONTROLMODE_VALUES] = {
+    INTERFACE_CTRLMODE_LISTEN_ONLY,
+    INTERFACE_CTRLMODE_LOOPBACK,
+    INTERFACE_CTRLMODE_TRIPLE_SAMPLING,
+};
 
 static bool parseSend(const char *text, size_t length, size_t *cursor, FrameMessage *frame);
+static bool parseBusCommand(const char *text, size_t length, size_t *cursor, const char *bus, size_t bus_length, SocketcandCommand *command);
+static bool parseDecimals(const char *text, size_t length, size_t *cursor, uint32_t *values, uint8_t count);
+static void bitTimingSettings(const uint32_t *values, InterfaceSettings *settings);
+static bool controlModeSettings(const uint32_t *values, InterfaceSettings *settings);
 static size_t nextToken(const char *text, size_t length, size_t *cursor, const char **token);
 static bool tokenEquals(const char *token, size_t token_length, const char *literal);
 static int32_t hexNibble(char character);
@@ -67,7 +92,7 @@ bool SocketcandCodec_Parse(const char *text, size_t length, SocketcandCommand *c
         return true;
     }
 
-    return false;
+    return parseBusCommand(text, length, &cursor, token, token_length, command);
 }
 
 size_t SocketcandCodec_RenderGreeting(char *out, size_t out_size)
@@ -111,6 +136,30 @@ size_t SocketcandCodec_RenderError(char *out, size_t out_size, const char *detai
     size_t position = 0;
 
     if (!append(out, out_size, &position, "< error ", 8)) {
+        return 0;
+    }
+    if (!append(out, out_size, &position, detail, strlen(detail))) {
+        return 0;
+    }
+    if (!append(out, out_size, &position, " >", 2)) {
+        return 0;
+    }
+    out[position] = '\0';
+
+    return position;
+}
+
+size_t SocketcandCodec_RenderReasonedError(char *out, size_t out_size, const char *reason, const char *detail)
+{
+    size_t position = 0;
+
+    if (!append(out, out_size, &position, "< error ", 8)) {
+        return 0;
+    }
+    if (!append(out, out_size, &position, reason, strlen(reason))) {
+        return 0;
+    }
+    if (detail[0] != '\0' && !append(out, out_size, &position, REASON_SEPARATOR, strlen(REASON_SEPARATOR))) {
         return 0;
     }
     if (!append(out, out_size, &position, detail, strlen(detail))) {
@@ -174,6 +223,99 @@ size_t SocketcandCodec_RenderFrame(char *out, size_t out_size, const FrameMessag
 }
 
 /* ---------- private ---------- */
+
+static bool parseBusCommand(const char *text, size_t length, size_t *cursor, const char *bus, size_t bus_length, SocketcandCommand *command)
+{
+    uint32_t values[BITTIMING_VALUES];
+    const char *token;
+    size_t token_length;
+
+    if (bus_length >= SOCKETCAND_BUS_NAME_SIZE) {
+        return false;
+    }
+
+    token_length = nextToken(text, length, cursor, &token);
+    if (tokenEquals(token, token_length, "B")) {
+        if (!parseDecimals(text, length, cursor, values, BITTIMING_VALUES)) {
+            return false;
+        }
+        bitTimingSettings(values, &command->settings);
+        command->kind = kSOCKETCAND_COMMAND_BITTIMING;
+    } else if (tokenEquals(token, token_length, "C")) {
+        if (!parseDecimals(text, length, cursor, values, CONTROLMODE_VALUES)) {
+            return false;
+        }
+        if (!controlModeSettings(values, &command->settings)) {
+            return false;
+        }
+        command->kind = kSOCKETCAND_COMMAND_CONTROLMODE;
+    } else {
+        return false;
+    }
+
+    memcpy(command->bus, bus, bus_length);
+    command->bus[bus_length] = '\0';
+
+    return true;
+}
+
+static bool parseDecimals(const char *text, size_t length, size_t *cursor, uint32_t *values, uint8_t count)
+{
+    const char *token;
+    size_t token_length;
+    uint8_t i;
+
+    for(i=0; i<count; i++) {
+        token_length = nextToken(text, length, cursor, &token);
+        if (token_length == 0 || !parseDecimal(token, token_length, &values[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static void bitTimingSettings(const uint32_t *values, InterfaceSettings *settings)
+{
+    InterfaceBitTiming *timing = &settings->bit_timing;
+
+    if (values[kBITTIMING_VALUE_BITRATE] != 0) {
+        settings->fields |= INTERFACE_FIELD_BITRATE;
+        settings->bitrate = values[kBITTIMING_VALUE_BITRATE];
+    }
+    if (values[kBITTIMING_VALUE_SAMPLE_POINT] != 0) {
+        settings->fields |= INTERFACE_FIELD_SAMPLE_POINT;
+        settings->sample_point = (uint16_t)values[kBITTIMING_VALUE_SAMPLE_POINT];
+    }
+
+    timing->tq = values[kBITTIMING_VALUE_TQ];
+    timing->prop_seg = values[kBITTIMING_VALUE_PROP_SEG];
+    timing->phase_seg1 = values[kBITTIMING_VALUE_PHASE_SEG1];
+    timing->phase_seg2 = values[kBITTIMING_VALUE_PHASE_SEG2];
+    timing->sjw = values[kBITTIMING_VALUE_SJW];
+    timing->brp = values[kBITTIMING_VALUE_BRP];
+    if (timing->tq | timing->prop_seg | timing->phase_seg1 | timing->phase_seg2 | timing->sjw | timing->brp) {
+        settings->fields |= INTERFACE_FIELD_BIT_TIMING;
+    }
+}
+
+static bool controlModeSettings(const uint32_t *values, InterfaceSettings *settings)
+{
+    uint8_t i;
+
+    settings->fields = INTERFACE_FIELD_CTRLMODE;
+    for(i=0; i<CONTROLMODE_VALUES; i++) {
+        if (values[i] > 1) {
+            return false;
+        }
+        settings->ctrlmode_mask |= CONTROLMODE_FLAGS[i];
+        if (values[i] == 1) {
+            settings->ctrlmode_flags |= CONTROLMODE_FLAGS[i];
+        }
+    }
+
+    return true;
+}
 
 static bool parseSend(const char *text, size_t length, size_t *cursor, FrameMessage *frame)
 {

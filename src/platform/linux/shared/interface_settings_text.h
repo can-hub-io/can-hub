@@ -23,4 +23,3 @@ bool InterfaceSettingsText_Parse(
     char *error
 );
 void InterfaceSettingsText_Print(FILE *stream, const InterfaceSettings *settings);
-const char *InterfaceSettingsText_ConfigureStatusName(uint8_t status);

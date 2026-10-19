@@ -127,24 +127,6 @@ void InterfaceSettingsText_Print(FILE *stream, const InterfaceSettings *settings
     }
 }
 
-const char *InterfaceSettingsText_ConfigureStatusName(uint8_t status)
-{
-    if (status == CONFIGURE_STATUS_OK) {
-        return "ok";
-    }
-    if (status == CONFIGURE_STATUS_UNKNOWN_INTERFACE) {
-        return "unknown interface";
-    }
-    if (status == CONFIGURE_STATUS_AGENT_UNREACHABLE) {
-        return "agent unreachable";
-    }
-    if (status == CONFIGURE_STATUS_DENIED) {
-        return "not allowed to configure this interface";
-    }
-
-    return "apply failed";
-}
-
 /* ---------- private ---------- */
 
 static bool parseWord(InterfaceSettings *settings, const char *key, const char *value, char *error)

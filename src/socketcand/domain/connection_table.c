@@ -82,6 +82,32 @@ uint32_t ConnectionTable_NextOpenSeq(ConnectionTable *self)
     return self->next_open_seq;
 }
 
+void ConnectionTable_QueueConfigure(ConnectionTable *self, SocketcandConnection *connection, const char *bus, const InterfaceSettings *settings)
+{
+    self->next_configure_seq++;
+    connection->configure.queued = true;
+    connection->configure.seq = self->next_configure_seq;
+    connection->configure.settings = *settings;
+    memcpy(connection->configure.bus, bus, SOCKETCAND_BUS_NAME_SIZE);
+}
+
+SocketcandConnection *ConnectionTable_OldestQueuedConfigure(ConnectionTable *self)
+{
+    SocketcandConnection *oldest = NULL;
+    uint8_t i;
+
+    for(i=0; i<SOCKETCAND_CONNECTIONS_MAX; i++) {
+        if (!self->connections[i].in_use || !self->connections[i].configure.queued) {
+            continue;
+        }
+        if (oldest == NULL || self->connections[i].configure.seq < oldest->configure.seq) {
+            oldest = &self->connections[i];
+        }
+    }
+
+    return oldest;
+}
+
 void ConnectionTable_Remove(ConnectionTable *self, uint32_t connection_id)
 {
     SocketcandConnection *connection = ConnectionTable_Find(self, connection_id);

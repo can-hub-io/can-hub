@@ -4,6 +4,7 @@
 
 extern "C" {
 #include "protocol/frame_message.h"
+#include "protocol/ifconfig_message.h"
 #include "protocol/list_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
@@ -86,6 +87,25 @@ static void feedFrameOnChannel(uint8_t channel)
     frame.timestamp_us = 1000000;
     size = FrameMessage_Encode(&frame, wire, sizeof(wire));
     hub_events.on_frame(hub_events.context, wire, size);
+}
+
+static void feedConfigureReply(uint8_t status, const char *detail)
+{
+    ConfigureReplyMessage reply;
+    uint8_t wire[256];
+    size_t size;
+
+    memset(&reply, 0, sizeof(reply));
+    reply.status = status;
+    strncpy(reply.detail, detail, IFCONFIG_DETAIL_SIZE - 1);
+    size = ConfigureReplyMessage_Encode(&reply, wire, sizeof(wire));
+    hub_events.on_control(hub_events.context, wire, size, 3000);
+}
+
+static void decodeConfigure(uint8_t index, MessageHeader *header, ConfigureMessage *request)
+{
+    MessageHeader_Decode(header, hub.control_log[index], hub.control_sizes[index]);
+    ConfigureMessage_Decode(request, hub.control_log[index] + MESSAGE_HEADER_SIZE, header->length);
 }
 
 describe("socketcand_bridge", []() {
@@ -299,4 +319,104 @@ describe("socketcand_bridge", []() {
         expect(open.interface_id).toBe((uint32_t)42);
     });
 
+    it("sends a bus bit timing to the hub as CONFIGURE", []() {
+        MessageHeader header;
+        ConfigureMessage request;
+
+        bringUpReady();
+        server_events.on_client_connected(server_events.context, 1);
+
+        clientBytes(1, "< truck42/can0 B 500000 875 0 0 0 0 0 0 >");
+        decodeConfigure(2, &header, &request);
+
+        expect(header.type).toBe((uint8_t)kMESSAGE_TYPE_CONFIGURE);
+        expect(strcmp(request.agent_name, "truck42") == 0).toBe(true);
+        expect(strcmp(request.interface_name, "can0") == 0).toBe(true);
+        expect(request.settings.bitrate).toBe((uint32_t)500000);
+    });
+
+    it("answers < ok > once the hub applies the configuration", []() {
+        bringUpReady();
+        server_events.on_client_connected(server_events.context, 1);
+        clientBytes(1, "< truck42/can0 C 1 0 0 >");
+
+        feedConfigureReply(CONFIGURE_STATUS_OK, "");
+
+        expect(strstr(SocketcandServerPortMock_Written(&server, 1), "< ok >") != nullptr).toBe(true);
+    });
+
+    it("answers an error with the reason the hub gives", []() {
+        bringUpReady();
+        server_events.on_client_connected(server_events.context, 1);
+        clientBytes(1, "< truck42/can0 C 1 0 0 >");
+
+        feedConfigureReply(CONFIGURE_STATUS_APPLY_FAILED, "Operation not supported");
+
+        expect(strstr(SocketcandServerPortMock_Written(&server, 1), "< error apply failed: Operation not supported >") != nullptr).toBe(true);
+    });
+
+    it("refuses to configure a bus once it is open", []() {
+        uint8_t before;
+
+        bringUpReady();
+        server_events.on_client_connected(server_events.context, 1);
+        clientBytes(1, "< open truck42/can0 >");
+        feedOpenAck(OPEN_STATUS_OK, 5);
+        before = hub.control_count;
+
+        clientBytes(1, "< truck42/can0 C 1 0 0 >");
+
+        expect(hub.control_count).toBe(before);
+        expect(strstr(SocketcandServerPortMock_Written(&server, 1), "< error configure the bus before opening it >") != nullptr).toBe(true);
+    });
+
+    it("refuses a bit timing that sets nothing", []() {
+        uint8_t before;
+
+        bringUpReady();
+        server_events.on_client_connected(server_events.context, 1);
+        before = hub.control_count;
+
+        clientBytes(1, "< truck42/can0 B 0 0 0 0 0 0 0 0 >");
+
+        expect(hub.control_count).toBe(before);
+        expect(strstr(SocketcandServerPortMock_Written(&server, 1), "< error nothing to configure >") != nullptr).toBe(true);
+    });
+
+    it("sends one configuration at a time in arrival order", []() {
+        MessageHeader header;
+        ConfigureMessage request;
+        uint8_t before;
+
+        bringUpReady();
+        server_events.on_client_connected(server_events.context, 1);
+        server_events.on_client_connected(server_events.context, 2);
+        clientBytes(1, "< truck42/can0 B 500000 0 0 0 0 0 0 0 >");
+        clientBytes(2, "< truck42/can0 B 250000 0 0 0 0 0 0 0 >");
+        before = hub.control_count;
+
+        feedConfigureReply(CONFIGURE_STATUS_OK, "");
+        decodeConfigure(before, &header, &request);
+
+        expect(before).toBe((uint8_t)3);
+        expect(hub.control_count).toBe((uint8_t)4);
+        expect(request.settings.bitrate).toBe((uint32_t)250000);
+        expect(strstr(SocketcandServerPortMock_Written(&server, 1), "< ok >") != nullptr).toBe(true);
+        expect(strstr(SocketcandServerPortMock_Written(&server, 2), "< ok >") == nullptr).toBe(true);
+    });
+
+    it("sends a configuration asked before the hub connects once it does", []() {
+        MessageHeader header;
+        ConfigureMessage request;
+
+        SocketcandBridge_Tick(&bridge, 0);
+        server_events.on_client_connected(server_events.context, 1);
+        clientBytes(1, "< truck42/can0 C 1 0 0 >");
+
+        hub_events.on_connected(hub_events.context);
+        decodeConfigure(2, &header, &request);
+
+        expect(header.type).toBe((uint8_t)kMESSAGE_TYPE_CONFIGURE);
+        expect(request.settings.fields).toBe((uint32_t)INTERFACE_FIELD_CTRLMODE);
+    });
 });
