@@ -66,6 +66,60 @@ describe("socketcand_codec", []() {
         expect(command.kind).toBe((uint8_t)kSOCKETCAND_COMMAND_UNKNOWN);
     });
 
+    it("parses a bus bitrate and sample point", []() {
+        SocketcandCommand command;
+        bool ok = parse("truck42/can0 B 500000 875 0 0 0 0 0 0", &command);
+
+        expect(ok).toBe(true);
+        expect(command.kind).toBe((uint8_t)kSOCKETCAND_COMMAND_BITTIMING);
+        expect(strcmp(command.bus, "truck42/can0") == 0).toBe(true);
+        expect(command.settings.fields).toBe((uint32_t)(INTERFACE_FIELD_BITRATE | INTERFACE_FIELD_SAMPLE_POINT));
+        expect(command.settings.bitrate).toBe((uint32_t)500000);
+        expect(command.settings.sample_point).toBe((uint16_t)875);
+    });
+
+    it("parses a raw bus bit timing", []() {
+        SocketcandCommand command;
+        bool ok = parse("truck42/can0 B 0 0 125 6 7 2 1 0", &command);
+
+        expect(ok).toBe(true);
+        expect(command.settings.fields).toBe((uint32_t)INTERFACE_FIELD_BIT_TIMING);
+        expect(command.settings.bit_timing.tq).toBe((uint32_t)125);
+        expect(command.settings.bit_timing.prop_seg).toBe((uint32_t)6);
+        expect(command.settings.bit_timing.phase_seg1).toBe((uint32_t)7);
+        expect(command.settings.bit_timing.phase_seg2).toBe((uint32_t)2);
+        expect(command.settings.bit_timing.sjw).toBe((uint32_t)1);
+    });
+
+    it("rejects a bus bit timing with missing values", []() {
+        SocketcandCommand command;
+
+        expect(parse("truck42/can0 B 500000 875", &command)).toBe(false);
+    });
+
+    it("parses bus control modes", []() {
+        SocketcandCommand command;
+        bool ok = parse("truck42/can0 C 1 0 1", &command);
+
+        expect(ok).toBe(true);
+        expect(command.kind).toBe((uint8_t)kSOCKETCAND_COMMAND_CONTROLMODE);
+        expect(command.settings.fields).toBe((uint32_t)INTERFACE_FIELD_CTRLMODE);
+        expect(command.settings.ctrlmode_mask).toBe((uint32_t)(INTERFACE_CTRLMODE_LISTEN_ONLY | INTERFACE_CTRLMODE_LOOPBACK | INTERFACE_CTRLMODE_TRIPLE_SAMPLING));
+        expect(command.settings.ctrlmode_flags).toBe((uint32_t)(INTERFACE_CTRLMODE_LISTEN_ONLY | INTERFACE_CTRLMODE_TRIPLE_SAMPLING));
+    });
+
+    it("rejects a control mode other than 0 or 1", []() {
+        SocketcandCommand command;
+
+        expect(parse("truck42/can0 C 2 0 0", &command)).toBe(false);
+    });
+
+    it("rejects an unknown bus command", []() {
+        SocketcandCommand command;
+
+        expect(parse("truck42/can0 Z 1", &command)).toBe(false);
+    });
+
     it("renders the greeting", []() {
         char out[64];
 
@@ -80,6 +134,22 @@ describe("socketcand_codec", []() {
         SocketcandCodec_RenderError(out, sizeof(out), "no bus open");
 
         expect(strcmp(out, "< error no bus open >") == 0).toBe(true);
+    });
+
+    it("renders an error with its reason and detail", []() {
+        char out[96];
+
+        SocketcandCodec_RenderReasonedError(out, sizeof(out), "apply failed", "bitrate not supported");
+
+        expect(strcmp(out, "< error apply failed: bitrate not supported >") == 0).toBe(true);
+    });
+
+    it("renders an error with only its reason when there is no detail", []() {
+        char out[96];
+
+        SocketcandCodec_RenderReasonedError(out, sizeof(out), "unknown interface", "");
+
+        expect(strcmp(out, "< error unknown interface >") == 0).toBe(true);
     });
 
     it("renders a received frame with padded microseconds", []() {

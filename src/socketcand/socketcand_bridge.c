@@ -5,6 +5,8 @@
 #include "protocol/control_buffer.h"
 #include "protocol/frame_message.h"
 #include "protocol/hello_message.h"
+#include "protocol/ifconfig_message.h"
+#include "protocol/interface_name.h"
 #include "protocol/list_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
@@ -21,6 +23,9 @@
 
 #define OPEN_FLAGS_READ_ONLY OPEN_FLAG_SUPPRESS_OWN_ECHO
 #define OPEN_FLAGS_READ_WRITE (OPEN_FLAG_SUPPRESS_OWN_ECHO | OPEN_FLAG_WANT_WRITE)
+#define CONFIGURE_AFTER_OPEN_DETAIL "configure the bus before opening it"
+#define NOTHING_TO_CONFIGURE_DETAIL "nothing to configure"
+#define UNKNOWN_BUS_DETAIL "unknown bus"
 
 static void transportOnConnected(void *context);
 static void transportOnDisconnected(void *context, uint64_t now_us);
@@ -38,6 +43,11 @@ static void deliverFrame(SocketcandBridge *self, const uint8_t *data, size_t siz
 static bool dispatchCommand(SocketcandBridge *self, SocketcandConnection *connection, const SocketcandCommand *command);
 static bool openBus(SocketcandBridge *self, SocketcandConnection *connection, const char *bus);
 static void handleSend(SocketcandBridge *self, SocketcandConnection *connection, const FrameMessage *frame);
+static void queueConfigure(SocketcandBridge *self, SocketcandConnection *connection, const SocketcandCommand *command);
+static void sendNextConfigure(SocketcandBridge *self);
+static bool sendConfigure(SocketcandBridge *self, SocketcandConnection *connection);
+static void handleConfigureReply(SocketcandBridge *self, const ConfigureReplyMessage *reply);
+static void sendError(SocketcandBridge *self, uint32_t connection_id, const char *detail);
 static void sendHello(SocketcandBridge *self);
 static void sendListPage(SocketcandBridge *self, uint16_t offset);
 static void sendOpen(SocketcandBridge *self, uint32_t interface_id, uint8_t flags);
@@ -132,6 +142,7 @@ static void transportOnConnected(void *context)
     startListing(self);
     self->hub_state = kSOCKETCAND_HUB_READY;
     self->next_beacon_at_us = 0;
+    sendNextConfigure(self);
 }
 
 static void transportOnDisconnected(void *context, uint64_t now_us)
@@ -145,6 +156,7 @@ static void transportOnDisconnected(void *context, uint64_t now_us)
     closeAllConnections(self);
     InterfaceCatalogue_Reset(&self->catalogue);
     self->listing_active = false;
+    self->configure_in_flight = false;
     self->hub_state = kSOCKETCAND_HUB_DISCONNECTED;
     self->next_connect_at_us = now_us + RECONNECT_DELAY_US;
     self->next_beacon_at_us = 0;
@@ -156,6 +168,7 @@ static void transportOnControl(void *context, const uint8_t *data, size_t size, 
     SocketcandBridge *self = context;
     MessageHeader header;
     OpenAckMessage ack;
+    ConfigureReplyMessage configure_reply;
 
     if (!MessageHeader_Decode(&header, data, size)) {
         return;
@@ -171,6 +184,12 @@ static void transportOnControl(void *context, const uint8_t *data, size_t size, 
     if (header.type == kMESSAGE_TYPE_OPEN_ACK) {
         if (OpenAckMessage_Decode(&ack, data + MESSAGE_HEADER_SIZE, header.length)) {
             handleOpenAck(self, &ack);
+        }
+        return;
+    }
+    if (header.type == kMESSAGE_TYPE_CONFIGURE_REPLY) {
+        if (ConfigureReplyMessage_Decode(&configure_reply, data + MESSAGE_HEADER_SIZE, header.length)) {
+            handleConfigureReply(self, &configure_reply);
         }
     }
 }
@@ -366,6 +385,10 @@ static bool dispatchCommand(SocketcandBridge *self, SocketcandConnection *connec
             length = SocketcandCodec_RenderEcho(ascii, sizeof(ascii));
             sendAscii(self, connection->connection_id, ascii, length);
             return true;
+        case kSOCKETCAND_COMMAND_BITTIMING:
+        case kSOCKETCAND_COMMAND_CONTROLMODE:
+            queueConfigure(self, connection, command);
+            return true;
         default:
             return true;
     }
@@ -419,6 +442,95 @@ static void handleSend(SocketcandBridge *self, SocketcandConnection *connection,
     if (encoded_size > 0) {
         self->hub->send_frame(self->hub->context, outgoing.channel, encoded, encoded_size);
     }
+}
+
+static void queueConfigure(SocketcandBridge *self, SocketcandConnection *connection, const SocketcandCommand *command)
+{
+    if (connection->open_state != kSOCKETCAND_OPEN_NONE) {
+        sendError(self, connection->connection_id, CONFIGURE_AFTER_OPEN_DETAIL);
+        return;
+    }
+    if (command->settings.fields == 0) {
+        sendError(self, connection->connection_id, NOTHING_TO_CONFIGURE_DETAIL);
+        return;
+    }
+
+    ConnectionTable_QueueConfigure(&self->connections, connection, command->bus, &command->settings);
+    sendNextConfigure(self);
+}
+
+static void sendNextConfigure(SocketcandBridge *self)
+{
+    SocketcandConnection *connection;
+
+    if (self->configure_in_flight || self->hub_state != kSOCKETCAND_HUB_READY) {
+        return;
+    }
+
+    connection = ConnectionTable_OldestQueuedConfigure(&self->connections);
+    while (connection != NULL && !sendConfigure(self, connection)) {
+        connection = ConnectionTable_OldestQueuedConfigure(&self->connections);
+    }
+}
+
+static bool sendConfigure(SocketcandBridge *self, SocketcandConnection *connection)
+{
+    ConfigureMessage request;
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
+    size_t encoded_size;
+
+    memset(&request, 0, sizeof(request));
+    connection->configure.queued = false;
+    if (!InterfaceName_Split(connection->configure.bus, request.agent_name, request.interface_name)) {
+        sendError(self, connection->connection_id, UNKNOWN_BUS_DETAIL);
+        return false;
+    }
+
+    request.op = IFCONFIG_OP_APPLY;
+    request.settings = connection->configure.settings;
+    encoded_size = ConfigureMessage_Encode(&request, encoded, sizeof(encoded));
+    if (encoded_size == 0) {
+        sendError(self, connection->connection_id, UNKNOWN_BUS_DETAIL);
+        return false;
+    }
+
+    self->configure_in_flight = true;
+    self->configuring_connection_id = connection->connection_id;
+    self->hub->send_control(self->hub->context, encoded, encoded_size);
+
+    return true;
+}
+
+static void handleConfigureReply(SocketcandBridge *self, const ConfigureReplyMessage *reply)
+{
+    SocketcandConnection *connection;
+    char ascii[ASCII_BUFFER_SIZE];
+    size_t length;
+
+    if (!self->configure_in_flight) {
+        return;
+    }
+
+    self->configure_in_flight = false;
+    connection = ConnectionTable_Find(&self->connections, self->configuring_connection_id);
+    if (connection != NULL) {
+        if (reply->status == CONFIGURE_STATUS_OK) {
+            length = SocketcandCodec_RenderOk(ascii, sizeof(ascii));
+        } else {
+            length = SocketcandCodec_RenderReasonedError(ascii, sizeof(ascii), ConfigureStatus_Name(reply->status), reply->detail);
+        }
+        sendAscii(self, connection->connection_id, ascii, length);
+    }
+
+    sendNextConfigure(self);
+}
+
+static void sendError(SocketcandBridge *self, uint32_t connection_id, const char *detail)
+{
+    char ascii[ASCII_BUFFER_SIZE];
+    size_t length = SocketcandCodec_RenderError(ascii, sizeof(ascii), detail);
+
+    sendAscii(self, connection_id, ascii, length);
 }
 
 static void sendHello(SocketcandBridge *self)

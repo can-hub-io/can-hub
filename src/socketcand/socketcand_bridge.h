@@ -21,7 +21,9 @@
  * Hub side: connect -> HELLO(client) -> LIST (paginated, refreshed) builds the
  * interface catalogue; per socketcand connection an OPEN maps a namespaced bus
  * to a session channel. socketcand side: rawmode only; frames delivered by the
- * hub on a channel fan out to the one connection that owns it.
+ * hub on a channel fan out to the one connection that owns it. Bus
+ * configuration (B / C, before open) goes to the hub as CONFIGURE, one at a
+ * time: CONFIGURE_REPLY carries no correlation, so the rest wait in order.
  */
 
 #define SOCKETCAND_DEVICE_NAME_SIZE 64
@@ -45,6 +47,8 @@ typedef struct {
     uint64_t next_list_at_us;
     uint16_t listing_offset;
     bool listing_active;
+    bool configure_in_flight;
+    uint32_t configuring_connection_id;
     bool beacon_enabled;
     char device_name[SOCKETCAND_DEVICE_NAME_SIZE];
     char beacon_url[SOCKETCAND_URL_SIZE];

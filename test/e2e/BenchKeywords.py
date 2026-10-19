@@ -28,6 +28,7 @@ PRODUCE_SCRIPT = "/work/test/e2e/scripts/produce.py"
 ECHO_PROBE_SCRIPT = "/work/test/e2e/scripts/echo_probe.py"
 LATENCY_SEND_SCRIPT = "/work/test/e2e/scripts/latency_send.py"
 BENCH_SEND_SCRIPT = "/work/test/e2e/scripts/bench_send.py"
+SOCKETCAND_COMMANDS_SCRIPT = "/work/test/e2e/scripts/socketcand_commands.py"
 
 
 @library(scope="GLOBAL")
@@ -605,6 +606,12 @@ class BenchKeywords:
                               str(hold), background=True, log_name="produce")
         process.wait(timeout=float(hold) + 30)
         return json.loads(process.read_log().strip().splitlines()[-1])
+
+    @keyword("Socketcand Replies To ${commands} On ${server}")
+    def socketcand_replies(self, commands, server, timeout=10, host="127.0.0.1", port="29536"):
+        sent = commands if isinstance(commands, list) else [commands]
+        result = server.exec("python3", SOCKETCAND_COMMANDS_SCRIPT, host, str(port), str(timeout), *sent)
+        return json.loads(result.stdout.strip().splitlines()[-1])
 
     @keyword("Start Echo Probe Of ${count} Frames Through Socketcand On ${server} ${channel}")
     def start_echo_probe(self, count, server, channel, own_id="123", seconds=10, host="127.0.0.1", port="29536"):

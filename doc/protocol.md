@@ -628,4 +628,3 @@ This document specifies the can-hub wire protocol only. Foreign protocols are br
 - Flow control / backpressure signalling on the data plane.
 - P2P phase 2: endpoint exchange messages (OFFER/ANSWER pattern).
 - Timestamp cost: u64 is the largest FRAME field. A u32 microsecond timestamp relative to a negotiated session base (wraps every ~71 min) would save 4 bytes per frame.
-- Interface configuration: only bitrate and link up/down ship today (admin-only). Bit timings and FD data parameters are not yet exposed.

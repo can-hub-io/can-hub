@@ -455,7 +455,9 @@ add_unit_test(test_socketcand_bridge
         ${ROOT_SRC_DIR}/socketcand/domain/connection_table.c
         ${ROOT_SRC_DIR}/socketcand/domain/beacon_xml.c
         ${ROOT_SRC_DIR}/protocol/frame_message.c
+        ${ROOT_SRC_DIR}/protocol/ifconfig_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c
+        ${ROOT_SRC_DIR}/protocol/interface_name.c
         ${ROOT_SRC_DIR}/protocol/list_message.c
         ${ROOT_SRC_DIR}/protocol/open_message.c
         ${ROOT_SRC_DIR}/protocol/message_header.c

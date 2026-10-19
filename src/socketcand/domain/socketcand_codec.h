@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "protocol/frame_message.h"
+#include "protocol/ifconfig_message.h"
 
 /*
  * Translates a single socketcand ASCII command (the inner text handed out by
@@ -13,6 +14,9 @@
  * all hex/decimal conversion is done by hand.
  *
  * Bus name holds the namespaced interface "agent_name/interface_name".
+ * The bus configuration commands "< bus B ... >" (bit timing) and
+ * "< bus C ... >" (control modes) parse into the interface settings they
+ * name; a zero bit timing value means "not given", as in socketcand.
  */
 
 #define SOCKETCAND_BUS_NAME_SIZE 160
@@ -24,6 +28,8 @@ typedef enum tsocketcand_command_e {
     kSOCKETCAND_COMMAND_BCMMODE,
     kSOCKETCAND_COMMAND_SEND,
     kSOCKETCAND_COMMAND_ECHO,
+    kSOCKETCAND_COMMAND_BITTIMING,
+    kSOCKETCAND_COMMAND_CONTROLMODE,
     kSOCKETCAND_COMMAND_MAX,
 } TSOCKETCAND_COMMAND;
 
@@ -31,6 +37,7 @@ typedef struct {
     uint8_t kind;
     char bus[SOCKETCAND_BUS_NAME_SIZE];
     FrameMessage frame;
+    InterfaceSettings settings;
 } SocketcandCommand;
 
 bool SocketcandCodec_Parse(const char *text, size_t length, SocketcandCommand *command);
@@ -39,4 +46,5 @@ size_t SocketcandCodec_RenderGreeting(char *out, size_t out_size);
 size_t SocketcandCodec_RenderOk(char *out, size_t out_size);
 size_t SocketcandCodec_RenderEcho(char *out, size_t out_size);
 size_t SocketcandCodec_RenderError(char *out, size_t out_size, const char *detail);
+size_t SocketcandCodec_RenderReasonedError(char *out, size_t out_size, const char *reason, const char *detail);
 size_t SocketcandCodec_RenderFrame(char *out, size_t out_size, const FrameMessage *frame);

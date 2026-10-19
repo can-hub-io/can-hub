@@ -1091,7 +1091,7 @@ static void printConfigureReply(const ConfigureReplyMessage *reply)
             "%s/%s: %s%s%s",
             target_agent,
             target_interface,
-            InterfaceSettingsText_ConfigureStatusName(reply->status),
+            ConfigureStatus_Name(reply->status),
             reply->detail[0] != '\0' ? ": " : "",
             reply->detail
         );

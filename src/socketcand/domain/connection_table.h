@@ -14,7 +14,8 @@
  * delivered frame's channel resolves to exactly one connection. OPEN_ACK only
  * carries interface_id, so concurrent opens of the same interface are matched
  * FIFO by open_seq: the control stream is ordered, so the oldest outstanding
- * OPEN owns the next ACK. Freestanding.
+ * OPEN owns the next ACK. A bus configuration (B / C) waits in the entry
+ * until the bridge sends it; configure_seq orders the queue. Freestanding.
  */
 
 #define SOCKETCAND_CONNECTIONS_MAX 32
@@ -35,6 +36,13 @@ typedef enum tsocketcand_open_state_e {
 } TSOCKETCAND_OPEN_STATE;
 
 typedef struct {
+    bool queued;
+    uint32_t seq;
+    char bus[SOCKETCAND_BUS_NAME_SIZE];
+    InterfaceSettings settings;
+} PendingConfigure;
+
+typedef struct {
     bool in_use;
     uint32_t connection_id;
     AsciiFramer framer;
@@ -46,11 +54,13 @@ typedef struct {
     bool channel_valid;
     bool can_write;
     char bus[SOCKETCAND_BUS_NAME_SIZE];
+    PendingConfigure configure;
 } SocketcandConnection;
 
 typedef struct {
     SocketcandConnection connections[SOCKETCAND_CONNECTIONS_MAX];
     uint32_t next_open_seq;
+    uint32_t next_configure_seq;
 } ConnectionTable;
 
 void ConnectionTable_Reset(ConnectionTable *self);
@@ -59,4 +69,6 @@ SocketcandConnection *ConnectionTable_Find(ConnectionTable *self, uint32_t conne
 SocketcandConnection *ConnectionTable_FindByChannel(ConnectionTable *self, uint8_t channel);
 SocketcandConnection *ConnectionTable_FindPendingOpen(ConnectionTable *self, uint32_t interface_id);
 uint32_t ConnectionTable_NextOpenSeq(ConnectionTable *self);
+void ConnectionTable_QueueConfigure(ConnectionTable *self, SocketcandConnection *connection, const char *bus, const InterfaceSettings *settings);
+SocketcandConnection *ConnectionTable_OldestQueuedConfigure(ConnectionTable *self);
 void ConnectionTable_Remove(ConnectionTable *self, uint32_t connection_id);
