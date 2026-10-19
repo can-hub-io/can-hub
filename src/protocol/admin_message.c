@@ -83,6 +83,17 @@
 #define BRIDGE_ENTRY_FORWARDED_OFFSET 424
 #define BRIDGE_ENTRY_DROPPED_OFFSET 432
 
+#define GROUP_NAME_OFFSET 0
+#define GROUP_FILTER_COUNT_OFFSET 32
+#define GROUP_FILTERS_OFFSET 36
+#define GROUP_MEMBER_OFFSET 32
+#define GROUP_ENTRY_MEMBER_COUNT_OFFSET 33
+#define GROUP_ENTRY_FORWARDED_OFFSET 168
+#define GROUP_ENTRY_DROPPED_OFFSET 176
+#define GROUP_ENTRY_MEMBERS_OFFSET 184
+#define GROUP_ENTRY_MEMBER_SIZE 152
+#define GROUP_ENTRY_MEMBER_STATE_OFFSET 144
+
 static size_t encodeFixedBody(uint8_t type, size_t body_size, uint8_t *buffer, size_t buffer_size, uint8_t **body);
 static bool isNameTerminated(const char *agent_name);
 static size_t encodeAgentName(uint8_t type, const char *agent_name, uint8_t *buffer, size_t buffer_size);
@@ -125,6 +136,10 @@ static void writeBridgeFilters(uint8_t *destination, const CanFilter *filters, u
 static void readBridgeFilters(const uint8_t *source, CanFilter *filters, uint8_t filter_count);
 static void writeBridgeEntry(uint8_t *destination, const AdminBridgeListReplyEntry *entry);
 static bool readBridgeEntry(const uint8_t *source, AdminBridgeListReplyEntry *entry);
+static bool isGroupNameValid(const char *name);
+static bool readGroupName(const uint8_t *source, char *name);
+static void writeGroupEntry(uint8_t *destination, const AdminGroupListReplyEntry *entry);
+static bool readGroupEntry(const uint8_t *source, AdminGroupListReplyEntry *entry);
 
 /* ---------- public ---------- */
 
@@ -1108,6 +1123,184 @@ bool AdminBridgeListReplyMessage_Decode(AdminBridgeListReplyMessage *self, const
     return true;
 }
 
+size_t AdminGroupSetMessage_Encode(const AdminGroupSetMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t total_size;
+
+    if (!isGroupNameValid(self->name) || self->filter_count > SUBSCRIBE_FILTERS_MAX) {
+        return 0;
+    }
+
+    total_size = encodeFixedBody(kMESSAGE_TYPE_ADMIN_GROUP_SET, ADMIN_GROUP_SET_BODY_SIZE, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    memcpy(body + GROUP_NAME_OFFSET, self->name, strlen(self->name));
+    body[GROUP_FILTER_COUNT_OFFSET] = self->filter_count;
+    writeBridgeFilters(body + GROUP_FILTERS_OFFSET, self->filters, self->filter_count);
+
+    return total_size;
+}
+
+bool AdminGroupSetMessage_Decode(AdminGroupSetMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    if (payload_length < ADMIN_GROUP_SET_BODY_SIZE || !readGroupName(payload + GROUP_NAME_OFFSET, self->name)) {
+        return false;
+    }
+
+    self->filter_count = payload[GROUP_FILTER_COUNT_OFFSET];
+    if (self->filter_count > SUBSCRIBE_FILTERS_MAX) {
+        return false;
+    }
+    readBridgeFilters(payload + GROUP_FILTERS_OFFSET, self->filters, self->filter_count);
+
+    return true;
+}
+
+size_t AdminGroupDeleteMessage_Encode(const AdminGroupDeleteMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t total_size;
+
+    if (!isGroupNameValid(self->name)) {
+        return 0;
+    }
+
+    total_size = encodeFixedBody(kMESSAGE_TYPE_ADMIN_GROUP_DELETE, ADMIN_GROUP_DELETE_BODY_SIZE, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    memcpy(body + GROUP_NAME_OFFSET, self->name, strlen(self->name));
+
+    return total_size;
+}
+
+bool AdminGroupDeleteMessage_Decode(AdminGroupDeleteMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    return payload_length >= ADMIN_GROUP_DELETE_BODY_SIZE && readGroupName(payload + GROUP_NAME_OFFSET, self->name);
+}
+
+size_t AdminGroupMemberMessage_Encode(uint8_t type, const AdminGroupMemberMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t total_size;
+
+    if (type != kMESSAGE_TYPE_ADMIN_GROUP_JOIN && type != kMESSAGE_TYPE_ADMIN_GROUP_LEAVE) {
+        return 0;
+    }
+    if (!isGroupNameValid(self->name) || !isBridgeEndpointValid(&self->member)) {
+        return 0;
+    }
+
+    total_size = encodeFixedBody(type, ADMIN_GROUP_MEMBER_BODY_SIZE, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    memcpy(body + GROUP_NAME_OFFSET, self->name, strlen(self->name));
+    writeBridgeEndpoint(body + GROUP_MEMBER_OFFSET, &self->member);
+
+    return total_size;
+}
+
+bool AdminGroupMemberMessage_Decode(AdminGroupMemberMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    if (payload_length < ADMIN_GROUP_MEMBER_BODY_SIZE || !readGroupName(payload + GROUP_NAME_OFFSET, self->name)) {
+        return false;
+    }
+
+    return readBridgeEndpoint(payload + GROUP_MEMBER_OFFSET, &self->member);
+}
+
+size_t AdminGroupReplyMessage_Encode(uint8_t type, const AdminGroupReplyMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    return encodeStatusReply(type, self->status, buffer, buffer_size);
+}
+
+bool AdminGroupReplyMessage_Decode(AdminGroupReplyMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    return decodeStatusReply(&self->status, payload, payload_length, ADMIN_GROUP_REPLY_BODY_SIZE);
+}
+
+size_t AdminGroupListMessage_Encode(const AdminGroupListMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    return encodeOffsetRequest(kMESSAGE_TYPE_ADMIN_GROUP_LIST, self->offset, buffer, buffer_size);
+}
+
+bool AdminGroupListMessage_Decode(AdminGroupListMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    if (payload_length < ADMIN_GROUP_LIST_BODY_SIZE) {
+        return false;
+    }
+
+    self->offset = Wire_ReadU16(payload + OFFSET_OFFSET);
+
+    return true;
+}
+
+size_t AdminGroupListReplyMessage_Encode(const AdminGroupListReplyMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t body_size;
+    size_t total_size;
+    uint8_t i;
+
+    if (self->count > ADMIN_GROUP_LIST_REPLY_ENTRIES_MAX) {
+        return 0;
+    }
+    for(i=0; i<self->count; i++) {
+        if (!isGroupNameValid(self->entries[i].name)) {
+            return 0;
+        }
+        if (self->entries[i].filter_count > SUBSCRIBE_FILTERS_MAX || self->entries[i].member_count > ADMIN_GROUP_MEMBERS_MAX) {
+            return 0;
+        }
+    }
+
+    body_size = ADMIN_GROUP_LIST_REPLY_FIXED_FIELDS_SIZE + (size_t)self->count * ADMIN_GROUP_LIST_REPLY_ENTRY_SIZE;
+    total_size = encodeFixedBody(kMESSAGE_TYPE_ADMIN_GROUP_LIST_REPLY, body_size, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    body[COUNT_OFFSET] = self->count;
+    body[FLAGS_OFFSET] = self->flags;
+    for(i=0; i<self->count; i++) {
+        writeGroupEntry(body + ENTRIES_OFFSET + i * ADMIN_GROUP_LIST_REPLY_ENTRY_SIZE, &self->entries[i]);
+    }
+
+    return total_size;
+}
+
+bool AdminGroupListReplyMessage_Decode(AdminGroupListReplyMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    uint8_t i;
+
+    if (payload_length < ADMIN_GROUP_LIST_REPLY_FIXED_FIELDS_SIZE) {
+        return false;
+    }
+
+    self->count = payload[COUNT_OFFSET];
+    self->flags = payload[FLAGS_OFFSET];
+    if (self->count > ADMIN_GROUP_LIST_REPLY_ENTRIES_MAX) {
+        return false;
+    }
+    if (payload_length < ADMIN_GROUP_LIST_REPLY_FIXED_FIELDS_SIZE + (size_t)self->count * ADMIN_GROUP_LIST_REPLY_ENTRY_SIZE) {
+        return false;
+    }
+
+    for(i=0; i<self->count; i++) {
+        if (!readGroupEntry(payload + ENTRIES_OFFSET + i * ADMIN_GROUP_LIST_REPLY_ENTRY_SIZE, &self->entries[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 /* ---------- private ---------- */
 
 static size_t encodeFixedBody(uint8_t type, size_t body_size, uint8_t *buffer, size_t buffer_size, uint8_t **body)
@@ -1492,6 +1685,65 @@ static bool readBridgeEntry(const uint8_t *source, AdminBridgeListReplyEntry *en
     readBridgeFilters(source + BRIDGE_FILTERS_OFFSET, entry->filters, entry->filter_count);
     entry->forwarded = Wire_ReadU64(source + BRIDGE_ENTRY_FORWARDED_OFFSET);
     entry->dropped = Wire_ReadU64(source + BRIDGE_ENTRY_DROPPED_OFFSET);
+
+    return true;
+}
+
+static bool isGroupNameValid(const char *name)
+{
+    return name[ADMIN_GROUP_NAME_SIZE - 1] == '\0' && name[0] != '\0';
+}
+
+static bool readGroupName(const uint8_t *source, char *name)
+{
+    memcpy(name, source, ADMIN_GROUP_NAME_SIZE);
+    name[ADMIN_GROUP_NAME_SIZE - 1] = '\0';
+
+    return name[0] != '\0';
+}
+
+static void writeGroupEntry(uint8_t *destination, const AdminGroupListReplyEntry *entry)
+{
+    uint8_t *member;
+    uint8_t i;
+
+    memcpy(destination + GROUP_NAME_OFFSET, entry->name, strlen(entry->name));
+    destination[GROUP_FILTER_COUNT_OFFSET] = entry->filter_count;
+    destination[GROUP_ENTRY_MEMBER_COUNT_OFFSET] = entry->member_count;
+    writeBridgeFilters(destination + GROUP_FILTERS_OFFSET, entry->filters, entry->filter_count);
+    Wire_WriteU64(destination + GROUP_ENTRY_FORWARDED_OFFSET, entry->forwarded);
+    Wire_WriteU64(destination + GROUP_ENTRY_DROPPED_OFFSET, entry->dropped);
+    for(i=0; i<entry->member_count; i++) {
+        member = destination + GROUP_ENTRY_MEMBERS_OFFSET + i * GROUP_ENTRY_MEMBER_SIZE;
+        writeBridgeEndpoint(member, &entry->members[i].endpoint);
+        member[GROUP_ENTRY_MEMBER_STATE_OFFSET] = entry->members[i].state;
+    }
+}
+
+static bool readGroupEntry(const uint8_t *source, AdminGroupListReplyEntry *entry)
+{
+    const uint8_t *member;
+    uint8_t i;
+
+    if (!readGroupName(source + GROUP_NAME_OFFSET, entry->name)) {
+        return false;
+    }
+
+    entry->filter_count = source[GROUP_FILTER_COUNT_OFFSET];
+    entry->member_count = source[GROUP_ENTRY_MEMBER_COUNT_OFFSET];
+    if (entry->filter_count > SUBSCRIBE_FILTERS_MAX || entry->member_count > ADMIN_GROUP_MEMBERS_MAX) {
+        return false;
+    }
+    readBridgeFilters(source + GROUP_FILTERS_OFFSET, entry->filters, entry->filter_count);
+    entry->forwarded = Wire_ReadU64(source + GROUP_ENTRY_FORWARDED_OFFSET);
+    entry->dropped = Wire_ReadU64(source + GROUP_ENTRY_DROPPED_OFFSET);
+    for(i=0; i<entry->member_count; i++) {
+        member = source + GROUP_ENTRY_MEMBERS_OFFSET + i * GROUP_ENTRY_MEMBER_SIZE;
+        if (!readBridgeEndpoint(member, &entry->members[i].endpoint)) {
+            return false;
+        }
+        entry->members[i].state = member[GROUP_ENTRY_MEMBER_STATE_OFFSET];
+    }
 
     return true;
 }

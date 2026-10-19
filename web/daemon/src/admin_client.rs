@@ -9,7 +9,7 @@
 use std::io::{self, Read, Write};
 
 use crate::protocol::admin::{
-    self, AclEntry, AclLevel, AgentEntry, BridgeEndpoint, BridgeEntry, CanFilter, ClientEntry, ConfigureOp, ConfigureReply, InterfaceEntry,
+    self, AclEntry, AclLevel, AgentEntry, BridgeEndpoint, BridgeEntry, CanFilter, GroupEntry, ClientEntry, ConfigureOp, ConfigureReply, InterfaceEntry,
     InterfaceSettings, Page, PeerEntry,
     PinEntry, RejectedEntry, Status,
 };
@@ -100,6 +100,10 @@ impl<T: Read + Write> AdminClient<T> {
         self.fetch_all(|offset| admin::encode_bridge_list(offset).to_vec(), admin::decode_bridge_list_reply)
     }
 
+    pub fn groups(&mut self) -> Result<Vec<GroupEntry>> {
+        self.fetch_all(|offset| admin::encode_group_list(offset).to_vec(), admin::decode_group_list_reply)
+    }
+
     pub fn rejected(&mut self) -> Result<Vec<RejectedEntry>> {
         self.fetch_all(|offset| admin::encode_rejected(offset).to_vec(), admin::decode_rejected_reply)
     }
@@ -134,6 +138,26 @@ impl<T: Read + Write> AdminClient<T> {
     pub fn bridge_delete(&mut self, source: &BridgeEndpoint, destination: &BridgeEndpoint) -> Result<u8> {
         let reply = self.exchange(&admin::encode_bridge_delete(source, destination))?;
         Ok(admin::decode_status_byte(&reply, MessageType::AdminBridgeDeleteReply)?)
+    }
+
+    pub fn group_set(&mut self, name: &str, filters: &[CanFilter]) -> Result<u8> {
+        let reply = self.exchange(&admin::encode_group_set(name, filters))?;
+        Ok(admin::decode_status_byte(&reply, MessageType::AdminGroupSetReply)?)
+    }
+
+    pub fn group_delete(&mut self, name: &str) -> Result<u8> {
+        let reply = self.exchange(&admin::encode_group_delete(name))?;
+        Ok(admin::decode_status_byte(&reply, MessageType::AdminGroupDeleteReply)?)
+    }
+
+    pub fn group_join(&mut self, name: &str, member: &BridgeEndpoint) -> Result<u8> {
+        let reply = self.exchange(&admin::encode_group_member(MessageType::AdminGroupJoin, name, member))?;
+        Ok(admin::decode_status_byte(&reply, MessageType::AdminGroupJoinReply)?)
+    }
+
+    pub fn group_leave(&mut self, name: &str, member: &BridgeEndpoint) -> Result<u8> {
+        let reply = self.exchange(&admin::encode_group_member(MessageType::AdminGroupLeave, name, member))?;
+        Ok(admin::decode_status_byte(&reply, MessageType::AdminGroupLeaveReply)?)
     }
 
     pub fn acl_set(

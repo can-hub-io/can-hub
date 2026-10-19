@@ -5,6 +5,7 @@
 
 extern "C" {
 #include "hub/domain/bridge_routes.h"
+#include "hub/domain/bridge_targets.h"
 #include "protocol/frame_message.h"
 }
 
@@ -13,10 +14,11 @@ extern "C" {
 #define RANGE_MASK 0x700
 
 static BridgeRoutes routes;
-static uint8_t slot_indices[BRIDGE_ROUTES_MAX];
+static BridgeGroups no_groups;
+static BridgeTarget targets[BRIDGE_TARGETS_MAX];
 
 static BridgeRoute route(const char *source_agent, const char *destination_agent);
-static uint8_t matching(const char *agent_name, uint32_t can_id);
+static uint16_t matching(const char *agent_name, uint32_t can_id);
 
 describe("bridge_routes", []() {
     beforeEach([]() {
@@ -28,8 +30,8 @@ describe("bridge_routes", []() {
 
         BridgeRoutes_Set(&routes, &truck_to_bus);
 
-        expect(matching("truck42", PASSED_ID)).toBe(1);
-        expect(matching("bus7", PASSED_ID)).toBe(0);
+        expect(matching("truck42", PASSED_ID)).toBe((uint16_t)1);
+        expect(matching("bus7", PASSED_ID)).toBe((uint16_t)0);
     });
 
     it("matches only the ids its filters name", []() {
@@ -39,8 +41,8 @@ describe("bridge_routes", []() {
         filtered.filters[0] = { PASSED_ID, FRAME_CAN_ID_MASK };
         BridgeRoutes_Set(&routes, &filtered);
 
-        expect(matching("truck42", PASSED_ID)).toBe(1);
-        expect(matching("truck42", OTHER_ID)).toBe(0);
+        expect(matching("truck42", PASSED_ID)).toBe((uint16_t)1);
+        expect(matching("truck42", OTHER_ID)).toBe((uint16_t)0);
     });
 
     it("matches a range through the mask", []() {
@@ -50,8 +52,8 @@ describe("bridge_routes", []() {
         ranged.filters[0] = { PASSED_ID, RANGE_MASK };
         BridgeRoutes_Set(&routes, &ranged);
 
-        expect(matching("truck42", PASSED_ID + 0x7F)).toBe(1);
-        expect(matching("truck42", OTHER_ID)).toBe(0);
+        expect(matching("truck42", PASSED_ID + 0x7F)).toBe((uint16_t)1);
+        expect(matching("truck42", OTHER_ID)).toBe((uint16_t)0);
     });
 
     it("never matches an error frame", []() {
@@ -59,7 +61,7 @@ describe("bridge_routes", []() {
 
         BridgeRoutes_Set(&routes, &truck_to_bus);
 
-        expect(matching("truck42", FRAME_CAN_ID_FLAG_ERR | PASSED_ID)).toBe(0);
+        expect(matching("truck42", FRAME_CAN_ID_FLAG_ERR | PASSED_ID)).toBe((uint16_t)0);
     });
 
     it("matches every route out of the same bus", []() {
@@ -69,7 +71,7 @@ describe("bridge_routes", []() {
         BridgeRoutes_Set(&routes, &to_bus);
         BridgeRoutes_Set(&routes, &to_lab);
 
-        expect(matching("truck42", PASSED_ID)).toBe(2);
+        expect(matching("truck42", PASSED_ID)).toBe((uint16_t)2);
     });
 
     it("keeps one route per pair of buses and its counters", []() {
@@ -116,7 +118,7 @@ describe("bridge_routes", []() {
 
         BridgeRoutes_Remove(&routes, &truck_to_bus.source, &truck_to_bus.destination);
 
-        expect(matching("truck42", PASSED_ID)).toBe(0);
+        expect(matching("truck42", PASSED_ID)).toBe((uint16_t)0);
         expect(BridgeRoutes_IsEmpty(&routes)).toBe(true);
         expect(BridgeRoutes_Find(&routes, &truck_to_bus.source, &truck_to_bus.destination) == nullptr).toBe(true);
     });
@@ -135,7 +137,14 @@ static BridgeRoute route(const char *source_agent, const char *destination_agent
     return built;
 }
 
-static uint8_t matching(const char *agent_name, uint32_t can_id)
+static uint16_t matching(const char *agent_name, uint32_t can_id)
 {
-    return BridgeRoutes_Matching(&routes, agent_name, "can0", can_id, slot_indices);
+    BridgeEndpoint source;
+
+    memset(&source, 0, sizeof(source));
+    snprintf(source.agent_name, sizeof(source.agent_name), "%s", agent_name);
+    snprintf(source.interface_name, sizeof(source.interface_name), "can0");
+    BridgeGroups_Reset(&no_groups);
+
+    return BridgeTargets_Collect(&routes, &no_groups, &source, can_id, targets);
 }

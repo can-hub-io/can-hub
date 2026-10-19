@@ -81,6 +81,16 @@ offset  size  field
 0x2F  ADMIN_BRIDGE_DELETE_REPLY
 0x30  ADMIN_BRIDGE_LIST   admin: bridge routes with counters (paginated)
 0x31  ADMIN_BRIDGE_LIST_REPLY
+0x32  ADMIN_GROUP_SET     admin: create a bridge group or replace its filters
+0x33  ADMIN_GROUP_SET_REPLY
+0x34  ADMIN_GROUP_DELETE  admin: drop a bridge group
+0x35  ADMIN_GROUP_DELETE_REPLY
+0x36  ADMIN_GROUP_JOIN    admin: add a bus to a bridge group
+0x37  ADMIN_GROUP_JOIN_REPLY
+0x38  ADMIN_GROUP_LEAVE   admin: remove a bus from a bridge group
+0x39  ADMIN_GROUP_LEAVE_REPLY
+0x3A  ADMIN_GROUP_LIST    admin: bridge groups with members and counters (one per page)
+0x3B  ADMIN_GROUP_LIST_REPLY
 0x7F  PING/PONG    liveness (flags bit 0: reply)
 ```
 
@@ -541,6 +551,54 @@ ADMIN_BRIDGE_LIST_REPLY (total 8 + count * 440)
 A route is keyed by its two endpoints; setting it again replaces its filters.
 Routes name interfaces, not ids, so they outlive the agents that serve them.
 The hub holds up to 64 and persists them in hub.db.
+
+ADMIN_GROUP_SET (total 168)
+@4   name char[32]     (1-31 of A-Z a-z 0-9 . _ -)
+@36  filter_count u8   (0-16; 0 bridges every frame)
+@37  reserved u8[3]
+@40  filters, 16 slots of 8 bytes as in ADMIN_BRIDGE_SET
+
+ADMIN_GROUP_DELETE (total 36)
+@4   name char[32]
+
+ADMIN_GROUP_JOIN / ADMIN_GROUP_LEAVE (total 180)
+@4   name char[32]
+@36  member agent_name char[128]
+@164 member interface_name char[16]
+
+ADMIN_GROUP_*_REPLY (total 8)
+@4   status u8 (codes as in ADMIN_BRIDGE_SET_REPLY: 1 bad name, 2 no more
+                groups or the group already has 16 members, 3 could not be
+                stored, 4 no such group or member; joining a member twice is ok)
+@5   reserved u8[3]
+
+ADMIN_GROUP_LIST (total 8)
+@4   offset u16        (pagination start index)
+@6   reserved u16
+
+ADMIN_GROUP_LIST_REPLY (total 8 + count * 2616)
+@4   count u8          (0-1 groups in this reply)
+@5   flags u8          (bit 0: more groups beyond offset + count)
+@6   reserved u16
+@8   entries, each 2616 bytes:
+     +0   name char[32]
+     +32  filter_count u8
+     +33  member_count u8 (0-16)
+     +34  reserved u16
+     +36  filters, 16 slots of 8 bytes
+     +164 reserved u32
+     +168 forwarded u64
+     +176 dropped u64  (frames for a member that was offline)
+     +184 members, 16 slots of 152 bytes:
+          +0   agent_name char[128], interface_name char[16]
+          +144 state u8 (bit 0: online)
+          +145 reserved u8[7]
+
+A frame captured on a member that passes the group filters is injected into
+every other member of the group. A bus reached by several routes and groups
+is injected once, charged to the first one that reaches it; the source bus
+is never a target. The hub holds up to 16 groups of up to 16 members, in
+hub.db.
 
 The hub remembers the last 16 identities it turned away, in memory, one entry
 per fingerprint and role. A retry bumps attempts instead of taking another

@@ -215,7 +215,9 @@ set(HUB_SOURCES
     src/hub/domain/egress_queue.c
     src/hub/domain/frame_routes.c
     src/hub/domain/hub_peer.c
+    src/hub/domain/bridge_groups.c
     src/hub/domain/bridge_routes.c
+    src/hub/domain/bridge_targets.c
     src/hub/domain/interface_registry.c
     src/hub/domain/peer_directory.c
     src/hub/domain/rejected_peers.c

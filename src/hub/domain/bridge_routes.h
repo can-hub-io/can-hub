@@ -42,6 +42,8 @@ typedef struct {
     uint8_t count;
 } BridgeRoutes;
 
+bool BridgeFilters_Pass(const CanFilter *filters, uint8_t filter_count, uint32_t can_id);
+bool BridgeEndpoint_IsNamed(const BridgeEndpoint *self);
 bool BridgeRoute_IsValid(const BridgeRoute *route);
 bool BridgeRoute_Passes(const BridgeRoute *route, uint32_t can_id);
 bool BridgeEndpoint_Equals(const BridgeEndpoint *self, const BridgeEndpoint *other);
@@ -57,12 +59,5 @@ const BridgeRouteSlot *BridgeRoutes_Find(
 );
 bool BridgeRoutes_IsEmpty(const BridgeRoutes *self);
 bool BridgeRoutes_HasRoom(const BridgeRoutes *self, const BridgeRoute *route);
-uint8_t BridgeRoutes_Matching(
-    const BridgeRoutes *self,
-    const char *agent_name,
-    const char *interface_name,
-    uint32_t can_id,
-    uint8_t *slot_indices
-);
 BridgeRouteSlot *BridgeRoutes_Slot(BridgeRoutes *self, uint8_t slot_index);
 const BridgeRouteSlot *BridgeRoutes_Nth(const BridgeRoutes *self, uint16_t position);

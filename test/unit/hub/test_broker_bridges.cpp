@@ -18,6 +18,8 @@ extern "C" {
 #define ADMIN_PEER 300
 #define TRUCK_CAN0_CHANNEL 0
 #define BUS_CAN0_CHANNEL 0
+#define LAB_PEER 102
+#define LAB_CAN0_CHANNEL 0
 #define BUS_INTERFACE_INDEX 2
 #define PASSED_ID 0x100
 #define FILTERED_ID 0x200
@@ -29,6 +31,8 @@ typedef struct {
     BridgeStorePort port;
     BridgeRoute routes[BRIDGE_ROUTES_MAX];
     uint16_t route_count;
+    BridgeGroup groups[BRIDGE_GROUPS_MAX];
+    uint16_t group_count;
     bool save_result;
 } BridgeStoreMock;
 
@@ -38,6 +42,8 @@ static BridgeStoreMock store;
 static HubTransportEvents events;
 static const RegisterMessage truck_registration = { "truck42", 2, { "can0", "can1" } };
 static const RegisterMessage bus_registration = { "bus7", 1, { "can0" } };
+static const RegisterMessage lab_registration = { "lab", 1, { "can0" } };
+static AdminGroupListReplyMessage listed_group;
 static uint8_t reply_status;
 static AdminBridgeListReplyMessage listed;
 static FrameMessage injected;
@@ -47,6 +53,12 @@ static void startHub(void);
 static void connectAgents(void);
 static void addBridge(const char *source, const char *destination, uint8_t id_count, const uint32_t *ids);
 static void deleteBridge(const char *source, const char *destination);
+static void addGroup(const char *name, uint8_t id_count, const uint32_t *ids);
+static void joinGroup(const char *name, const char *member);
+static void leaveGroup(const char *name, const char *member);
+static void deleteGroup(const char *name);
+static void listGroups(void);
+static void connectLab(void);
 static void listBridges(void);
 static void frameFromAgent(uint32_t agent_peer_id, uint8_t channel, uint32_t can_id, uint8_t route_flags);
 static void echoFromBus(uint8_t token);
@@ -55,11 +67,18 @@ static FrameMessage lastFrameTo(uint32_t peer_id);
 static uint8_t tokenOf(const FrameMessage *frame);
 static void openBusAsClient(void);
 static void storeRoute(const char *source, const char *destination);
+static void storeGroup(const char *name, const char *first, const char *second);
 static void endpointFrom(const char *text, AdminBridgeEndpoint *endpoint);
 static void sendAdmin(const uint8_t *encoded, size_t encoded_size);
 static bool storeSave(void *context, const BridgeRoute *route);
 static bool storeRemove(void *context, const BridgeEndpoint *source, const BridgeEndpoint *destination);
 static bool storeLoad(void *context, uint16_t position, BridgeRoute *route);
+static bool storeSaveGroup(void *context, const BridgeGroup *group);
+static bool storeRemoveGroup(void *context, const char *name);
+static bool storeAddMember(void *context, const char *name, const BridgeEndpoint *member);
+static bool storeRemoveMember(void *context, const char *name, const BridgeEndpoint *member);
+static bool storeLoadGroup(void *context, uint16_t position, BridgeGroup *group);
+static BridgeGroup *storedGroup(BridgeStoreMock *self, const char *name);
 
 describe("broker bus bridges", []() {
     describe("routing", []() {
@@ -249,6 +268,147 @@ describe("broker bus bridges", []() {
             expect(framesTo(BUS_PEER)).toBe(1);
         });
     });
+
+    describe("groups", []() {
+        beforeEach([]() {
+            resetStore();
+            startHub();
+            connectAgents();
+            connectLab();
+        });
+
+        it("injects a frame of a member into every other member", []() {
+            addGroup("fleet", 0, NULL);
+            joinGroup("fleet", "truck42/can0");
+            joinGroup("fleet", "bus7/can0");
+            joinGroup("fleet", "lab/can0");
+
+            frameFromAgent(TRUCK_PEER, TRUCK_CAN0_CHANNEL, PASSED_ID, 0);
+
+            expect(framesTo(BUS_PEER)).toBe(1);
+            expect(framesTo(LAB_PEER)).toBe(1);
+            expect(framesTo(TRUCK_PEER)).toBe(0);
+        });
+
+        it("never bridges the echo of a group injection again", []() {
+            addGroup("fleet", 0, NULL);
+            joinGroup("fleet", "truck42/can0");
+            joinGroup("fleet", "bus7/can0");
+            joinGroup("fleet", "lab/can0");
+            frameFromAgent(TRUCK_PEER, TRUCK_CAN0_CHANNEL, PASSED_ID, 0);
+            injected = lastFrameTo(BUS_PEER);
+            HubTransportPortMock_Reset(&transport);
+
+            echoFromBus(tokenOf(&injected));
+
+            expect(framesTo(TRUCK_PEER)).toBe(0);
+            expect(framesTo(LAB_PEER)).toBe(0);
+        });
+
+        it("injects only the ids the group filters let through", []() {
+            const uint32_t ids[] = { PASSED_ID };
+
+            addGroup("fleet", 1, ids);
+            joinGroup("fleet", "truck42/can0");
+            joinGroup("fleet", "bus7/can0");
+
+            frameFromAgent(TRUCK_PEER, TRUCK_CAN0_CHANNEL, FILTERED_ID, 0);
+
+            expect(framesTo(BUS_PEER)).toBe(0);
+        });
+
+        it("injects once into a bus a route and a group both reach", []() {
+            addBridge("truck42/can0", "bus7/can0", 0, NULL);
+            addGroup("fleet", 0, NULL);
+            joinGroup("fleet", "truck42/can0");
+            joinGroup("fleet", "bus7/can0");
+
+            frameFromAgent(TRUCK_PEER, TRUCK_CAN0_CHANNEL, PASSED_ID, 0);
+
+            expect(framesTo(BUS_PEER)).toBe(1);
+        });
+
+        it("stops feeding a member that left", []() {
+            addGroup("fleet", 0, NULL);
+            joinGroup("fleet", "truck42/can0");
+            joinGroup("fleet", "bus7/can0");
+            joinGroup("fleet", "lab/can0");
+
+            leaveGroup("fleet", "lab/can0");
+            frameFromAgent(TRUCK_PEER, TRUCK_CAN0_CHANNEL, PASSED_ID, 0);
+
+            expect(framesTo(LAB_PEER)).toBe(0);
+            expect(framesTo(BUS_PEER)).toBe(1);
+        });
+
+        it("lists a group with its members and their state", []() {
+            addGroup("fleet", 0, NULL);
+            joinGroup("fleet", "truck42/can0");
+            joinGroup("fleet", "ghost/can0");
+            frameFromAgent(TRUCK_PEER, TRUCK_CAN0_CHANNEL, PASSED_ID, 0);
+
+            listGroups();
+
+            expect(listed_group.count).toBe(1);
+            expect((const char *)listed_group.entries[0].name).toBe("fleet");
+            expect(listed_group.entries[0].member_count).toBe(2);
+            expect(listed_group.entries[0].members[0].state).toBe((uint8_t)ADMIN_GROUP_MEMBER_ONLINE);
+            expect(listed_group.entries[0].members[1].state).toBe((uint8_t)0);
+            expect(listed_group.entries[0].dropped).toBe((uint64_t)1);
+        });
+
+        it("counts what a group forwards", []() {
+            addGroup("fleet", 0, NULL);
+            joinGroup("fleet", "truck42/can0");
+            joinGroup("fleet", "bus7/can0");
+            joinGroup("fleet", "ghost/can0");
+            frameFromAgent(TRUCK_PEER, TRUCK_CAN0_CHANNEL, PASSED_ID, 0);
+
+            listGroups();
+
+            expect(listed_group.entries[0].forwarded).toBe((uint64_t)1);
+            expect(listed_group.entries[0].dropped).toBe((uint64_t)1);
+        });
+
+        it("refuses a group name with a space", []() {
+            addGroup("my fleet", 0, NULL);
+
+            expect(reply_status).toBe((uint8_t)ADMIN_BRIDGE_STATUS_INVALID);
+        });
+
+        it("refuses a member into a group it does not hold", []() {
+            joinGroup("fleet", "truck42/can0");
+
+            expect(reply_status).toBe((uint8_t)ADMIN_BRIDGE_STATUS_UNKNOWN);
+        });
+
+        it("writes a group and its members to the store and drops them on delete", []() {
+            uint8_t stored_members;
+
+            addGroup("fleet", 0, NULL);
+            joinGroup("fleet", "truck42/can0");
+            stored_members = store.groups[0].member_count;
+
+            deleteGroup("fleet");
+
+            expect(stored_members).toBe(1);
+            expect(store.group_count).toBe((uint16_t)0);
+            expect(reply_status).toBe((uint8_t)ADMIN_BRIDGE_STATUS_OK);
+        });
+    });
+
+    describe("group start", []() {
+        it("applies the groups the store holds", []() {
+            resetStore();
+            storeGroup("fleet", "truck42/can0", "bus7/can0");
+            startHub();
+            connectAgents();
+
+            frameFromAgent(TRUCK_PEER, TRUCK_CAN0_CHANNEL, PASSED_ID, 0);
+
+            expect(framesTo(BUS_PEER)).toBe(1);
+        });
+    });
 });
 
 /* ---------- private ---------- */
@@ -260,6 +420,11 @@ static void resetStore(void)
     store.port.save = storeSave;
     store.port.remove = storeRemove;
     store.port.load = storeLoad;
+    store.port.save_group = storeSaveGroup;
+    store.port.remove_group = storeRemoveGroup;
+    store.port.add_member = storeAddMember;
+    store.port.remove_member = storeRemoveMember;
+    store.port.load_group = storeLoadGroup;
     store.save_result = true;
 }
 
@@ -400,6 +565,7 @@ static void sendAdmin(const uint8_t *encoded, size_t encoded_size)
     const uint8_t *reply;
     AdminBridgeSetReplyMessage set_reply;
     AdminBridgeDeleteReplyMessage delete_reply;
+    AdminGroupReplyMessage group_reply;
 
     HubTransportPortMock_Reset(&transport);
     events.on_peer_control(events.context, ADMIN_PEER, encoded, encoded_size, 0);
@@ -414,6 +580,11 @@ static void sendAdmin(const uint8_t *encoded, size_t encoded_size)
         reply_status = delete_reply.status;
     } else if (header.type == kMESSAGE_TYPE_ADMIN_BRIDGE_LIST_REPLY) {
         AdminBridgeListReplyMessage_Decode(&listed, reply + MESSAGE_HEADER_SIZE, header.length);
+    } else if (header.type == kMESSAGE_TYPE_ADMIN_GROUP_LIST_REPLY) {
+        AdminGroupListReplyMessage_Decode(&listed_group, reply + MESSAGE_HEADER_SIZE, header.length);
+    } else {
+        AdminGroupReplyMessage_Decode(&group_reply, reply + MESSAGE_HEADER_SIZE, header.length);
+        reply_status = group_reply.status;
     }
 }
 
@@ -462,6 +633,172 @@ static bool storeLoad(void *context, uint16_t position, BridgeRoute *route)
     }
 
     *route = self->routes[position];
+
+    return true;
+}
+
+static void addGroup(const char *name, uint8_t id_count, const uint32_t *ids)
+{
+    AdminGroupSetMessage request;
+    uint8_t encoded[ADMIN_REQUEST_BUFFER_SIZE];
+    uint8_t i;
+
+    memset(&request, 0, sizeof(request));
+    snprintf(request.name, sizeof(request.name), "%s", name);
+    request.filter_count = id_count;
+    for(i=0; i<id_count; i++) {
+        request.filters[i].can_id = ids[i];
+        request.filters[i].can_mask = EXACT_MASK;
+    }
+
+    sendAdmin(encoded, AdminGroupSetMessage_Encode(&request, encoded, sizeof(encoded)));
+}
+
+static void joinGroup(const char *name, const char *member)
+{
+    AdminGroupMemberMessage request;
+    uint8_t encoded[ADMIN_REQUEST_BUFFER_SIZE];
+
+    memset(&request, 0, sizeof(request));
+    snprintf(request.name, sizeof(request.name), "%s", name);
+    endpointFrom(member, &request.member);
+
+    sendAdmin(encoded, AdminGroupMemberMessage_Encode(kMESSAGE_TYPE_ADMIN_GROUP_JOIN, &request, encoded, sizeof(encoded)));
+}
+
+static void leaveGroup(const char *name, const char *member)
+{
+    AdminGroupMemberMessage request;
+    uint8_t encoded[ADMIN_REQUEST_BUFFER_SIZE];
+
+    memset(&request, 0, sizeof(request));
+    snprintf(request.name, sizeof(request.name), "%s", name);
+    endpointFrom(member, &request.member);
+
+    sendAdmin(encoded, AdminGroupMemberMessage_Encode(kMESSAGE_TYPE_ADMIN_GROUP_LEAVE, &request, encoded, sizeof(encoded)));
+}
+
+static void deleteGroup(const char *name)
+{
+    AdminGroupDeleteMessage request;
+    uint8_t encoded[ADMIN_REQUEST_BUFFER_SIZE];
+
+    memset(&request, 0, sizeof(request));
+    snprintf(request.name, sizeof(request.name), "%s", name);
+
+    sendAdmin(encoded, AdminGroupDeleteMessage_Encode(&request, encoded, sizeof(encoded)));
+}
+
+static void listGroups(void)
+{
+    AdminGroupListMessage request = { 0 };
+    uint8_t encoded[ADMIN_REQUEST_BUFFER_SIZE];
+
+    sendAdmin(encoded, AdminGroupListMessage_Encode(&request, encoded, sizeof(encoded)));
+}
+
+static void connectLab(void)
+{
+    BrokerDriver_ConnectAgent(&events, &transport, LAB_PEER, &lab_registration);
+    HubTransportPortMock_Reset(&transport);
+}
+
+static void storeGroup(const char *name, const char *first, const char *second)
+{
+    BridgeGroup *group = &store.groups[store.group_count++];
+
+    memset(group, 0, sizeof(*group));
+    snprintf(group->name, sizeof(group->name), "%s", name);
+    InterfaceName_Split(first, group->members[0].agent_name, group->members[0].interface_name);
+    InterfaceName_Split(second, group->members[1].agent_name, group->members[1].interface_name);
+    group->member_count = 2;
+}
+
+static BridgeGroup *storedGroup(BridgeStoreMock *self, const char *name)
+{
+    uint16_t i;
+
+    for(i=0; i<self->group_count; i++) {
+        if (strcmp(self->groups[i].name, name) == 0) {
+            return &self->groups[i];
+        }
+    }
+
+    return NULL;
+}
+
+static bool storeSaveGroup(void *context, const BridgeGroup *group)
+{
+    BridgeStoreMock *self = (BridgeStoreMock *)context;
+    BridgeGroup *stored = storedGroup(self, group->name);
+
+    if (!self->save_result) {
+        return false;
+    }
+    if (stored == NULL) {
+        stored = &self->groups[self->group_count++];
+        memset(stored, 0, sizeof(*stored));
+        memcpy(stored->name, group->name, sizeof(stored->name));
+    }
+    stored->filter_count = group->filter_count;
+    memcpy(stored->filters, group->filters, sizeof(stored->filters));
+
+    return true;
+}
+
+static bool storeRemoveGroup(void *context, const char *name)
+{
+    BridgeStoreMock *self = (BridgeStoreMock *)context;
+    BridgeGroup *stored = storedGroup(self, name);
+
+    if (stored != NULL) {
+        *stored = self->groups[--self->group_count];
+    }
+
+    return true;
+}
+
+static bool storeAddMember(void *context, const char *name, const BridgeEndpoint *member)
+{
+    BridgeStoreMock *self = (BridgeStoreMock *)context;
+    BridgeGroup *stored = storedGroup(self, name);
+
+    if (stored == NULL) {
+        return false;
+    }
+    stored->members[stored->member_count++] = *member;
+
+    return true;
+}
+
+static bool storeRemoveMember(void *context, const char *name, const BridgeEndpoint *member)
+{
+    BridgeStoreMock *self = (BridgeStoreMock *)context;
+    BridgeGroup *stored = storedGroup(self, name);
+    uint8_t i;
+
+    if (stored == NULL) {
+        return false;
+    }
+    for(i=0; i<stored->member_count; i++) {
+        if (BridgeEndpoint_Equals(&stored->members[i], member)) {
+            stored->members[i] = stored->members[--stored->member_count];
+            return true;
+        }
+    }
+
+    return true;
+}
+
+static bool storeLoadGroup(void *context, uint16_t position, BridgeGroup *group)
+{
+    BridgeStoreMock *self = (BridgeStoreMock *)context;
+
+    if (position >= self->group_count) {
+        return false;
+    }
+
+    *group = self->groups[position];
 
     return true;
 }

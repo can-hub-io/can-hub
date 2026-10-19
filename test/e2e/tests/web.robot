@@ -181,6 +181,36 @@ A Bridge Route Can Be Deleted Once
     Status Of ${deleted} Should Be    200
     Status Of ${deleted_again} Should Be    404
 
+A Bridge Group Is Listed With Its Members
+    ${group}=    Set Variable    ${{ {"name": "fleet", "filters": [{"canId": 256, "canMask": 1792}]} }}
+    ${member}=    Set Variable    ${{ {"name": "fleet", "member": {"agentName": "truck42", "interfaceName": "vcan0"}} }}
+    POST /api/bridge-groups On ${WEB} With ${group}
+
+    ${joined}=    POST /api/bridge-groups/members On ${WEB} With ${member}
+    ${groups}=    GET /api/bridge-groups On ${WEB}
+
+    Status Of ${joined} Should Be    200
+    Each Item Of ${groups} Should Match    BridgeGroup
+    Should Be Equal    ${groups.json}[0][members][0][agentName]    truck42
+    Should Be True    ${groups.json}[0][members][0][online]
+
+A Bridge Group With A Bad Name Is A Bad Request
+    ${group}=    Set Variable    ${{ {"name": "my fleet"} }}
+
+    ${refused}=    POST /api/bridge-groups On ${WEB} With ${group}
+
+    Status Of ${refused} Should Be    400
+
+A Bridge Group Can Be Deleted Once
+    ${group}=    Set Variable    ${{ {"name": "spare"} }}
+    POST /api/bridge-groups On ${WEB} With ${group}
+
+    ${deleted}=    POST /api/bridge-groups/delete On ${WEB} With ${group}
+    ${deleted_again}=    POST /api/bridge-groups/delete On ${WEB} With ${group}
+
+    Status Of ${deleted} Should Be    200
+    Status Of ${deleted_again} Should Be    404
+
 Kick By Peer Id
     ${peers}=    GET /api/peers On ${WEB}
     ${peer}=    Get From List    ${peers.json}    0

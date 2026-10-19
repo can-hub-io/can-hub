@@ -499,6 +499,71 @@ describe("admin_acl_message", []() {
         expect((const char *)decoded.entries[1].source.agent_name).toBe("bus7");
     });
 
+    it("round-trips a group set with its filters", []() {
+        AdminGroupSetMessage request = { "fleet", 1, { { 0x100, 0x7FF } } };
+        AdminGroupSetMessage decoded;
+        uint8_t buffer[512];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminGroupSetMessage_Encode(&request, buffer, sizeof(buffer));
+        decoded_ok = AdminGroupSetMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + ADMIN_GROUP_SET_BODY_SIZE));
+        expect(decoded_ok).toBe(true);
+        expect((const char *)decoded.name).toBe("fleet");
+        expect(decoded.filters[0].can_mask).toBe((uint32_t)0x7FF);
+    });
+
+    it("round-trips a group join", []() {
+        AdminGroupMemberMessage request = { "fleet", { "truck42", "can0" } };
+        AdminGroupMemberMessage decoded;
+        MessageHeader header;
+        uint8_t buffer[512];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminGroupMemberMessage_Encode(kMESSAGE_TYPE_ADMIN_GROUP_JOIN, &request, buffer, sizeof(buffer));
+        MessageHeader_Decode(&header, buffer, encoded_size);
+        decoded_ok = AdminGroupMemberMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(header.type).toBe((uint8_t)kMESSAGE_TYPE_ADMIN_GROUP_JOIN);
+        expect(decoded_ok).toBe(true);
+        expect((const char *)decoded.member.agent_name).toBe("truck42");
+    });
+
+    it("refuses to encode a member message of another type", []() {
+        AdminGroupMemberMessage request = { "fleet", { "truck42", "can0" } };
+        uint8_t buffer[512];
+
+        expect(AdminGroupMemberMessage_Encode(kMESSAGE_TYPE_ADMIN_GROUP_SET, &request, buffer, sizeof(buffer))).toBe((size_t)0);
+    });
+
+    it("round-trips a group list entry with its members", []() {
+        static AdminGroupListReplyMessage reply;
+        static AdminGroupListReplyMessage decoded;
+        uint8_t buffer[4096];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        memset(&reply, 0, sizeof(reply));
+        reply.count = 1;
+        snprintf(reply.entries[0].name, sizeof(reply.entries[0].name), "fleet");
+        reply.entries[0].member_count = 2;
+        reply.entries[0].forwarded = 9;
+        reply.entries[0].members[0] = { { "truck42", "can0" }, ADMIN_GROUP_MEMBER_ONLINE };
+        reply.entries[0].members[1] = { { "lab", "can1" }, 0 };
+
+        encoded_size = AdminGroupListReplyMessage_Encode(&reply, buffer, sizeof(buffer));
+        decoded_ok = AdminGroupListReplyMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + ADMIN_GROUP_LIST_REPLY_FIXED_FIELDS_SIZE + ADMIN_GROUP_LIST_REPLY_ENTRY_SIZE));
+        expect(decoded_ok).toBe(true);
+        expect(decoded.entries[0].forwarded).toBe((uint64_t)9);
+        expect(decoded.entries[0].members[0].state).toBe((uint8_t)ADMIN_GROUP_MEMBER_ONLINE);
+        expect((const char *)decoded.entries[0].members[1].endpoint.interface_name).toBe("can1");
+    });
+
     it("rejects encoding an acl list entry with an unterminated agent name", []() {
         AdminAclListReplyMessage reply = { 1, 0, { { "truck42", "can0", FINGERPRINT, 1, 1 } } };
         uint8_t buffer[512];

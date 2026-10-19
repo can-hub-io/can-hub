@@ -80,9 +80,22 @@ static uint8_t applyBridgeRoute(Broker *self, const BridgeRoute *route);
 static uint8_t removeBridgeRoute(Broker *self, const BridgeEndpoint *source, const BridgeEndpoint *destination);
 static void fillBridgeEntry(Broker *self, const BridgeRouteSlot *slot, AdminBridgeListReplyEntry *entry);
 static bool endpointOnline(Broker *self, const BridgeEndpoint *endpoint);
+static void handleAdminGroupSet(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleAdminGroupDelete(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleAdminGroupJoin(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleAdminGroupLeave(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleAdminGroupList(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static uint8_t applyGroup(Broker *self, const AdminGroupSetMessage *request);
+static uint8_t removeGroup(Broker *self, const char *name);
+static uint8_t joinGroup(Broker *self, const char *name, const BridgeEndpoint *member);
+static uint8_t leaveGroup(Broker *self, const char *name, const BridgeEndpoint *member);
+static void fillGroupEntry(Broker *self, const BridgeGroupSlot *slot, AdminGroupListReplyEntry *entry);
+static void sendGroupReply(Broker *self, HubPeer *peer, uint8_t type, uint8_t status);
 static void loadBridgeRoutes(Broker *self);
-static uint8_t bridgeFrame(Broker *self, const HubPeer *source_agent, const FrameMessage *frame);
-static void bridgeAlong(Broker *self, BridgeRouteSlot *slot, const FrameMessage *frame);
+static void loadBridgeGroups(Broker *self);
+static bool bridgesConfigured(Broker *self);
+static uint16_t bridgeFrame(Broker *self, const HubPeer *source_agent, const FrameMessage *frame);
+static void bridgeInto(Broker *self, const BridgeTarget *target, const FrameMessage *frame);
 static void handleIfconfigReply(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleInterfaceStatus(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void relayPaceToClients(Broker *self, uint32_t interface_id, uint32_t pace_rate);
@@ -184,6 +197,11 @@ static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
     [kMESSAGE_TYPE_ADMIN_BRIDGE_SET] = handleAdminBridgeSet,
     [kMESSAGE_TYPE_ADMIN_BRIDGE_DELETE] = handleAdminBridgeDelete,
     [kMESSAGE_TYPE_ADMIN_BRIDGE_LIST] = handleAdminBridgeList,
+    [kMESSAGE_TYPE_ADMIN_GROUP_SET] = handleAdminGroupSet,
+    [kMESSAGE_TYPE_ADMIN_GROUP_DELETE] = handleAdminGroupDelete,
+    [kMESSAGE_TYPE_ADMIN_GROUP_JOIN] = handleAdminGroupJoin,
+    [kMESSAGE_TYPE_ADMIN_GROUP_LEAVE] = handleAdminGroupLeave,
+    [kMESSAGE_TYPE_ADMIN_GROUP_LIST] = handleAdminGroupList,
     [kMESSAGE_TYPE_IFCONFIG_REPLY] = handleIfconfigReply,
     [kMESSAGE_TYPE_INTERFACE_STATUS] = handleInterfaceStatus,
 };
@@ -209,7 +227,9 @@ void Broker_Init(
     PeerDirectory_Reset(&self->directory);
     RejectedPeers_Reset(&self->rejected_peers);
     BridgeRoutes_Reset(&self->bridges);
+    BridgeGroups_Reset(&self->groups);
     loadBridgeRoutes(self);
+    loadBridgeGroups(self);
 }
 
 HubTransportEvents Broker_Events(Broker *self)
@@ -406,7 +426,7 @@ static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame)
     uint16_t route_count = 0;
     uint16_t routes_dropped = 0;
     uint8_t forwarded_route_flags = 0;
-    uint8_t bridged_count = 0;
+    uint16_t bridged_count = 0;
     uint8_t token;
     bool accepted = true;
     bool bridged = false;
@@ -457,7 +477,7 @@ static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame)
         }
     }
 
-    if (peer->role == kHUB_PEER_ROLE_AGENT && !bridged && !BridgeRoutes_IsEmpty(&self->bridges)) {
+    if (peer->role == kHUB_PEER_ROLE_AGENT && !bridged && bridgesConfigured(self)) {
         bridged_count = bridgeFrame(self, peer, frame);
     }
     if (route_count == 0 && bridged_count == 0) {
@@ -1213,21 +1233,220 @@ static void loadBridgeRoutes(Broker *self)
     }
 }
 
-static uint8_t bridgeFrame(Broker *self, const HubPeer *source_agent, const FrameMessage *frame)
+static void handleAdminGroupSet(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
 {
-    uint8_t slot_indices[BRIDGE_ROUTES_MAX];
-    const InterfaceEntry *source;
-    uint8_t count;
+    AdminGroupSetMessage request;
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN || !AdminGroupSetMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    sendGroupReply(self, peer, kMESSAGE_TYPE_ADMIN_GROUP_SET_REPLY, applyGroup(self, &request));
+}
+
+static void handleAdminGroupDelete(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    AdminGroupDeleteMessage request;
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN || !AdminGroupDeleteMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    sendGroupReply(self, peer, kMESSAGE_TYPE_ADMIN_GROUP_DELETE_REPLY, removeGroup(self, request.name));
+}
+
+static void handleAdminGroupJoin(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    AdminGroupMemberMessage request;
+    BridgeEndpoint member;
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN || !AdminGroupMemberMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    memcpy(&member, &request.member, sizeof(member));
+    sendGroupReply(self, peer, kMESSAGE_TYPE_ADMIN_GROUP_JOIN_REPLY, joinGroup(self, request.name, &member));
+}
+
+static void handleAdminGroupLeave(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    AdminGroupMemberMessage request;
+    BridgeEndpoint member;
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN || !AdminGroupMemberMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    memcpy(&member, &request.member, sizeof(member));
+    sendGroupReply(self, peer, kMESSAGE_TYPE_ADMIN_GROUP_LEAVE_REPLY, leaveGroup(self, request.name, &member));
+}
+
+static void handleAdminGroupList(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    AdminGroupListMessage request;
+    AdminGroupListReplyMessage reply;
+    const BridgeGroupSlot *slot;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN || !AdminGroupListMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    memset(&reply, 0, sizeof(reply));
+    slot = BridgeGroups_Nth(&self->groups, request.offset);
+    if (slot != NULL) {
+        fillGroupEntry(self, slot, &reply.entries[0]);
+        reply.count = ADMIN_GROUP_LIST_REPLY_ENTRIES_MAX;
+    }
+    if (BridgeGroups_Nth(&self->groups, (uint16_t)(request.offset + reply.count)) != NULL) {
+        reply.flags |= ADMIN_REPLY_FLAG_MORE;
+    }
+
+    sendControl(self, peer, encoded, AdminGroupListReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+}
+
+static uint8_t applyGroup(Broker *self, const AdminGroupSetMessage *request)
+{
+    BridgeGroup group;
+
+    if (!BridgeGroup_IsNameValid(request->name)) {
+        return ADMIN_BRIDGE_STATUS_INVALID;
+    }
+    if (!BridgeGroups_HasRoom(&self->groups, request->name)) {
+        return ADMIN_BRIDGE_STATUS_FULL;
+    }
+
+    memset(&group, 0, sizeof(group));
+    memcpy(group.name, request->name, sizeof(group.name));
+    group.filter_count = request->filter_count;
+    memcpy(group.filters, request->filters, sizeof(group.filters));
+    if (self->bridge_store != NULL && !self->bridge_store->save_group(self->bridge_store->context, &group)) {
+        return ADMIN_BRIDGE_STATUS_STORE_FAILED;
+    }
+
+    BridgeGroups_Set(&self->groups, group.name, group.filter_count, group.filters);
+
+    return ADMIN_BRIDGE_STATUS_OK;
+}
+
+static uint8_t removeGroup(Broker *self, const char *name)
+{
+    if (BridgeGroups_Find(&self->groups, name) == NULL) {
+        return ADMIN_BRIDGE_STATUS_UNKNOWN;
+    }
+    if (self->bridge_store != NULL && !self->bridge_store->remove_group(self->bridge_store->context, name)) {
+        return ADMIN_BRIDGE_STATUS_STORE_FAILED;
+    }
+
+    BridgeGroups_Remove(&self->groups, name);
+
+    return ADMIN_BRIDGE_STATUS_OK;
+}
+
+static uint8_t joinGroup(Broker *self, const char *name, const BridgeEndpoint *member)
+{
+    BridgeGroupSlot *slot = BridgeGroups_Find(&self->groups, name);
+
+    if (slot == NULL) {
+        return ADMIN_BRIDGE_STATUS_UNKNOWN;
+    }
+    if (BridgeGroup_HasMember(&slot->group, member)) {
+        return ADMIN_BRIDGE_STATUS_OK;
+    }
+    if (slot->group.member_count == BRIDGE_GROUP_MEMBERS_MAX) {
+        return ADMIN_BRIDGE_STATUS_FULL;
+    }
+    if (self->bridge_store != NULL && !self->bridge_store->add_member(self->bridge_store->context, name, member)) {
+        return ADMIN_BRIDGE_STATUS_STORE_FAILED;
+    }
+
+    BridgeGroups_Join(&self->groups, name, member);
+
+    return ADMIN_BRIDGE_STATUS_OK;
+}
+
+static uint8_t leaveGroup(Broker *self, const char *name, const BridgeEndpoint *member)
+{
+    BridgeGroupSlot *slot = BridgeGroups_Find(&self->groups, name);
+
+    if (slot == NULL || !BridgeGroup_HasMember(&slot->group, member)) {
+        return ADMIN_BRIDGE_STATUS_UNKNOWN;
+    }
+    if (self->bridge_store != NULL && !self->bridge_store->remove_member(self->bridge_store->context, name, member)) {
+        return ADMIN_BRIDGE_STATUS_STORE_FAILED;
+    }
+
+    BridgeGroups_Leave(&self->groups, name, member);
+
+    return ADMIN_BRIDGE_STATUS_OK;
+}
+
+static void fillGroupEntry(Broker *self, const BridgeGroupSlot *slot, AdminGroupListReplyEntry *entry)
+{
     uint8_t i;
+
+    memset(entry, 0, sizeof(*entry));
+    memcpy(entry->name, slot->group.name, sizeof(entry->name));
+    entry->filter_count = slot->group.filter_count;
+    memcpy(entry->filters, slot->group.filters, sizeof(entry->filters));
+    entry->member_count = slot->group.member_count;
+    entry->forwarded = slot->forwarded;
+    entry->dropped = slot->dropped;
+    for(i=0; i<slot->group.member_count; i++) {
+        memcpy(&entry->members[i].endpoint, &slot->group.members[i], sizeof(entry->members[i].endpoint));
+        if (endpointOnline(self, &slot->group.members[i])) {
+            entry->members[i].state = ADMIN_GROUP_MEMBER_ONLINE;
+        }
+    }
+}
+
+static void sendGroupReply(Broker *self, HubPeer *peer, uint8_t type, uint8_t status)
+{
+    AdminGroupReplyMessage reply = { status };
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+
+    sendControl(self, peer, encoded, AdminGroupReplyMessage_Encode(type, &reply, encoded, sizeof(encoded)));
+}
+
+static void loadBridgeGroups(Broker *self)
+{
+    BridgeGroup group;
+    uint16_t position = 0;
+
+    if (self->bridge_store == NULL) {
+        return;
+    }
+
+    while (position < BRIDGE_GROUPS_MAX && self->bridge_store->load_group(self->bridge_store->context, position, &group)) {
+        BridgeGroups_Restore(&self->groups, &group);
+        position++;
+    }
+}
+
+static bool bridgesConfigured(Broker *self)
+{
+    return !BridgeRoutes_IsEmpty(&self->bridges) || !BridgeGroups_IsEmpty(&self->groups);
+}
+
+static uint16_t bridgeFrame(Broker *self, const HubPeer *source_agent, const FrameMessage *frame)
+{
+    const InterfaceEntry *source;
+    BridgeEndpoint origin;
+    uint16_t count;
+    uint16_t i;
 
     source = InterfaceRegistry_FindByAgentChannel(&self->registry, source_agent->peer_id, frame->channel);
     if (source == NULL) {
         return 0;
     }
 
-    count = BridgeRoutes_Matching(&self->bridges, source->agent_name, source->interface_name, frame->can_id, slot_indices);
+    memset(&origin, 0, sizeof(origin));
+    memcpy(origin.agent_name, source->agent_name, sizeof(origin.agent_name));
+    memcpy(origin.interface_name, source->interface_name, sizeof(origin.interface_name));
+
+    count = BridgeTargets_Collect(&self->bridges, &self->groups, &origin, frame->can_id, self->bridge_targets);
     for(i=0; i<count; i++) {
-        bridgeAlong(self, BridgeRoutes_Slot(&self->bridges, slot_indices[i]), frame);
+        bridgeInto(self, &self->bridge_targets[i], frame);
     }
 
     return count;
@@ -1237,7 +1456,7 @@ static uint8_t bridgeFrame(Broker *self, const HubPeer *source_agent, const Fram
  * Without an echo token the bus echo of the injection could not be told
  * from plain traffic and would be bridged back: no token, no injection.
  */
-static void bridgeAlong(Broker *self, BridgeRouteSlot *slot, const FrameMessage *frame)
+static void bridgeInto(Broker *self, const BridgeTarget *target, const FrameMessage *frame)
 {
     const InterfaceEntry *destination;
     HubPeer *agent;
@@ -1246,13 +1465,13 @@ static void bridgeAlong(Broker *self, BridgeRouteSlot *slot, const FrameMessage 
 
     destination = InterfaceRegistry_FindByName(
         &self->registry,
-        slot->route.destination.agent_name,
-        slot->route.destination.interface_name
+        target->destination->agent_name,
+        target->destination->interface_name
     );
     agent = (destination != NULL) ? PeerDirectory_Find(&self->directory, destination->agent_peer_id) : NULL;
     token = (agent != NULL) ? EchoTokens_Issue(&agent->echo_tokens, ECHO_TOKENS_BRIDGE_OWNER) : FRAME_ROUTE_NO_TOKEN;
     if (token == FRAME_ROUTE_NO_TOKEN) {
-        slot->dropped++;
+        (*target->dropped)++;
         return;
     }
 
@@ -1261,7 +1480,7 @@ static void bridgeAlong(Broker *self, BridgeRouteSlot *slot, const FrameMessage 
     route.suppress_echo = false;
     route.reliable = false;
     forwardFrame(self, &route, frame, (uint8_t)(token << FRAME_ROUTE_TOKEN_SHIFT));
-    slot->forwarded++;
+    (*target->forwarded)++;
 }
 
 static void handleIfconfigReply(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)

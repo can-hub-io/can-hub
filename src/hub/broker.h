@@ -1,6 +1,8 @@
 #pragma once
 
+#include "hub/domain/bridge_groups.h"
 #include "hub/domain/bridge_routes.h"
+#include "hub/domain/bridge_targets.h"
 #include "hub/domain/interface_registry.h"
 #include "hub/domain/frame_routes.h"
 #include "hub/domain/peer_directory.h"
@@ -41,6 +43,8 @@ typedef struct {
     BridgeStorePort *bridge_store;
     InterfaceRegistry registry;
     BridgeRoutes bridges;
+    BridgeGroups groups;
+    BridgeTarget bridge_targets[BRIDGE_TARGETS_MAX];
     PeerDirectory directory;
     HubMetrics metrics;
     PendingIfconfig pending_ifconfig[BROKER_PENDING_IFCONFIG_MAX];

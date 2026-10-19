@@ -57,6 +57,16 @@ pub enum MessageType {
     AdminBridgeDeleteReply = 0x2F,
     AdminBridgeList = 0x30,
     AdminBridgeListReply = 0x31,
+    AdminGroupSet = 0x32,
+    AdminGroupSetReply = 0x33,
+    AdminGroupDelete = 0x34,
+    AdminGroupDeleteReply = 0x35,
+    AdminGroupJoin = 0x36,
+    AdminGroupJoinReply = 0x37,
+    AdminGroupLeave = 0x38,
+    AdminGroupLeaveReply = 0x39,
+    AdminGroupList = 0x3A,
+    AdminGroupListReply = 0x3B,
 }
 
 impl MessageType {
@@ -101,6 +111,16 @@ impl MessageType {
             0x2F => AdminBridgeDeleteReply,
             0x30 => AdminBridgeList,
             0x31 => AdminBridgeListReply,
+            0x32 => AdminGroupSet,
+            0x33 => AdminGroupSetReply,
+            0x34 => AdminGroupDelete,
+            0x35 => AdminGroupDeleteReply,
+            0x36 => AdminGroupJoin,
+            0x37 => AdminGroupJoinReply,
+            0x38 => AdminGroupLeave,
+            0x39 => AdminGroupLeaveReply,
+            0x3A => AdminGroupList,
+            0x3B => AdminGroupListReply,
             _ => return None,
         };
         Some(kind)

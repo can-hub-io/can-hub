@@ -38,6 +38,10 @@ Noun-first grammar; an omitted verb lists.
 | `bridge` | bus-to-bus routes with their state and counters |
 | `bridge add <agent>/<iface> <agent>/<iface> [<id>[:<mask>] ...]` | inject what the first bus carries into the second, all of it or only the ids given; adding again replaces the ids ([bridging buses](hub.md#bridging-buses)) |
 | `bridge delete <agent>/<iface> <agent>/<iface>` | drop a route |
+| `group` | bridge groups with their members, state and counters |
+| `group add <name> [<id>[:<mask>] ...]` | create a group of buses that behave as one, or replace its ids ([groups](hub.md#groups)) |
+| `group delete <name>` | drop a group |
+| `group join\|leave <name> <agent>/<iface>` | add a bus to a group, or remove it |
 
 ## Interface settings
 

@@ -95,11 +95,19 @@ class BenchKeywords:
                                       interface="vcan0") -> CanHub:
         first_server.make_vcan(interface)
         second_server.make_vcan(interface)
-        hub = CanHub.start(hub_server, HubConfig())
+        hub = CanHub.start(hub_server, HubConfig(state_dir=self.fresh_state_directory("hub")))
         for name, server in ((first, first_server), (second, second_server)):
-            agent = CanAgent.start(server, AgentConfig(connect="quic://local:7227", name=name, interfaces=[interface]))
-            agent.wait_registered(hub, timeout=8)
+            self.start_agent_exporting(name, server, interface, hub)
         return hub
+
+    @keyword("Start CAN Agent ${name} On ${server} Exporting ${interface} Into ${hub}")
+    def start_agent_exporting(self, name, server, interface, hub) -> CanAgent:
+        server.make_vcan(interface)
+        config = AgentConfig(connect="quic://local:7227", name=name, interfaces=[interface],
+                             state_dir=self.fresh_state_directory("agent"))
+        agent = CanAgent.start(server, config)
+        agent.wait_registered(hub, timeout=8)
+        return agent
 
     @keyword("Wait Until Hub ${hub} Exports ${count} Interfaces")
     def wait_until_hub_exports(self, hub, count, timeout=30):

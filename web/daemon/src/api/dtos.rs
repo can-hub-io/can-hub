@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::admin::{
-    AclEntry, AclLevel, AgentEntry, BridgeEndpoint, BridgeEntry, CanFilter, BitTiming, ClientEntry, InterfaceEntry, InterfaceSettings, PeerEntry, PinEntry,
+    AclEntry, AclLevel, AgentEntry, BridgeEndpoint, BridgeEntry, CanFilter, GroupEntry, BitTiming, ClientEntry, InterfaceEntry, InterfaceSettings, PeerEntry, PinEntry,
     RejectedEntry, RejectionReason, Status, CTRLMODE_BERR_REPORTING, CTRLMODE_FD, CTRLMODE_LISTEN_ONLY,
     CTRLMODE_LOOPBACK, CTRLMODE_ONE_SHOT, CTRLMODE_TRIPLE_SAMPLING, SETTING_BITRATE, SETTING_CTRLMODE,
     SETTING_DATA_BITRATE, SETTING_DATA_SAMPLE_POINT, SETTING_LINK, SETTING_RESTART_MS, SETTING_SAMPLE_POINT,
@@ -124,6 +124,69 @@ impl From<BridgeEntry> for BridgeDto {
                 .collect(),
             source_online: entry.source_online,
             destination_online: entry.destination_online,
+            forwarded: entry.forwarded,
+            dropped: entry.dropped,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BridgeGroupBody {
+    pub name: String,
+    #[serde(default)]
+    pub filters: Vec<CanFilterDto>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BridgeGroupNameBody {
+    pub name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BridgeGroupMemberBody {
+    pub name: String,
+    pub member: BridgeEndpointDto,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BridgeGroupMemberDto {
+    pub agent_name: String,
+    pub interface_name: String,
+    pub online: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BridgeGroupDto {
+    pub name: String,
+    pub filters: Vec<CanFilterDto>,
+    pub members: Vec<BridgeGroupMemberDto>,
+    pub forwarded: u64,
+    pub dropped: u64,
+}
+
+impl From<GroupEntry> for BridgeGroupDto {
+    fn from(entry: GroupEntry) -> Self {
+        BridgeGroupDto {
+            name: entry.name,
+            filters: entry
+                .filters
+                .into_iter()
+                .map(|filter| CanFilterDto { can_id: filter.can_id, can_mask: filter.can_mask })
+                .collect(),
+            members: entry
+                .members
+                .into_iter()
+                .map(|member| BridgeGroupMemberDto {
+                    agent_name: member.endpoint.agent_name,
+                    interface_name: member.endpoint.interface_name,
+                    online: member.online,
+                })
+                .collect(),
             forwarded: entry.forwarded,
             dropped: entry.dropped,
         }
