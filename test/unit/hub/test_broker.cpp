@@ -25,13 +25,14 @@ extern "C" {
 #define TRUCK_FINGERPRINT "aa11bb22cc33dd44ee55ff66aa77bb88cc99dd00ee11ff22aa33bb44cc55dd66"
 #define OTHER_FINGERPRINT "0000000000000000000000000000000000000000000000000000000000000000"
 #define BUS_INTERFACE_INDEX 2
-#define CLIENT_TOKEN 2
+#define CLIENT_TOKEN 1
 #define SUPPRESS_ECHO_AND_WRITE (OPEN_FLAG_SUPPRESS_OWN_ECHO | OPEN_FLAG_WANT_WRITE)
 #define AWAITING_PEER_BASE 1000
 #define CROWDED_HOST "198.51.100.7"
 #define QUIET_HOST "198.51.100.8"
 #define PER_HOST_SHARE 4
-#define HUB_WIDE_SHARE 32
+#define HUB_WIDE_SHARE (HUB_PEERS_MAX / 2)
+#define CROWD_PEER_BASE 10000
 
 static Broker broker;
 static HubTransportPortMock transport;
@@ -59,6 +60,7 @@ static void connectPeerFrom(uint32_t peer_id, const char *host);
 static void connectPeersAwaitingHelloFrom(const char *host, uint32_t count);
 static void connectPeersAwaitingHelloFromDistinctHosts(uint32_t count);
 static void sayHelloAsClient(uint32_t peer_id);
+static void connectDistinctClients(uint32_t count);
 static void listRejected(AdminRejectedReplyMessage *reply);
 
 static void connectPeer(uint32_t peer_id, const char *fingerprint, bool local)
@@ -1491,7 +1493,7 @@ describe("broker", []() {
             FrameMessage_Decode(&forwarded, transport.frame_log[0] + MESSAGE_HEADER_SIZE, header.length);
 
             expect(transport.frame_peers[0]).toBe((uint32_t)AGENT_PEER);
-            expect(forwarded.route_flags).toBe(2 << FRAME_ROUTE_TOKEN_SHIFT);
+            expect(forwarded.route_flags).toBe(CLIENT_TOKEN << FRAME_ROUTE_TOKEN_SHIFT);
         });
 
         it("fans an echo out to subscribers and strips the token", []() {
@@ -1622,6 +1624,45 @@ describe("broker", []() {
             events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
 
             expect(transport.frame_count).toBe(2);
+        });
+
+        it("suppresses the own echo of a client whose slot is past the token range", []() {
+            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            uint32_t late_client = CROWD_PEER_BASE + FRAME_ROUTE_TOKEN_VALUES_MAX;
+            uint8_t channel;
+            uint8_t token;
+
+            connectDistinctClients(FRAME_ROUTE_TOKEN_VALUES_MAX);
+            BrokerDriver_ConnectClient(&events, late_client);
+            channel = BrokerDriver_OpenInterface(&events, &transport, late_client, interface_id, SUPPRESS_ECHO_AND_WRITE);
+            token = injectFrom(late_client, channel);
+
+            sendEchoFromAgent(AGENT_PEER, token);
+
+            expect(transport.frame_count).toBe(0);
+        });
+    });
+
+    describe("peer capacity", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            events = Broker_Events(&broker);
+        });
+
+        it("admits as many clients as the hub holds peers", []() {
+            connectDistinctClients(HUB_PEERS_MAX);
+
+            expect(transport.close_count).toBe(0);
+        });
+
+        it("turns away the peer past the last free slot", []() {
+            connectDistinctClients(HUB_PEERS_MAX);
+
+            BrokerDriver_ConnectClient(&events, CROWD_PEER_BASE + HUB_PEERS_MAX);
+
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)(CROWD_PEER_BASE + HUB_PEERS_MAX));
         });
     });
 
@@ -2283,4 +2324,13 @@ static void listRejected(AdminRejectedReplyMessage *reply)
     BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
     sendControlFrom(ADMIN_PEER, encoded, encoded_size);
     lastReply(reply, AdminRejectedReplyMessage_Decode);
+}
+
+static void connectDistinctClients(uint32_t count)
+{
+    uint32_t i;
+
+    for(i=0; i<count; i++) {
+        BrokerDriver_ConnectClient(&events, CROWD_PEER_BASE + i);
+    }
 }

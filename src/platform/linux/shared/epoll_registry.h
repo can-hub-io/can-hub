@@ -6,7 +6,7 @@
 
 #include <sys/epoll.h>
 
-#define EPOLL_REGISTRY_SLOTS_MAX 192
+#define EPOLL_REGISTRY_SLOTS_MAX 1536
 #define EPOLL_REGISTRY_NO_SOCKET (-1)
 
 /*
@@ -25,7 +25,7 @@ bool EpollRegistry_AddStatic(EpollRegistry *self, int32_t fd, uint32_t event_dat
 void EpollRegistry_SetStaticInterest(EpollRegistry *self, int32_t fd, uint32_t mask, uint32_t event_data);
 void EpollRegistry_SyncSlot(
     EpollRegistry *self,
-    uint8_t slot,
+    uint16_t slot,
     int32_t current_fd,
     uint32_t wanted_mask,
     uint32_t event_data

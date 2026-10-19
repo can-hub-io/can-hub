@@ -4,9 +4,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define HUB_PEERS_MAX 512
+
 /*
  * Outbound multi-peer transport for the hub core: send to or close one of
- * the N connected peers. peer_id is assigned by the platform transport and
+ * the up to HUB_PEERS_MAX connected peers. peer_id is assigned by the platform transport and
  * is opaque to the core. receive_overflows counts the packets the transports
  * lost before reading them (receive buffer full). Counterpart of
  * HubTransportEvents.

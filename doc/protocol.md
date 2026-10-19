@@ -466,7 +466,8 @@ FRAME (total 20 + payload)
                         bit 1: echo — this frame is the bus echo of an
                         injected TX (set by the agent on kernel TX-confirm).
                         bits 2-7: origin token — hub-assigned opaque tag of
-                        the injecting client (peer slot + 1, 0 = none). The
+                        the injecting client, scoped to the agent it injects
+                        through (1-63, 0 = none). The
                         hub stamps it on injections towards the agent; the
                         agent carries it through its local TX/echo
                         correlation and returns it on the echo frame; the

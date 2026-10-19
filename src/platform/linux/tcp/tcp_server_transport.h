@@ -10,7 +10,7 @@
 #include "hub/ports/hub_transport_events.h"
 #include "hub/ports/hub_transport_port.h"
 
-#define TCP_SERVER_PEERS_MAX 64
+#define TCP_SERVER_PEERS_MAX HUB_PEERS_MAX
 
 /*
  * Plaintext TCP server transport for the hub: accepts up to
@@ -48,8 +48,8 @@ bool TcpServerTransport_InitUnix(
 );
 HubTransportPort *TcpServerTransport_Port(TcpServerTransport *self);
 int32_t TcpServerTransport_ListenFd(const TcpServerTransport *self);
-int32_t TcpServerTransport_SlotFd(const TcpServerTransport *self, uint8_t slot);
-bool TcpServerTransport_SlotWantsWritable(const TcpServerTransport *self, uint8_t slot);
+int32_t TcpServerTransport_SlotFd(const TcpServerTransport *self, uint16_t slot);
+bool TcpServerTransport_SlotWantsWritable(const TcpServerTransport *self, uint16_t slot);
 void TcpServerTransport_OnAcceptReady(TcpServerTransport *self);
-void TcpServerTransport_OnSlotReadable(TcpServerTransport *self, uint8_t slot);
-void TcpServerTransport_OnSlotWritable(TcpServerTransport *self, uint8_t slot);
+void TcpServerTransport_OnSlotReadable(TcpServerTransport *self, uint16_t slot);
+void TcpServerTransport_OnSlotWritable(TcpServerTransport *self, uint16_t slot);

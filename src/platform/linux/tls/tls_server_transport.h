@@ -9,7 +9,7 @@
 #include "hub/ports/hub_transport_events.h"
 #include "hub/ports/hub_transport_port.h"
 
-#define TLS_SERVER_PEERS_MAX 64
+#define TLS_SERVER_PEERS_MAX HUB_PEERS_MAX
 #define TLS_SERVER_HANDSHAKES_MAX (TLS_SERVER_PEERS_MAX / 2)
 #define TLS_SERVER_ORIGIN_SIZE 56
 
@@ -50,9 +50,9 @@ bool TlsServerTransport_Init(
 );
 HubTransportPort *TlsServerTransport_Port(TlsServerTransport *self);
 int32_t TlsServerTransport_ListenFd(const TlsServerTransport *self);
-int32_t TlsServerTransport_SlotFd(const TlsServerTransport *self, uint8_t slot);
-bool TlsServerTransport_SlotWantsWritable(const TlsServerTransport *self, uint8_t slot);
+int32_t TlsServerTransport_SlotFd(const TlsServerTransport *self, uint16_t slot);
+bool TlsServerTransport_SlotWantsWritable(const TlsServerTransport *self, uint16_t slot);
 void TlsServerTransport_OnAcceptReady(TlsServerTransport *self);
-void TlsServerTransport_OnSlotReadable(TlsServerTransport *self, uint8_t slot);
-void TlsServerTransport_OnSlotWritable(TlsServerTransport *self, uint8_t slot);
+void TlsServerTransport_OnSlotReadable(TlsServerTransport *self, uint16_t slot);
+void TlsServerTransport_OnSlotWritable(TlsServerTransport *self, uint16_t slot);
 void TlsServerTransport_Tick(TlsServerTransport *self, uint64_t now_us);

@@ -16,7 +16,7 @@ uint16_t FrameRoutes_FromAgent(
     const ChannelBinding *binding;
     HubPeer *peer;
     uint16_t route_count = 0;
-    uint8_t peer_index;
+    uint16_t peer_index;
     uint8_t binding_iterator;
 
     *dropped = 0;

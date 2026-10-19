@@ -4,7 +4,7 @@
 
 bool EpollRegistry_Open(EpollRegistry *self)
 {
-    uint8_t slot;
+    uint16_t slot;
 
     self->epoll_fd = epoll_create1(0);
     for(slot=0; slot<EPOLL_REGISTRY_SLOTS_MAX; slot++) {
@@ -36,7 +36,7 @@ void EpollRegistry_SetStaticInterest(EpollRegistry *self, int32_t fd, uint32_t m
 
 void EpollRegistry_SyncSlot(
     EpollRegistry *self,
-    uint8_t slot,
+    uint16_t slot,
     int32_t current_fd,
     uint32_t wanted_mask,
     uint32_t event_data

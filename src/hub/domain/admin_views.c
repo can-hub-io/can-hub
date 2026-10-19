@@ -34,7 +34,7 @@ void AdminViews_Agents(
     AdminAgentsReplyEntry *entry;
     bool filtered = agent_name_filter[0] != '\0';
     uint16_t skipped = 0;
-    uint8_t i;
+    uint16_t i;
 
     memset(reply, 0, sizeof(*reply));
 
@@ -77,7 +77,7 @@ void AdminViews_Clients(
     const char *interface_name;
     bool filtered = agent_name_filter[0] != '\0';
     uint16_t skipped = 0;
-    uint8_t peer_index;
+    uint16_t peer_index;
     uint8_t binding_index;
 
     memset(reply, 0, sizeof(*reply));
@@ -189,7 +189,7 @@ static uint8_t countSubscribers(const PeerDirectory *directory, uint32_t interfa
 {
     uint8_t channel;
     uint8_t count = 0;
-    uint8_t i;
+    uint16_t i;
 
     for(i=0; i<PEER_DIRECTORY_MAX; i++) {
         if (!directory->peers[i].in_use || directory->peers[i].role != kHUB_PEER_ROLE_CLIENT) {

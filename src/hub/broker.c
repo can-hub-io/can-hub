@@ -119,12 +119,11 @@ static void drainPeer(Broker *self, HubPeer *peer);
 static bool liveFrameTooOld(const Broker *self, const HubPeer *peer, uint8_t channel);
 static void countForwarded(Broker *self, HubPeer *peer, uint8_t channel);
 static void countDropped(Broker *self, HubPeer *peer, uint8_t channel);
-static uint8_t injectionToken(Broker *self, const HubPeer *sender);
-static void recordInjections(Broker *self, uint8_t token, const FrameRoute *routes, uint16_t route_count);
+static uint8_t injectionToken(Broker *self, const HubPeer *sender, const FrameRoute *routes, uint16_t route_count);
+static void releaseEchoTokens(Broker *self, uint32_t client_peer_id);
 static bool clientCanRead(Broker *self, const HubPeer *peer, const InterfaceEntry *entry);
 static bool clientCanWrite(Broker *self, const HubPeer *peer, const InterfaceEntry *entry);
 static bool reliableEndpointsSupport(Broker *self, const HubPeer *client, const InterfaceEntry *entry);
-static uint32_t echoOriginatorPeerId(Broker *self, const HubPeer *agent, uint8_t route_flags);
 static void tickHelloDeadline(Broker *self, HubPeer *peer, uint64_t now_us);
 
 static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
@@ -171,7 +170,6 @@ void Broker_Init(
     self->require_known_peers = require_known_peers;
     InterfaceRegistry_Reset(&self->registry);
     PeerDirectory_Reset(&self->directory);
-    EchoTokens_Reset(&self->echo_tokens);
     RejectedPeers_Reset(&self->rejected_peers);
 }
 
@@ -192,7 +190,7 @@ HubTransportEvents Broker_Events(Broker *self)
 void Broker_Tick(Broker *self, uint64_t now_us)
 {
     HubPeer *peer;
-    uint8_t i;
+    uint16_t i;
 
     self->now_us = now_us;
 
@@ -218,7 +216,7 @@ int32_t Broker_NextTimeoutMs(Broker *self, int32_t cap_ms)
     uint16_t size;
     uint16_t channel;
     HubPeer *peer;
-    uint8_t i;
+    uint16_t i;
 
     for(i=0; i<PEER_DIRECTORY_MAX; i++) {
         peer = PeerDirectory_At(&self->directory, i);
@@ -387,7 +385,7 @@ static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame)
             &routes_dropped
         );
         forwarded_route_flags = frame->route_flags & (FRAME_ROUTE_FLAG_BRIDGED | FRAME_ROUTE_FLAG_ECHO);
-        echo_originator_peer_id = echoOriginatorPeerId(self, peer, frame->route_flags);
+        echo_originator_peer_id = EchoTokens_Originator(&peer->echo_tokens, frame->route_flags);
     } else {
         if (!ClientSession_CanWrite(&peer->session, frame->channel) || (frame->can_id & FRAME_CAN_ID_FLAG_ERR)) {
             self->metrics.frames_dropped++;
@@ -395,8 +393,7 @@ static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame)
         }
         route_count = FrameRoutes_FromClient(
             &self->registry, peer, frame->channel, routes, FRAME_ROUTES_MAX, &routes_dropped);
-        token = injectionToken(self, peer);
-        recordInjections(self, token, routes, route_count);
+        token = injectionToken(self, peer, routes, route_count);
         forwarded_route_flags = (uint8_t)(token << FRAME_ROUTE_TOKEN_SHIFT);
     }
 
@@ -1090,7 +1087,7 @@ static void relayPaceToClients(Broker *self, uint32_t interface_id, uint32_t pac
     uint8_t encoded[CONTROL_BUFFER_SIZE];
     HubPeer *peer;
     uint8_t channel;
-    uint8_t i;
+    uint16_t i;
 
     for(i=0; i<PEER_DIRECTORY_MAX; i++) {
         peer = PeerDirectory_At(&self->directory, i);
@@ -1277,10 +1274,10 @@ static void releasePeer(Broker *self, HubPeer *peer)
 
     if (peer->role == kHUB_PEER_ROLE_AGENT) {
         detachAgent(self, peer_id);
-        EchoTokens_ReleaseAgent(&self->echo_tokens, PeerDirectory_SlotOf(&self->directory, peer));
     }
     if (peer->role == kHUB_PEER_ROLE_CLIENT) {
         releaseReliableBindings(self, peer);
+        releaseEchoTokens(self, peer_id);
     }
 
     releasePendingIfconfig(self, peer_id);
@@ -1330,7 +1327,7 @@ static void revertAgentChannelIfUnused(Broker *self, uint32_t interface_id)
 {
     const InterfaceEntry *entry = InterfaceRegistry_FindById(&self->registry, interface_id);
     HubPeer *peer;
-    uint8_t i;
+    uint16_t i;
 
     if (entry == NULL) {
         return;
@@ -1376,7 +1373,7 @@ static void detachAgent(Broker *self, uint32_t agent_peer_id)
     const InterfaceEntry *entry;
     HubPeer *peer;
     uint32_t entry_index;
-    uint8_t peer_index;
+    uint16_t peer_index;
 
     for(entry_index=0; entry_index<INTERFACE_REGISTRY_MAX; entry_index++) {
         entry = &self->registry.entries[entry_index];
@@ -1399,7 +1396,7 @@ static void reattachClientsToAgent(Broker *self, uint32_t agent_peer_id)
     const InterfaceEntry *entry;
     HubPeer *peer;
     uint32_t entry_index;
-    uint8_t peer_index;
+    uint16_t peer_index;
     uint8_t channel;
 
     for(entry_index=0; entry_index<INTERFACE_REGISTRY_MAX; entry_index++) {
@@ -1697,32 +1694,33 @@ static bool reliableEndpointsSupport(Broker *self, const HubPeer *client, const 
     return agent != NULL && (agent->capabilities & HELLO_CAP_RELIABLE_CHANNELS) != 0;
 }
 
-static uint8_t injectionToken(Broker *self, const HubPeer *sender)
-{
-    uint8_t slot = PeerDirectory_SlotOf(&self->directory, sender);
-
-    return EchoTokens_Issue(&self->echo_tokens, slot, sender->peer_id);
-}
-
-static void recordInjections(Broker *self, uint8_t token, const FrameRoute *routes, uint16_t route_count)
+static uint8_t injectionToken(Broker *self, const HubPeer *sender, const FrameRoute *routes, uint16_t route_count)
 {
     HubPeer *agent;
-    uint16_t i;
 
-    for(i=0; i<route_count; i++) {
-        agent = PeerDirectory_Find(&self->directory, routes[i].peer_id);
-        if (agent == NULL) {
-            continue;
-        }
-        EchoTokens_RecordInjection(&self->echo_tokens, token, PeerDirectory_SlotOf(&self->directory, agent));
+    if (route_count == 0) {
+        return FRAME_ROUTE_NO_TOKEN;
     }
+
+    agent = PeerDirectory_Find(&self->directory, routes[0].peer_id);
+    if (agent == NULL) {
+        return FRAME_ROUTE_NO_TOKEN;
+    }
+
+    return EchoTokens_Issue(&agent->echo_tokens, sender->peer_id);
 }
 
-static uint32_t echoOriginatorPeerId(Broker *self, const HubPeer *agent, uint8_t route_flags)
+static void releaseEchoTokens(Broker *self, uint32_t client_peer_id)
 {
-    uint8_t slot = PeerDirectory_SlotOf(&self->directory, agent);
+    HubPeer *peer;
+    uint16_t i;
 
-    return EchoTokens_Originator(&self->echo_tokens, route_flags, slot);
+    for(i=0; i<PEER_DIRECTORY_MAX; i++) {
+        peer = PeerDirectory_At(&self->directory, i);
+        if (peer != NULL && peer->role == kHUB_PEER_ROLE_AGENT) {
+            EchoTokens_ReleaseClient(&peer->echo_tokens, client_peer_id);
+        }
+    }
 }
 
 static void countInterfaceFrame(Broker *self, const HubPeer *peer, uint8_t channel)

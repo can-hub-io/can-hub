@@ -93,6 +93,10 @@ class BenchKeywords:
     def start_can_client_with(self, server, config) -> CanClient:
         return CanClient.start(server, config)
 
+    @keyword("Start ${count} CAN Clients On ${server} With ${config}")
+    def start_can_clients_with(self, count, server, config) -> list[CanClient]:
+        return [CanClient.start(server, config) for _ in range(int(count))]
+
     # ---------- actions ----------
 
     @keyword("Fresh State Directory For ${role}")
@@ -300,6 +304,11 @@ class BenchKeywords:
         raise AssertionError(
             f"client did not receive {can_id}#{data}\n{client.process.read_log()}"
         )
+
+    @keyword("Every Client Of ${clients} Should Receive ${can_id}#${data}")
+    def every_client_should_receive(self, clients, can_id, data, timeout=5):
+        for client in clients:
+            self.client_should_receive(client, can_id, data, timeout)
 
     # ---------- fairness / backpressure ----------
 

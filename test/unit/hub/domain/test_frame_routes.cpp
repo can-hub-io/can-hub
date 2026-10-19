@@ -4,6 +4,9 @@ extern "C" {
 #include "hub/domain/frame_routes.h"
 }
 
+#define FIRST_CLIENT_PEER 200
+#define CLIENTS_PAST_PEER_COUNT (PEER_DIRECTORY_MAX / CLIENT_SESSION_BINDINGS_MAX + 1)
+
 static InterfaceRegistry registry;
 static PeerDirectory directory;
 static const RegisterMessage truck_registration = { "truck42", 2, { "can0", "can1" } };
@@ -135,7 +138,7 @@ describe("frame_routes", []() {
         uint32_t peer_id;
         uint8_t opened;
 
-        for(peer_id=200; peer_id<204; peer_id++) {
+        for(peer_id=FIRST_CLIENT_PEER; peer_id<FIRST_CLIENT_PEER + CLIENTS_PAST_PEER_COUNT; peer_id++) {
             client = PeerDirectory_Allocate(&directory, peer_id);
             client->role = kHUB_PEER_ROLE_CLIENT;
             for(opened=0; opened<CLIENT_SESSION_BINDINGS_MAX; opened++) {

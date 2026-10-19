@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -36,6 +37,9 @@
 #define TLS_PEER_ID_BASE 0xC0000001
 #define UNIX_SLOT_OFFSET TCP_SERVER_PEERS_MAX
 #define TLS_SLOT_OFFSET (2 * TCP_SERVER_PEERS_MAX)
+#define STREAM_SLOTS_MAX (TLS_SLOT_OFFSET + TLS_SERVER_PEERS_MAX)
+
+static_assert(STREAM_SLOTS_MAX <= EPOLL_REGISTRY_SLOTS_MAX, "stream slots exceed the epoll registry");
 
 typedef struct {
     bool requested;
@@ -44,7 +48,7 @@ typedef struct {
 } ListenAddress;
 
 typedef enum thub_event_tag_e {
-    kHUB_EVENT_TAG_TCP_LISTENER = 0x100,
+    kHUB_EVENT_TAG_TCP_LISTENER = STREAM_SLOTS_MAX,
     kHUB_EVENT_TAG_UNIX_LISTENER,
     kHUB_EVENT_TAG_QUIC_UDP,
     kHUB_EVENT_TAG_QUIC_TIMER,
@@ -90,7 +94,7 @@ static void muxClosePeer(void *context, uint32_t peer_id);
 static uint32_t muxReceiveOverflows(void *context);
 static HubTransportPort *portForPeer(uint32_t peer_id);
 static bool registerStaticPollFds(void);
-static void syncStreamSlotRegistrations(TcpServerTransport *transport, uint8_t slot_offset);
+static void syncStreamSlotRegistrations(TcpServerTransport *transport, uint16_t slot_offset);
 static void syncTlsSlotRegistrations(void);
 static void dispatchEvent(const struct epoll_event *event);
 static void corkQuic(void);
@@ -522,11 +526,11 @@ static bool registerStaticPollFds(void)
     return true;
 }
 
-static void syncStreamSlotRegistrations(TcpServerTransport *transport, uint8_t slot_offset)
+static void syncStreamSlotRegistrations(TcpServerTransport *transport, uint16_t slot_offset)
 {
     int32_t current_fd;
     uint32_t wanted_mask;
-    uint8_t slot;
+    uint16_t slot;
 
     for(slot=0; slot<TCP_SERVER_PEERS_MAX; slot++) {
         current_fd = TcpServerTransport_SlotFd(transport, slot);
@@ -543,7 +547,7 @@ static void syncTlsSlotRegistrations(void)
 {
     int32_t current_fd;
     uint32_t wanted_mask;
-    uint8_t slot;
+    uint16_t slot;
 
     for(slot=0; slot<TLS_SERVER_PEERS_MAX; slot++) {
         current_fd = TlsServerTransport_SlotFd(&tls_transport, slot);
@@ -599,7 +603,7 @@ static void uncorkQuic(void)
 static void dispatchStreamSlotEvent(const struct epoll_event *event)
 {
     TcpServerTransport *transport = &tcp_transport;
-    uint8_t slot = (uint8_t)event->data.u32;
+    uint16_t slot = (uint16_t)event->data.u32;
 
     if (slot >= TLS_SLOT_OFFSET) {
         slot -= TLS_SLOT_OFFSET;
