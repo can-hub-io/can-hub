@@ -54,6 +54,9 @@ SETTING_RESTART_MS = 1 << 5
 SETTING_TXQUEUELEN = 1 << 6
 SETTING_LINK = 1 << 7
 SETTING_STATE = 1 << 8
+SETTING_BIT_TIMING = 1 << 9
+SETTING_DATA_BIT_TIMING = 1 << 10
+SETTING_TERMINATION = 1 << 11
 
 CTRLMODE_LOOPBACK = 1 << 0
 CTRLMODE_LISTEN_ONLY = 1 << 1
@@ -97,6 +100,17 @@ class CanHubStats(Structure):
     ]
 
 
+class CanHubBitTiming(Structure):
+    _fields_ = [
+        ("tq", c_uint32),
+        ("prop_seg", c_uint32),
+        ("phase_seg1", c_uint32),
+        ("phase_seg2", c_uint32),
+        ("sjw", c_uint32),
+        ("brp", c_uint32),
+    ]
+
+
 class CanHubInterfaceSettings(Structure):
     _fields_ = [
         ("struct_size", c_uint32),
@@ -111,7 +125,9 @@ class CanHubInterfaceSettings(Structure):
         ("txqueuelen", c_uint32),
         ("link_up", c_uint8),
         ("can_state", c_uint8),
-        ("reserved", c_uint8 * 2),
+        ("termination", c_uint16),
+        ("bit_timing", CanHubBitTiming),
+        ("data_bit_timing", CanHubBitTiming),
     ]
 
 

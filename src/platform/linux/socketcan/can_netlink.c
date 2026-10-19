@@ -21,6 +21,16 @@
 #define VCAN_KIND "vcan"
 #define CAN_KIND "can"
 #define UNKNOWN_INTERFACE_DETAIL "no such interface"
+#define CAN_DATA_FIELDS (INTERFACE_FIELDS_NEED_LINK_DOWN | INTERFACE_FIELD_TERMINATION)
+
+typedef struct {
+    bool has_rate;
+    bool has_sample_point;
+    bool has_raw;
+    uint32_t rate;
+    uint16_t sample_point;
+    InterfaceBitTiming raw;
+} TimingRequest;
 
 static_assert(INTERFACE_CTRLMODE_LOOPBACK == CAN_CTRLMODE_LOOPBACK, "ctrlmode bits follow the kernel");
 static_assert(INTERFACE_CTRLMODE_LISTEN_ONLY == CAN_CTRLMODE_LISTENONLY, "ctrlmode bits follow the kernel");
@@ -38,6 +48,10 @@ static bool applyLinkSettings(
     char *detail
 );
 static void appendCanData(struct nlmsghdr *header, const InterfaceSettings *requested, const InterfaceSettings *current);
+static TimingRequest nominalTiming(const InterfaceSettings *requested, const InterfaceSettings *current);
+static TimingRequest dataTiming(const InterfaceSettings *requested, const InterfaceSettings *current);
+static void appendBitTiming(struct nlmsghdr *header, uint16_t type, const TimingRequest *request);
+static void readBitTiming(const struct can_bittiming *timing, InterfaceBitTiming *out);
 static void beginRequest(uint8_t *buffer, uint16_t type, uint16_t flags, uint32_t index);
 static bool sendAndAck(const void *request, uint32_t length, char *detail);
 static int32_t openNetlinkSocket(void);
@@ -212,7 +226,7 @@ static bool applyLinkSettings(
     struct nlmsghdr *header = (struct nlmsghdr *)buffer;
     uint32_t index = if_nametoindex(interface_name);
 
-    if ((requested->fields & (INTERFACE_FIELDS_NEED_LINK_DOWN | INTERFACE_FIELD_TXQUEUELEN)) == 0) {
+    if ((requested->fields & (CAN_DATA_FIELDS | INTERFACE_FIELD_TXQUEUELEN)) == 0) {
         return true;
     }
     if (index == 0) {
@@ -223,7 +237,7 @@ static bool applyLinkSettings(
     if (requested->fields & INTERFACE_FIELD_TXQUEUELEN) {
         appendAttribute(header, sizeof(buffer), IFLA_TXQLEN, &requested->txqueuelen, sizeof(requested->txqueuelen));
     }
-    if (requested->fields & INTERFACE_FIELDS_NEED_LINK_DOWN) {
+    if (requested->fields & CAN_DATA_FIELDS) {
         appendCanData(header, requested, current);
     }
 
@@ -232,8 +246,8 @@ static bool applyLinkSettings(
 
 static void appendCanData(struct nlmsghdr *header, const InterfaceSettings *requested, const InterfaceSettings *current)
 {
-    struct can_bittiming bittiming;
-    struct can_bittiming data_bittiming;
+    TimingRequest nominal = nominalTiming(requested, current);
+    TimingRequest data = dataTiming(requested, current);
     struct can_ctrlmode ctrlmode;
     struct rtattr *link_info;
     struct rtattr *info_data;
@@ -242,23 +256,8 @@ static void appendCanData(struct nlmsghdr *header, const InterfaceSettings *requ
     appendAttribute(header, NETLINK_BUFFER_SIZE, IFLA_INFO_KIND, CAN_KIND, sizeof(CAN_KIND));
     info_data = beginNested(header, NETLINK_BUFFER_SIZE, IFLA_INFO_DATA);
 
-    if (requested->fields & (INTERFACE_FIELD_BITRATE | INTERFACE_FIELD_SAMPLE_POINT)) {
-        memset(&bittiming, 0, sizeof(bittiming));
-        bittiming.bitrate = (requested->fields & INTERFACE_FIELD_BITRATE) ? requested->bitrate : current->bitrate;
-        bittiming.sample_point = (requested->fields & INTERFACE_FIELD_SAMPLE_POINT) ? requested->sample_point : 0;
-        appendAttribute(header, NETLINK_BUFFER_SIZE, IFLA_CAN_BITTIMING, &bittiming, sizeof(bittiming));
-    }
-    if (requested->fields & (INTERFACE_FIELD_DATA_BITRATE | INTERFACE_FIELD_DATA_SAMPLE_POINT)) {
-        memset(&data_bittiming, 0, sizeof(data_bittiming));
-        data_bittiming.bitrate = current->data_bitrate;
-        if (requested->fields & INTERFACE_FIELD_DATA_BITRATE) {
-            data_bittiming.bitrate = requested->data_bitrate;
-        }
-        if (requested->fields & INTERFACE_FIELD_DATA_SAMPLE_POINT) {
-            data_bittiming.sample_point = requested->data_sample_point;
-        }
-        appendAttribute(header, NETLINK_BUFFER_SIZE, IFLA_CAN_DATA_BITTIMING, &data_bittiming, sizeof(data_bittiming));
-    }
+    appendBitTiming(header, IFLA_CAN_BITTIMING, &nominal);
+    appendBitTiming(header, IFLA_CAN_DATA_BITTIMING, &data);
     if (requested->fields & INTERFACE_FIELD_CTRLMODE) {
         ctrlmode.mask = requested->ctrlmode_mask & INTERFACE_CTRLMODES_KNOWN;
         ctrlmode.flags = requested->ctrlmode_flags & ctrlmode.mask;
@@ -267,9 +266,67 @@ static void appendCanData(struct nlmsghdr *header, const InterfaceSettings *requ
     if (requested->fields & INTERFACE_FIELD_RESTART_MS) {
         appendAttribute(header, NETLINK_BUFFER_SIZE, IFLA_CAN_RESTART_MS, &requested->restart_ms, sizeof(requested->restart_ms));
     }
+    if (requested->fields & INTERFACE_FIELD_TERMINATION) {
+        appendAttribute(header, NETLINK_BUFFER_SIZE, IFLA_CAN_TERMINATION, &requested->termination, sizeof(requested->termination));
+    }
 
     endNested(header, info_data);
     endNested(header, link_info);
+}
+
+static TimingRequest nominalTiming(const InterfaceSettings *requested, const InterfaceSettings *current)
+{
+    TimingRequest request;
+
+    memset(&request, 0, sizeof(request));
+    request.has_rate = (requested->fields & INTERFACE_FIELD_BITRATE) != 0;
+    request.has_sample_point = (requested->fields & INTERFACE_FIELD_SAMPLE_POINT) != 0;
+    request.has_raw = (requested->fields & INTERFACE_FIELD_BIT_TIMING) != 0;
+    request.rate = request.has_rate ? requested->bitrate : current->bitrate;
+    request.sample_point = requested->sample_point;
+    request.raw = requested->bit_timing;
+
+    return request;
+}
+
+static TimingRequest dataTiming(const InterfaceSettings *requested, const InterfaceSettings *current)
+{
+    TimingRequest request;
+
+    memset(&request, 0, sizeof(request));
+    request.has_rate = (requested->fields & INTERFACE_FIELD_DATA_BITRATE) != 0;
+    request.has_sample_point = (requested->fields & INTERFACE_FIELD_DATA_SAMPLE_POINT) != 0;
+    request.has_raw = (requested->fields & INTERFACE_FIELD_DATA_BIT_TIMING) != 0;
+    request.rate = request.has_rate ? requested->data_bitrate : current->data_bitrate;
+    request.sample_point = requested->data_sample_point;
+    request.raw = requested->data_bit_timing;
+
+    return request;
+}
+
+static void appendBitTiming(struct nlmsghdr *header, uint16_t type, const TimingRequest *request)
+{
+    struct can_bittiming bittiming;
+
+    if (!request->has_rate && !request->has_sample_point && !request->has_raw) {
+        return;
+    }
+
+    memset(&bittiming, 0, sizeof(bittiming));
+    if (request->has_raw) {
+        bittiming.tq = request->raw.tq;
+        bittiming.prop_seg = request->raw.prop_seg;
+        bittiming.phase_seg1 = request->raw.phase_seg1;
+        bittiming.phase_seg2 = request->raw.phase_seg2;
+        bittiming.sjw = request->raw.sjw;
+        bittiming.brp = request->raw.brp;
+    }
+    if (bittiming.tq == 0 && bittiming.brp == 0) {
+        bittiming.bitrate = request->rate;
+        bittiming.sample_point = request->has_sample_point ? request->sample_point : 0;
+    }
+
+    appendAttribute(header, NETLINK_BUFFER_SIZE, type, &bittiming, sizeof(bittiming));
 }
 
 static void beginRequest(uint8_t *buffer, uint16_t type, uint16_t flags, uint32_t index)
@@ -452,23 +509,27 @@ static void parseCanData(const struct rtattr *info_data, InterfaceSettings *effe
     const struct rtattr *ctrlmode = findAttribute(RTA_DATA(info_data), RTA_PAYLOAD(info_data), IFLA_CAN_CTRLMODE);
     const struct rtattr *restart_ms = findAttribute(RTA_DATA(info_data), RTA_PAYLOAD(info_data), IFLA_CAN_RESTART_MS);
     const struct rtattr *state = findAttribute(RTA_DATA(info_data), RTA_PAYLOAD(info_data), IFLA_CAN_STATE);
+    const struct rtattr *termination = findAttribute(RTA_DATA(info_data), RTA_PAYLOAD(info_data), IFLA_CAN_TERMINATION);
     const struct can_bittiming *timing;
     const struct can_ctrlmode *modes;
+    uint16_t ohms;
 
     if (bittiming != NULL && RTA_PAYLOAD(bittiming) >= sizeof(*timing)) {
         timing = RTA_DATA(bittiming);
         if (timing->bitrate != 0) {
-            effective->fields |= INTERFACE_FIELD_BITRATE | INTERFACE_FIELD_SAMPLE_POINT;
+            effective->fields |= INTERFACE_FIELDS_NOMINAL_RATE | INTERFACE_FIELD_BIT_TIMING;
             effective->bitrate = timing->bitrate;
             effective->sample_point = (uint16_t)timing->sample_point;
+            readBitTiming(timing, &effective->bit_timing);
         }
     }
     if (data_bittiming != NULL && RTA_PAYLOAD(data_bittiming) >= sizeof(*timing)) {
         timing = RTA_DATA(data_bittiming);
         if (timing->bitrate != 0) {
-            effective->fields |= INTERFACE_FIELD_DATA_BITRATE | INTERFACE_FIELD_DATA_SAMPLE_POINT;
+            effective->fields |= INTERFACE_FIELDS_DATA_RATE | INTERFACE_FIELD_DATA_BIT_TIMING;
             effective->data_bitrate = timing->bitrate;
             effective->data_sample_point = (uint16_t)timing->sample_point;
+            readBitTiming(timing, &effective->data_bit_timing);
         }
     }
     if (ctrlmode != NULL && RTA_PAYLOAD(ctrlmode) >= sizeof(*modes)) {
@@ -485,6 +546,21 @@ static void parseCanData(const struct rtattr *info_data, InterfaceSettings *effe
         effective->fields |= INTERFACE_FIELD_STATE;
         effective->can_state = (uint8_t)readU32Attribute(state);
     }
+    if (termination != NULL && RTA_PAYLOAD(termination) >= sizeof(ohms)) {
+        memcpy(&ohms, RTA_DATA(termination), sizeof(ohms));
+        effective->fields |= INTERFACE_FIELD_TERMINATION;
+        effective->termination = ohms;
+    }
+}
+
+static void readBitTiming(const struct can_bittiming *timing, InterfaceBitTiming *out)
+{
+    out->tq = timing->tq;
+    out->prop_seg = timing->prop_seg;
+    out->phase_seg1 = timing->phase_seg1;
+    out->phase_seg2 = timing->phase_seg2;
+    out->sjw = timing->sjw;
+    out->brp = timing->brp;
 }
 
 static uint32_t readU32Attribute(const struct rtattr *attribute)

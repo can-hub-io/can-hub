@@ -166,7 +166,8 @@ static void printUsage(FILE *stream, const char *program)
     fprintf(stream, "  interface set <agent>/<iface> <setting>...    reconfigure a bus in one step:\n");
     fprintf(stream, "      bitrate <bps> sample-point <0.xxx> dbitrate <bps> dsample-point <0.xxx>\n");
     fprintf(stream, "      fd|listen-only|loopback|one-shot|triple-sampling|berr-reporting on|off\n");
-    fprintf(stream, "      restart-ms <ms> txqueuelen <n> up|down\n");
+    fprintf(stream, "      restart-ms <ms> txqueuelen <n> termination <ohms> up|down\n");
+    fprintf(stream, "      tq <ns> prop-seg <n> phase-seg1 <n> phase-seg2 <n> sjw <n>   (dtq ... dsjw: data phase)\n");
     fprintf(stream, "  interface up|down <agent>/<iface>             bring a bus up or down\n");
     fprintf(stream, "  pins                   pinned TOFU identities\n");
     fprintf(stream, "  pins add <name> <fp>   allow an agent (its --show-identity fingerprint)\n");

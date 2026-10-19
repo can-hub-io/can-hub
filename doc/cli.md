@@ -45,6 +45,8 @@ them, and the agent applies them all at once:
 |---|---|
 | `bitrate`, `dbitrate` | nominal and CAN FD data bit rate, bit/s |
 | `sample-point`, `dsample-point` | a fraction, `0.875` |
+| `tq`, `prop-seg`, `phase-seg1`, `phase-seg2`, `sjw` (and `dtq` … `dsjw`) | raw timing instead of a bitrate: time quantum in ns, segments in quanta; `sjw` alone may go with a bitrate |
+| `termination` | ohms, `0` = off (hardware that supports it) |
 | `fd`, `listen-only`, `loopback`, `one-shot`, `triple-sampling`, `berr-reporting` | `on` or `off` |
 | `restart-ms` | restart after bus-off, ms (`0` = never) |
 | `txqueuelen` | TX queue length |
@@ -52,12 +54,13 @@ them, and the agent applies them all at once:
 
 ```sh
 can-hub-cli interface set truck42/can0 bitrate 500000 sample-point 0.875 fd on dbitrate 2000000
-can-hub-cli interface set truck42/can0 restart-ms 100
+can-hub-cli interface set truck42/can0 restart-ms 100 termination 120
+can-hub-cli interface set truck42/can0 tq 125 prop-seg 6 phase-seg1 7 phase-seg2 2 sjw 1
 can-hub-cli interface show truck42/can0
 ```
 
 Both print the settings the device holds afterwards, as the kernel reports
-them (it may round a sample point). A failure prints the kernel's reason,
+them (it may round a sample point), raw timing and `brp` included. A failure prints the kernel's reason,
 e.g. `apply failed: Operation not supported` for bit timing on a vcan.
 
 ## Notes

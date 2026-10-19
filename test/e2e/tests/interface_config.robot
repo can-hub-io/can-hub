@@ -40,6 +40,30 @@ A Bus Without Bit Timing Says Why It Refused
     Should Not Be True    ${refused.ok}
     Should Contain    ${refused.stderr}    apply failed:
 
+Raw Timing On A Bus Without Bit Timing Says Why It Refused
+    ${hub}=    Start CAN HUB With Agent bench On ${LOCAL_SERVER}
+
+    ${refused}=    Try CLI On Hub ${hub}    interface    set    bench/vcan0    tq    125    prop-seg    6    phase-seg1    7    phase-seg2    2
+
+    Should Not Be True    ${refused.ok}
+    Should Contain    ${refused.stderr}    apply failed:
+
+Termination On A Bus Without It Says Why It Refused
+    ${hub}=    Start CAN HUB With Agent bench On ${LOCAL_SERVER}
+
+    ${refused}=    Try CLI On Hub ${hub}    interface    set    bench/vcan0    termination    120
+
+    Should Not Be True    ${refused.ok}
+    Should Contain    ${refused.stderr}    apply failed:
+
+A Bitrate And A Time Quantum Together Are Refused Before Anything Changes
+    ${hub}=    Start CAN HUB With Agent bench On ${LOCAL_SERVER}
+
+    ${refused}=    Try CLI On Hub ${hub}    interface    set    bench/vcan0    bitrate    500000    tq    125    down
+
+    Should Contain    ${refused.stderr}    give a bitrate or a time quantum and segments, not both
+    Link vcan0 On ${LOCAL_SERVER} Should Be Up
+
 A Client With An Admin Grant Configures The Bus
     ${hub}=    Start CAN HUB With Agent bench On ${LOCAL_SERVER}
     ${state}=    Fresh State Directory For client

@@ -6,7 +6,7 @@ python fingerprint helper) must work without libcanhub present.
 
 from .fingerprint import identity_fingerprint
 
-__all__ = ["CanHubBus", "InterfaceSettings", "identity_fingerprint"]
+__all__ = ["BitTiming", "CanHubBus", "InterfaceSettings", "identity_fingerprint"]
 
 
 def __getattr__(name):
@@ -16,4 +16,7 @@ def __getattr__(name):
     if name == "InterfaceSettings":
         from .settings import InterfaceSettings
         return InterfaceSettings
+    if name == "BitTiming":
+        from .settings import BitTiming
+        return BitTiming
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

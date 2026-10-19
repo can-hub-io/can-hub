@@ -63,6 +63,9 @@ extern "C" {
 #define CANHUB_SETTING_TXQUEUELEN (1u << 6)
 #define CANHUB_SETTING_LINK (1u << 7)
 #define CANHUB_SETTING_STATE (1u << 8)
+#define CANHUB_SETTING_BIT_TIMING (1u << 9)
+#define CANHUB_SETTING_DATA_BIT_TIMING (1u << 10)
+#define CANHUB_SETTING_TERMINATION (1u << 11)
 
 #define CANHUB_CTRLMODE_LOOPBACK (1u << 0)
 #define CANHUB_CTRLMODE_LISTEN_ONLY (1u << 1)
@@ -117,11 +120,27 @@ typedef struct {
 } CanHubConnectConfig;
 
 /*
+ * Raw bit timing, the alternative to a bitrate: time quantum in ns and the
+ * segments in quanta. Give either a bitrate (and sample point) or tq and the
+ * segments, not both; sjw may go with either. Replies carry the timing the
+ * kernel settled on, brp included.
+ */
+typedef struct {
+    uint32_t tq;
+    uint32_t prop_seg;
+    uint32_t phase_seg1;
+    uint32_t phase_seg2;
+    uint32_t sjw;
+    uint32_t brp;
+} CanHubBitTiming;
+
+/*
  * The settings of one CAN interface. fields names the members that carry a
  * value (CANHUB_SETTING_*): in a request, what to change, all applied in one
  * step; in a reply, what the device reports. Sample points are in tenths of a
  * percent (875 = 87.5%). ctrlmode_mask names the CANHUB_CTRLMODE_* modes to
- * change and ctrlmode_flags their new values. can_state is only reported.
+ * change and ctrlmode_flags their new values. termination is in ohms, 0 =
+ * off. can_state is only reported.
  */
 typedef struct {
     uint32_t struct_size;
@@ -136,7 +155,9 @@ typedef struct {
     uint32_t txqueuelen;
     uint8_t link_up;
     uint8_t can_state;
-    uint8_t reserved[2];
+    uint16_t termination;
+    CanHubBitTiming bit_timing;
+    CanHubBitTiming data_bit_timing;
 } CanHubInterfaceSettings;
 
 CANHUB_API uint32_t canhub_api_version(void);

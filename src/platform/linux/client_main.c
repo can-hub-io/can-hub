@@ -217,7 +217,8 @@ static void printUsage(FILE *stream, const char *program)
     fprintf(stream, "       | configure <agent>/<iface> <setting>...   reconfigure the bus (needs an rwa grant):\n");
     fprintf(stream, "           bitrate <bps> sample-point <0.xxx> dbitrate <bps> dsample-point <0.xxx>\n");
     fprintf(stream, "           fd|listen-only|loopback|one-shot|triple-sampling|berr-reporting on|off\n");
-    fprintf(stream, "           restart-ms <ms> txqueuelen <n> up|down\n");
+    fprintf(stream, "           restart-ms <ms> txqueuelen <n> termination <ohms> up|down\n");
+    fprintf(stream, "           tq <ns> prop-seg <n> phase-seg1 <n> phase-seg2 <n> sjw <n>   (dtq ... dsjw: data phase)\n");
     fprintf(stream, "       <interface> is the numeric id (from list) or the namespaced name agent/iface\n");
     fprintf(stream, "       %s --show-identity [--state-dir <path>]   print this client's TLS fingerprint\n", program);
     fprintf(stream, "       [--log-level error|warn|info|debug]\n");

@@ -350,14 +350,14 @@ mod tests {
 
     #[test]
     fn configure_sends_the_query_and_returns_the_reply() {
-        let mut reply = vec![0u8; 112];
-        Header::write(&mut reply, MessageType::ConfigureReply, 0, 108);
+        let mut reply = vec![0u8; 160];
+        Header::write(&mut reply, MessageType::ConfigureReply, 0, 156);
         let transport = MockTransport::with_replies(&[reply]);
         let mut client = AdminClient::connect(transport).unwrap();
 
         let answered = client.configure("truck42", "can0", ConfigureOp::Query, &InterfaceSettings::default()).unwrap();
 
-        let request = &client.transport.outbound[76..76 + 192];
+        let request = &client.transport.outbound[76..76 + 240];
         assert_eq!(request[0], MessageType::Configure as u8);
         assert_eq!(request[148], ConfigureOp::Query as u8);
         assert_eq!(answered.status, 0);

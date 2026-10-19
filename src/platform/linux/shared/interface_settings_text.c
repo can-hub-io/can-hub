@@ -7,6 +7,8 @@
 #define DECIMAL_BASE 10
 #define U32_DECIMAL_DIGITS_MAX 10
 #define KEY_COLUMN_WIDTH 16
+#define DATA_PHASE_PREFIX 'd'
+#define TERMINATION_KEY "termination"
 
 typedef struct {
     const char *name;
@@ -33,6 +35,9 @@ static const char *const STATE_NAMES[] = {
 
 static bool parseWord(InterfaceSettings *settings, const char *key, const char *value, char *error);
 static bool parseNumber(InterfaceSettings *settings, const char *key, const char *value, char *error);
+static bool parseTiming(uint32_t *member, uint32_t field, InterfaceSettings *settings, const char *key, const char *value, char *error);
+static bool parseTermination(InterfaceSettings *settings, const char *value, char *error);
+static uint32_t *timingMember(InterfaceBitTiming *timing, const char *name);
 static bool parseCtrlmode(InterfaceSettings *settings, uint32_t flag, const char *key, const char *value, char *error);
 static const CtrlmodeName *findCtrlmode(const char *name);
 static bool isLinkWord(const char *word);
@@ -40,6 +45,7 @@ static bool readU32(const char *text, uint32_t *value);
 static bool readSamplePoint(const char *text, uint16_t *value);
 static void printSamplePoint(FILE *stream, const char *key, uint16_t sample_point);
 static void printCtrlmodes(FILE *stream, const InterfaceSettings *settings);
+static void printBitTiming(FILE *stream, const char *prefix, const InterfaceBitTiming *timing);
 static const char *stateName(uint8_t can_state);
 
 /* ---------- public ---------- */
@@ -95,11 +101,17 @@ void InterfaceSettingsText_Print(FILE *stream, const InterfaceSettings *settings
     if (settings->fields & INTERFACE_FIELD_SAMPLE_POINT) {
         printSamplePoint(stream, "sample-point", settings->sample_point);
     }
+    if (settings->fields & INTERFACE_FIELD_BIT_TIMING) {
+        printBitTiming(stream, "", &settings->bit_timing);
+    }
     if (settings->fields & INTERFACE_FIELD_DATA_BITRATE) {
         fprintf(stream, "%-*s %u\n", KEY_COLUMN_WIDTH, "dbitrate", settings->data_bitrate);
     }
     if (settings->fields & INTERFACE_FIELD_DATA_SAMPLE_POINT) {
         printSamplePoint(stream, "dsample-point", settings->data_sample_point);
+    }
+    if (settings->fields & INTERFACE_FIELD_DATA_BIT_TIMING) {
+        printBitTiming(stream, "d", &settings->data_bit_timing);
     }
     if (settings->fields & INTERFACE_FIELD_CTRLMODE) {
         printCtrlmodes(stream, settings);
@@ -109,6 +121,9 @@ void InterfaceSettingsText_Print(FILE *stream, const InterfaceSettings *settings
     }
     if (settings->fields & INTERFACE_FIELD_TXQUEUELEN) {
         fprintf(stream, "%-*s %u\n", KEY_COLUMN_WIDTH, "txqueuelen", settings->txqueuelen);
+    }
+    if (settings->fields & INTERFACE_FIELD_TERMINATION) {
+        fprintf(stream, "%-*s %u\n", KEY_COLUMN_WIDTH, TERMINATION_KEY, settings->termination);
     }
 }
 
@@ -135,9 +150,24 @@ const char *InterfaceSettingsText_ConfigureStatusName(uint8_t status)
 static bool parseWord(InterfaceSettings *settings, const char *key, const char *value, char *error)
 {
     const CtrlmodeName *ctrlmode = findCtrlmode(key);
+    uint32_t *nominal_member = timingMember(&settings->bit_timing, key);
+    uint32_t *data_member = NULL;
+
+    if (key[0] == DATA_PHASE_PREFIX) {
+        data_member = timingMember(&settings->data_bit_timing, key + 1);
+    }
 
     if (ctrlmode != NULL) {
         return parseCtrlmode(settings, ctrlmode->flag, key, value, error);
+    }
+    if (nominal_member != NULL) {
+        return parseTiming(nominal_member, INTERFACE_FIELD_BIT_TIMING, settings, key, value, error);
+    }
+    if (data_member != NULL) {
+        return parseTiming(data_member, INTERFACE_FIELD_DATA_BIT_TIMING, settings, key, value, error);
+    }
+    if (strcmp(key, TERMINATION_KEY) == 0) {
+        return parseTermination(settings, value, error);
     }
 
     return parseNumber(settings, key, value, error);
@@ -175,6 +205,54 @@ static bool parseNumber(InterfaceSettings *settings, const char *key, const char
     }
 
     return parsed;
+}
+
+static bool parseTiming(uint32_t *member, uint32_t field, InterfaceSettings *settings, const char *key, const char *value, char *error)
+{
+    settings->fields |= field;
+    if (readU32(value, member) && *member != 0) {
+        return true;
+    }
+
+    snprintf(error, INTERFACE_SETTINGS_TEXT_ERROR_SIZE, "invalid %s %s", key, value);
+
+    return false;
+}
+
+static bool parseTermination(InterfaceSettings *settings, const char *value, char *error)
+{
+    uint32_t ohms;
+
+    if (!readU32(value, &ohms) || ohms > UINT16_MAX) {
+        snprintf(error, INTERFACE_SETTINGS_TEXT_ERROR_SIZE, "invalid %s %s", TERMINATION_KEY, value);
+        return false;
+    }
+
+    settings->fields |= INTERFACE_FIELD_TERMINATION;
+    settings->termination = (uint16_t)ohms;
+
+    return true;
+}
+
+static uint32_t *timingMember(InterfaceBitTiming *timing, const char *name)
+{
+    if (strcmp(name, "tq") == 0) {
+        return &timing->tq;
+    }
+    if (strcmp(name, "prop-seg") == 0) {
+        return &timing->prop_seg;
+    }
+    if (strcmp(name, "phase-seg1") == 0) {
+        return &timing->phase_seg1;
+    }
+    if (strcmp(name, "phase-seg2") == 0) {
+        return &timing->phase_seg2;
+    }
+    if (strcmp(name, "sjw") == 0) {
+        return &timing->sjw;
+    }
+
+    return NULL;
 }
 
 static bool parseCtrlmode(InterfaceSettings *settings, uint32_t flag, const char *key, const char *value, char *error)
@@ -282,6 +360,24 @@ static void printCtrlmodes(FILE *stream, const InterfaceSettings *settings)
             (settings->ctrlmode_flags & CTRLMODE_NAMES[i].flag) ? "on" : "off"
         );
     }
+}
+
+static void printBitTiming(FILE *stream, const char *prefix, const InterfaceBitTiming *timing)
+{
+    char key[KEY_COLUMN_WIDTH];
+
+    snprintf(key, sizeof(key), "%stq", prefix);
+    fprintf(stream, "%-*s %u\n", KEY_COLUMN_WIDTH, key, timing->tq);
+    snprintf(key, sizeof(key), "%sprop-seg", prefix);
+    fprintf(stream, "%-*s %u\n", KEY_COLUMN_WIDTH, key, timing->prop_seg);
+    snprintf(key, sizeof(key), "%sphase-seg1", prefix);
+    fprintf(stream, "%-*s %u\n", KEY_COLUMN_WIDTH, key, timing->phase_seg1);
+    snprintf(key, sizeof(key), "%sphase-seg2", prefix);
+    fprintf(stream, "%-*s %u\n", KEY_COLUMN_WIDTH, key, timing->phase_seg2);
+    snprintf(key, sizeof(key), "%ssjw", prefix);
+    fprintf(stream, "%-*s %u\n", KEY_COLUMN_WIDTH, key, timing->sjw);
+    snprintf(key, sizeof(key), "%sbrp", prefix);
+    fprintf(stream, "%-*s %u\n", KEY_COLUMN_WIDTH, key, timing->brp);
 }
 
 static const char *stateName(uint8_t can_state)

@@ -16,6 +16,15 @@
 #define SETTINGS_TXQUEUELEN_OFFSET 28
 #define SETTINGS_LINK_UP_OFFSET 32
 #define SETTINGS_CAN_STATE_OFFSET 33
+#define SETTINGS_TERMINATION_OFFSET 34
+#define SETTINGS_BIT_TIMING_OFFSET 36
+#define SETTINGS_DATA_BIT_TIMING_OFFSET 60
+#define BIT_TIMING_TQ_OFFSET 0
+#define BIT_TIMING_PROP_SEG_OFFSET 4
+#define BIT_TIMING_PHASE_SEG1_OFFSET 8
+#define BIT_TIMING_PHASE_SEG2_OFFSET 12
+#define BIT_TIMING_SJW_OFFSET 16
+#define BIT_TIMING_BRP_OFFSET 20
 #define IFCONFIG_REQUEST_ID_OFFSET 0
 #define IFCONFIG_INTERFACE_NAME_OFFSET 4
 #define IFCONFIG_OP_OFFSET 20
@@ -23,22 +32,37 @@
 #define IFCONFIG_REPLY_REQUEST_ID_OFFSET 0
 #define IFCONFIG_REPLY_STATUS_OFFSET 4
 #define IFCONFIG_REPLY_SETTINGS_OFFSET 8
-#define IFCONFIG_REPLY_DETAIL_OFFSET 48
+#define IFCONFIG_REPLY_DETAIL_OFFSET (IFCONFIG_REPLY_SETTINGS_OFFSET + INTERFACE_SETTINGS_SIZE)
 #define CONFIGURE_AGENT_NAME_OFFSET 0
 #define CONFIGURE_INTERFACE_NAME_OFFSET 128
 #define CONFIGURE_OP_OFFSET 144
 #define CONFIGURE_SETTINGS_OFFSET 148
 #define CONFIGURE_REPLY_STATUS_OFFSET 0
 #define CONFIGURE_REPLY_SETTINGS_OFFSET 4
-#define CONFIGURE_REPLY_DETAIL_OFFSET 44
+#define CONFIGURE_REPLY_DETAIL_OFFSET (CONFIGURE_REPLY_SETTINGS_OFFSET + INTERFACE_SETTINGS_SIZE)
 
 static size_t encode(uint8_t type, uint16_t body_size, uint8_t *buffer, size_t buffer_size, uint8_t **body);
 static void writeSettings(uint8_t *destination, const InterfaceSettings *settings);
 static bool readSettings(InterfaceSettings *settings, const uint8_t *source);
+static void writeBitTiming(uint8_t *destination, const InterfaceBitTiming *timing);
+static void readBitTiming(InterfaceBitTiming *timing, const uint8_t *source);
+static bool namesRawTiming(const InterfaceBitTiming *timing);
 static void writeText(uint8_t *destination, const char *text, size_t size);
 static void copyName(char *destination, const uint8_t *source, size_t size);
 
 /* ---------- public ---------- */
+
+bool InterfaceSettings_HasTimingConflict(const InterfaceSettings *self)
+{
+    bool nominal_raw = (self->fields & INTERFACE_FIELD_BIT_TIMING) && namesRawTiming(&self->bit_timing);
+    bool data_raw = (self->fields & INTERFACE_FIELD_DATA_BIT_TIMING) && namesRawTiming(&self->data_bit_timing);
+
+    if (nominal_raw && (self->fields & INTERFACE_FIELDS_NOMINAL_RATE)) {
+        return true;
+    }
+
+    return data_raw && (self->fields & INTERFACE_FIELDS_DATA_RATE);
+}
 
 size_t IfconfigMessage_Encode(const IfconfigMessage *self, uint8_t *buffer, size_t buffer_size)
 {
@@ -198,6 +222,9 @@ static void writeSettings(uint8_t *destination, const InterfaceSettings *setting
     Wire_WriteU32(destination + SETTINGS_TXQUEUELEN_OFFSET, settings->txqueuelen);
     destination[SETTINGS_LINK_UP_OFFSET] = settings->link_up ? 1 : 0;
     destination[SETTINGS_CAN_STATE_OFFSET] = settings->can_state;
+    Wire_WriteU16(destination + SETTINGS_TERMINATION_OFFSET, settings->termination);
+    writeBitTiming(destination + SETTINGS_BIT_TIMING_OFFSET, &settings->bit_timing);
+    writeBitTiming(destination + SETTINGS_DATA_BIT_TIMING_OFFSET, &settings->data_bit_timing);
 }
 
 static bool readSettings(InterfaceSettings *settings, const uint8_t *source)
@@ -213,12 +240,40 @@ static bool readSettings(InterfaceSettings *settings, const uint8_t *source)
     settings->txqueuelen = Wire_ReadU32(source + SETTINGS_TXQUEUELEN_OFFSET);
     settings->link_up = source[SETTINGS_LINK_UP_OFFSET] != 0;
     settings->can_state = source[SETTINGS_CAN_STATE_OFFSET];
+    settings->termination = Wire_ReadU16(source + SETTINGS_TERMINATION_OFFSET);
+    readBitTiming(&settings->bit_timing, source + SETTINGS_BIT_TIMING_OFFSET);
+    readBitTiming(&settings->data_bit_timing, source + SETTINGS_DATA_BIT_TIMING_OFFSET);
 
     if (settings->sample_point > INTERFACE_SAMPLE_POINT_MAX) {
         return false;
     }
 
     return settings->data_sample_point <= INTERFACE_SAMPLE_POINT_MAX;
+}
+
+static void writeBitTiming(uint8_t *destination, const InterfaceBitTiming *timing)
+{
+    Wire_WriteU32(destination + BIT_TIMING_TQ_OFFSET, timing->tq);
+    Wire_WriteU32(destination + BIT_TIMING_PROP_SEG_OFFSET, timing->prop_seg);
+    Wire_WriteU32(destination + BIT_TIMING_PHASE_SEG1_OFFSET, timing->phase_seg1);
+    Wire_WriteU32(destination + BIT_TIMING_PHASE_SEG2_OFFSET, timing->phase_seg2);
+    Wire_WriteU32(destination + BIT_TIMING_SJW_OFFSET, timing->sjw);
+    Wire_WriteU32(destination + BIT_TIMING_BRP_OFFSET, timing->brp);
+}
+
+static void readBitTiming(InterfaceBitTiming *timing, const uint8_t *source)
+{
+    timing->tq = Wire_ReadU32(source + BIT_TIMING_TQ_OFFSET);
+    timing->prop_seg = Wire_ReadU32(source + BIT_TIMING_PROP_SEG_OFFSET);
+    timing->phase_seg1 = Wire_ReadU32(source + BIT_TIMING_PHASE_SEG1_OFFSET);
+    timing->phase_seg2 = Wire_ReadU32(source + BIT_TIMING_PHASE_SEG2_OFFSET);
+    timing->sjw = Wire_ReadU32(source + BIT_TIMING_SJW_OFFSET);
+    timing->brp = Wire_ReadU32(source + BIT_TIMING_BRP_OFFSET);
+}
+
+static bool namesRawTiming(const InterfaceBitTiming *timing)
+{
+    return timing->tq != 0 || timing->brp != 0;
 }
 
 static void writeText(uint8_t *destination, const char *text, size_t size)

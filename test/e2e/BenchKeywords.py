@@ -157,6 +157,12 @@ class BenchKeywords:
     def tx_queue_length_of(self, interface, server) -> int:
         return server.link(interface)["txqlen"]
 
+    @keyword("Link ${interface} On ${server} Should Be Up")
+    def link_should_be_up(self, interface, server):
+        flags = server.link(interface)["flags"]
+        if "UP" not in flags:
+            raise AssertionError(f"{interface} is down: {flags}")
+
     @keyword("Link ${interface} On ${server} Should Be Down")
     def link_should_be_down(self, interface, server):
         flags = server.link(interface)["flags"]

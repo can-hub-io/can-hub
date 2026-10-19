@@ -192,6 +192,10 @@ export type AclLevel = 'none' | 'r' | 'rw' | 'rwa'
 export const CAN_MODES = ['fd', 'listenOnly', 'loopback', 'oneShot', 'tripleSampling', 'berrReporting'] as const
 export type CanMode = (typeof CAN_MODES)[number]
 
+export const TIMING_MEMBERS = ['tq', 'propSeg', 'phaseSeg1', 'phaseSeg2', 'sjw', 'brp'] as const
+export type TimingMember = (typeof TIMING_MEMBERS)[number]
+export type BitTiming = Partial<Record<TimingMember, number>>
+
 // What the device reports: a key is absent when it reports nothing (a vcan has
 // no bit timing). Sample points are fractions (0.875).
 export interface InterfaceSettings {
@@ -203,6 +207,9 @@ export interface InterfaceSettings {
   dataSamplePoint?: number
   restartMs?: number
   txqueuelen?: number
+  termination?: number
+  bitTiming?: BitTiming
+  dataBitTiming?: BitTiming
   modes: Partial<Record<CanMode, boolean>>
 }
 
