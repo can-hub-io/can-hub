@@ -1,5 +1,8 @@
 #include <cest>
 
+#include <cstdio>
+#include <cstring>
+
 extern "C" {
 #include "agent/agent.h"
 #include "can_port_mock.h"
@@ -15,6 +18,13 @@ static TransportPortMock transport;
 static CanPortMock can;
 static const RegisterMessage registration = { "truck42", 2, { "can0", "can1" } };
 static const RegisterAckMessage ack_ok = { REGISTER_STATUS_OK, 2, { 7, 9 } };
+static IfconfigReplyMessage ifconfig_reply;
+static uint8_t ifconfig_reply_type;
+
+#define IFCONFIG_REQUEST_ID 77
+
+static InterfaceSettings bitrateSettings(uint32_t bitrate);
+static void sendIfconfig(const char *interface_name, uint8_t op, const InterfaceSettings *settings);
 
 describe("agent", []() {
     describe("disconnected", []() {
@@ -291,60 +301,55 @@ describe("agent", []() {
             expect(sent_frame.route_flags).toBe(0);
         });
 
-        it("applies an interface config and replies ok", []() {
-            IfconfigMessage request = { "can1", IFCONFIG_OP_SET_BITRATE, 250000 };
-            IfconfigReplyMessage reply;
-            MessageHeader header;
-            uint8_t encoded[64];
-            size_t encoded_size = IfconfigMessage_Encode(&request, encoded, sizeof(encoded));
-            int reply_index;
+        it("applies the requested settings and replies with the effective ones", []() {
+            InterfaceSettings requested = bitrateSettings(250000);
 
-            Agent_OnControlMessage(&agent, encoded, encoded_size, 0);
-            reply_index = transport.control_count - 1;
-            MessageHeader_Decode(&header, transport.control_log[reply_index], transport.control_sizes[reply_index]);
-            IfconfigReplyMessage_Decode(&reply, transport.control_log[reply_index] + MESSAGE_HEADER_SIZE, header.length);
+            can.query_settings = bitrateSettings(250000);
+            can.query_settings.sample_point = 875;
+
+            sendIfconfig("can1", IFCONFIG_OP_APPLY, &requested);
 
             expect(can.configure_count).toBe(1);
             expect(can.last_configure_interface_index).toBe(1);
-            expect(can.last_configure_op).toBe(IFCONFIG_OP_SET_BITRATE);
-            expect(can.last_configure_bitrate).toBe((uint32_t)250000);
-            expect(header.type).toBe(kMESSAGE_TYPE_IFCONFIG_REPLY);
-            expect(reply.status).toBe(IFCONFIG_STATUS_OK);
+            expect(can.last_configure_settings.bitrate).toBe((uint32_t)250000);
+            expect(ifconfig_reply_type).toBe(kMESSAGE_TYPE_IFCONFIG_REPLY);
+            expect(ifconfig_reply.request_id).toBe((uint32_t)IFCONFIG_REQUEST_ID);
+            expect(ifconfig_reply.status).toBe(IFCONFIG_STATUS_OK);
+            expect(ifconfig_reply.settings.sample_point).toBe((uint16_t)875);
+        });
+
+        it("answers a query with the settings without changing them", []() {
+            InterfaceSettings requested = bitrateSettings(0);
+
+            can.query_settings = bitrateSettings(500000);
+
+            sendIfconfig("can0", IFCONFIG_OP_QUERY, &requested);
+
+            expect(can.configure_count).toBe(0);
+            expect(ifconfig_reply.status).toBe(IFCONFIG_STATUS_OK);
+            expect(ifconfig_reply.settings.bitrate).toBe((uint32_t)500000);
         });
 
         it("replies unknown interface for a name it does not export", []() {
-            IfconfigMessage request = { "can9", IFCONFIG_OP_UP, 0 };
-            IfconfigReplyMessage reply;
-            MessageHeader header;
-            uint8_t encoded[64];
-            size_t encoded_size = IfconfigMessage_Encode(&request, encoded, sizeof(encoded));
-            int reply_index;
+            InterfaceSettings requested = bitrateSettings(250000);
 
-            Agent_OnControlMessage(&agent, encoded, encoded_size, 0);
-            reply_index = transport.control_count - 1;
-            MessageHeader_Decode(&header, transport.control_log[reply_index], transport.control_sizes[reply_index]);
-            IfconfigReplyMessage_Decode(&reply, transport.control_log[reply_index] + MESSAGE_HEADER_SIZE, header.length);
+            sendIfconfig("can9", IFCONFIG_OP_APPLY, &requested);
 
             expect(can.configure_count).toBe(0);
-            expect(reply.status).toBe(IFCONFIG_STATUS_UNKNOWN_INTERFACE);
+            expect(ifconfig_reply.status).toBe(IFCONFIG_STATUS_UNKNOWN_INTERFACE);
         });
 
-        it("replies apply failed when the adapter rejects the change", []() {
-            IfconfigMessage request = { "can0", IFCONFIG_OP_DOWN, 0 };
-            IfconfigReplyMessage reply;
-            MessageHeader header;
-            uint8_t encoded[64];
-            size_t encoded_size = IfconfigMessage_Encode(&request, encoded, sizeof(encoded));
-            int reply_index;
+        it("replies apply failed with the reason the adapter gives", []() {
+            InterfaceSettings requested = bitrateSettings(250000);
 
             can.configure_result = false;
-            Agent_OnControlMessage(&agent, encoded, encoded_size, 0);
-            reply_index = transport.control_count - 1;
-            MessageHeader_Decode(&header, transport.control_log[reply_index], transport.control_sizes[reply_index]);
-            IfconfigReplyMessage_Decode(&reply, transport.control_log[reply_index] + MESSAGE_HEADER_SIZE, header.length);
+            snprintf(can.configure_detail, sizeof(can.configure_detail), "Operation not supported");
+
+            sendIfconfig("can0", IFCONFIG_OP_APPLY, &requested);
 
             expect(can.configure_count).toBe(1);
-            expect(reply.status).toBe(IFCONFIG_STATUS_APPLY_FAILED);
+            expect(ifconfig_reply.status).toBe(IFCONFIG_STATUS_APPLY_FAILED);
+            expect((const char *)ifconfig_reply.detail).toBe("Operation not supported");
         });
 
         it("emits an interface status immediately on entering running", []() {
@@ -414,3 +419,36 @@ describe("agent", []() {
     });
 
 });
+
+static InterfaceSettings bitrateSettings(uint32_t bitrate)
+{
+    InterfaceSettings settings;
+
+    memset(&settings, 0, sizeof(settings));
+    settings.fields = INTERFACE_FIELD_BITRATE;
+    settings.bitrate = bitrate;
+
+    return settings;
+}
+
+static void sendIfconfig(const char *interface_name, uint8_t op, const InterfaceSettings *settings)
+{
+    IfconfigMessage request;
+    MessageHeader header;
+    uint8_t encoded[MESSAGE_HEADER_SIZE + IFCONFIG_BODY_SIZE];
+    size_t encoded_size;
+    int reply_index;
+
+    memset(&request, 0, sizeof(request));
+    request.request_id = IFCONFIG_REQUEST_ID;
+    snprintf(request.interface_name, sizeof(request.interface_name), "%s", interface_name);
+    request.op = op;
+    request.settings = *settings;
+    encoded_size = IfconfigMessage_Encode(&request, encoded, sizeof(encoded));
+
+    Agent_OnControlMessage(&agent, encoded, encoded_size, 0);
+    reply_index = transport.control_count - 1;
+    MessageHeader_Decode(&header, transport.control_log[reply_index], transport.control_sizes[reply_index]);
+    IfconfigReplyMessage_Decode(&ifconfig_reply, transport.control_log[reply_index] + MESSAGE_HEADER_SIZE, header.length);
+    ifconfig_reply_type = header.type;
+}

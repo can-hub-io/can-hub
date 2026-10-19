@@ -7,7 +7,7 @@
 #define LINE_BUFFER_SIZE 512
 #define IMPORT_KEY_MAX 256
 #define PRAGMA_BUFFER_SIZE 64
-#define SCHEMA_VERSION 1
+#define SCHEMA_VERSION 2
 
 #define SCHEMA_BASELINE \
     "CREATE TABLE IF NOT EXISTS agent_identities (" \
@@ -24,6 +24,8 @@
     "PRIMARY KEY (fingerprint, agent_name, interface_name)" \
     ")"
 
+#define SCHEMA_ACL_ADMIN "ALTER TABLE client_acls ADD COLUMN can_admin INTEGER NOT NULL DEFAULT 0"
+
 typedef struct {
     int32_t version;
     const char *statements;
@@ -31,6 +33,7 @@ typedef struct {
 
 static const SchemaMigration SCHEMA_MIGRATIONS[] = {
     { 1, SCHEMA_BASELINE },
+    { 2, SCHEMA_ACL_ADMIN },
 };
 
 static bool migrateSchema(IdentityDatabase *self);
@@ -43,22 +46,15 @@ static uint8_t storeList(void *context, uint16_t offset, IdentityPin *pins, uint
 static bool insertPin(IdentityDatabase *self, const char *sql, const char *agent_name, const char *fingerprint_hex);
 static bool aclReadAllowed(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name);
 static bool aclWriteAllowed(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name);
-static bool aclResolve(
+static bool aclAdminAllowed(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name);
+static void aclResolve(
     IdentityDatabase *self,
     const char *fingerprint_hex,
     const char *agent_name,
     const char *interface_name,
-    bool *can_read,
-    bool *can_write
+    AclEntry *entry
 );
-static bool aclGrant(
-    void *context,
-    const char *fingerprint_hex,
-    const char *agent_name,
-    const char *interface_name,
-    bool can_read,
-    bool can_write
-);
+static bool aclGrant(void *context, const AclEntry *entry);
 static bool aclRevoke(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name);
 static uint8_t aclList(void *context, uint16_t offset, AclEntry *entries, uint8_t max_entries, bool *more);
 static bool aclKnows(void *context, const char *fingerprint_hex);
@@ -76,6 +72,7 @@ bool IdentityDatabase_Open(IdentityDatabase *self, const char *path)
     self->authorization_port.context = self;
     self->authorization_port.read_allowed = aclReadAllowed;
     self->authorization_port.write_allowed = aclWriteAllowed;
+    self->authorization_port.admin_allowed = aclAdminAllowed;
     self->authorization_port.grant = aclGrant;
     self->authorization_port.revoke = aclRevoke;
     self->authorization_port.list = aclList;
@@ -329,41 +326,47 @@ static bool insertPin(IdentityDatabase *self, const char *sql, const char *agent
 
 static bool aclReadAllowed(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name)
 {
-    bool can_read = true;
-    bool can_write;
+    AclEntry entry;
 
-    aclResolve(context, fingerprint_hex, agent_name, interface_name, &can_read, &can_write);
+    aclResolve(context, fingerprint_hex, agent_name, interface_name, &entry);
 
-    return can_read;
+    return entry.can_read;
 }
 
 static bool aclWriteAllowed(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name)
 {
-    bool can_read;
-    bool can_write = false;
+    AclEntry entry;
 
-    aclResolve(context, fingerprint_hex, agent_name, interface_name, &can_read, &can_write);
+    aclResolve(context, fingerprint_hex, agent_name, interface_name, &entry);
 
-    return can_write;
+    return entry.can_write;
 }
 
-static bool aclResolve(
+static bool aclAdminAllowed(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name)
+{
+    AclEntry entry;
+
+    aclResolve(context, fingerprint_hex, agent_name, interface_name, &entry);
+
+    return entry.can_admin;
+}
+
+static void aclResolve(
     IdentityDatabase *self,
     const char *fingerprint_hex,
     const char *agent_name,
     const char *interface_name,
-    bool *can_read,
-    bool *can_write
+    AclEntry *entry
 )
 {
     sqlite3_stmt *statement = NULL;
-    bool found = false;
 
-    *can_read = true;
-    *can_write = false;
+    entry->can_read = true;
+    entry->can_write = false;
+    entry->can_admin = false;
     if (sqlite3_prepare_v2(
             self->database,
-            "SELECT can_read, can_write FROM client_acls"
+            "SELECT can_read, can_write, can_admin FROM client_acls"
             " WHERE fingerprint IN (?1, '*') AND agent_name IN (?2, '*') AND interface_name IN (?3, '*')"
             " ORDER BY (fingerprint <> '*') DESC,"
             " ((agent_name <> '*') * 2 + (interface_name <> '*')) DESC LIMIT 1",
@@ -371,30 +374,21 @@ static bool aclResolve(
             &statement,
             NULL
         ) != SQLITE_OK) {
-        return false;
+        return;
     }
 
     sqlite3_bind_text(statement, 1, fingerprint_hex, -1, SQLITE_STATIC);
     sqlite3_bind_text(statement, 2, agent_name, -1, SQLITE_STATIC);
     sqlite3_bind_text(statement, 3, interface_name, -1, SQLITE_STATIC);
     if (sqlite3_step(statement) == SQLITE_ROW) {
-        *can_read = sqlite3_column_int(statement, 0) != 0;
-        *can_write = sqlite3_column_int(statement, 1) != 0;
-        found = true;
+        entry->can_read = sqlite3_column_int(statement, 0) != 0;
+        entry->can_write = sqlite3_column_int(statement, 1) != 0;
+        entry->can_admin = sqlite3_column_int(statement, 2) != 0;
     }
     sqlite3_finalize(statement);
-
-    return found;
 }
 
-static bool aclGrant(
-    void *context,
-    const char *fingerprint_hex,
-    const char *agent_name,
-    const char *interface_name,
-    bool can_read,
-    bool can_write
-)
+static bool aclGrant(void *context, const AclEntry *entry)
 {
     IdentityDatabase *self = context;
     sqlite3_stmt *statement = NULL;
@@ -402,9 +396,10 @@ static bool aclGrant(
 
     if (sqlite3_prepare_v2(
             self->database,
-            "INSERT INTO client_acls (fingerprint, agent_name, interface_name, can_read, can_write)"
-            " VALUES (?1, ?2, ?3, ?4, ?5)"
-            " ON CONFLICT (fingerprint, agent_name, interface_name) DO UPDATE SET can_read = ?4, can_write = ?5",
+            "INSERT INTO client_acls (fingerprint, agent_name, interface_name, can_read, can_write, can_admin)"
+            " VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+            " ON CONFLICT (fingerprint, agent_name, interface_name)"
+            " DO UPDATE SET can_read = ?4, can_write = ?5, can_admin = ?6",
             -1,
             &statement,
             NULL
@@ -412,11 +407,12 @@ static bool aclGrant(
         return false;
     }
 
-    sqlite3_bind_text(statement, 1, fingerprint_hex, -1, SQLITE_STATIC);
-    sqlite3_bind_text(statement, 2, agent_name, -1, SQLITE_STATIC);
-    sqlite3_bind_text(statement, 3, interface_name, -1, SQLITE_STATIC);
-    sqlite3_bind_int(statement, 4, can_read ? 1 : 0);
-    sqlite3_bind_int(statement, 5, can_write ? 1 : 0);
+    sqlite3_bind_text(statement, 1, entry->fingerprint_hex, -1, SQLITE_STATIC);
+    sqlite3_bind_text(statement, 2, entry->agent_name, -1, SQLITE_STATIC);
+    sqlite3_bind_text(statement, 3, entry->interface_name, -1, SQLITE_STATIC);
+    sqlite3_bind_int(statement, 4, entry->can_read ? 1 : 0);
+    sqlite3_bind_int(statement, 5, entry->can_write ? 1 : 0);
+    sqlite3_bind_int(statement, 6, entry->can_admin ? 1 : 0);
     granted = sqlite3_step(statement) == SQLITE_DONE;
     sqlite3_finalize(statement);
 
@@ -459,7 +455,7 @@ static uint8_t aclList(void *context, uint16_t offset, AclEntry *entries, uint8_
     *more = false;
     if (sqlite3_prepare_v2(
             self->database,
-            "SELECT fingerprint, agent_name, interface_name, can_read, can_write FROM client_acls"
+            "SELECT fingerprint, agent_name, interface_name, can_read, can_write, can_admin FROM client_acls"
             " ORDER BY agent_name, interface_name, fingerprint LIMIT ?1 OFFSET ?2",
             -1,
             &statement,
@@ -481,6 +477,7 @@ static uint8_t aclList(void *context, uint16_t offset, AclEntry *entries, uint8_
         snprintf(entries[count].interface_name, sizeof(entries[count].interface_name), "%s", (const char *)sqlite3_column_text(statement, 2));
         entries[count].can_read = sqlite3_column_int(statement, 3) != 0;
         entries[count].can_write = sqlite3_column_int(statement, 4) != 0;
+        entries[count].can_admin = sqlite3_column_int(statement, 5) != 0;
         count++;
     }
     sqlite3_finalize(statement);

@@ -21,6 +21,8 @@ pub const HEADER_SIZE: usize = 4;
 pub enum MessageType {
     Hello = 0x01,
     Error = 0x09,
+    Configure = 0x0E,
+    ConfigureReply = 0x0F,
     AdminStatus = 0x10,
     AdminStatusReply = 0x11,
     AdminPeers = 0x12,
@@ -47,8 +49,6 @@ pub enum MessageType {
     AdminAclRevokeReply = 0x27,
     AdminAclList = 0x28,
     AdminAclListReply = 0x29,
-    AdminIfconfig = 0x2A,
-    AdminIfconfigReply = 0x2B,
     AdminRejected = 0x2C,
     AdminRejectedReply = 0x2D,
 }
@@ -59,6 +59,8 @@ impl MessageType {
         let kind = match value {
             0x01 => Hello,
             0x09 => Error,
+            0x0E => Configure,
+            0x0F => ConfigureReply,
             0x10 => AdminStatus,
             0x11 => AdminStatusReply,
             0x12 => AdminPeers,
@@ -85,8 +87,6 @@ impl MessageType {
             0x27 => AdminAclRevokeReply,
             0x28 => AdminAclList,
             0x29 => AdminAclListReply,
-            0x2A => AdminIfconfig,
-            0x2B => AdminIfconfigReply,
             0x2C => AdminRejected,
             0x2D => AdminRejectedReply,
             _ => return None,
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn message_type_is_total_round_trip() {
-        for raw in [0x01u8, 0x10, 0x13, 0x21, 0x2B, 0x2D] {
+        for raw in [0x01u8, 0x0F, 0x10, 0x13, 0x21, 0x2D] {
             let kind = MessageType::from_u8(raw).unwrap();
             assert_eq!(kind as u8, raw);
         }

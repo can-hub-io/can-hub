@@ -51,6 +51,24 @@ both as monotonic totals, so a quiet bus is distinguishable from a lossy one:
 bus.drop_counters()     # {"rate_limited": 0, "ring_dropped": 12}
 ```
 
+## Configuring the interface
+
+`configure()` reconfigures the bus's interface on its agent, everything in one
+step, with the keywords of `ip link set ... type can`; `interface_settings()`
+reads it back. The bus must be opened by its `agent/iface` name, and the hub
+allows it only with an `rwa` ACL grant (unix and plain tcp clients are trusted).
+
+```python
+bus.configure(bitrate=500000, sample_point=0.875, fd=True, data_bitrate=2000000)
+bus.configure(restart_ms=100, txqueuelen=1000, listen_only=False, up=True)
+bus.interface_settings()
+# InterfaceSettings(up=True, state='error-active', bitrate=500000, sample_point=0.875, ...)
+```
+
+Both return an `InterfaceSettings` with `None` where the device reports
+nothing (a vcan has no bit timing). A refusal raises `CanOperationError` with
+the reason.
+
 ## Listing interfaces
 
 `CanHubBus.list_interfaces()` asks a hub for the interfaces it exports. Each

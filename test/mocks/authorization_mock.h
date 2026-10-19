@@ -20,3 +20,9 @@ void AuthorizationMock_Grant(
     bool can_read,
     bool can_write
 );
+void AuthorizationMock_GrantAdmin(
+    AuthorizationMock *self,
+    const char *fingerprint_hex,
+    const char *agent_name,
+    const char *interface_name
+);

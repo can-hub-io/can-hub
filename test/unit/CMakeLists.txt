@@ -166,6 +166,12 @@ add_unit_test(test_connect_url
         ${ROOT_SRC_DIR}/platform/linux/shared/connect_url.c
 )
 
+add_unit_test(test_interface_settings_text
+    SOURCES
+        platform/test_interface_settings_text.cpp
+        ${ROOT_SRC_DIR}/platform/linux/shared/interface_settings_text.c
+)
+
 add_unit_test(test_listen_endpoint
     SOURCES
         platform/test_listen_endpoint.cpp
@@ -372,6 +378,7 @@ add_unit_test(test_client
         ${ROOT_SRC_DIR}/protocol/error_message.c
         ${ROOT_SRC_DIR}/protocol/frame_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c
+        ${ROOT_SRC_DIR}/protocol/ifconfig_message.c
         ${ROOT_SRC_DIR}/protocol/interface_name.c
         ${ROOT_SRC_DIR}/protocol/interface_status_message.c
         ${ROOT_SRC_DIR}/protocol/list_message.c

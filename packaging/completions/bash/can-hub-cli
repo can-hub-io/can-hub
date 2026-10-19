@@ -22,6 +22,15 @@ _can_hub_cli_dynamic()
     fi
 }
 
+_can_hub_setting_words()
+{
+    case $1 in
+        fd | listen-only | loopback | one-shot | triple-sampling | berr-reporting) echo "on off" ;;
+        bitrate | dbitrate | sample-point | dsample-point | restart-ms | txqueuelen) ;;
+        *) echo "bitrate sample-point dbitrate dsample-point fd listen-only loopback one-shot triple-sampling berr-reporting restart-ms txqueuelen up down" ;;
+    esac
+}
+
 _can_hub_cli()
 {
     local cur prev words cword
@@ -81,16 +90,16 @@ _can_hub_cli()
             elif [[ $sub == "add" || $sub == "delete" ]] && (( cword == i + 3 )); then
                 COMPREPLY=($(compgen -W "* $(_can_hub_cli_dynamic interfaces)" -- "$cur"))
             elif [[ $sub == "add" ]] && (( cword == i + 4 )); then
-                COMPREPLY=($(compgen -W "none ro rw" -- "$cur"))
+                COMPREPLY=($(compgen -W "none r rw rwa" -- "$cur"))
             fi
             ;;
         interface)
             if (( cword == i + 1 )); then
-                COMPREPLY=($(compgen -W "set up down" -- "$cur"))
+                COMPREPLY=($(compgen -W "show set up down" -- "$cur"))
             elif (( cword == i + 2 )); then
                 COMPREPLY=($(compgen -W "$(_can_hub_cli_dynamic interfaces)" -- "$cur"))
-            elif [[ $sub == "set" ]] && (( cword == i + 3 )); then
-                COMPREPLY=($(compgen -W "bitrate" -- "$cur"))
+            elif [[ $sub == "set" ]] && (( cword >= i + 3 )); then
+                COMPREPLY=($(compgen -W "$(_can_hub_setting_words "$prev")" -- "$cur"))
             fi
             ;;
     esac

@@ -33,6 +33,7 @@ static void handleError(Client *self, const uint8_t *body, uint16_t length);
 static void handleListReply(Client *self, const uint8_t *body, uint16_t length);
 static void handleOpenAck(Client *self, const uint8_t *body, uint16_t length);
 static void handleInterfaceStatus(Client *self, const uint8_t *body, uint16_t length, uint64_t now_us);
+static void handleConfigureReply(Client *self, const uint8_t *body, uint16_t length);
 static uint64_t frameWireBits(const FrameMessage *frame);
 static void resolveFromReply(Client *self, const ListReplyMessage *reply);
 static void emitLocalError(Client *self, uint16_t code, const char *detail);
@@ -40,6 +41,7 @@ static void sendHello(Client *self);
 static void sendList(Client *self, uint16_t offset);
 static void sendOpen(Client *self);
 static void sendSubscribe(Client *self);
+static void sendConfigure(Client *self);
 
 /* ---------- public ---------- */
 
@@ -105,6 +107,26 @@ void Client_OpenByName(Client *self, const char *interface_name, uint8_t flags)
     }
 
     startOpenByName(self);
+}
+
+bool Client_Configure(Client *self, const char *interface_name, uint8_t op, const InterfaceSettings *settings)
+{
+    memset(&self->configure_request, 0, sizeof(self->configure_request));
+    if (!InterfaceName_Split(interface_name, self->configure_request.agent_name, self->configure_request.interface_name)) {
+        return false;
+    }
+
+    self->configure_request.op = op;
+    self->configure_request.settings = *settings;
+
+    if (!self->connected) {
+        self->configure_pending = true;
+        return true;
+    }
+
+    sendConfigure(self);
+
+    return true;
 }
 
 void Client_SetFilters(Client *self, const CanFilter *filters, uint8_t count)
@@ -214,6 +236,10 @@ static void transportOnControl(void *context, const uint8_t *data, size_t size, 
     }
     if (header.type == kMESSAGE_TYPE_INTERFACE_STATUS) {
         handleInterfaceStatus(self, data + MESSAGE_HEADER_SIZE, header.length, now_us);
+        return;
+    }
+    if (header.type == kMESSAGE_TYPE_CONFIGURE_REPLY) {
+        handleConfigureReply(self, data + MESSAGE_HEADER_SIZE, header.length);
     }
 }
 
@@ -238,6 +264,11 @@ static void runPending(Client *self)
     uint8_t pending = self->pending;
 
     self->pending = kCLIENT_PENDING_NONE;
+
+    if (self->configure_pending) {
+        self->configure_pending = false;
+        sendConfigure(self);
+    }
 
     if (pending == kCLIENT_PENDING_LIST) {
         startList(self, self->list_offset);
@@ -373,6 +404,21 @@ static void handleInterfaceStatus(Client *self, const uint8_t *body, uint16_t le
     }
 }
 
+static void handleConfigureReply(Client *self, const uint8_t *body, uint16_t length)
+{
+    ConfigureReplyMessage reply;
+
+    if (self->events.on_configure_reply == NULL) {
+        return;
+    }
+    if (!ConfigureReplyMessage_Decode(&reply, body, length)) {
+        emitLocalError(self, CLIENT_ERROR_MALFORMED_REPLY, "malformed configure reply");
+        return;
+    }
+
+    self->events.on_configure_reply(self->events.context, &reply);
+}
+
 static uint64_t frameWireBits(const FrameMessage *frame)
 {
     return FRAME_PACE_OVERHEAD_BITS + (uint64_t)FRAME_PACE_BITS_PER_BYTE * frame->payload_length;
@@ -428,6 +474,16 @@ static void sendSubscribe(Client *self)
     subscribe.filter_count = self->filter_count;
     memcpy(subscribe.filters, self->filters, (size_t)self->filter_count * sizeof(*self->filters));
     encoded_size = SubscribeMessage_Encode(&subscribe, encoded, sizeof(encoded));
+
+    if (encoded_size > 0) {
+        self->hub->send_control(self->hub->context, encoded, encoded_size);
+    }
+}
+
+static void sendConfigure(Client *self)
+{
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
+    size_t encoded_size = ConfigureMessage_Encode(&self->configure_request, encoded, sizeof(encoded));
 
     if (encoded_size > 0) {
         self->hub->send_control(self->hub->context, encoded, encoded_size);

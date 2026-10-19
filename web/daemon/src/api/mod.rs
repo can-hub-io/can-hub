@@ -84,6 +84,7 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
         .route("/api/agents", get(handlers::agents))
         .route("/api/clients", get(handlers::clients))
         .route("/api/interfaces", get(handlers::interfaces))
+        .route("/api/interfaces/{agent}/{interface}/settings", get(handlers::interface_settings))
         .route("/api/telemetry/ws", get(handlers::telemetry_ws)));
 
     let peers_kick = guarded(&state, Some(Permission::PeersKick), Router::new()

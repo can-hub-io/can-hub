@@ -60,8 +60,9 @@ sudo systemctl enable --now can-hub-agent
 ### Capabilities
 
 The unit grants `CAP_NET_RAW` only (raw SocketCAN sockets). Remote interface
-reconfiguration — `can-hub-cli interface set <agent>/<iface> bitrate <bps>`,
-`interface up|down` — uses rtnetlink on the device and needs
+reconfiguration — `can-hub-cli interface set <agent>/<iface> ...`,
+`interface up|down`, `can-hub-client configure` — uses rtnetlink on the
+device and needs
 `CAP_NET_ADMIN`. Add it with a drop-in if you use that feature:
 
 ```ini

@@ -22,12 +22,21 @@ _can_hub_client_interfaces()
     fi
 }
 
+_can_hub_setting_words()
+{
+    case $1 in
+        fd | listen-only | loopback | one-shot | triple-sampling | berr-reporting) _values 'state' 'on' 'off' ;;
+        bitrate | dbitrate | sample-point | dsample-point | restart-ms | txqueuelen) _message 'value' ;;
+        *) _values 'setting' bitrate sample-point dbitrate dsample-point fd listen-only loopback one-shot triple-sampling berr-reporting restart-ms txqueuelen up down ;;
+    esac
+}
+
 _can-hub-client()
 {
     local -a commands flags values
     local verb verb_index i
 
-    commands=(list dump send attach socketcand)
+    commands=(list dump send attach socketcand show configure)
     flags=(
         '--connect[hub URL: quic/tls/tcp/unix]:url:'
         '--state-dir[identity and pin store directory]:dir:_files -/'
@@ -56,12 +65,14 @@ _can-hub-client()
     fi
 
     case $verb in
-        dump | send | attach)
+        dump | send | attach | show | configure)
             if (( CURRENT == verb_index + 1 )); then
                 values=(${(f)"$(_can_hub_client_interfaces)"})
                 _describe 'interface' values
             elif [[ $verb == attach ]] && (( CURRENT == verb_index + 2 )); then
                 _net_interfaces
+            elif [[ $verb == configure ]]; then
+                _can_hub_setting_words "${words[CURRENT - 1]}"
             fi
             ;;
     esac

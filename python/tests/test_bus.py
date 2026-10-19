@@ -318,3 +318,42 @@ def given_waiting_for(lock, order):
     while lock._next_ticket < 2 and time.monotonic() < deadline:
         time.sleep(0.001)
     return waiter
+
+
+class TestConfigure:
+    def test_it_configures_the_interface_the_bus_was_opened_with(self, monkeypatch):
+        bus, calls = given_bus_on_configurable_hub(monkeypatch)
+
+        settings = bus.configure(bitrate=250000)
+
+        assert calls == [(SESSION, b"agent/can0", 250000)]
+        assert settings.bitrate == 250000
+
+    def test_it_reports_why_the_hub_refused(self, monkeypatch):
+        bus, _ = given_bus_on_configurable_hub(monkeypatch, result=native.ERR_CONFIGURE_DENIED)
+        monkeypatch.setattr(native.lib, "canhub_last_error", lambda session: b"configure refused by the hub (status 4)")
+
+        with pytest.raises(CanOperationError, match="configure refused"):
+            bus.configure(bitrate=250000)
+
+    def test_it_needs_the_bus_opened_by_name(self, monkeypatch):
+        bus, calls = given_bus_on_configurable_hub(monkeypatch, channel="7")
+
+        with pytest.raises(CanOperationError, match="agent/iface"):
+            bus.configure(bitrate=250000)
+        assert calls == []
+
+
+def given_bus_on_configurable_hub(monkeypatch, result=native.OK, channel="agent/can0"):
+    calls = []
+
+    def configure(session, name, requested, effective, timeout_ms):
+        calls.append((session, name, requested._obj.bitrate))
+        effective._obj.fields = requested._obj.fields
+        effective._obj.bitrate = requested._obj.bitrate
+        return result
+
+    bus = make_bare_bus()
+    bus._channel_name = channel
+    monkeypatch.setattr(native.lib, "canhub_configure", configure)
+    return bus, calls

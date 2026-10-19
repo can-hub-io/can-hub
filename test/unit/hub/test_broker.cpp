@@ -33,6 +33,8 @@ extern "C" {
 #define PER_HOST_SHARE 4
 #define HUB_WIDE_SHARE (HUB_PEERS_MAX / 2)
 #define CROWD_PEER_BASE 10000
+#define CONFIGURED_BITRATE 500000
+#define CONFIGURED_SAMPLE_POINT 875
 
 static Broker broker;
 static HubTransportPortMock transport;
@@ -60,6 +62,9 @@ static void connectPeerFrom(uint32_t peer_id, const char *host);
 static void connectPeersAwaitingHelloFrom(const char *host, uint32_t count);
 static void connectPeersAwaitingHelloFromDistinctHosts(uint32_t count);
 static void sayHelloAsClient(uint32_t peer_id);
+static void sendConfigure(uint32_t peer_id, const char *interface_name, uint8_t op);
+static uint32_t lastForwardedRequestId(void);
+static void replyFromAgent(uint32_t request_id, uint8_t status, const char *detail);
 static void connectDistinctClients(uint32_t count);
 static void listRejected(AdminRejectedReplyMessage *reply);
 
@@ -2067,107 +2072,157 @@ describe("broker", []() {
     describe("interface configuration", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            AuthorizationMock_Reset(&authorization);
+            Broker_Init(&broker, &transport.port, NULL, &authorization.port, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
+            HubTransportPortMock_Reset(&transport);
         });
 
-        it("forwards an admin request to the owning agent", []() {
-            AdminIfconfigMessage request;
+        it("forwards an admin request to the owning agent with every setting", []() {
             IfconfigMessage forwarded;
-            MessageHeader header;
-            uint8_t encoded[256];
-            size_t encoded_size;
+            uint8_t forwarded_type;
 
-            memset(&request, 0, sizeof(request));
-            snprintf(request.agent_name, sizeof(request.agent_name), "truck42");
-            snprintf(request.interface_name, sizeof(request.interface_name), "can0");
-            request.op = IFCONFIG_OP_SET_BITRATE;
-            request.bitrate = 500000;
-            encoded_size = AdminIfconfigMessage_Encode(&request, encoded, sizeof(encoded));
-            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            sendConfigure(ADMIN_PEER, "can0", IFCONFIG_OP_APPLY);
+            forwarded_type = lastReply(&forwarded, IfconfigMessage_Decode);
 
-            MessageHeader_Decode(&header, transport.control_log[0], transport.control_sizes[0]);
-            IfconfigMessage_Decode(&forwarded, transport.control_log[0] + MESSAGE_HEADER_SIZE, header.length);
-
-            expect(transport.control_count).toBe(1);
             expect(transport.control_peers[0]).toBe((uint32_t)AGENT_PEER);
-            expect(header.type).toBe(kMESSAGE_TYPE_IFCONFIG);
+            expect(forwarded_type).toBe(kMESSAGE_TYPE_IFCONFIG);
             expect((const char *)forwarded.interface_name).toBe("can0");
-            expect(forwarded.op).toBe(IFCONFIG_OP_SET_BITRATE);
-            expect(forwarded.bitrate).toBe((uint32_t)500000);
+            expect(forwarded.op).toBe(IFCONFIG_OP_APPLY);
+            expect(forwarded.settings.fields).toBe((uint32_t)(INTERFACE_FIELD_BITRATE | INTERFACE_FIELD_SAMPLE_POINT));
+            expect(forwarded.settings.bitrate).toBe((uint32_t)CONFIGURED_BITRATE);
+            expect(forwarded.settings.sample_point).toBe((uint16_t)CONFIGURED_SAMPLE_POINT);
         });
 
-        it("relays the agent reply back to the waiting admin", []() {
-            AdminIfconfigMessage request;
-            IfconfigReplyMessage agent_reply = { "can0", IFCONFIG_STATUS_OK };
-            AdminIfconfigReplyMessage admin_reply;
+        it("relays the effective settings and the detail back to the requester", []() {
+            ConfigureReplyMessage reply;
             uint8_t reply_type;
-            uint8_t encoded[256];
-            size_t encoded_size;
 
-            memset(&request, 0, sizeof(request));
-            snprintf(request.agent_name, sizeof(request.agent_name), "truck42");
-            snprintf(request.interface_name, sizeof(request.interface_name), "can0");
-            request.op = IFCONFIG_OP_UP;
-            encoded_size = AdminIfconfigMessage_Encode(&request, encoded, sizeof(encoded));
-            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            sendConfigure(ADMIN_PEER, "can0", IFCONFIG_OP_APPLY);
 
-            encoded_size = IfconfigReplyMessage_Encode(&agent_reply, encoded, sizeof(encoded));
-            sendControlFrom(AGENT_PEER, encoded, encoded_size);
-            reply_type = lastReply(&admin_reply, AdminIfconfigReplyMessage_Decode);
+            replyFromAgent(lastForwardedRequestId(), IFCONFIG_STATUS_APPLY_FAILED, "Device or resource busy");
+            reply_type = lastReply(&reply, ConfigureReplyMessage_Decode);
 
             expect(transport.control_peers[transport.control_count - 1]).toBe((uint32_t)ADMIN_PEER);
-            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_IFCONFIG_REPLY);
-            expect(admin_reply.status).toBe(ADMIN_IFCONFIG_STATUS_OK);
+            expect(reply_type).toBe(kMESSAGE_TYPE_CONFIGURE_REPLY);
+            expect(reply.status).toBe(CONFIGURE_STATUS_APPLY_FAILED);
+            expect(reply.settings.bitrate).toBe((uint32_t)CONFIGURED_BITRATE);
+            expect((const char *)reply.detail).toBe("Device or resource busy");
+        });
+
+        it("relays each reply to its own requester when two configure at once", []() {
+            uint32_t first_request_id;
+
+            BrokerDriver_ConnectAdmin(&events, ADMIN_PEER + 1);
+            sendConfigure(ADMIN_PEER, "can0", IFCONFIG_OP_APPLY);
+            first_request_id = lastForwardedRequestId();
+            sendConfigure(ADMIN_PEER + 1, "can0", IFCONFIG_OP_QUERY);
+
+            replyFromAgent(lastForwardedRequestId(), IFCONFIG_STATUS_OK, "");
+            replyFromAgent(first_request_id, IFCONFIG_STATUS_OK, "");
+
+            expect(transport.control_peers[transport.control_count - 2]).toBe((uint32_t)(ADMIN_PEER + 1));
+            expect(transport.control_peers[transport.control_count - 1]).toBe((uint32_t)ADMIN_PEER);
         });
 
         it("answers unknown interface without reaching the agent", []() {
-            AdminIfconfigMessage request;
-            AdminIfconfigReplyMessage reply;
-            uint8_t reply_type;
-            uint8_t encoded[256];
-            size_t encoded_size;
+            ConfigureReplyMessage reply;
 
-            memset(&request, 0, sizeof(request));
-            snprintf(request.agent_name, sizeof(request.agent_name), "truck42");
-            snprintf(request.interface_name, sizeof(request.interface_name), "can9");
-            request.op = IFCONFIG_OP_DOWN;
-            encoded_size = AdminIfconfigMessage_Encode(&request, encoded, sizeof(encoded));
-            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
-            reply_type = lastReply(&reply, AdminIfconfigReplyMessage_Decode);
+            sendConfigure(ADMIN_PEER, "can9", IFCONFIG_OP_APPLY);
+            lastReply(&reply, ConfigureReplyMessage_Decode);
 
             expect(transport.control_count).toBe(1);
             expect(transport.control_peers[0]).toBe((uint32_t)ADMIN_PEER);
-            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_IFCONFIG_REPLY);
-            expect(reply.status).toBe(ADMIN_IFCONFIG_STATUS_UNKNOWN_INTERFACE);
+            expect(reply.status).toBe(CONFIGURE_STATUS_UNKNOWN_INTERFACE);
         });
 
         it("answers unreachable when the agent drops before replying", []() {
-            AdminIfconfigMessage request;
-            AdminIfconfigReplyMessage reply;
-            uint8_t reply_type;
-            uint8_t encoded[256];
-            size_t encoded_size;
+            ConfigureReplyMessage reply;
 
-            memset(&request, 0, sizeof(request));
-            snprintf(request.agent_name, sizeof(request.agent_name), "truck42");
-            snprintf(request.interface_name, sizeof(request.interface_name), "can0");
-            request.op = IFCONFIG_OP_SET_BITRATE;
-            request.bitrate = 250000;
-            encoded_size = AdminIfconfigMessage_Encode(&request, encoded, sizeof(encoded));
-            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            sendConfigure(ADMIN_PEER, "can0", IFCONFIG_OP_APPLY);
 
             events.on_peer_disconnected(events.context, AGENT_PEER, 0);
-            reply_type = lastReply(&reply, AdminIfconfigReplyMessage_Decode);
+            lastReply(&reply, ConfigureReplyMessage_Decode);
 
             expect(transport.control_peers[transport.control_count - 1]).toBe((uint32_t)ADMIN_PEER);
-            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_IFCONFIG_REPLY);
-            expect(reply.status).toBe(ADMIN_IFCONFIG_STATUS_AGENT_UNREACHABLE);
+            expect(reply.status).toBe(CONFIGURE_STATUS_AGENT_UNREACHABLE);
+        });
+
+        it("denies a client whose grant stops at rw", []() {
+            ConfigureReplyMessage reply;
+
+            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true, true);
+            connectClientWithFingerprintAndCapabilities(CLIENT_PEER, TRUCK_FINGERPRINT, 0);
+
+            sendConfigure(CLIENT_PEER, "can0", IFCONFIG_OP_APPLY);
+            lastReply(&reply, ConfigureReplyMessage_Decode);
+
+            expect(transport.control_peers[transport.control_count - 1]).toBe((uint32_t)CLIENT_PEER);
+            expect(reply.status).toBe(CONFIGURE_STATUS_DENIED);
+        });
+
+        it("forwards a client holding an rwa grant to the agent", []() {
+            AuthorizationMock_GrantAdmin(&authorization, TRUCK_FINGERPRINT, "truck42", "can0");
+            connectClientWithFingerprintAndCapabilities(CLIENT_PEER, TRUCK_FINGERPRINT, 0);
+
+            sendConfigure(CLIENT_PEER, "can0", IFCONFIG_OP_APPLY);
+
+            expect(transport.control_peers[transport.control_count - 1]).toBe((uint32_t)AGENT_PEER);
+        });
+
+        it("forwards a plaintext client, which carries no fingerprint", []() {
+            BrokerDriver_ConnectClient(&events, CLIENT_PEER);
+
+            sendConfigure(CLIENT_PEER, "can0", IFCONFIG_OP_APPLY);
+
+            expect(transport.control_peers[transport.control_count - 1]).toBe((uint32_t)AGENT_PEER);
         });
     });
 });
+
+static void sendConfigure(uint32_t peer_id, const char *interface_name, uint8_t op)
+{
+    ConfigureMessage request;
+    uint8_t encoded[MESSAGE_HEADER_SIZE + CONFIGURE_BODY_SIZE];
+    size_t encoded_size;
+
+    memset(&request, 0, sizeof(request));
+    snprintf(request.agent_name, sizeof(request.agent_name), "truck42");
+    snprintf(request.interface_name, sizeof(request.interface_name), "%s", interface_name);
+    request.op = op;
+    request.settings.fields = INTERFACE_FIELD_BITRATE | INTERFACE_FIELD_SAMPLE_POINT;
+    request.settings.bitrate = CONFIGURED_BITRATE;
+    request.settings.sample_point = CONFIGURED_SAMPLE_POINT;
+    encoded_size = ConfigureMessage_Encode(&request, encoded, sizeof(encoded));
+    sendControlFrom(peer_id, encoded, encoded_size);
+}
+
+static uint32_t lastForwardedRequestId(void)
+{
+    IfconfigMessage forwarded;
+
+    lastReply(&forwarded, IfconfigMessage_Decode);
+
+    return forwarded.request_id;
+}
+
+static void replyFromAgent(uint32_t request_id, uint8_t status, const char *detail)
+{
+    IfconfigReplyMessage reply;
+    uint8_t encoded[MESSAGE_HEADER_SIZE + IFCONFIG_REPLY_BODY_SIZE];
+    size_t encoded_size;
+
+    memset(&reply, 0, sizeof(reply));
+    reply.request_id = request_id;
+    reply.status = status;
+    reply.settings.fields = INTERFACE_FIELD_BITRATE;
+    reply.settings.bitrate = CONFIGURED_BITRATE;
+    snprintf(reply.detail, sizeof(reply.detail), "%s", detail);
+    encoded_size = IfconfigReplyMessage_Encode(&reply, encoded, sizeof(encoded));
+    sendControlFrom(AGENT_PEER, encoded, encoded_size);
+}
 
 static uint8_t injectFrom(uint32_t client_peer_id, uint8_t channel)
 {

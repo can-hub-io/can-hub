@@ -9,6 +9,7 @@
 #include "protocol/error_message.h"
 #include "protocol/frame_message.h"
 #include "protocol/hello_message.h"
+#include "protocol/ifconfig_message.h"
 #include "protocol/interface_name.h"
 #include "protocol/list_message.h"
 #include "protocol/subscribe_message.h"
@@ -40,6 +41,7 @@ typedef struct {
     void (*on_frame)(void *context, const FrameMessage *frame);
     void (*on_error)(void *context, uint16_t code, const char *detail);
     void (*on_disconnected)(void *context);
+    void (*on_configure_reply)(void *context, const ConfigureReplyMessage *reply);
 } ClientEvents;
 
 typedef struct {
@@ -56,6 +58,8 @@ typedef struct {
     uint8_t filter_count;
     CanFilter filters[SUBSCRIBE_FILTERS_MAX];
     char name[HELLO_NAME_SIZE];
+    bool configure_pending;
+    ConfigureMessage configure_request;
     EgressShaper shaper;
     uint64_t frames_paced_dropped;
 } Client;
@@ -66,6 +70,7 @@ TransportEvents Client_TransportEvents(Client *self);
 void Client_RequestList(Client *self, uint16_t offset);
 void Client_OpenById(Client *self, uint32_t interface_id, uint8_t flags);
 void Client_OpenByName(Client *self, const char *interface_name, uint8_t flags);
+bool Client_Configure(Client *self, const char *interface_name, uint8_t op, const InterfaceSettings *settings);
 void Client_SetFilters(Client *self, const CanFilter *filters, uint8_t count);
 TCLIENT_SEND_RESULT Client_SendFrame(Client *self, FrameMessage *frame, uint64_t now_us);
 uint64_t Client_FramesPacedDropped(const Client *self);

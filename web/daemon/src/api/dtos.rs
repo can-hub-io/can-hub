@@ -1,12 +1,32 @@
 //! Request bodies and the camelCase response DTOs the React UI consumes,
 //! decoupled from the wire layout of the protocol structs.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::admin::{
-    AclEntry, AclLevel, AgentEntry, ClientEntry, InterfaceEntry, PeerEntry, PinEntry, RejectedEntry,
-    RejectionReason, Status,
+    AclEntry, AclLevel, AgentEntry, ClientEntry, InterfaceEntry, InterfaceSettings, PeerEntry, PinEntry,
+    RejectedEntry, RejectionReason, Status, CTRLMODE_BERR_REPORTING, CTRLMODE_FD, CTRLMODE_LISTEN_ONLY,
+    CTRLMODE_LOOPBACK, CTRLMODE_ONE_SHOT, CTRLMODE_TRIPLE_SAMPLING, SETTING_BITRATE, SETTING_CTRLMODE,
+    SETTING_DATA_BITRATE, SETTING_DATA_SAMPLE_POINT, SETTING_LINK, SETTING_RESTART_MS, SETTING_SAMPLE_POINT,
+    SETTING_STATE, SETTING_TXQUEUELEN,
 };
+
+/// Wire sample points are tenths of a percent; the API speaks fractions.
+const SAMPLE_POINT_SCALE: f64 = 1000.0;
+
+/// The control modes by their API name, in display order.
+const MODES: [(&str, u32); 6] = [
+    ("fd", CTRLMODE_FD),
+    ("listenOnly", CTRLMODE_LISTEN_ONLY),
+    ("loopback", CTRLMODE_LOOPBACK),
+    ("oneShot", CTRLMODE_ONE_SHOT),
+    ("tripleSampling", CTRLMODE_TRIPLE_SAMPLING),
+    ("berrReporting", CTRLMODE_BERR_REPORTING),
+];
+
+const STATES: [&str; 6] = ["error-active", "error-warning", "error-passive", "bus-off", "stopped", "sleeping"];
 
 #[derive(Serialize)]
 pub(crate) struct ActionResult {
@@ -26,7 +46,7 @@ pub(crate) struct AclBody {
     pub fingerprint_hex: String,
     pub agent_name: String,
     pub interface_name: String,
-    /// "none" | "ro" | "rw"; ignored by revoke.
+    /// "none" | "r" | "rw" | "rwa"; ignored by revoke.
     #[serde(default)]
     pub level: String,
 }
@@ -36,10 +56,136 @@ pub(crate) struct AclBody {
 pub(crate) struct InterfaceConfigBody {
     pub agent_name: String,
     pub interface_name: String,
-    /// "bitrate" | "up" | "down".
-    pub op: String,
+    pub settings: InterfaceSettingsBody,
+}
+
+/// What to change on an interface, all applied in one step. Absent keys are
+/// left as they are; sample points are fractions (0.875).
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InterfaceSettingsBody {
+    pub bitrate: Option<u32>,
+    pub sample_point: Option<f64>,
+    pub data_bitrate: Option<u32>,
+    pub data_sample_point: Option<f64>,
+    pub restart_ms: Option<u32>,
+    pub txqueuelen: Option<u32>,
+    pub up: Option<bool>,
     #[serde(default)]
-    pub bitrate: u32,
+    pub modes: BTreeMap<String, bool>,
+}
+
+impl InterfaceSettingsBody {
+    pub fn to_settings(&self) -> Result<InterfaceSettings, String> {
+        let mut settings = InterfaceSettings::default();
+
+        if let Some(bitrate) = self.bitrate {
+            settings.fields |= SETTING_BITRATE;
+            settings.bitrate = bitrate;
+        }
+        if let Some(data_bitrate) = self.data_bitrate {
+            settings.fields |= SETTING_DATA_BITRATE;
+            settings.data_bitrate = data_bitrate;
+        }
+        if let Some(sample_point) = self.sample_point {
+            settings.fields |= SETTING_SAMPLE_POINT;
+            settings.sample_point = scaled_sample_point(sample_point)?;
+        }
+        if let Some(data_sample_point) = self.data_sample_point {
+            settings.fields |= SETTING_DATA_SAMPLE_POINT;
+            settings.data_sample_point = scaled_sample_point(data_sample_point)?;
+        }
+        if let Some(restart_ms) = self.restart_ms {
+            settings.fields |= SETTING_RESTART_MS;
+            settings.restart_ms = restart_ms;
+        }
+        if let Some(txqueuelen) = self.txqueuelen {
+            settings.fields |= SETTING_TXQUEUELEN;
+            settings.txqueuelen = txqueuelen;
+        }
+        if let Some(up) = self.up {
+            settings.fields |= SETTING_LINK;
+            settings.link_up = up;
+        }
+        for (name, enabled) in &self.modes {
+            let flag = mode_flag(name).ok_or_else(|| format!("unknown mode: {name}"))?;
+            settings.fields |= SETTING_CTRLMODE;
+            settings.ctrlmode_mask |= flag;
+            if *enabled {
+                settings.ctrlmode_flags |= flag;
+            }
+        }
+
+        if settings.fields == 0 {
+            return Err("nothing to configure".to_string());
+        }
+        Ok(settings)
+    }
+}
+
+/// The settings a device reports; absent where it reports nothing.
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InterfaceSettingsDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub up: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bitrate: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_point: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_bitrate: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_sample_point: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restart_ms: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub txqueuelen: Option<u32>,
+    pub modes: BTreeMap<&'static str, bool>,
+}
+
+impl From<InterfaceSettings> for InterfaceSettingsDto {
+    fn from(settings: InterfaceSettings) -> Self {
+        let has = |flag: u32| settings.fields & flag != 0;
+        let mut modes = BTreeMap::new();
+        if has(SETTING_CTRLMODE) {
+            for (name, flag) in MODES {
+                if settings.ctrlmode_mask & flag != 0 {
+                    modes.insert(name, settings.ctrlmode_flags & flag != 0);
+                }
+            }
+        }
+
+        InterfaceSettingsDto {
+            up: has(SETTING_LINK).then_some(settings.link_up),
+            state: has(SETTING_STATE).then(|| state_name(settings.can_state)),
+            bitrate: has(SETTING_BITRATE).then_some(settings.bitrate),
+            sample_point: has(SETTING_SAMPLE_POINT).then(|| f64::from(settings.sample_point) / SAMPLE_POINT_SCALE),
+            data_bitrate: has(SETTING_DATA_BITRATE).then_some(settings.data_bitrate),
+            data_sample_point: has(SETTING_DATA_SAMPLE_POINT)
+                .then(|| f64::from(settings.data_sample_point) / SAMPLE_POINT_SCALE),
+            restart_ms: has(SETTING_RESTART_MS).then_some(settings.restart_ms),
+            txqueuelen: has(SETTING_TXQUEUELEN).then_some(settings.txqueuelen),
+            modes,
+        }
+    }
+}
+
+fn scaled_sample_point(fraction: f64) -> Result<u16, String> {
+    if !(fraction > 0.0 && fraction < 1.0) {
+        return Err(format!("sample point {fraction} is not a fraction between 0 and 1"));
+    }
+    Ok((fraction * SAMPLE_POINT_SCALE).round() as u16)
+}
+
+fn mode_flag(name: &str) -> Option<u32> {
+    MODES.iter().find(|(mode, _)| *mode == name).map(|(_, flag)| *flag)
+}
+
+fn state_name(can_state: u8) -> &'static str {
+    STATES.get(usize::from(can_state)).copied().unwrap_or("unknown")
 }
 
 #[derive(Deserialize)]
@@ -350,7 +496,8 @@ fn rejection_reason_name(reason: RejectionReason) -> &'static str {
 fn acl_level_name(level: AclLevel) -> &'static str {
     match level {
         AclLevel::None => "none",
-        AclLevel::ReadOnly => "ro",
+        AclLevel::Read => "r",
         AclLevel::ReadWrite => "rw",
+        AclLevel::ReadWriteAdmin => "rwa",
     }
 }

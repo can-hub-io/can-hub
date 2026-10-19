@@ -27,9 +27,9 @@ typedef struct {
 
 typedef struct {
     bool in_use;
-    uint32_t admin_peer_id;
+    uint32_t requester_peer_id;
     uint32_t agent_peer_id;
-    char interface_name[REGISTER_INTERFACE_NAME_SIZE];
+    uint32_t request_id;
 } PendingIfconfig;
 
 typedef struct {
@@ -40,6 +40,7 @@ typedef struct {
     PeerDirectory directory;
     HubMetrics metrics;
     PendingIfconfig pending_ifconfig[BROKER_PENDING_IFCONFIG_MAX];
+    uint32_t next_ifconfig_request_id;
     /* 128 KB, so not on the stack of onPeerFrame. Shared safely only while
        nothing reachable from a send re-enters that function. */
     FrameRoute frame_routes[FRAME_ROUTES_MAX];

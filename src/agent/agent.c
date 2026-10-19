@@ -28,6 +28,7 @@ static void sendInterfaceStatus(Agent *self);
 static void handleRegisterAck(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
 static void handlePing(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
 static void handleIfconfig(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
+static uint8_t applyIfconfig(Agent *self, const IfconfigMessage *request, uint8_t interface_index, char *detail);
 static bool interfaceIndexForName(const Agent *self, const char *interface_name, uint8_t *interface_index);
 
 static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
@@ -374,21 +375,35 @@ static void handleIfconfig(Agent *self, const MessageHeader *header, const uint8
         return;
     }
 
-    memset(reply.interface_name, 0, sizeof(reply.interface_name));
-    memcpy(reply.interface_name, request.interface_name, sizeof(reply.interface_name));
+    memset(&reply, 0, sizeof(reply));
+    reply.request_id = request.request_id;
 
     if (!interfaceIndexForName(self, request.interface_name, &interface_index)) {
         reply.status = IFCONFIG_STATUS_UNKNOWN_INTERFACE;
-    } else if (self->can->configure(self->can->context, interface_index, request.op, request.bitrate)) {
-        reply.status = IFCONFIG_STATUS_OK;
     } else {
-        reply.status = IFCONFIG_STATUS_APPLY_FAILED;
+        reply.status = applyIfconfig(self, &request, interface_index, reply.detail);
+        self->can->query(self->can->context, interface_index, &reply.settings);
     }
 
     encoded_size = IfconfigReplyMessage_Encode(&reply, encoded, sizeof(encoded));
     if (encoded_size > 0) {
         self->transport->send_control(self->transport->context, encoded, encoded_size);
     }
+}
+
+static uint8_t applyIfconfig(Agent *self, const IfconfigMessage *request, uint8_t interface_index, char *detail)
+{
+    if (request->op == IFCONFIG_OP_QUERY) {
+        return IFCONFIG_STATUS_OK;
+    }
+    if (request->op != IFCONFIG_OP_APPLY) {
+        return IFCONFIG_STATUS_APPLY_FAILED;
+    }
+    if (!self->can->configure(self->can->context, interface_index, &request->settings, detail)) {
+        return IFCONFIG_STATUS_APPLY_FAILED;
+    }
+
+    return IFCONFIG_STATUS_OK;
 }
 
 static bool interfaceIndexForName(const Agent *self, const char *interface_name, uint8_t *interface_index)

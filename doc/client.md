@@ -65,6 +65,18 @@ Data bytes may be separated by `.` (`123#11.22.33`).
 Requires a write grant when connected on tls/quic — see
 [security](security.md#client-acls).
 
+## show and configure
+
+```sh
+can-hub-client show truck42/can0
+can-hub-client configure truck42/can0 bitrate 500000 sample-point 0.875 fd on dbitrate 2000000
+```
+
+`configure` takes the same settings as
+[`can-hub-cli interface set`](cli.md#interface-settings) and applies them in
+one step; both print the settings the bus holds afterwards. On tls/quic it
+needs an `rwa` grant on the interface ([security](security.md#client-acls)).
+
 ## attach — mirror into a local vcan
 
 ```sh

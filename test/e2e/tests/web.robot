@@ -68,9 +68,27 @@ Mutating Without CSRF Is Forbidden
     Login ${WEB} As    ${ADMIN}    ${PASSWORD}
 
 Bitrate Zero Is Rejected
-    ${body}=    Create Dictionary    agentName=truck42    interfaceName=vcan0    op=bitrate    bitrate=${0}
+    ${settings}=    Create Dictionary    bitrate=${0}
+    ${body}=    Create Dictionary    agentName=truck42    interfaceName=vcan0    settings=${settings}
     ${r}=    POST /api/interfaces/config On ${WEB} With ${body}
     Status Of ${r} Should Be    400
+
+The Settings Of A vcan Match The Schema
+    ${r}=    GET /api/interfaces/truck42/vcan0/settings On ${WEB}
+
+    Status Of ${r} Should Be    200
+    Body Of ${r} Should Match    InterfaceSettings
+    Should Be True    ${r.json}[up]
+
+A TX Queue Length Set Over REST Is What The Bus Reports
+    ${settings}=    Create Dictionary    txqueuelen=${500}
+    ${body}=    Create Dictionary    agentName=truck42    interfaceName=vcan0    settings=${settings}
+
+    ${r}=    POST /api/interfaces/config On ${WEB} With ${body}
+
+    Status Of ${r} Should Be    200
+    Body Of ${r} Should Match    InterfaceSettings
+    Should Be Equal As Integers    ${r.json}[txqueuelen]    500
 
 Pins Lifecycle
     ${list}=    GET /api/pins On ${WEB}
@@ -89,7 +107,7 @@ Pins Lifecycle
     Status Of ${delete} Should Be    200
 
 ACL Grant And Revoke
-    ${grant}=    Create Dictionary    fingerprintHex=*    agentName=truck42    interfaceName=vcan0    level=ro
+    ${grant}=    Create Dictionary    fingerprintHex=*    agentName=truck42    interfaceName=vcan0    level=r
     ${set}=    POST /api/acls On ${WEB} With ${grant}
     Status Of ${set} Should Be    200
 

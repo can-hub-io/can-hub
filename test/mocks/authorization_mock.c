@@ -5,14 +5,8 @@
 
 static bool mockReadAllowed(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name);
 static bool mockWriteAllowed(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name);
-static bool mockGrant(
-    void *context,
-    const char *fingerprint_hex,
-    const char *agent_name,
-    const char *interface_name,
-    bool can_read,
-    bool can_write
-);
+static bool mockAdminAllowed(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name);
+static bool mockGrant(void *context, const AclEntry *granted);
 static bool mockRevoke(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name);
 static uint8_t mockList(void *context, uint16_t offset, AclEntry *entries, uint8_t max_entries, bool *more);
 static bool mockKnows(void *context, const char *fingerprint_hex);
@@ -37,6 +31,7 @@ void AuthorizationMock_Reset(AuthorizationMock *self)
     self->port.context = self;
     self->port.read_allowed = mockReadAllowed;
     self->port.write_allowed = mockWriteAllowed;
+    self->port.admin_allowed = mockAdminAllowed;
     self->port.grant = mockGrant;
     self->port.revoke = mockRevoke;
     self->port.list = mockList;
@@ -52,7 +47,34 @@ void AuthorizationMock_Grant(
     bool can_write
 )
 {
-    mockGrant(self, fingerprint_hex, agent_name, interface_name, can_read, can_write);
+    AclEntry granted;
+
+    memset(&granted, 0, sizeof(granted));
+    snprintf(granted.fingerprint_hex, sizeof(granted.fingerprint_hex), "%s", fingerprint_hex);
+    snprintf(granted.agent_name, sizeof(granted.agent_name), "%s", agent_name);
+    snprintf(granted.interface_name, sizeof(granted.interface_name), "%s", interface_name);
+    granted.can_read = can_read;
+    granted.can_write = can_write;
+    mockGrant(self, &granted);
+}
+
+void AuthorizationMock_GrantAdmin(
+    AuthorizationMock *self,
+    const char *fingerprint_hex,
+    const char *agent_name,
+    const char *interface_name
+)
+{
+    AclEntry granted;
+
+    memset(&granted, 0, sizeof(granted));
+    snprintf(granted.fingerprint_hex, sizeof(granted.fingerprint_hex), "%s", fingerprint_hex);
+    snprintf(granted.agent_name, sizeof(granted.agent_name), "%s", agent_name);
+    snprintf(granted.interface_name, sizeof(granted.interface_name), "%s", interface_name);
+    granted.can_read = true;
+    granted.can_write = true;
+    granted.can_admin = true;
+    mockGrant(self, &granted);
 }
 
 static bool mockReadAllowed(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name)
@@ -69,29 +91,25 @@ static bool mockWriteAllowed(void *context, const char *fingerprint_hex, const c
     return entry == NULL ? false : entry->can_write;
 }
 
-static bool mockGrant(
-    void *context,
-    const char *fingerprint_hex,
-    const char *agent_name,
-    const char *interface_name,
-    bool can_read,
-    bool can_write
-)
+static bool mockAdminAllowed(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name)
+{
+    const AclEntry *entry = resolve(context, fingerprint_hex, agent_name, interface_name);
+
+    return entry == NULL ? false : entry->can_admin;
+}
+
+static bool mockGrant(void *context, const AclEntry *granted)
 {
     AuthorizationMock *self = context;
-    AclEntry *entry = findEntry(self, fingerprint_hex, agent_name, interface_name);
+    AclEntry *entry = findEntry(self, granted->fingerprint_hex, granted->agent_name, granted->interface_name);
 
     if (entry == NULL) {
         if (self->entry_count == AUTHORIZATION_MOCK_ENTRIES_MAX) {
             return false;
         }
         entry = &self->entries[self->entry_count++];
-        snprintf(entry->fingerprint_hex, sizeof(entry->fingerprint_hex), "%s", fingerprint_hex);
-        snprintf(entry->agent_name, sizeof(entry->agent_name), "%s", agent_name);
-        snprintf(entry->interface_name, sizeof(entry->interface_name), "%s", interface_name);
     }
-    entry->can_read = can_read;
-    entry->can_write = can_write;
+    *entry = *granted;
 
     return true;
 }

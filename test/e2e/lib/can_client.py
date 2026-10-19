@@ -48,6 +48,11 @@ class CanClient:
         argv += ["send", interface, frame]
         return server.exec(*argv, check=False)
 
+    @staticmethod
+    def configure(server: Server, interface: str, connect: str, state_dir: str, *settings: str) -> Result:
+        return server.exec(binary("can-hub-client"), "--connect", connect, "--state-dir", state_dir,
+                           "configure", interface, *settings, check=False)
+
     def dumped_frames(self):
         return parse_client_dump(self.process.read_log())
 

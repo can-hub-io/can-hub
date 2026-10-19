@@ -42,9 +42,11 @@ offset  size  field
 0x08  SUBSCRIBE    CAN id mask filters for an open channel
 0x09  ERROR        code + human-readable detail
 0x0A  OPEN_ACK     status + assigned channel
-0x0B  IFCONFIG     hub -> agent: apply an interface change (bitrate, up, down)
-0x0C  IFCONFIG_REPLY agent -> hub: apply status
+0x0B  IFCONFIG     hub -> agent: apply or read back an interface's settings
+0x0C  IFCONFIG_REPLY agent -> hub: status, effective settings, reason
 0x0D  INTERFACE_STATUS agent->hub: per-interface health/credit; also hub->client: pace-rate relay
+0x0E  CONFIGURE    client or admin -> hub: configure an interface by name
+0x0F  CONFIGURE_REPLY
 0x10  ADMIN_STATUS        admin: hub counters
 0x11  ADMIN_STATUS_REPLY
 0x12  ADMIN_PEERS         admin: live peer table (paginated)
@@ -71,8 +73,6 @@ offset  size  field
 0x27  ADMIN_ACL_REVOKE_REPLY
 0x28  ADMIN_ACL_LIST      admin: list client grants (paginated)
 0x29  ADMIN_ACL_LIST_REPLY
-0x2A  ADMIN_IFCONFIG      admin: reconfigure an interface (bitrate, up, down)
-0x2B  ADMIN_IFCONFIG_REPLY
 0x2C  ADMIN_REJECTED      admin: identities the hub turned away (paginated)
 0x2D  ADMIN_REJECTED_REPLY
 0x7F  PING/PONG    liveness (flags bit 0: reply)
@@ -81,8 +81,10 @@ offset  size  field
 Admin ACL grants are keyed by the client TLS fingerprint (subject) and the
 stable namespaced interface (agent_name + interface_name, the object). Any
 of the three may be the literal `*` wildcard. Each grant carries a level:
-`none` (no read, no write), `ro` (read), `rw` (read and write); on the wire
-this is the `can_read`/`can_write` byte pair. The hub resolves a client's
+`none` (no read, no write), `r` (read), `rw` (read and write), `rwa` (read,
+write and configure the interface); on the wire this is the
+`can_read`/`can_write`/`can_admin` byte triple, and `can_admin` always comes
+with the other two. The hub resolves a client's
 permission most-specific-wins with the subject dominating: a rule naming the
 fingerprint beats any `*`-subject rule, then narrower object scope wins
 (exact > agent/* > */*). With no matching rule the baseline is read-open,
@@ -194,16 +196,48 @@ only to frames the hub fans out toward the client; it never affects injection
 toward the agent. SUBSCRIBE on an unopened channel returns an ERROR and is
 otherwise ignored (no SUBSCRIBE_ACK).
 
-IFCONFIG (total 28, hub -> agent)
-@4   interface_name char[16]
-@20  op u8 (0 set bitrate, 1 link up, 2 link down)
-@21  reserved u8[3]
-@24  bitrate u32 (bits per second; only read for op 0)
+IFCONFIG (total 68, hub -> agent)
+@4   request_id u32            (hub-chosen, echoed by the reply)
+@8   interface_name char[16]
+@24  op u8 (0 apply, 1 query)
+@25  reserved u8[3]
+@28  settings (40 bytes, below)
 
-IFCONFIG_REPLY (total 24, agent -> hub)
-@4   interface_name char[16]   (echo, lets the hub correlate the request)
-@20  status u8 (0 ok, 1 unknown interface, 2 apply failed)
-@21  reserved u8[3]
+IFCONFIG_REPLY (total 116, agent -> hub)
+@4   request_id u32
+@8   status u8 (0 ok, 1 unknown interface, 2 apply failed)
+@9   reserved u8[3]
+@12  settings (40 bytes): what the device holds after the request
+@52  detail char[64]           (why it failed, e.g. the kernel's netlink message)
+
+settings (40 bytes, shared by IFCONFIG, IFCONFIG_REPLY, CONFIGURE, CONFIGURE_REPLY)
++0   fields u32                (which members carry a value: bit 0 bitrate,
+                                1 sample_point, 2 data_bitrate,
+                                3 data_sample_point, 4 ctrlmode, 5 restart_ms,
+                                6 txqueuelen, 7 link, 8 can_state)
++4   bitrate u32               (bits per second)
++8   data_bitrate u32          (CAN FD data phase, bits per second)
++12  sample_point u16          (tenths of a percent: 875 = 87.5%; 0-1000)
++14  data_sample_point u16
++16  ctrlmode_mask u32         (modes to change: bit 0 loopback, 1 listen-only,
+                                2 triple-sampling, 3 one-shot, 4 berr-reporting,
+                                5 fd; the Linux CAN_CTRLMODE_* values)
++20  ctrlmode_flags u32        (their new values)
++24  restart_ms u32            (automatic restart after bus-off; 0 = never)
++28  txqueuelen u32
++32  link_up u8 (0/1)
++33  can_state u8              (reported only: 0 error-active, 1 error-warning,
+                                2 error-passive, 3 bus-off, 4 stopped, 5 sleeping)
++34  reserved u8[6]
+
+In a request, fields names what to change and nothing else is touched. In a
+reply it names what the device reports: a vcan has no bit timing, so a reply
+for one carries only link and txqueuelen. The agent applies everything in one
+step: bit timing, data bit timing, control modes and restart-ms need the link
+down, so it takes the link down, sets them and the TX queue in one netlink
+request, and brings the link back to the requested state (or to the one it
+had). If the request fails it restores the link and reports why in detail.
+Query applies nothing and only reads back.
 
 INTERFACE_STATUS (total 328; agent -> hub, also hub -> client)
 @4   interface_count u8
@@ -229,24 +263,29 @@ the same message (entries addressed by the client's channel, advertised_rate = t
 rate the client should pace its writes to) so a client sheds excess at the source
 instead of overrunning the hub. flags is reserved for the reliability toggle.
 
-ADMIN_IFCONFIG (total 156, admin -> hub)
+CONFIGURE (total 192, client or admin -> hub)
 @4   agent_name char[128]
 @132 interface_name char[16]
-@148 op u8 (0 set bitrate, 1 link up, 2 link down)
+@148 op u8 (0 apply, 1 query)
 @149 reserved u8[3]
-@152 bitrate u32
+@152 settings (40 bytes)
 
-ADMIN_IFCONFIG_REPLY (total 8)
-@4   status u8 (0 ok, 1 unknown interface, 2 agent unreachable, 3 apply failed)
+CONFIGURE_REPLY (total 112, hub -> client or admin)
+@4   status u8 (0 ok, 1 unknown interface, 2 agent unreachable, 3 apply failed,
+                4 not allowed)
 @5   reserved u8[3]
+@8   settings (40 bytes): what the device holds afterwards
+@48  detail char[64]
 
-Interface configuration is admin-only. The admin names the interface by its
-namespaced (agent_name, interface_name) pair; the hub resolves it, forwards an
-IFCONFIG to the owning agent, and relays the agent's IFCONFIG_REPLY back as an
-ADMIN_IFCONFIG_REPLY — a synchronous round trip. The agent applies the change
-through its CAN port (SocketCAN: rtnetlink, needs CAP_NET_ADMIN). A bitrate
-change brings the link down, sets the bitrate, brings it up. If the agent
-disconnects before replying the admin gets status agent unreachable.
+The requester names the interface by its namespaced (agent_name,
+interface_name) pair, with no channel open. The hub resolves it, checks the
+requester may configure it, forwards an IFCONFIG to the owning agent with a
+fresh request_id and relays the agent's IFCONFIG_REPLY back as a
+CONFIGURE_REPLY. An admin may always configure. A client needs an `rwa` grant
+on the interface; clients on transports with no fingerprint (unix socket,
+plain tcp) are trusted, as for writes. The agent applies the change through
+its CAN port (SocketCAN: rtnetlink, needs CAP_NET_ADMIN). If the agent
+disconnects before replying the requester gets status agent unreachable.
 
 ADMIN_STATUS (total 4)
 empty payload
@@ -387,7 +426,7 @@ ADMIN_ACL_SET (total 216)
 @148 fingerprint_hex char[65]  (subject client fingerprint; * for any)
 @213 can_read u8 (0/1)
 @214 can_write u8 (0/1)
-@215 reserved u8[1]
+@215 can_admin u8 (0/1; implies the other two)
 
 ADMIN_ACL_SET_REPLY (total 8)
 @4   status u8 (0 ok, non-zero: rejected)
@@ -397,7 +436,7 @@ ADMIN_ACL_REVOKE (total 216)
 @4   agent_name char[128]      (object agent; * for any)
 @132 interface_name char[16]   (object interface; * for any)
 @148 fingerprint_hex char[65]  (subject client fingerprint; * for any)
-@213 reserved u8[3]            (can_read/can_write unused on revoke)
+@213 reserved u8[3]            (the level bytes are unused on revoke)
 
 ADMIN_ACL_REVOKE_REPLY (total 8)
 @4   status u8 (0 ok, 1 no matching grant)
@@ -417,7 +456,7 @@ ADMIN_ACL_LIST_REPLY (total 8 + count * 212)
      +144 fingerprint_hex char[65]
      +209 can_read u8 (0/1)
      +210 can_write u8 (0/1)
-     +211 reserved u8[1]
+     +211 can_admin u8 (0/1)
 
 ADMIN_REJECTED (total 8)
 @4   offset u16        (pagination start index)

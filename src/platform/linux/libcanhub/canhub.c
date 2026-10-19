@@ -11,6 +11,8 @@
 #include <unistd.h>
 
 #include "client/client.h"
+#include "platform/linux/libcanhub/canhub_settings.h"
+#include "protocol/ifconfig_message.h"
 #include "protocol/open_message.h"
 #include "platform/linux/clock/clock.h"
 #include "platform/linux/quic/quic_client_transport.h"
@@ -61,6 +63,9 @@ struct CanHubSession {
     bool open_done;
     int32_t open_result;
     int32_t hub_error;
+    bool configure_done;
+    int32_t configure_result;
+    CanHubInterfaceSettings *configure_out;
     CanHubFrame frame_ring[FRAME_RING_SIZE];
     uint16_t ring_head;
     uint16_t ring_count;
@@ -87,6 +92,15 @@ static void onOpenResult(void *context, uint8_t status, uint8_t channel, uint32_
 static void onFrame(void *context, const FrameMessage *message);
 static void onError(void *context, uint16_t code, const char *detail);
 static void onDisconnected(void *context);
+static int32_t runConfigure(
+    CanHubSession *self,
+    const char *interface_name,
+    uint8_t op,
+    const InterfaceSettings *settings,
+    CanHubInterfaceSettings *effective,
+    int32_t timeout_ms
+);
+static void onConfigureReply(void *context, const ConfigureReplyMessage *reply);
 
 static _Thread_local char connect_error[LAST_ERROR_SIZE] = NO_CONNECT_ERROR;
 
@@ -140,6 +154,7 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
     client_events.on_frame = onFrame;
     client_events.on_error = onError;
     client_events.on_disconnected = onDisconnected;
+    client_events.on_configure_reply = onConfigureReply;
 
     transport_events = Client_TransportEvents(&self->client);
 
@@ -404,6 +419,47 @@ int32_t canhub_stats(CanHubSession *session, CanHubStats *stats)
     stats->frames_ring_dropped = session->frames_ring_dropped;
 
     return CANHUB_OK;
+}
+
+int32_t canhub_configure(
+    CanHubSession *session,
+    const char *interface_name,
+    const CanHubInterfaceSettings *requested,
+    CanHubInterfaceSettings *effective,
+    int32_t timeout_ms
+)
+{
+    InterfaceSettings settings;
+
+    if (session == NULL) {
+        return CANHUB_ERR_ARGUMENT;
+    }
+    if (requested == NULL || requested->struct_size != sizeof(*requested)) {
+        setError(session, "requested settings required with struct_size set");
+        return CANHUB_ERR_ARGUMENT;
+    }
+
+    CanHubSettings_ToWire(requested, &settings);
+
+    return runConfigure(session, interface_name, IFCONFIG_OP_APPLY, &settings, effective, timeout_ms);
+}
+
+int32_t canhub_query(
+    CanHubSession *session,
+    const char *interface_name,
+    CanHubInterfaceSettings *effective,
+    int32_t timeout_ms
+)
+{
+    InterfaceSettings settings;
+
+    if (session == NULL) {
+        return CANHUB_ERR_ARGUMENT;
+    }
+
+    memset(&settings, 0, sizeof(settings));
+
+    return runConfigure(session, interface_name, IFCONFIG_OP_QUERY, &settings, effective, timeout_ms);
 }
 
 /* ---------- private ---------- */
@@ -747,4 +803,72 @@ static void onDisconnected(void *context)
     CanHubSession *self = context;
 
     self->disconnected = true;
+}
+
+static int32_t runConfigure(
+    CanHubSession *self,
+    const char *interface_name,
+    uint8_t op,
+    const InterfaceSettings *settings,
+    CanHubInterfaceSettings *effective,
+    int32_t timeout_ms
+)
+{
+    uint64_t deadline = deadlineFrom(timeout_ms);
+
+    if (effective != NULL && effective->struct_size != sizeof(*effective)) {
+        setError(self, "effective settings need struct_size set");
+        return CANHUB_ERR_ARGUMENT;
+    }
+    if (self->disconnected) {
+        return CANHUB_ERR_DISCONNECTED;
+    }
+    if (interface_name == NULL || !Client_Configure(&self->client, interface_name, op, settings)) {
+        setError(self, "interface must be named agent/iface");
+        return CANHUB_ERR_ARGUMENT;
+    }
+
+    self->configure_out = effective;
+    self->configure_done = false;
+    self->configure_result = CANHUB_OK;
+    self->hub_error = 0;
+
+    while (!self->configure_done && self->hub_error == 0 && !self->disconnected) {
+        if (timeout_ms >= 0 && remainingMs(deadline) == 0) {
+            self->configure_out = NULL;
+            setError(self, "configure timed out");
+            return CANHUB_ERR_TIMEOUT;
+        }
+        pumpOnce(self, remainingMs(deadline));
+    }
+
+    self->configure_out = NULL;
+    if (self->disconnected) {
+        return CANHUB_ERR_DISCONNECTED;
+    }
+    if (self->hub_error != 0) {
+        return self->hub_error;
+    }
+
+    return self->configure_result;
+}
+
+static void onConfigureReply(void *context, const ConfigureReplyMessage *reply)
+{
+    CanHubSession *self = context;
+
+    self->configure_done = true;
+    self->configure_result = CanHubSettings_Result(reply->status);
+    if (self->configure_out != NULL) {
+        CanHubSettings_FromWire(&reply->settings, self->configure_out);
+    }
+    if (self->configure_result == CANHUB_OK) {
+        return;
+    }
+
+    if (reply->detail[0] != '\0') {
+        snprintf(self->last_error, sizeof(self->last_error), "configure failed: %s", reply->detail);
+        return;
+    }
+    snprintf(self->last_error, sizeof(self->last_error), "configure refused by the hub (status %u)", reply->status);
 }

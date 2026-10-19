@@ -81,6 +81,14 @@ class BenchKeywords:
     def start_can_hub_with(self, server, config) -> CanHub:
         return CanHub.start(server, config)
 
+    @keyword("Start CAN HUB With Agent ${name} On ${server}")
+    def start_can_hub_with_agent(self, name, server, interface="vcan0") -> CanHub:
+        server.make_vcan(interface)
+        hub = CanHub.start(server, HubConfig())
+        agent = CanAgent.start(server, AgentConfig(connect="quic://local:7227", name=name, interfaces=[interface]))
+        agent.wait_registered(hub, timeout=8)
+        return hub
+
     @keyword("Start CAN HUB On ${server}")
     def start_can_hub(self, server) -> CanHub:
         return CanHub.start(server)
@@ -136,6 +144,24 @@ class BenchKeywords:
     @keyword("Run CLI On Hub ${hub}")
     def run_cli_on_hub(self, hub, *args):
         return hub.cli(*args)
+
+    @keyword("Try CLI On Hub ${hub}")
+    def try_cli_on_hub(self, hub, *args):
+        return hub.cli(*args, check=False)
+
+    @keyword("Configure ${interface} From A Client On ${server}")
+    def configure_from_client(self, interface, server, connect, state_dir, *settings):
+        return CanClient.configure(server, interface, connect, state_dir, *settings)
+
+    @keyword("TX Queue Length Of ${interface} On ${server}")
+    def tx_queue_length_of(self, interface, server) -> int:
+        return server.link(interface)["txqlen"]
+
+    @keyword("Link ${interface} On ${server} Should Be Down")
+    def link_should_be_down(self, interface, server):
+        flags = server.link(interface)["flags"]
+        if "UP" in flags:
+            raise AssertionError(f"{interface} is still up: {flags}")
 
     @keyword("List Interfaces On ${server}")
     def list_interfaces_on(self, server, connect=None):
