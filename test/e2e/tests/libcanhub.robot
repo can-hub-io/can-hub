@@ -13,33 +13,41 @@ ${CONNECT}        tcp://127.0.0.1:7228
 *** Test Cases ***
 Library Lists The Catalogue
     ${result}=    Run Binary canhub-dump On ${LOCAL_SERVER}    ${CONNECT}    list
+
     Should Be True    ${result.ok}
     Should Contain    ${result.stdout}    truck42/vcan0
 
 Library Receives Frames From The Bus
     ${dump}=    Start Binary canhub-dump On ${LOCAL_SERVER}    ${CONNECT}    dump    truck42/vcan0
     Log Of ${dump} Should Contain dumping truck42/vcan0
+
     Inject CAN Frame On ${LOCAL_SERVER}    vcan0    123#DEADBEEF
+
     Log Of ${dump} Should Contain 123#DEADBEEF
 
 Library Sends Onto The Bus
     ${candump}=    Start Candump On ${LOCAL_SERVER}
+
     ${result}=    Run Binary canhub-dump On ${LOCAL_SERVER}    ${CONNECT}    send    truck42/vcan0    1A0    CAFE
+
     Should Be True    ${result.ok}
     Candump ${candump} Should Capture 1A0#CAFE
 
 Library Reports Unknown Interfaces
     ${result}=    Run Binary canhub-dump On ${LOCAL_SERVER}    ${CONNECT}    dump    truck42/nope
+
     Should Not Be True    ${result.ok}
     Should Contain    ${result.stderr}    not found
 
 Library Explains A Failed Connection
     ${result}=    Run Binary canhub-dump On ${LOCAL_SERVER}    tcp://127.0.0.1:7    list
+
     Should Not Be True    ${result.ok}
     Should Contain    ${result.stderr}    the hub refused or closed the connection
 
 Library Explains A Malformed Url
     ${result}=    Run Binary canhub-dump On ${LOCAL_SERVER}    not-a-url    list
+
     Should Not Be True    ${result.ok}
     Should Contain    ${result.stderr}    could not parse the hub url
 

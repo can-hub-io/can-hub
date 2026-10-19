@@ -68,24 +68,24 @@ describe("echo_correlator", []() {
     });
 
     it("keeps interfaces independent", []() {
-        uint8_t b_token = 0;
-        uint8_t a_token = 0;
-        bool b_matched;
-        bool b_matched_again;
-        bool a_matched;
+        uint8_t interface_b_token = 0;
+        uint8_t interface_a_token = 0;
+        bool matched_on_interface_b;
+        bool matched_again_on_interface_b;
+        bool matched_on_interface_a;
 
         EchoCorrelator_Push(&correlator, INTERFACE_A, 7, 0x100);
         EchoCorrelator_Push(&correlator, INTERFACE_B, 9, 0x100);
 
-        b_matched = EchoCorrelator_PopMatch(&correlator, INTERFACE_B, 0x100, &b_token);
-        b_matched_again = EchoCorrelator_PopMatch(&correlator, INTERFACE_B, 0x100, &b_token);
-        a_matched = EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x100, &a_token);
+        matched_on_interface_b = EchoCorrelator_PopMatch(&correlator, INTERFACE_B, 0x100, &interface_b_token);
+        matched_again_on_interface_b = EchoCorrelator_PopMatch(&correlator, INTERFACE_B, 0x100, &interface_b_token);
+        matched_on_interface_a = EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x100, &interface_a_token);
 
-        expect(b_matched).toBe(true);
-        expect(b_token).toBe(9);
-        expect(b_matched_again).toBe(false);
-        expect(a_matched).toBe(true);
-        expect(a_token).toBe(7);
+        expect(matched_on_interface_b).toBe(true);
+        expect(interface_b_token).toBe(9);
+        expect(matched_again_on_interface_b).toBe(false);
+        expect(matched_on_interface_a).toBe(true);
+        expect(interface_a_token).toBe(7);
     });
 
     it("misses when nothing was pushed", []() {

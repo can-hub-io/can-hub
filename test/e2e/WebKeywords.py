@@ -4,9 +4,9 @@ Keywords drive the daemon's REST API and assert response bodies against the
 OpenAPI schemas, so the suite reads like:
 
     ${web}=     Start CAN HUB Web On ${LOCAL_SERVER} Against ${hub}
-    ${r}=       Bootstrap Admin ${web}    admin    hunter2pass
-    Status Of ${r} Should Be    200
-    Body Of ${r} Should Match    AuthState
+    ${bootstrap}=    Bootstrap Admin ${web}    admin    hunter2pass
+    Status Of ${bootstrap} Should Be    200
+    Body Of ${bootstrap} Should Match    AuthState
 """
 
 from robot.api.deco import keyword, library
@@ -79,6 +79,19 @@ class WebKeywords:
     @keyword("DELETE ${path} On ${target}")
     def delete(self, path, target):
         return self._rest(target).delete(path)
+
+    @keyword("Id Of ${kind} ${name} In ${result}")
+    def id_named(self, kind, name, result):
+        for entry in result.json:
+            if entry["name"] == name:
+                return entry["id"]
+        raise AssertionError(f"{kind} {name} not found")
+
+    @keyword("Change Password Of ${target} From ${current} To ${new}")
+    def change_password(self, target, current, new):
+        return self._rest(target).post(
+            "/api/auth/password", {"currentPassword": current, "newPassword": new}
+        )
 
     @keyword("Status Of ${result} Should Be")
     def status_should_be(self, result, code):
