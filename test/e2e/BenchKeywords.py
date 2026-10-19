@@ -711,6 +711,10 @@ class BenchKeywords:
     def lines_containing(self, process, text):
         return sum(1 for line in process.read_log().splitlines() if text in line)
 
+    @keyword("Interfaces Listed On ${server}")
+    def interfaces_listed_on(self, server, connect=None) -> list[str]:
+        return [f"{row.agent}/{row.interface}" for row in CanClient.list(server, connect)]
+
     @keyword("Restart ${hub}")
     def restart_hub(self, hub) -> CanHub:
         hub.stop()

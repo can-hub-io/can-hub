@@ -527,7 +527,7 @@ paths:
       description: >-
         Permission: bridges.manage. A frame captured on a member that passes
         the filters (none = all) is injected into every other member. Members
-        are kept when the group exists. 400 for a bad name (1-31 of
+        are kept when the group exists. 400 for a bad name (1-15 of
         A-Z a-z 0-9 . _ -), 409 when the hub holds no more groups.
       requestBody:
         required: true
@@ -1132,7 +1132,7 @@ components:
       type: object
       required: [name]
       properties:
-        name: { type: string, pattern: '^[A-Za-z0-9._-]{1,31}$' }
+        name: { type: string, pattern: '^[A-Za-z0-9._-]{1,15}$' }
         filters:
           type: array
           maxItems: 16

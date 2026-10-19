@@ -12,7 +12,24 @@ uint16_t FrameRoutes_FromAgent(
     uint16_t *dropped
 )
 {
-    const InterfaceEntry *entry;
+    const InterfaceEntry *entry = InterfaceRegistry_FindByAgentChannel(registry, agent_peer_id, agent_channel);
+
+    *dropped = 0;
+    if (entry == NULL) {
+        return 0;
+    }
+
+    return FrameRoutes_ToInterface(directory, entry->interface_id, routes, routes_max, dropped);
+}
+
+uint16_t FrameRoutes_ToInterface(
+    PeerDirectory *directory,
+    uint32_t interface_id,
+    FrameRoute *routes,
+    uint16_t routes_max,
+    uint16_t *dropped
+)
+{
     const ChannelBinding *binding;
     HubPeer *peer;
     uint16_t route_count = 0;
@@ -21,18 +38,13 @@ uint16_t FrameRoutes_FromAgent(
 
     *dropped = 0;
 
-    entry = InterfaceRegistry_FindByAgentChannel(registry, agent_peer_id, agent_channel);
-    if (entry == NULL) {
-        return 0;
-    }
-
     for(peer_index=0; peer_index<PEER_DIRECTORY_MAX; peer_index++) {
         peer = PeerDirectory_At(directory, peer_index);
         if (peer == NULL || peer->role != kHUB_PEER_ROLE_CLIENT) {
             continue;
         }
         binding_iterator = 0;
-        while ((binding = ClientSession_NextBindingForInterface(&peer->session, entry->interface_id, &binding_iterator)) != NULL) {
+        while ((binding = ClientSession_NextBindingForInterface(&peer->session, interface_id, &binding_iterator)) != NULL) {
             if (route_count == routes_max) {
                 (*dropped)++;
                 continue;

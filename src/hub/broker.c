@@ -94,7 +94,14 @@ static void sendGroupReply(Broker *self, HubPeer *peer, uint8_t type, uint8_t st
 static void loadBridgeRoutes(Broker *self);
 static void loadBridgeGroups(Broker *self);
 static bool bridgesConfigured(Broker *self);
-static uint16_t bridgeFrame(Broker *self, const HubPeer *source_agent, const FrameMessage *frame);
+static bool isGroupEndpoint(const BridgeEndpoint *endpoint);
+static void openGroupInterface(Broker *self, const char *name);
+static void closeGroupInterface(Broker *self, const char *name);
+static BridgeGroupSlot *groupOfChannel(Broker *self, const HubPeer *client, uint8_t channel, const InterfaceEntry **entry);
+static void writeIntoGroup(Broker *self, const HubPeer *writer, BridgeGroupSlot *slot, const InterfaceEntry *entry, const FrameMessage *frame);
+static uint16_t showToGroups(Broker *self, const BridgeEndpoint *origin, const FrameMessage *frame, uint32_t echo_originator_peer_id, uint8_t route_flags);
+static uint16_t showToGroup(Broker *self, const InterfaceEntry *entry, const FrameMessage *frame, uint32_t echo_originator_peer_id, uint8_t route_flags);
+static uint16_t bridgeFrame(Broker *self, const HubPeer *source_agent, const FrameMessage *frame, uint32_t echo_originator_peer_id, uint8_t route_flags);
 static void bridgeInto(Broker *self, const BridgeTarget *target, const FrameMessage *frame);
 static void handleIfconfigReply(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleInterfaceStatus(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
@@ -120,6 +127,8 @@ static void rejectAgent(Broker *self, HubPeer *peer, const RegisterMessage *regi
 static void recordRejection(Broker *self, const HubPeer *peer, const char *name, uint8_t reason);
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
 static void reattachClientsToAgent(Broker *self, uint32_t agent_peer_id);
+static void detachInterface(Broker *self, const InterfaceEntry *entry);
+static void reattachInterface(Broker *self, const InterfaceEntry *entry);
 static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size);
 static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char *detail);
 static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame);
@@ -427,6 +436,8 @@ static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame)
     uint16_t routes_dropped = 0;
     uint8_t forwarded_route_flags = 0;
     uint16_t bridged_count = 0;
+    BridgeGroupSlot *group;
+    const InterfaceEntry *group_entry = NULL;
     uint8_t token;
     bool accepted = true;
     bool bridged = false;
@@ -456,6 +467,11 @@ static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame)
             self->metrics.frames_dropped++;
             return true;
         }
+        group = groupOfChannel(self, peer, frame->channel, &group_entry);
+        if (group != NULL) {
+            writeIntoGroup(self, peer, group, group_entry, frame);
+            return true;
+        }
         route_count = FrameRoutes_FromClient(
             &self->registry, peer, frame->channel, routes, FRAME_ROUTES_MAX, &routes_dropped);
         token = injectionToken(self, peer, routes, route_count);
@@ -478,7 +494,7 @@ static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame)
     }
 
     if (peer->role == kHUB_PEER_ROLE_AGENT && !bridged && bridgesConfigured(self)) {
-        bridged_count = bridgeFrame(self, peer, frame);
+        bridged_count = bridgeFrame(self, peer, frame, echo_originator_peer_id, forwarded_route_flags);
     }
     if (route_count == 0 && bridged_count == 0) {
         self->metrics.frames_unroutable++;
@@ -547,6 +563,12 @@ static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *hea
     }
     if (!RegisterMessage_Decode(&registration, payload, header->length)) {
         sendError(self, peer->peer_id, kERROR_CODE_MALFORMED, "malformed register");
+        disconnectPeer(self, peer->peer_id);
+        return;
+    }
+
+    if (strcmp(registration.agent_name, BRIDGE_GROUP_AGENT_NAME) == 0) {
+        sendError(self, peer->peer_id, kERROR_CODE_ROLE_REJECTED, "the agent name group is reserved for bridge groups");
         disconnectPeer(self, peer->peer_id);
         return;
     }
@@ -1045,7 +1067,7 @@ static void handleConfigure(Broker *self, HubPeer *peer, const MessageHeader *he
     }
 
     entry = InterfaceRegistry_FindByName(&self->registry, request.agent_name, request.interface_name);
-    if (entry == NULL) {
+    if (entry == NULL || InterfaceEntry_IsVirtual(entry)) {
         replyConfigure(self, peer, CONFIGURE_STATUS_UNKNOWN_INTERFACE);
         return;
     }
@@ -1167,7 +1189,7 @@ static void handleAdminBridgeList(Broker *self, HubPeer *peer, const MessageHead
 
 static uint8_t applyBridgeRoute(Broker *self, const BridgeRoute *route)
 {
-    if (!BridgeRoute_IsValid(route)) {
+    if (!BridgeRoute_IsValid(route) || isGroupEndpoint(&route->source) || isGroupEndpoint(&route->destination)) {
         return ADMIN_BRIDGE_STATUS_INVALID;
     }
     if (!BridgeRoutes_HasRoom(&self->bridges, route)) {
@@ -1315,6 +1337,10 @@ static uint8_t applyGroup(Broker *self, const AdminGroupSetMessage *request)
     if (!BridgeGroups_HasRoom(&self->groups, request->name)) {
         return ADMIN_BRIDGE_STATUS_FULL;
     }
+    if (BridgeGroups_Find(&self->groups, request->name) == NULL
+        && InterfaceRegistry_Count(&self->registry) >= INTERFACE_REGISTRY_MAX) {
+        return ADMIN_BRIDGE_STATUS_FULL;
+    }
 
     memset(&group, 0, sizeof(group));
     memcpy(group.name, request->name, sizeof(group.name));
@@ -1325,6 +1351,7 @@ static uint8_t applyGroup(Broker *self, const AdminGroupSetMessage *request)
     }
 
     BridgeGroups_Set(&self->groups, group.name, group.filter_count, group.filters);
+    openGroupInterface(self, group.name);
 
     return ADMIN_BRIDGE_STATUS_OK;
 }
@@ -1338,6 +1365,7 @@ static uint8_t removeGroup(Broker *self, const char *name)
         return ADMIN_BRIDGE_STATUS_STORE_FAILED;
     }
 
+    closeGroupInterface(self, name);
     BridgeGroups_Remove(&self->groups, name);
 
     return ADMIN_BRIDGE_STATUS_OK;
@@ -1349,6 +1377,9 @@ static uint8_t joinGroup(Broker *self, const char *name, const BridgeEndpoint *m
 
     if (slot == NULL) {
         return ADMIN_BRIDGE_STATUS_UNKNOWN;
+    }
+    if (isGroupEndpoint(member)) {
+        return ADMIN_BRIDGE_STATUS_INVALID;
     }
     if (BridgeGroup_HasMember(&slot->group, member)) {
         return ADMIN_BRIDGE_STATUS_OK;
@@ -1418,7 +1449,9 @@ static void loadBridgeGroups(Broker *self)
     }
 
     while (position < BRIDGE_GROUPS_MAX && self->bridge_store->load_group(self->bridge_store->context, position, &group)) {
-        BridgeGroups_Restore(&self->groups, &group);
+        if (BridgeGroups_Restore(&self->groups, &group)) {
+            openGroupInterface(self, group.name);
+        }
         position++;
     }
 }
@@ -1428,7 +1461,117 @@ static bool bridgesConfigured(Broker *self)
     return !BridgeRoutes_IsEmpty(&self->bridges) || !BridgeGroups_IsEmpty(&self->groups);
 }
 
-static uint16_t bridgeFrame(Broker *self, const HubPeer *source_agent, const FrameMessage *frame)
+static bool isGroupEndpoint(const BridgeEndpoint *endpoint)
+{
+    return strcmp(endpoint->agent_name, BRIDGE_GROUP_AGENT_NAME) == 0;
+}
+
+static void openGroupInterface(Broker *self, const char *name)
+{
+    const InterfaceEntry *entry;
+
+    if (InterfaceRegistry_FindByName(&self->registry, BRIDGE_GROUP_AGENT_NAME, name) != NULL) {
+        return;
+    }
+
+    entry = InterfaceRegistry_AddVirtual(&self->registry, BRIDGE_GROUP_AGENT_NAME, name);
+    if (entry != NULL) {
+        reattachInterface(self, entry);
+    }
+}
+
+static void closeGroupInterface(Broker *self, const char *name)
+{
+    const InterfaceEntry *entry = InterfaceRegistry_FindByName(&self->registry, BRIDGE_GROUP_AGENT_NAME, name);
+
+    if (entry == NULL) {
+        return;
+    }
+
+    detachInterface(self, entry);
+    InterfaceRegistry_RemoveVirtual(&self->registry, entry->interface_id);
+}
+
+static BridgeGroupSlot *groupOfChannel(Broker *self, const HubPeer *client, uint8_t channel, const InterfaceEntry **entry)
+{
+    uint32_t interface_id;
+
+    if (!ClientSession_InterfaceForChannel(&client->session, channel, &interface_id)) {
+        return NULL;
+    }
+
+    *entry = InterfaceRegistry_FindById(&self->registry, interface_id);
+    if (*entry == NULL || !InterfaceEntry_IsVirtual(*entry)) {
+        return NULL;
+    }
+
+    return BridgeGroups_Find(&self->groups, (*entry)->interface_name);
+}
+
+/*
+ * A frame a client writes into a group reaches every member bus and every
+ * other client of the group at once; the bus echoes come back bridged and
+ * are not shown again.
+ */
+static void writeIntoGroup(Broker *self, const HubPeer *writer, BridgeGroupSlot *slot, const InterfaceEntry *entry, const FrameMessage *frame)
+{
+    BridgeTarget target;
+    uint8_t i;
+
+    target.forwarded = &slot->forwarded;
+    target.dropped = &slot->dropped;
+    for(i=0; i<slot->group.member_count; i++) {
+        target.destination = &slot->group.members[i];
+        bridgeInto(self, &target, frame);
+    }
+
+    showToGroup(self, entry, frame, writer->peer_id, 0);
+}
+
+static uint16_t showToGroups(Broker *self, const BridgeEndpoint *origin, const FrameMessage *frame, uint32_t echo_originator_peer_id, uint8_t route_flags)
+{
+    const BridgeGroupSlot *slot;
+    const InterfaceEntry *entry;
+    uint16_t shown = 0;
+    uint8_t i;
+
+    for(i=0; i<BRIDGE_GROUPS_MAX; i++) {
+        slot = BridgeGroups_Slot(&self->groups, i);
+        if (slot == NULL || !BridgeGroup_HasMember(&slot->group, origin)) {
+            continue;
+        }
+        if (!BridgeFilters_Pass(slot->group.filters, slot->group.filter_count, frame->can_id)) {
+            continue;
+        }
+        entry = InterfaceRegistry_FindByName(&self->registry, BRIDGE_GROUP_AGENT_NAME, slot->group.name);
+        if (entry != NULL) {
+            shown = (uint16_t)(shown + showToGroup(self, entry, frame, echo_originator_peer_id, route_flags));
+        }
+    }
+
+    return shown;
+}
+
+static uint16_t showToGroup(Broker *self, const InterfaceEntry *entry, const FrameMessage *frame, uint32_t echo_originator_peer_id, uint8_t route_flags)
+{
+    FrameRoute *routes = self->frame_routes;
+    uint16_t routes_dropped;
+    uint16_t route_count;
+    uint16_t i;
+
+    route_count = FrameRoutes_ToInterface(&self->directory, entry->interface_id, routes, FRAME_ROUTES_MAX, &routes_dropped);
+    self->metrics.frames_dropped += routes_dropped;
+    InterfaceRegistry_CountFrame(&self->registry, entry->interface_id);
+    for(i=0; i<route_count; i++) {
+        if (routeTakesFrame(self, &routes[i], frame, echo_originator_peer_id)) {
+            forwardFrame(self, &routes[i], frame, route_flags);
+        }
+    }
+
+    return route_count;
+}
+
+static uint16_t bridgeFrame(Broker *self, const HubPeer *source_agent, const FrameMessage *frame, uint32_t echo_originator_peer_id, uint8_t route_flags)
 {
     const InterfaceEntry *source;
     BridgeEndpoint origin;
@@ -1449,7 +1592,7 @@ static uint16_t bridgeFrame(Broker *self, const HubPeer *source_agent, const Fra
         bridgeInto(self, &self->bridge_targets[i], frame);
     }
 
-    return count;
+    return (uint16_t)(count + showToGroups(self, &origin, frame, echo_originator_peer_id, route_flags));
 }
 
 /*
@@ -1804,7 +1947,7 @@ static void revertAgentChannelIfUnused(Broker *self, uint32_t interface_id)
     HubPeer *peer;
     uint16_t i;
 
-    if (entry == NULL) {
+    if (entry == NULL || InterfaceEntry_IsVirtual(entry)) {
         return;
     }
 
@@ -1846,20 +1989,12 @@ static bool displaceGhostPeer(Broker *self, const HubPeer *peer, const RegisterM
 static void detachAgent(Broker *self, uint32_t agent_peer_id)
 {
     const InterfaceEntry *entry;
-    HubPeer *peer;
     uint32_t entry_index;
-    uint16_t peer_index;
 
     for(entry_index=0; entry_index<INTERFACE_REGISTRY_MAX; entry_index++) {
         entry = &self->registry.entries[entry_index];
-        if (!entry->in_use || entry->agent_peer_id != agent_peer_id) {
-            continue;
-        }
-        for(peer_index=0; peer_index<PEER_DIRECTORY_MAX; peer_index++) {
-            peer = PeerDirectory_At(&self->directory, peer_index);
-            if (peer != NULL && peer->role == kHUB_PEER_ROLE_CLIENT) {
-                ClientSession_DetachInterface(&peer->session, entry->interface_id);
-            }
+        if (entry->in_use && entry->agent_peer_id == agent_peer_id) {
+            detachInterface(self, entry);
         }
     }
 
@@ -1869,32 +2004,50 @@ static void detachAgent(Broker *self, uint32_t agent_peer_id)
 static void reattachClientsToAgent(Broker *self, uint32_t agent_peer_id)
 {
     const InterfaceEntry *entry;
-    HubPeer *peer;
     uint32_t entry_index;
-    uint16_t peer_index;
-    uint8_t channel;
 
     for(entry_index=0; entry_index<INTERFACE_REGISTRY_MAX; entry_index++) {
         entry = &self->registry.entries[entry_index];
-        if (!entry->in_use || entry->agent_peer_id != agent_peer_id) {
+        if (entry->in_use && entry->agent_peer_id == agent_peer_id) {
+            reattachInterface(self, entry);
+        }
+    }
+}
+
+static void detachInterface(Broker *self, const InterfaceEntry *entry)
+{
+    HubPeer *peer;
+    uint16_t peer_index;
+
+    for(peer_index=0; peer_index<PEER_DIRECTORY_MAX; peer_index++) {
+        peer = PeerDirectory_At(&self->directory, peer_index);
+        if (peer != NULL && peer->role == kHUB_PEER_ROLE_CLIENT) {
+            ClientSession_DetachInterface(&peer->session, entry->interface_id);
+        }
+    }
+}
+
+static void reattachInterface(Broker *self, const InterfaceEntry *entry)
+{
+    HubPeer *peer;
+    uint16_t peer_index;
+    uint8_t channel;
+
+    for(peer_index=0; peer_index<PEER_DIRECTORY_MAX; peer_index++) {
+        peer = PeerDirectory_At(&self->directory, peer_index);
+        if (peer == NULL || peer->role != kHUB_PEER_ROLE_CLIENT) {
             continue;
         }
-        for(peer_index=0; peer_index<PEER_DIRECTORY_MAX; peer_index++) {
-            peer = PeerDirectory_At(&self->directory, peer_index);
-            if (peer == NULL || peer->role != kHUB_PEER_ROLE_CLIENT) {
-                continue;
-            }
-            if (!ClientSession_ReattachInterface(&peer->session, entry->agent_name, entry->interface_name, entry->interface_id, clientCanWrite(self, peer, entry))) {
-                continue;
-            }
-            if (!clientCanRead(self, peer, entry)) {
-                removeClientInterface(self, peer, entry->interface_id);
-                continue;
-            }
-            if (ClientSession_ChannelForInterface(&peer->session, entry->interface_id, &channel)
-                && ClientSession_ChannelReliable(&peer->session, channel)) {
-                self->transport->set_channel_mode(self->transport->context, entry->agent_peer_id, entry->agent_channel, true);
-            }
+        if (!ClientSession_ReattachInterface(&peer->session, entry->agent_name, entry->interface_name, entry->interface_id, clientCanWrite(self, peer, entry))) {
+            continue;
+        }
+        if (!clientCanRead(self, peer, entry)) {
+            removeClientInterface(self, peer, entry->interface_id);
+            continue;
+        }
+        if (ClientSession_ChannelForInterface(&peer->session, entry->interface_id, &channel)
+            && ClientSession_ChannelReliable(&peer->session, channel)) {
+            self->transport->set_channel_mode(self->transport->context, entry->agent_peer_id, entry->agent_channel, true);
         }
     }
 }

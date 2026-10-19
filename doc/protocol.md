@@ -553,7 +553,8 @@ Routes name interfaces, not ids, so they outlive the agents that serve them.
 The hub holds up to 64 and persists them in hub.db.
 
 ADMIN_GROUP_SET (total 168)
-@4   name char[32]     (1-31 of A-Z a-z 0-9 . _ -)
+@4   name char[32]     (1-15 of A-Z a-z 0-9 . _ -; the group is also
+                       the interface group/<name>)
 @36  filter_count u8   (0-16; 0 bridges every frame)
 @37  reserved u8[3]
 @40  filters, 16 slots of 8 bytes as in ADMIN_BRIDGE_SET
@@ -599,6 +600,14 @@ every other member of the group. A bus reached by several routes and groups
 is injected once, charged to the first one that reaches it; the source bus
 is never a target. The hub holds up to 16 groups of up to 16 members, in
 hub.db.
+
+Each group is also listed (LIST, ADMIN_INTERFACES) as the interface
+`group/<name>`, an entry the hub serves itself: OPEN, FRAME and CLOSE work
+as for any interface. Frames captured on members that pass the group
+filters are delivered to its channels (hub injections excluded); a FRAME a
+client writes on it is injected into every member and delivered to the
+group's other channels. A reliable OPEN is refused, CONFIGURE answers
+unknown interface, and REGISTER under the agent name `group` is refused.
 
 The hub remembers the last 16 identities it turned away, in memory, one entry
 per fingerprint and role. A retry bumps attempts instead of taking another

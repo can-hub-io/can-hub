@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "shared/bounded_string.h"
+
 #define PACE_EFFECTIVE_PERCENT 80
 #define PACE_BURST_BITS 8192
 
@@ -74,6 +76,49 @@ void InterfaceRegistry_RemovePeer(InterfaceRegistry *self, uint32_t agent_peer_i
             memset(&self->entries[i], 0, sizeof(self->entries[i]));
         }
     }
+}
+
+const InterfaceEntry *InterfaceRegistry_AddVirtual(
+    InterfaceRegistry *self,
+    const char *agent_name,
+    const char *interface_name
+)
+{
+    InterfaceEntry *entry;
+
+    if (InterfaceRegistry_FindByName(self, agent_name, interface_name) != NULL) {
+        return NULL;
+    }
+
+    entry = findFreeEntry(self);
+    if (entry == NULL) {
+        return NULL;
+    }
+
+    entry->in_use = true;
+    entry->interface_id = self->next_interface_id++;
+    entry->agent_peer_id = INTERFACE_REGISTRY_HUB_PEER;
+    BoundedString_Copy(entry->agent_name, sizeof(entry->agent_name), agent_name);
+    BoundedString_Copy(entry->interface_name, sizeof(entry->interface_name), interface_name);
+
+    return entry;
+}
+
+void InterfaceRegistry_RemoveVirtual(InterfaceRegistry *self, uint32_t interface_id)
+{
+    uint32_t i;
+
+    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
+        if (self->entries[i].in_use && self->entries[i].interface_id == interface_id
+            && InterfaceEntry_IsVirtual(&self->entries[i])) {
+            memset(&self->entries[i], 0, sizeof(self->entries[i]));
+        }
+    }
+}
+
+bool InterfaceEntry_IsVirtual(const InterfaceEntry *entry)
+{
+    return entry->agent_peer_id == INTERFACE_REGISTRY_HUB_PEER;
 }
 
 bool InterfaceRegistry_CollidingPeer(

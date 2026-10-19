@@ -10,6 +10,7 @@ extern "C" {
 #include "protocol/frame_message.h"
 #include "protocol/interface_name.h"
 #include "protocol/message_header.h"
+#include "protocol/open_message.h"
 }
 
 #define TRUCK_PEER 100
@@ -20,6 +21,9 @@ extern "C" {
 #define BUS_CAN0_CHANNEL 0
 #define LAB_PEER 102
 #define LAB_CAN0_CHANNEL 0
+#define GROUP_INTERFACE_INDEX 4
+#define VIEWER_PEER 201
+#define RESERVED_PEER 103
 #define BUS_INTERFACE_INDEX 2
 #define PASSED_ID 0x100
 #define FILTERED_ID 0x200
@@ -43,6 +47,8 @@ static HubTransportEvents events;
 static const RegisterMessage truck_registration = { "truck42", 2, { "can0", "can1" } };
 static const RegisterMessage bus_registration = { "bus7", 1, { "can0" } };
 static const RegisterMessage lab_registration = { "lab", 1, { "can0" } };
+static const RegisterMessage reserved_registration = { "group", 1, { "can0" } };
+static uint8_t viewer_channel;
 static AdminGroupListReplyMessage listed_group;
 static uint8_t reply_status;
 static AdminBridgeListReplyMessage listed;
@@ -59,6 +65,9 @@ static void leaveGroup(const char *name, const char *member);
 static void deleteGroup(const char *name);
 static void listGroups(void);
 static void connectLab(void);
+static void fleetOfTruckAndBus(void);
+static uint8_t openFleetAs(uint32_t client_peer_id, uint8_t open_flags);
+static void writeFromClient(uint32_t client_peer_id, uint8_t channel, uint32_t can_id);
 static void listBridges(void);
 static void frameFromAgent(uint32_t agent_peer_id, uint8_t channel, uint32_t can_id, uint8_t route_flags);
 static void echoFromBus(uint8_t token);
@@ -407,6 +416,104 @@ describe("broker bus bridges", []() {
             frameFromAgent(TRUCK_PEER, TRUCK_CAN0_CHANNEL, PASSED_ID, 0);
 
             expect(framesTo(BUS_PEER)).toBe(1);
+        });
+    });
+
+    describe("group as an interface", []() {
+        beforeEach([]() {
+            resetStore();
+            startHub();
+            connectAgents();
+            connectLab();
+        });
+
+        it("shows a client of the group what any member captures", []() {
+            fleetOfTruckAndBus();
+            viewer_channel = openFleetAs(VIEWER_PEER, 0);
+
+            frameFromAgent(TRUCK_PEER, TRUCK_CAN0_CHANNEL, PASSED_ID, 0);
+            frameFromAgent(BUS_PEER, BUS_CAN0_CHANNEL, FILTERED_ID, 0);
+            injected = lastFrameTo(VIEWER_PEER);
+
+            expect(framesTo(VIEWER_PEER)).toBe(2);
+            expect(injected.channel).toBe(viewer_channel);
+            expect(injected.can_id).toBe((uint32_t)FILTERED_ID);
+        });
+
+        it("shows nothing a member did not capture itself", []() {
+            fleetOfTruckAndBus();
+            openFleetAs(VIEWER_PEER, 0);
+
+            frameFromAgent(LAB_PEER, LAB_CAN0_CHANNEL, PASSED_ID, 0);
+
+            expect(framesTo(VIEWER_PEER)).toBe(0);
+        });
+
+        it("injects what a client writes into every member", []() {
+            fleetOfTruckAndBus();
+            viewer_channel = openFleetAs(VIEWER_PEER, OPEN_FLAG_WANT_WRITE);
+
+            writeFromClient(VIEWER_PEER, viewer_channel, PASSED_ID);
+
+            expect(framesTo(TRUCK_PEER)).toBe(1);
+            expect(framesTo(BUS_PEER)).toBe(1);
+            expect(framesTo(LAB_PEER)).toBe(0);
+        });
+
+        it("shows what one client writes to the other clients of the group", []() {
+            uint8_t writer_channel;
+
+            fleetOfTruckAndBus();
+            openFleetAs(VIEWER_PEER, 0);
+            writer_channel = openFleetAs(CLIENT_PEER, OPEN_FLAG_WANT_WRITE | OPEN_FLAG_SUPPRESS_OWN_ECHO);
+
+            writeFromClient(CLIENT_PEER, writer_channel, PASSED_ID);
+
+            expect(framesTo(VIEWER_PEER)).toBe(1);
+            expect(framesTo(CLIENT_PEER)).toBe(0);
+        });
+
+        it("does not show the bus echo of what was written into the group again", []() {
+            fleetOfTruckAndBus();
+            viewer_channel = openFleetAs(VIEWER_PEER, OPEN_FLAG_WANT_WRITE);
+            writeFromClient(VIEWER_PEER, viewer_channel, PASSED_ID);
+            injected = lastFrameTo(BUS_PEER);
+            HubTransportPortMock_Reset(&transport);
+
+            echoFromBus(tokenOf(&injected));
+
+            expect(framesTo(VIEWER_PEER)).toBe(0);
+            expect(framesTo(TRUCK_PEER)).toBe(0);
+        });
+
+        it("stops showing a deleted group to its clients", []() {
+            fleetOfTruckAndBus();
+            openFleetAs(VIEWER_PEER, 0);
+
+            deleteGroup("fleet");
+            frameFromAgent(TRUCK_PEER, TRUCK_CAN0_CHANNEL, PASSED_ID, 0);
+
+            expect(framesTo(VIEWER_PEER)).toBe(0);
+        });
+
+        it("refuses a group as a member or a route endpoint", []() {
+            uint8_t route_status;
+
+            fleetOfTruckAndBus();
+            addGroup("spare", 0, NULL);
+            addBridge("group/fleet", "lab/can0", 0, NULL);
+            route_status = reply_status;
+
+            joinGroup("spare", "group/fleet");
+
+            expect(route_status).toBe((uint8_t)ADMIN_BRIDGE_STATUS_INVALID);
+            expect(reply_status).toBe((uint8_t)ADMIN_BRIDGE_STATUS_INVALID);
+        });
+
+        it("refuses an agent that registers under the reserved name group", []() {
+            BrokerDriver_ConnectAgent(&events, &transport, RESERVED_PEER, &reserved_registration);
+
+            expect(transport.last_closed_peer).toBe((uint32_t)RESERVED_PEER);
         });
     });
 });
@@ -801,4 +908,32 @@ static bool storeLoadGroup(void *context, uint16_t position, BridgeGroup *group)
     *group = self->groups[position];
 
     return true;
+}
+
+static void fleetOfTruckAndBus(void)
+{
+    addGroup("fleet", 0, NULL);
+    joinGroup("fleet", "truck42/can0");
+    joinGroup("fleet", "bus7/can0");
+}
+
+static uint8_t openFleetAs(uint32_t client_peer_id, uint8_t open_flags)
+{
+    uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, GROUP_INTERFACE_INDEX);
+    uint8_t channel;
+
+    BrokerDriver_ConnectClient(&events, client_peer_id);
+    channel = BrokerDriver_OpenInterface(&events, &transport, client_peer_id, interface_id, open_flags);
+    HubTransportPortMock_Reset(&transport);
+
+    return channel;
+}
+
+static void writeFromClient(uint32_t client_peer_id, uint8_t channel, uint32_t can_id)
+{
+    FrameMessage frame = { can_id, 2000, channel, 1, 0, 0, { 0x55 } };
+    uint8_t encoded[FRAME_BUFFER_SIZE];
+    size_t encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+
+    events.on_peer_frame(events.context, client_peer_id, encoded, encoded_size);
 }

@@ -32,6 +32,13 @@ uint16_t FrameRoutes_FromAgent(
     uint16_t routes_max,
     uint16_t *dropped
 );
+uint16_t FrameRoutes_ToInterface(
+    PeerDirectory *directory,
+    uint32_t interface_id,
+    FrameRoute *routes,
+    uint16_t routes_max,
+    uint16_t *dropped
+);
 uint16_t FrameRoutes_FromClient(
     const InterfaceRegistry *registry,
     const HubPeer *client_peer,

@@ -7,6 +7,9 @@ import { ConfigureDialog } from './ConfigureDialog'
 import { Table, Tbody, Td, Th, Thead, Tr } from './ui/table'
 import { GrantDialog } from './GrantDialog'
 
+// A bridge group is listed as group/<name>; the hub serves it, nothing to configure.
+const GROUP_AGENT = 'group'
+
 export function Interfaces({ permissions }: { permissions: string[] }) {
   const { data, error } = usePolling(api.interfaces)
   const allowConfig = can(permissions, PERMISSION.interfacesConfig)
@@ -35,7 +38,7 @@ export function Interfaces({ permissions }: { permissions: string[] }) {
               {hasActions && (
                 <Td>
                   <div className="flex justify-end gap-2">
-                    {allowConfig && (
+                    {allowConfig && i.agentName !== GROUP_AGENT && (
                       <Button variant="outline" size="sm" onClick={() => setConfiguring(i)}>Configure…</Button>
                     )}
                     {allowAcl && <Button variant="outline" size="sm" onClick={() => setGranting(i)}>Grant</Button>}

@@ -284,6 +284,7 @@ add_unit_test(test_interface_registry
     SOURCES
         hub/domain/test_interface_registry.cpp
         ${ROOT_SRC_DIR}/hub/domain/interface_registry.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
         ${ROOT_SRC_DIR}/shared/egress_shaper.c
         ${ROOT_SRC_DIR}/protocol/list_message.c
         ${ROOT_SRC_DIR}/protocol/message_header.c
