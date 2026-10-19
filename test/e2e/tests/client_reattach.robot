@@ -25,7 +25,7 @@ Client Keeps Receiving After Its Agent Reconnects
     Client ${client} Should Receive 123#DEADBEEF
 
     Set Link Loss On ${WAN_SERVER} To 100
-    Sleep    12s
+    Wait Until Agent ${agent} Is Gone From ${hub}    30
     Set Link Loss On ${WAN_SERVER} To 0
     Wait Until Agent ${agent} Registered On ${hub}    20
     Inject CAN Frame On ${WAN_SERVER}    vcan0    321#CAFEBABE

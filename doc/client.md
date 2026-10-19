@@ -19,6 +19,8 @@ hub only, with no first contact ([security](security.md#pinning-the-hub)).
 
 Interfaces are addressed by the numeric id from `list` or by namespaced name
 `agent/iface`. Hub-side denials print as `hub error <code>: <detail>`.
+SIGINT and SIGTERM close the hub connection cleanly, so the hub releases the
+client at once (`systemctl stop` of the socketcand service included).
 
 ## list
 
