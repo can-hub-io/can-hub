@@ -40,9 +40,9 @@ Registration rejections the agent logs:
 - *agent name pinned to a different fingerprint* — the hub knows this name
   under another identity. Re-keyed device? `can-hub-cli pins delete <name>`
   on the hub.
-- *unknown agent* — the hub runs `--require-known-agents` and this
+- *unknown agent* — the hub runs `--require-known-peers` and this
   fingerprint is not enrolled. See
-  [security](security.md#locking-down-agents).
+  [security](security.md#locking-down-agents-and-clients).
 - *name/interface collision or hub registry full*.
 
 ## Running as a service

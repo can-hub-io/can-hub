@@ -515,3 +515,65 @@ describe("admin_clients_message", []() {
         expect(AdminClientsReplyMessage_Decode(&decoded, payload, sizeof(payload))).toBe(false);
     });
 });
+
+describe("admin_rejected_message", []() {
+    it("round-trips the pagination offset", []() {
+        AdminRejectedMessage request = { 15 };
+        AdminRejectedMessage decoded;
+        uint8_t buffer[16];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminRejectedMessage_Encode(&request, buffer, sizeof(buffer));
+        decoded_ok = AdminRejectedMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + ADMIN_REJECTED_BODY_SIZE));
+        expect(decoded_ok).toBe(true);
+        expect(decoded.offset).toBe((uint16_t)15);
+    });
+
+    it("round-trips rejected entries", []() {
+        AdminRejectedReplyMessage reply = {
+            1, ADMIN_REPLY_FLAG_MORE, { { 1, ADMIN_REJECTED_REASON_FINGERPRINT_MISMATCH, 12, 8, "truck42", FINGERPRINT, "203.0.113.5:40000" } }
+        };
+        AdminRejectedReplyMessage decoded;
+        uint8_t buffer[512];
+        size_t expected_size = MESSAGE_HEADER_SIZE + ADMIN_REJECTED_REPLY_FIXED_FIELDS_SIZE + ADMIN_REJECTED_REPLY_ENTRY_SIZE;
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminRejectedReplyMessage_Encode(&reply, buffer, sizeof(buffer));
+        decoded_ok = AdminRejectedReplyMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe(expected_size);
+        expect(decoded_ok).toBe(true);
+        expect(decoded.count).toBe(1);
+        expect(decoded.flags).toBe(ADMIN_REPLY_FLAG_MORE);
+        expect(decoded.entries[0].role).toBe(1);
+        expect(decoded.entries[0].reason).toBe(ADMIN_REJECTED_REASON_FINGERPRINT_MISMATCH);
+        expect(decoded.entries[0].attempts).toBe((uint32_t)12);
+        expect(decoded.entries[0].last_seen_seconds).toBe((uint32_t)8);
+        expect((const char *)decoded.entries[0].name).toBe("truck42");
+        expect((const char *)decoded.entries[0].fingerprint_hex).toBe(FINGERPRINT);
+        expect((const char *)decoded.entries[0].origin).toBe("203.0.113.5:40000");
+    });
+
+    it("rejects encoding a rejected entry with an unterminated origin", []() {
+        AdminRejectedReplyMessage reply = { 1, 0, { { 1, 0, 1, 0, "truck42", FINGERPRINT, "" } } };
+        uint8_t buffer[512];
+        size_t encoded_size;
+
+        memset(reply.entries[0].origin, 'a', ADMIN_ORIGIN_SIZE);
+
+        encoded_size = AdminRejectedReplyMessage_Encode(&reply, buffer, sizeof(buffer));
+
+        expect(encoded_size).toBe((size_t)0);
+    });
+
+    it("rejects a reply that claims more entries than it carries", []() {
+        AdminRejectedReplyMessage decoded;
+        uint8_t payload[ADMIN_REJECTED_REPLY_FIXED_FIELDS_SIZE] = { 2, 0, 0, 0 };
+
+        expect(AdminRejectedReplyMessage_Decode(&decoded, payload, sizeof(payload))).toBe(false);
+    });
+});

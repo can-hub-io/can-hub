@@ -9,7 +9,7 @@
 #define ADMIN_STATUS_REPLY_BODY_SIZE 44
 #define ADMIN_PEERS_BODY_SIZE 4
 #define ADMIN_PEERS_REPLY_FIXED_FIELDS_SIZE 4
-#define ADMIN_PEERS_REPLY_ENTRIES_MAX 16
+#define ADMIN_PEERS_REPLY_ENTRIES_MAX 15
 #define ADMIN_PEERS_REPLY_ENTRY_SIZE 272
 #define ADMIN_ORIGIN_SIZE 56
 #define ADMIN_KICK_BODY_SIZE 128
@@ -44,6 +44,10 @@
 #define ADMIN_INTERFACES_REPLY_FIXED_FIELDS_SIZE 4
 #define ADMIN_INTERFACES_REPLY_ENTRIES_MAX 16
 #define ADMIN_INTERFACES_REPLY_ENTRY_SIZE 168
+#define ADMIN_REJECTED_BODY_SIZE 4
+#define ADMIN_REJECTED_REPLY_FIXED_FIELDS_SIZE 4
+#define ADMIN_REJECTED_REPLY_ENTRIES_MAX 15
+#define ADMIN_REJECTED_REPLY_ENTRY_SIZE 264
 
 #define ADMIN_FINGERPRINT_HEX_SIZE 65
 #define ADMIN_REPLY_FLAG_MORE (1u << 0)
@@ -53,6 +57,9 @@
 #define ADMIN_STATUS_UNKNOWN_AGENT 1
 #define ADMIN_STATUS_UNKNOWN_PEER 1
 #define ADMIN_STATUS_PIN_FAILED 1
+
+#define ADMIN_REJECTED_REASON_NOT_ALLOWED 0
+#define ADMIN_REJECTED_REASON_FINGERPRINT_MISMATCH 1
 
 typedef struct {
     uint16_t peer_count;
@@ -234,6 +241,26 @@ typedef struct {
     AdminInterfacesReplyEntry entries[ADMIN_INTERFACES_REPLY_ENTRIES_MAX];
 } AdminInterfacesReplyMessage;
 
+typedef struct {
+    uint16_t offset;
+} AdminRejectedMessage;
+
+typedef struct {
+    uint8_t role;
+    uint8_t reason;
+    uint32_t attempts;
+    uint32_t last_seen_seconds;
+    char name[REGISTER_AGENT_NAME_SIZE];
+    char fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE];
+    char origin[ADMIN_ORIGIN_SIZE];
+} AdminRejectedReplyEntry;
+
+typedef struct {
+    uint8_t count;
+    uint8_t flags;
+    AdminRejectedReplyEntry entries[ADMIN_REJECTED_REPLY_ENTRIES_MAX];
+} AdminRejectedReplyMessage;
+
 size_t AdminStatusMessage_Encode(uint8_t *buffer, size_t buffer_size);
 
 size_t AdminStatusReplyMessage_Encode(const AdminStatusReplyMessage *self, uint8_t *buffer, size_t buffer_size);
@@ -310,3 +337,9 @@ bool AdminInterfacesMessage_Decode(AdminInterfacesMessage *self, const uint8_t *
 
 size_t AdminInterfacesReplyMessage_Encode(const AdminInterfacesReplyMessage *self, uint8_t *buffer, size_t buffer_size);
 bool AdminInterfacesReplyMessage_Decode(AdminInterfacesReplyMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminRejectedMessage_Encode(const AdminRejectedMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminRejectedMessage_Decode(AdminRejectedMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminRejectedReplyMessage_Encode(const AdminRejectedReplyMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminRejectedReplyMessage_Decode(AdminRejectedReplyMessage *self, const uint8_t *payload, size_t payload_length);

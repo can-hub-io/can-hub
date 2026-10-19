@@ -49,6 +49,8 @@ pub enum MessageType {
     AdminAclListReply = 0x29,
     AdminIfconfig = 0x2A,
     AdminIfconfigReply = 0x2B,
+    AdminRejected = 0x2C,
+    AdminRejectedReply = 0x2D,
 }
 
 impl MessageType {
@@ -85,6 +87,8 @@ impl MessageType {
             0x29 => AdminAclListReply,
             0x2A => AdminIfconfig,
             0x2B => AdminIfconfigReply,
+            0x2C => AdminRejected,
+            0x2D => AdminRejectedReply,
             _ => return None,
         };
         Some(kind)
@@ -230,7 +234,7 @@ mod tests {
 
     #[test]
     fn message_type_is_total_round_trip() {
-        for raw in [0x01u8, 0x10, 0x13, 0x21, 0x2B] {
+        for raw in [0x01u8, 0x10, 0x13, 0x21, 0x2B, 0x2D] {
             let kind = MessageType::from_u8(raw).unwrap();
             assert_eq!(kind as u8, raw);
         }

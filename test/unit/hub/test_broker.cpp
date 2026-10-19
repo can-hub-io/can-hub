@@ -59,6 +59,7 @@ static void connectPeerFrom(uint32_t peer_id, const char *host);
 static void connectPeersAwaitingHelloFrom(const char *host, uint32_t count);
 static void connectPeersAwaitingHelloFromDistinctHosts(uint32_t count);
 static void sayHelloAsClient(uint32_t peer_id);
+static void listRejected(AdminRejectedReplyMessage *reply);
 
 static void connectPeer(uint32_t peer_id, const char *fingerprint, bool local)
 {
@@ -427,6 +428,88 @@ describe("broker", []() {
             registerAgentWithFingerprint(AGENT_PEER, NULL);
 
             expect(registerAckStatus()).toBe(REGISTER_STATUS_OK);
+        });
+    });
+
+    describe("locked to known peers", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            IdentityStoreMock_Reset(&identity_store);
+            AuthorizationMock_Reset(&authorization);
+            Broker_Init(&broker, &transport.port, &identity_store.port, &authorization.port, true);
+            events = Broker_Events(&broker);
+        });
+
+        it("rejects a client no ACL names", []() {
+            ErrorMessage error;
+            uint8_t error_type;
+
+            connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
+            error_type = lastReply(&error, ErrorMessage_Decode);
+
+            expect(error_type).toBe(kMESSAGE_TYPE_ERROR);
+            expect((const char *)error.detail).toBe("client fingerprint not in the hub allowlist");
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)CLIENT_PEER);
+        });
+
+        it("admits a client an ACL names, whatever the level", []() {
+            AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", false, false);
+
+            connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
+
+            expect(transport.close_count).toBe(0);
+        });
+
+        it("still admits plaintext clients that carry no fingerprint", []() {
+            connectClientWithFingerprint(CLIENT_PEER, NULL);
+
+            expect(transport.close_count).toBe(0);
+        });
+
+        it("lists rejected agents and clients for the admin", []() {
+            AdminRejectedReplyMessage reply;
+
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+            connectClientWithFingerprint(CLIENT_PEER, OTHER_FINGERPRINT);
+            listRejected(&reply);
+
+            expect(reply.count).toBe((uint8_t)2);
+            expect((const char *)reply.entries[0].name).toBe("truck42");
+            expect(reply.entries[0].role).toBe((uint8_t)kHUB_PEER_ROLE_AGENT);
+            expect((const char *)reply.entries[1].fingerprint_hex).toBe(OTHER_FINGERPRINT);
+            expect(reply.entries[1].role).toBe((uint8_t)kHUB_PEER_ROLE_CLIENT);
+        });
+
+        it("drops an agent from the rejected list once it is authorized and registers", []() {
+            AdminRejectedReplyMessage reply;
+
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+            IdentityStoreMock_Preload(&identity_store, "truck42", TRUCK_FINGERPRINT);
+            registerAgentWithFingerprint(AGENT_PEER + 1, TRUCK_FINGERPRINT);
+            listRejected(&reply);
+
+            expect(reply.count).toBe((uint8_t)0);
+        });
+    });
+
+    describe("rejected identities in tofu mode", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            IdentityStoreMock_Reset(&identity_store);
+            Broker_Init(&broker, &transport.port, &identity_store.port, NULL, false);
+            events = Broker_Events(&broker);
+        });
+
+        it("lists an agent whose name is pinned to another fingerprint", []() {
+            AdminRejectedReplyMessage reply;
+
+            IdentityStoreMock_Preload(&identity_store, "truck42", TRUCK_FINGERPRINT);
+            registerAgentWithFingerprint(AGENT_PEER, OTHER_FINGERPRINT);
+            listRejected(&reply);
+
+            expect(reply.count).toBe((uint8_t)1);
+            expect(reply.entries[0].reason).toBe((uint8_t)ADMIN_REJECTED_REASON_FINGERPRINT_MISMATCH);
         });
     });
 
@@ -1179,6 +1262,26 @@ describe("broker", []() {
             expect((const char *)reply.entries[0].agent_name).toBe("truck42");
             expect(reply.entries[1].role).toBe(kPEER_ROLE_CLIENT);
             expect(reply.entries[2].role).toBe(kPEER_ROLE_ADMIN);
+        });
+
+        it("answers with a full page of peers", []() {
+            AdminPeersMessage request = { 0 };
+            AdminPeersReplyMessage reply;
+            uint8_t reply_type;
+            uint8_t encoded[128];
+            size_t encoded_size = AdminPeersMessage_Encode(&request, encoded, sizeof(encoded));
+            uint32_t i;
+
+            for(i=0; i<ADMIN_PEERS_REPLY_ENTRIES_MAX; i++) {
+                BrokerDriver_ConnectClient(&events, CLIENT_PEER + 100 + i);
+            }
+            HubTransportPortMock_Reset(&transport);
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            reply_type = lastReply(&reply, AdminPeersReplyMessage_Decode);
+
+            expect(reply_type).toBe(kMESSAGE_TYPE_ADMIN_PEERS_REPLY);
+            expect(reply.count).toBe(ADMIN_PEERS_REPLY_ENTRIES_MAX);
+            expect(reply.flags & ADMIN_REPLY_FLAG_MORE).toBe(ADMIN_REPLY_FLAG_MORE);
         });
 
         it("surfaces a client name carried in its HELLO", []() {
@@ -2169,3 +2272,15 @@ static void sayHelloAsClient(uint32_t peer_id)
     events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
 }
 
+
+static void listRejected(AdminRejectedReplyMessage *reply)
+{
+    AdminRejectedMessage request = { 0 };
+    uint8_t encoded[128];
+    size_t encoded_size = AdminRejectedMessage_Encode(&request, encoded, sizeof(encoded));
+
+    HubTransportPortMock_Reset(&transport);
+    BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
+    sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+    lastReply(reply, AdminRejectedReplyMessage_Decode);
+}

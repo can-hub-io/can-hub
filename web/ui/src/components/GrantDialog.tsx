@@ -6,30 +6,36 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from './ui/input'
 import { selectClass } from '../lib'
 import { cn } from '../lib/utils'
-import { SubjectOptions } from './ui/acl-fields'
+import { AgentOptions, InterfaceOptions, SubjectOptions } from './ui/acl-fields'
 
+// Without an agent and interface the dialog asks for them too: granting a
+// client the hub turned away, before it has opened anything.
 export function GrantDialog({ agentName, interfaceName, fingerprintHex, onClose }: {
-  agentName: string
-  interfaceName: string
+  agentName?: string
+  interfaceName?: string
   fingerprintHex?: string
   onClose: () => void
 }) {
   const peers = usePolling(api.peers)
+  const interfaces = usePolling(api.interfaces)
   const action = useAction(onClose)
   const [fingerprint, setFingerprint] = useState(fingerprintHex || '*')
+  const [agent, setAgent] = useState(agentName || '*')
+  const [iface, setIface] = useState(interfaceName || '*')
   const [level, setLevel] = useState<AclLevel>('ro')
+  const objectFixed = agentName !== undefined && interfaceName !== undefined
 
-  const object = `${agentName}/${interfaceName}`
+  const object = `${agent || '*'}/${iface || '*'}`
 
   const grant = (event: React.FormEvent) => {
     event.preventDefault()
-    action.run(() => api.aclSet(fingerprint || '*', agentName, interfaceName, level), `Granted ${level} on ${object}`)
+    action.run(() => api.aclSet(fingerprint || '*', agent || '*', iface || '*', level), `Granted ${level} on ${object}`)
   }
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Grant access · {object}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{objectFixed ? `Grant access · ${object}` : 'Grant access'}</DialogTitle></DialogHeader>
         <form className="space-y-3" onSubmit={grant}>
           {action.error && <p className="text-sm text-red-600">{action.error}</p>}
           <div className="space-y-1">
@@ -43,6 +49,18 @@ export function GrantDialog({ agentName, interfaceName, fingerprintHex, onClose 
             <SubjectOptions id="grant-subjects" peers={peers.data} />
             <p className="text-xs text-gray-500">* grants to every client that has no rule of its own.</p>
           </div>
+          {!objectFixed && (
+            <div className="space-y-1">
+              <label className="block text-sm font-medium text-gray-800" htmlFor="grant-agent">Interface</label>
+              <div className="flex items-center gap-2">
+                <Input id="grant-agent" list="grant-agents" placeholder="agent or *" value={agent} onChange={(e) => setAgent(e.target.value)} />
+                <AgentOptions id="grant-agents" interfaces={interfaces.data} />
+                <span className="text-gray-500">/</span>
+                <Input list="grant-interfaces" placeholder="iface or *" value={iface} onChange={(e) => setIface(e.target.value)} />
+                <InterfaceOptions id="grant-interfaces" interfaces={interfaces.data} agent={agent} />
+              </div>
+            </div>
+          )}
           <div className="space-y-1">
             <label className="block text-sm font-medium text-gray-800" htmlFor="grant-level">Level</label>
             <select id="grant-level" className={cn(selectClass, 'w-full')} value={level} onChange={(e) => setLevel(e.target.value as AclLevel)}>

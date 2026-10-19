@@ -7,6 +7,7 @@ export interface NavItem {
   id: string
   label: string
   icon: LucideIcon
+  count?: number
 }
 
 export function Sidebar({ items, active, onSelect, user, onChangePassword, onLogout, open, onClose }: {
@@ -50,7 +51,7 @@ export function Sidebar({ items, active, onSelect, user, onChangePassword, onLog
         </div>
 
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-4">
-          {items.map(({ id, label, icon: Icon }) => (
+          {items.map(({ id, label, icon: Icon, count }) => (
             <button
               key={id}
               onClick={() => {
@@ -66,6 +67,9 @@ export function Sidebar({ items, active, onSelect, user, onChangePassword, onLog
             >
               <Icon size={16} />
               {label}
+              {!!count && (
+                <span className="ml-auto rounded-full bg-amber-100 px-2 text-xs font-semibold text-amber-700">{count}</span>
+              )}
             </button>
           ))}
         </nav>

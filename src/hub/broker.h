@@ -4,6 +4,7 @@
 #include "hub/domain/interface_registry.h"
 #include "hub/domain/frame_routes.h"
 #include "hub/domain/peer_directory.h"
+#include "hub/domain/rejected_peers.h"
 #include "hub/ports/authorization_port.h"
 #include "hub/ports/hub_transport_events.h"
 #include "hub/ports/identity_store_port.h"
@@ -44,7 +45,8 @@ typedef struct {
        nothing reachable from a send re-enters that function. */
     FrameRoute frame_routes[FRAME_ROUTES_MAX];
     EchoTokens echo_tokens;
-    bool require_known_agents;
+    RejectedPeers rejected_peers;
+    bool require_known_peers;
     uint64_t now_us;
 } Broker;
 
@@ -53,7 +55,7 @@ void Broker_Init(
     HubTransportPort *transport,
     IdentityStorePort *identity_store,
     AuthorizationPort *authorization,
-    bool require_known_agents
+    bool require_known_peers
 );
 HubTransportEvents Broker_Events(Broker *self);
 void Broker_Tick(Broker *self, uint64_t now_us);

@@ -10,7 +10,7 @@ use std::io::{self, Read, Write};
 
 use crate::protocol::admin::{
     self, AclEntry, AclLevel, AgentEntry, ClientEntry, IfconfigOp, InterfaceEntry, Page, PeerEntry,
-    PinEntry, Status,
+    PinEntry, RejectedEntry, Status,
 };
 use crate::protocol::{DecodeError, Header, MessageType, Role, HEADER_SIZE};
 
@@ -93,6 +93,10 @@ impl<T: Read + Write> AdminClient<T> {
 
     pub fn pins(&mut self) -> Result<Vec<PinEntry>> {
         self.fetch_all(|offset| admin::encode_pins(offset).to_vec(), admin::decode_pins_reply)
+    }
+
+    pub fn rejected(&mut self) -> Result<Vec<RejectedEntry>> {
+        self.fetch_all(|offset| admin::encode_rejected(offset).to_vec(), admin::decode_rejected_reply)
     }
 
     // --- mutating actions: each returns the reply's status byte (0 = ok) ---

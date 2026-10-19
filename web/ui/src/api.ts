@@ -62,6 +62,16 @@ export interface Pin {
   fingerprintHex: string
 }
 
+export interface Rejected {
+  role: 'agent' | 'client'
+  reason: 'not-allowed' | 'fingerprint-mismatch'
+  attempts: number
+  lastSeenSeconds: number
+  name: string
+  fingerprintHex: string
+  origin: string
+}
+
 export interface AuthState {
   needsBootstrap: boolean
   authenticated: boolean
@@ -188,6 +198,7 @@ export const api = {
   interfaces: () => getJson<Interface[]>('/api/interfaces'),
   acls: () => getJson<Acl[]>('/api/acls'),
   pins: () => getJson<Pin[]>('/api/pins'),
+  rejected: () => getJson<Rejected[]>('/api/rejected'),
 
   kickPeer: (peerId: number) => send(`/api/peers/${peerId}/kick`, 'POST'),
   kickAgent: (name: string) => send(`/api/agents/${encodeURIComponent(name)}/kick`, 'POST'),

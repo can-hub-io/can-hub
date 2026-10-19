@@ -5,7 +5,7 @@ _can_hub()
     local cur prev words cword
     _init_completion || return
 
-    local flags="--listen --cert --key --state-dir --require-known-agents"
+    local flags="--listen --cert --key --state-dir --require-known-peers"
 
     case $prev in
         --listen)

@@ -1,4 +1,4 @@
-//! Admin message family (0x10..=0x2B): request encoders and reply decoders.
+//! Admin message family (0x10..=0x2D): request encoders and reply decoders.
 //!
 //! The layouts mirror the authoritative C codec in
 //! `src/protocol/admin_message.c`, including the pin/ACL mutations
@@ -84,6 +84,33 @@ pub struct InterfaceEntry {
     pub interface_name: String,
 }
 
+/// Why the hub turned an identity away (ADMIN_REJECTED_REPLY entry @1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RejectionReason {
+    NotAllowed,
+    FingerprintMismatch,
+}
+
+impl RejectionReason {
+    pub fn from_u8(raw: u8) -> RejectionReason {
+        match raw {
+            1 => RejectionReason::FingerprintMismatch,
+            _ => RejectionReason::NotAllowed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RejectedEntry {
+    pub role: u8,
+    pub reason: RejectionReason,
+    pub attempts: u32,
+    pub last_seen_seconds: u32,
+    pub name: String,
+    pub fingerprint_hex: String,
+    pub origin: String,
+}
+
 /// ACL permission level on the wire as a `can_read`/`can_write` byte pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AclLevel {
@@ -147,6 +174,10 @@ pub fn encode_interfaces(offset: u16) -> [u8; 8] {
 
 pub fn encode_pins(offset: u16) -> [u8; 8] {
     encode_paginated(MessageType::AdminPins, offset)
+}
+
+pub fn encode_rejected(offset: u16) -> [u8; 8] {
+    encode_paginated(MessageType::AdminRejected, offset)
 }
 
 fn encode_paginated(message_type: MessageType, offset: u16) -> [u8; 8] {
@@ -401,6 +432,21 @@ pub fn decode_acl_list_reply(buffer: &[u8]) -> Result<Page<AclEntry>, DecodeErro
     })
 }
 
+/// ADMIN_REJECTED_REPLY (8 + count * 264). Entry layout (entry-relative):
+/// role @0, reason @1, attempts @4, last_seen_seconds @8, name[128] @12,
+/// fingerprint_hex[65] @140, origin[56] @205.
+pub fn decode_rejected_reply(buffer: &[u8]) -> Result<Page<RejectedEntry>, DecodeError> {
+    decode_page(buffer, MessageType::AdminRejectedReply, 264, |entry| RejectedEntry {
+        role: entry[0],
+        reason: RejectionReason::from_u8(entry[1]),
+        attempts: read_u32(entry, 4),
+        last_seen_seconds: read_u32(entry, 8),
+        name: read_fixed_str(entry, 12, AGENT_NAME_SIZE),
+        fingerprint_hex: read_fixed_str(entry, 140, FINGERPRINT_SIZE),
+        origin: read_fixed_str(entry, 205, ORIGIN_SIZE),
+    })
+}
+
 /// Status-only reply (KICK/FORGET/KICK_PEER/IFCONFIG/PIN_ADD/ACL_SET/
 /// ACL_REVOKE replies): a single status byte at @4. Returns the raw code.
 pub fn decode_status_byte(buffer: &[u8], message_type: MessageType) -> Result<u8, DecodeError> {
@@ -572,6 +618,29 @@ mod tests {
         let page = decode_pins_reply(&buffer).unwrap();
         assert_eq!(page.entries[0].agent_name, "truck42");
         assert_eq!(page.entries[0].fingerprint_hex, "ab12cd");
+    }
+
+    #[test]
+    fn rejected_reply_decodes_entry() {
+        let mut buffer = vec![0u8; 8 + 264];
+        Header::write(&mut buffer, MessageType::AdminRejectedReply, 0, (4 + 264) as u16);
+        buffer[4] = 1;
+        buffer[8] = 2;
+        buffer[9] = 1;
+        buffer[12..16].copy_from_slice(&12u32.to_le_bytes());
+        buffer[16..20].copy_from_slice(&8u32.to_le_bytes());
+        write_fixed_str(&mut buffer, 8 + 12, AGENT_NAME_SIZE, "laptop");
+        write_fixed_str(&mut buffer, 8 + 140, FINGERPRINT_SIZE, "ab12cd");
+        write_fixed_str(&mut buffer, 8 + 205, ORIGIN_SIZE, "203.0.113.5:40000");
+        let page = decode_rejected_reply(&buffer).unwrap();
+        let entry = &page.entries[0];
+        assert_eq!(entry.role, 2);
+        assert_eq!(entry.reason, RejectionReason::FingerprintMismatch);
+        assert_eq!(entry.attempts, 12);
+        assert_eq!(entry.last_seen_seconds, 8);
+        assert_eq!(entry.name, "laptop");
+        assert_eq!(entry.fingerprint_hex, "ab12cd");
+        assert_eq!(entry.origin, "203.0.113.5:40000");
     }
 
     #[test]

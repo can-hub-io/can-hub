@@ -17,6 +17,8 @@
  * fingerprint beats any "*" rule), then object specificity (exact >
  * agent-wide > global). With no matching rule the baseline is read-open,
  * no-write. The "*" subject is therefore the default for unmatched clients.
+ * A client is known when at least one grant names its fingerprint, whatever
+ * the level: that is what admits it to a hub locked to known clients.
  * The platform decides where the grants live (SQLite on the hub).
  */
 
@@ -59,4 +61,5 @@ typedef struct {
         const char *interface_name
     );
     uint8_t (*list)(void *context, uint16_t offset, AclEntry *entries, uint8_t max_entries, bool *more);
+    bool (*knows)(void *context, const char *fingerprint_hex);
 } AuthorizationPort;

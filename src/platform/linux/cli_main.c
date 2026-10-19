@@ -42,6 +42,7 @@ typedef enum tcli_command_e {
     kCLI_COMMAND_ACL,
     kCLI_COMMAND_ACL_ADD,
     kCLI_COMMAND_ACL_REVOKE,
+    kCLI_COMMAND_PENDING,
     kCLI_COMMAND_INTERFACE_SET,
     kCLI_COMMAND_INTERFACE_UP,
     kCLI_COMMAND_INTERFACE_DOWN,
@@ -96,6 +97,8 @@ static void handleInterfacesReply(const uint8_t *payload, uint16_t payload_lengt
 static void handleListReply(const uint8_t *payload, uint16_t payload_length);
 static void handlePinsReply(const uint8_t *payload, uint16_t payload_length);
 static void handleAclListReply(const uint8_t *payload, uint16_t payload_length);
+static void handleRejectedReply(const uint8_t *payload, uint16_t payload_length);
+static const char *rejectionReasonName(uint8_t reason);
 static void printClientRow(const AdminClientsReplyEntry *entry, const char *indent);
 static void printActionReply(uint8_t status, const char *action, const char *target_kind, const char *target);
 static void printIfconfigReply(uint8_t status);
@@ -165,6 +168,7 @@ static void printUsage(FILE *stream, const char *program)
     fprintf(stream, "  acl                    client read/write grants\n");
     fprintf(stream, "  acl add <fp|*> <agent|*>/<iface|*> none|ro|rw   grant (* = baseline)\n");
     fprintf(stream, "  acl delete <fp|*> <agent|*>/<iface|*>          drop a grant\n");
+    fprintf(stream, "  pending                identities the hub turned away, to authorize\n");
     fprintf(stream, "default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
 }
 
@@ -227,6 +231,8 @@ static bool mapCommand(const char *words[], uint8_t word_count)
             command = kCLI_COMMAND_PINS;
         } else if (strcmp(words[0], "acl") == 0) {
             command = kCLI_COMMAND_ACL;
+        } else if (strcmp(words[0], "pending") == 0) {
+            command = kCLI_COMMAND_PENDING;
         } else {
             return false;
         }
@@ -478,6 +484,10 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
         handlePinsReply(data + MESSAGE_HEADER_SIZE, header.length);
         return;
     }
+    if (header.type == kMESSAGE_TYPE_ADMIN_REJECTED_REPLY) {
+        handleRejectedReply(data + MESSAGE_HEADER_SIZE, header.length);
+        return;
+    }
     if (header.type == kMESSAGE_TYPE_ADMIN_KICK_REPLY) {
         AdminKickReplyMessage_Decode(&kick_reply, data + MESSAGE_HEADER_SIZE, header.length);
         printActionReply(kick_reply.status, "kicked", "agent", target_agent);
@@ -567,6 +577,7 @@ static void sendRequest(void)
     AdminAclSetMessage acl_set;
     AdminAclRevokeMessage acl_revoke;
     AdminAclListMessage acl_list = { page_offset };
+    AdminRejectedMessage rejected = { page_offset };
     AdminIfconfigMessage ifconfig;
     uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size = 0;
@@ -597,6 +608,8 @@ static void sendRequest(void)
         encoded_size = AdminInterfacesMessage_Encode(&interfaces, encoded, sizeof(encoded));
     } else if (command == kCLI_COMMAND_PINS) {
         encoded_size = AdminPinsMessage_Encode(&pins, encoded, sizeof(encoded));
+    } else if (command == kCLI_COMMAND_PENDING) {
+        encoded_size = AdminRejectedMessage_Encode(&rejected, encoded, sizeof(encoded));
     } else if (command == kCLI_COMMAND_PINS_FORGET) {
         memset(&forget, 0, sizeof(forget));
         snprintf(forget.agent_name, sizeof(forget.agent_name), "%s", target_agent);
@@ -979,6 +992,43 @@ static void handleAclListReply(const uint8_t *payload, uint16_t payload_length)
     }
 }
 
+static void handleRejectedReply(const uint8_t *payload, uint16_t payload_length)
+{
+    AdminRejectedReplyMessage reply;
+    char last_seen[16];
+    uint8_t i;
+
+    if (!AdminRejectedReplyMessage_Decode(&reply, payload, payload_length)) {
+        exit_code = 1;
+        return;
+    }
+
+    if (!page_header_printed) {
+        printf(
+            "%-8s %-24s %-22s %-20s %-8s %-9s %s\n",
+            "role", "name", "origin", "reason", "attempts", "last-seen", "fingerprint"
+        );
+        page_header_printed = true;
+    }
+    for(i=0; i<reply.count; i++) {
+        formatUptime(reply.entries[i].last_seen_seconds, last_seen, sizeof(last_seen));
+        printf(
+            "%-8s %-24s %-22s %-20s %-8u %-9s %s\n",
+            roleName(reply.entries[i].role),
+            textOrDash(reply.entries[i].name),
+            textOrDash(reply.entries[i].origin),
+            rejectionReasonName(reply.entries[i].reason),
+            reply.entries[i].attempts,
+            last_seen,
+            reply.entries[i].fingerprint_hex
+        );
+    }
+
+    if (!requestNextPage(reply.flags, reply.count)) {
+        exit_code = 0;
+    }
+}
+
 /* ---------- private: printing ---------- */
 
 static void printClientRow(const AdminClientsReplyEntry *entry, const char *indent)
@@ -1069,6 +1119,15 @@ static const char *roleName(uint8_t role)
     }
 
     return "unknown";
+}
+
+static const char *rejectionReasonName(uint8_t reason)
+{
+    if (reason == ADMIN_REJECTED_REASON_FINGERPRINT_MISMATCH) {
+        return "fingerprint-mismatch";
+    }
+
+    return "not-allowed";
 }
 
 static const char *transportName(uint8_t transport_kind)

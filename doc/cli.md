@@ -28,11 +28,12 @@ Noun-first grammar; an omitted verb lists.
 | `interface set <agent>/<iface> bitrate <bps>` | reconfigure a bus bitrate |
 | `interface up\|down <agent>/<iface>` | bring a bus up or down |
 | `pins` | pinned agent identities |
-| `pins add <name> <fingerprint>` | authorize an agent ([enrollment](security.md#locking-down-agents)) |
+| `pins add <name> <fingerprint>` | authorize an agent ([enrollment](security.md#locking-down-agents-and-clients)) |
 | `pins delete <name>` | drop a pin so a re-keyed agent can pin again |
 | `acl` | client read/write grants |
 | `acl add <fp\|*> <agent\|*>/<iface\|*> none\|ro\|rw` | grant a permission level ([semantics](security.md#client-acls)) |
 | `acl delete <fp\|*> <agent\|*>/<iface\|*>` | drop a grant |
+| `pending` | identities the hub turned away, to authorize ([enrolling](security.md#enrolling-what-knocked)) |
 
 ## Notes
 
@@ -43,7 +44,7 @@ Noun-first grammar; an omitted verb lists.
   the link down/set/up and disrupts every consumer; `agent unreachable`
   means the agent dropped mid-request.
 - Kicked agents normally reconnect on their backoff. To keep one out,
-  `pins delete` it first and run the hub with `--require-known-agents`.
+  `pins delete` it first and run the hub with `--require-known-peers`.
 - Failures print `hub error <code>: <detail>` from the hub's ERROR message.
 - Command output goes to stdout, diagnostics to stderr. Tune the stderr
   verbosity with `--log-level error|warn|info|debug` (default `info`) or the

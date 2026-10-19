@@ -64,6 +64,14 @@
 #define INTERFACE_ENTRY_INTERFACE_NAME_OFFSET 144
 #define INTERFACE_ENTRY_TX_DROPPED_OFFSET 160
 
+#define REJECTED_ENTRY_ROLE_OFFSET 0
+#define REJECTED_ENTRY_REASON_OFFSET 1
+#define REJECTED_ENTRY_ATTEMPTS_OFFSET 4
+#define REJECTED_ENTRY_LAST_SEEN_OFFSET 8
+#define REJECTED_ENTRY_NAME_OFFSET 12
+#define REJECTED_ENTRY_FINGERPRINT_OFFSET 140
+#define REJECTED_ENTRY_ORIGIN_OFFSET 205
+
 static size_t encodeFixedBody(uint8_t type, size_t body_size, uint8_t *buffer, size_t buffer_size, uint8_t **body);
 static bool isNameTerminated(const char *agent_name);
 static size_t encodeAgentName(uint8_t type, const char *agent_name, uint8_t *buffer, size_t buffer_size);
@@ -96,6 +104,9 @@ static void writeAclEntry(uint8_t *destination, const AdminAclListReplyEntry *en
 static void readAclEntry(const uint8_t *source, AdminAclListReplyEntry *entry);
 static void writeInterfaceEntry(uint8_t *destination, const AdminInterfacesReplyEntry *entry);
 static void readInterfaceEntry(const uint8_t *source, AdminInterfacesReplyEntry *entry);
+static bool isRejectedEntryTerminated(const AdminRejectedReplyEntry *entry);
+static void writeRejectedEntry(uint8_t *destination, const AdminRejectedReplyEntry *entry);
+static void readRejectedEntry(const uint8_t *source, AdminRejectedReplyEntry *entry);
 
 /* ---------- public ---------- */
 
@@ -816,6 +827,77 @@ bool AdminInterfacesReplyMessage_Decode(AdminInterfacesReplyMessage *self, const
     return true;
 }
 
+size_t AdminRejectedMessage_Encode(const AdminRejectedMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    return encodeOffsetRequest(kMESSAGE_TYPE_ADMIN_REJECTED, self->offset, buffer, buffer_size);
+}
+
+bool AdminRejectedMessage_Decode(AdminRejectedMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    if (payload_length < ADMIN_REJECTED_BODY_SIZE) {
+        return false;
+    }
+
+    self->offset = Wire_ReadU16(payload + OFFSET_OFFSET);
+
+    return true;
+}
+
+size_t AdminRejectedReplyMessage_Encode(const AdminRejectedReplyMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t body_size;
+    size_t total_size;
+    uint8_t i;
+
+    if (self->count > ADMIN_REJECTED_REPLY_ENTRIES_MAX) {
+        return 0;
+    }
+    for(i=0; i<self->count; i++) {
+        if (!isRejectedEntryTerminated(&self->entries[i])) {
+            return 0;
+        }
+    }
+
+    body_size = ADMIN_REJECTED_REPLY_FIXED_FIELDS_SIZE + (size_t)self->count * ADMIN_REJECTED_REPLY_ENTRY_SIZE;
+    total_size = encodeFixedBody(kMESSAGE_TYPE_ADMIN_REJECTED_REPLY, body_size, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    body[COUNT_OFFSET] = self->count;
+    body[FLAGS_OFFSET] = self->flags;
+    for(i=0; i<self->count; i++) {
+        writeRejectedEntry(body + ENTRIES_OFFSET + i * ADMIN_REJECTED_REPLY_ENTRY_SIZE, &self->entries[i]);
+    }
+
+    return total_size;
+}
+
+bool AdminRejectedReplyMessage_Decode(AdminRejectedReplyMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    uint8_t i;
+
+    if (payload_length < ADMIN_REJECTED_REPLY_FIXED_FIELDS_SIZE) {
+        return false;
+    }
+
+    self->count = payload[COUNT_OFFSET];
+    self->flags = payload[FLAGS_OFFSET];
+    if (self->count > ADMIN_REJECTED_REPLY_ENTRIES_MAX) {
+        return false;
+    }
+    if (payload_length < ADMIN_REJECTED_REPLY_FIXED_FIELDS_SIZE + (size_t)self->count * ADMIN_REJECTED_REPLY_ENTRY_SIZE) {
+        return false;
+    }
+
+    for(i=0; i<self->count; i++) {
+        readRejectedEntry(payload + ENTRIES_OFFSET + i * ADMIN_REJECTED_REPLY_ENTRY_SIZE, &self->entries[i]);
+    }
+
+    return true;
+}
+
 /* ---------- private ---------- */
 
 static size_t encodeFixedBody(uint8_t type, size_t body_size, uint8_t *buffer, size_t buffer_size, uint8_t **body)
@@ -1086,4 +1168,41 @@ static void readInterfaceEntry(const uint8_t *source, AdminInterfacesReplyEntry 
     memcpy(entry->interface_name, source + INTERFACE_ENTRY_INTERFACE_NAME_OFFSET, REGISTER_INTERFACE_NAME_SIZE);
     entry->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] = '\0';
     entry->tx_dropped = Wire_ReadU64(source + INTERFACE_ENTRY_TX_DROPPED_OFFSET);
+}
+
+static bool isRejectedEntryTerminated(const AdminRejectedReplyEntry *entry)
+{
+    if (!isNameTerminated(entry->name)) {
+        return false;
+    }
+    if (entry->fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] != '\0') {
+        return false;
+    }
+
+    return entry->origin[ADMIN_ORIGIN_SIZE - 1] == '\0';
+}
+
+static void writeRejectedEntry(uint8_t *destination, const AdminRejectedReplyEntry *entry)
+{
+    destination[REJECTED_ENTRY_ROLE_OFFSET] = entry->role;
+    destination[REJECTED_ENTRY_REASON_OFFSET] = entry->reason;
+    Wire_WriteU32(destination + REJECTED_ENTRY_ATTEMPTS_OFFSET, entry->attempts);
+    Wire_WriteU32(destination + REJECTED_ENTRY_LAST_SEEN_OFFSET, entry->last_seen_seconds);
+    memcpy(destination + REJECTED_ENTRY_NAME_OFFSET, entry->name, strlen(entry->name));
+    memcpy(destination + REJECTED_ENTRY_FINGERPRINT_OFFSET, entry->fingerprint_hex, strlen(entry->fingerprint_hex));
+    memcpy(destination + REJECTED_ENTRY_ORIGIN_OFFSET, entry->origin, strlen(entry->origin));
+}
+
+static void readRejectedEntry(const uint8_t *source, AdminRejectedReplyEntry *entry)
+{
+    entry->role = source[REJECTED_ENTRY_ROLE_OFFSET];
+    entry->reason = source[REJECTED_ENTRY_REASON_OFFSET];
+    entry->attempts = Wire_ReadU32(source + REJECTED_ENTRY_ATTEMPTS_OFFSET);
+    entry->last_seen_seconds = Wire_ReadU32(source + REJECTED_ENTRY_LAST_SEEN_OFFSET);
+    memcpy(entry->name, source + REJECTED_ENTRY_NAME_OFFSET, REGISTER_AGENT_NAME_SIZE);
+    entry->name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';
+    memcpy(entry->fingerprint_hex, source + REJECTED_ENTRY_FINGERPRINT_OFFSET, ADMIN_FINGERPRINT_HEX_SIZE);
+    entry->fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] = '\0';
+    memcpy(entry->origin, source + REJECTED_ENTRY_ORIGIN_OFFSET, ADMIN_ORIGIN_SIZE);
+    entry->origin[ADMIN_ORIGIN_SIZE - 1] = '\0';
 }

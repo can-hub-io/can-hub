@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import {
-  Cable, ChevronRight, Cpu, Fingerprint, LayoutDashboard, Lock, Menu, Plug, ScrollText, Share2,
+  Cable, ChevronRight, Cpu, DoorClosed, Fingerprint, LayoutDashboard, Lock, Menu, Plug, ScrollText, Share2,
   Users as UsersIcon, type LucideIcon,
 } from 'lucide-react'
 import { api, PERMISSION, setUnauthorizedHandler, type AuthState } from './api'
-import { useAuth } from './hooks'
+import { useAuth, usePolling } from './hooks'
+import { can } from './lib'
 import { Sidebar, type NavItem } from './components/layout/Sidebar'
 import { Acls } from './components/Acls'
 import { Agents } from './components/Agents'
@@ -15,10 +16,11 @@ import { Clients } from './components/Clients'
 import { Dashboard } from './components/Dashboard'
 import { Interfaces } from './components/Interfaces'
 import { Peers } from './components/Peers'
+import { Pending } from './components/Pending'
 import { Pins } from './components/Pins'
 import { Users } from './components/Users'
 
-type Tab = 'dashboard' | 'peers' | 'agents' | 'clients' | 'interfaces' | 'pins' | 'acls' | 'users' | 'audit'
+type Tab = 'dashboard' | 'peers' | 'agents' | 'clients' | 'interfaces' | 'pins' | 'pending' | 'acls' | 'users' | 'audit'
 
 const NAV: { id: Tab; label: string; icon: LucideIcon; permission: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: PERMISSION.viewsRead },
@@ -27,6 +29,7 @@ const NAV: { id: Tab; label: string; icon: LucideIcon; permission: string }[] = 
   { id: 'clients', label: 'Clients', icon: Plug, permission: PERMISSION.viewsRead },
   { id: 'interfaces', label: 'Interfaces', icon: Cable, permission: PERMISSION.viewsRead },
   { id: 'pins', label: 'Pins', icon: Fingerprint, permission: PERMISSION.pinsManage },
+  { id: 'pending', label: 'Pending', icon: DoorClosed, permission: PERMISSION.pinsManage },
   { id: 'acls', label: 'ACLs', icon: Lock, permission: PERMISSION.aclManage },
   { id: 'users', label: 'Users', icon: UsersIcon, permission: PERMISSION.usersManage },
   { id: 'audit', label: 'Audit', icon: ScrollText, permission: PERMISSION.usersManage },
@@ -63,7 +66,10 @@ function Console({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) 
     onLogout()
   }
 
-  const navItems: NavItem[] = allowed.map(({ id, label, icon }) => ({ id, label, icon }))
+  const pendingCount = usePendingCount(can(auth.permissions, PERMISSION.pinsManage))
+  const navItems: NavItem[] = allowed.map(({ id, label, icon }) => ({
+    id, label, icon, count: id === 'pending' ? pendingCount : undefined,
+  }))
   const current = allowed.find((item) => item.id === tab)
 
   return (
@@ -108,6 +114,7 @@ function Console({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) 
               {tab === 'clients' && <Clients permissions={auth.permissions} />}
               {tab === 'interfaces' && <Interfaces permissions={auth.permissions} />}
               {tab === 'pins' && <Pins />}
+              {tab === 'pending' && <Pending permissions={auth.permissions} />}
               {tab === 'acls' && <Acls />}
               {tab === 'users' && <Users currentUser={auth.user} />}
               {tab === 'audit' && <Audit />}
@@ -118,6 +125,14 @@ function Console({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) 
       {changingPassword && <ChangePassword onClose={() => setChangingPassword(false)} />}
     </div>
   )
+}
+
+const PENDING_POLL_MS = 10000
+const noRejected = async () => []
+
+function usePendingCount(allowed: boolean): number {
+  const { data } = usePolling(allowed ? api.rejected : noRejected, PENDING_POLL_MS)
+  return data?.length ?? 0
 }
 
 export default App

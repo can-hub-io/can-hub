@@ -353,6 +353,27 @@ paths:
         '409': { $ref: '#/components/responses/HubRejected' }
         '502': { $ref: '#/components/responses/HubUnreachable' }
 
+  /api/rejected:
+    get:
+      tags: [actions]
+      summary: List the identities the hub turned away
+      description: >-
+        Agents and clients rejected by a hub locked to known peers, and agents
+        whose name is pinned to another fingerprint. One entry per fingerprint
+        and role, in memory on the hub; an admitted identity drops out.
+        Permission: pins.manage
+      responses:
+        '200':
+          description: Rejected identities
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Rejected' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
   /api/acls:
     get:
       tags: [actions]
@@ -806,6 +827,18 @@ components:
       properties:
         agentName: { type: string }
         fingerprintHex: { type: string }
+
+    Rejected:
+      type: object
+      required: [role, reason, attempts, lastSeenSeconds, name, fingerprintHex, origin]
+      properties:
+        role: { type: string, enum: [agent, client] }
+        reason: { type: string, enum: [not-allowed, fingerprint-mismatch] }
+        attempts: { type: integer }
+        lastSeenSeconds: { type: integer }
+        name: { type: string, description: 'agent name claimed at REGISTER, or the client HELLO label' }
+        fingerprintHex: { type: string }
+        origin: { type: string, description: 'remote ip:port of the last attempt' }
 
     ManagedUser:
       type: object

@@ -4,7 +4,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::admin::{
-    AclEntry, AclLevel, AgentEntry, ClientEntry, InterfaceEntry, PeerEntry, PinEntry, Status,
+    AclEntry, AclLevel, AgentEntry, ClientEntry, InterfaceEntry, PeerEntry, PinEntry, RejectedEntry,
+    RejectionReason, Status,
 };
 
 #[derive(Serialize)]
@@ -223,6 +224,32 @@ impl From<PinEntry> for PinDto {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct RejectedDto {
+    pub role: &'static str,
+    pub reason: &'static str,
+    pub attempts: u32,
+    pub last_seen_seconds: u32,
+    pub name: String,
+    pub fingerprint_hex: String,
+    pub origin: String,
+}
+
+impl From<RejectedEntry> for RejectedDto {
+    fn from(entry: RejectedEntry) -> Self {
+        RejectedDto {
+            role: role_name(entry.role),
+            reason: rejection_reason_name(entry.reason),
+            attempts: entry.attempts,
+            last_seen_seconds: entry.last_seen_seconds,
+            name: entry.name,
+            fingerprint_hex: entry.fingerprint_hex,
+            origin: entry.origin,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct UserDto {
     pub id: i64,
     pub name: String,
@@ -310,6 +337,13 @@ fn transport_name(transport_kind: u8) -> &'static str {
         3 => "tls",
         4 => "quic",
         _ => "unknown",
+    }
+}
+
+fn rejection_reason_name(reason: RejectionReason) -> &'static str {
+    match reason {
+        RejectionReason::NotAllowed => "not-allowed",
+        RejectionReason::FingerprintMismatch => "fingerprint-mismatch",
     }
 }
 
