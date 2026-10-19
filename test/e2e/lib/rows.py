@@ -65,6 +65,7 @@ class Frame:
     interface: str
     can_id: str
     data: str
+    bridged: bool = False
 
 
 def parse_status(text: str) -> HubStatus:
@@ -176,5 +177,5 @@ def parse_client_dump(text: str) -> list[Frame]:
         match = re.match(r"\(([\d.]+)\)\s+([0-9A-Fa-f]+)\s+\[\d+\]\s*([0-9A-Fa-f ]*)", line)
         if match:
             data = match.group(3).replace(" ", "").upper()
-            frames.append(Frame(float(match.group(1)), "", match.group(2).upper(), data))
+            frames.append(Frame(float(match.group(1)), "", match.group(2).upper(), data, "(bridged)" in line))
     return frames

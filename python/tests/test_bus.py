@@ -358,3 +358,21 @@ def given_bus_on_configurable_hub(monkeypatch, result=native.OK, channel="agent/
     bus._channel_name = channel
     monkeypatch.setattr(native.lib, "canhub_configure", configure)
     return bus, calls
+
+
+class TestToMessage:
+    def test_it_marks_a_frame_the_hub_bridged(self):
+        frame = native.CanHubFrame(can_id=0x123, flags=native.FRAME_FLAG_BRIDGED, length=1)
+
+        message = CanHubBus._to_message(frame)
+
+        assert message.bridged
+        assert message.arbitration_id == 0x123
+
+    def test_it_leaves_a_frame_of_the_bus_unmarked(self):
+        frame = native.CanHubFrame(can_id=0x123, flags=native.FRAME_FLAG_FD, length=1)
+
+        message = CanHubBus._to_message(frame)
+
+        assert not message.bridged
+        assert message.is_fd

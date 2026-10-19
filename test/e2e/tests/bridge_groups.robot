@@ -28,9 +28,9 @@ A Group Joins Three Buses Into One
 
     Send ${FRAMES} Frames On ${LAN_SERVER} vcan0    can_id=123
     Send ${FRAMES} Frames On ${LOCAL_SERVER} vcan1    can_id=456
-    ${truck_on_lab}=    Wait Until Capture ${lab_capture} Settles    can_id=123
-    ${truck_on_bench}=    Wait Until Capture ${bench_capture} Settles    can_id=123
-    ${bench_on_truck}=    Wait Until Capture ${truck_capture} Settles    can_id=456
+    ${truck_on_lab}=    Wait Until Capture ${lab_capture} Settles    can_id=123    quiet=1
+    ${truck_on_bench}=    Wait Until Capture ${bench_capture} Settles    can_id=123    quiet=1
+    ${bench_on_truck}=    Wait Until Capture ${truck_capture} Settles    can_id=456    quiet=1
     ${bench_on_lab}=    Frames With Id 456 Captured By ${lab_capture}
     ${truck_on_truck}=    Frames With Id 123 Captured By ${truck_capture}
     ${bench_on_bench}=    Frames With Id 456 Captured By ${bench_capture}
@@ -51,7 +51,7 @@ A Group Passes Only The Ids It Names
 
     Send ${FRAMES} Frames On ${LAN_SERVER} vcan0    can_id=200
     Send ${FRAMES} Frames On ${LAN_SERVER} vcan0    can_id=100
-    ${passed}=    Wait Until Capture ${lab_capture} Settles    can_id=100
+    ${passed}=    Wait Until Capture ${lab_capture} Settles    can_id=100    quiet=1
     ${filtered}=    Frames With Id 200 Captured By ${lab_capture}
 
     Should Be Equal As Integers    ${passed}    ${FRAMES}
@@ -69,7 +69,7 @@ A Member That Leaves Stops Receiving
     ${bench_capture}=    Start Candump On ${LOCAL_SERVER}    vcan1
 
     Send ${FRAMES} Frames On ${LAN_SERVER} vcan0
-    ${on_lab}=    Wait Until Capture ${lab_capture} Settles
+    ${on_lab}=    Wait Until Capture ${lab_capture} Settles    quiet=1
     ${on_bench}=    Frames With Id 123 Captured By ${bench_capture}
 
     Should Be Equal As Integers    ${on_lab}    ${FRAMES}
@@ -84,7 +84,7 @@ A Route And A Group Into The Same Bus Inject Once
     ${lab_capture}=    Start Candump On ${LOCAL_SERVER}    vcan0
 
     Send ${FRAMES} Frames On ${LAN_SERVER} vcan0
-    ${on_lab}=    Wait Until Capture ${lab_capture} Settles
+    ${on_lab}=    Wait Until Capture ${lab_capture} Settles    quiet=1
 
     Should Be Equal As Integers    ${on_lab}    ${FRAMES}
 

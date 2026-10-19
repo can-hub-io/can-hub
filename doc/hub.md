@@ -98,7 +98,9 @@ lab/can1                 truck42/can0             active   88           0       
   bridges everything. Error frames are never bridged.
 - One hop only: the hub marks what it injects and never bridges that frame
   again, so routes in both directions join two buses without a loop. Clients
-  see such a frame with the bridged flag. A second agent on the very same
+  see such a frame with the bridged flag: `(bridged)` in `can-hub-client
+  dump`, `CANHUB_FRAME_FLAG_BRIDGED` in libcanhub, `message.bridged` in
+  python-can-hub. A second agent on the very same
   physical bus would see the injection as plain traffic; do not export one
   bus through two agents that are both bridged.
 - Routes name interfaces, so they wait for agents that are offline (state
