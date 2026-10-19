@@ -17,17 +17,14 @@ ${CYCLES}         ${10}
 *** Test Cases ***
 The Agent Uplink Leaves Reliable Mode When Its Last Reliable Client Leaves
     Create VCAN On ${LOCAL_SERVER}    vcan0
-
     ${hub_cfg}=    Hub Configuration
     ${hub}=    Start CAN HUB On ${LOCAL_SERVER} With ${hub_cfg}
-
     ${agent_cfg}=    Agent Configuration    quic://local:7227    edge    vcan0
     ${agent}=    Start CAN Agent On ${LOCAL_SERVER} With ${agent_cfg}
     Wait Until Agent ${agent} Registered On ${hub}    8
     ${agent_peer}=    Peer Id Of Agent ${agent} On ${hub}
     ${opened}=    Set Variable    peer ${agent_peer} reliable channel 0 opened
     ${closed}=    Set Variable    peer ${agent_peer} reliable channel 0 closed
-
     FOR    ${cycle}    IN RANGE    1    ${CYCLES + 1}
         ${reliable_cfg}=    Client Configuration    dump    edge/vcan0    connect=quic://local:7227    reliable=${True}
         ${reliable}=    Start CAN Client On ${LOCAL_SERVER} With ${reliable_cfg}
@@ -35,9 +32,10 @@ The Agent Uplink Leaves Reliable Mode When Its Last Reliable Client Leaves
         Stop CAN Client ${reliable}
         Wait Until Hub ${hub} Logged ${closed} ${cycle} Times
     END
-
     ${lossy_cfg}=    Client Configuration    dump    edge/vcan0    connect=quic://local:7227
     ${lossy}=    Start CAN Client On ${LOCAL_SERVER} With ${lossy_cfg}
     Wait Until 1 Channels Open On ${hub}    12
+
     Inject CAN Frame On ${LOCAL_SERVER}    vcan0    123#CAFE
+
     Client ${lossy} Should Receive 123#CAFE

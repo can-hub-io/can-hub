@@ -38,6 +38,7 @@ describe("echo_tokens", []() {
 
         issueToken(CLIENT_PEER);
         first_token = token;
+
         issueToken(CLIENT_PEER);
 
         expect(token).toBe(first_token);
@@ -48,6 +49,7 @@ describe("echo_tokens", []() {
 
         issueToken(CLIENT_PEER);
         first_token = token;
+
         issueToken(OTHER_CLIENT_PEER);
 
         expect(token == first_token).toBe(false);
@@ -84,6 +86,7 @@ describe("echo_tokens", []() {
         issueToken(CLIENT_PEER);
         released_token = token;
         EchoTokens_ReleaseClient(&tokens, CLIENT_PEER);
+
         issueToken(OTHER_CLIENT_PEER);
 
         expect(token == released_token).toBe(false);

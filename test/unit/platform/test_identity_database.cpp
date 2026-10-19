@@ -39,9 +39,14 @@ describe("identity_database", []() {
 
     it("pins and looks up a fingerprint", []() {
         char fingerprint[IDENTITY_FINGERPRINT_HEX_SIZE];
+        bool pinned;
+        bool found;
 
-        expect(port->pin(port->context, "truck42", TRUCK_FINGERPRINT)).toBe(true);
-        expect(port->lookup(port->context, "truck42", fingerprint)).toBe(true);
+        pinned = port->pin(port->context, "truck42", TRUCK_FINGERPRINT);
+        found = port->lookup(port->context, "truck42", fingerprint);
+
+        expect(pinned).toBe(true);
+        expect(found).toBe(true);
         expect((const char *)fingerprint).toBe(TRUCK_FINGERPRINT);
     });
 
@@ -53,12 +58,19 @@ describe("identity_database", []() {
 
     it("forgets a pinned name so it can be pinned again", []() {
         char fingerprint[IDENTITY_FINGERPRINT_HEX_SIZE];
+        bool forgotten;
+        bool found;
+        bool pinned_again;
 
         port->pin(port->context, "truck42", TRUCK_FINGERPRINT);
 
-        expect(port->forget(port->context, "truck42")).toBe(true);
-        expect(port->lookup(port->context, "truck42", fingerprint)).toBe(false);
-        expect(port->pin(port->context, "truck42", OTHER_FINGERPRINT)).toBe(true);
+        forgotten = port->forget(port->context, "truck42");
+        found = port->lookup(port->context, "truck42", fingerprint);
+        pinned_again = port->pin(port->context, "truck42", OTHER_FINGERPRINT);
+
+        expect(forgotten).toBe(true);
+        expect(found).toBe(false);
+        expect(pinned_again).toBe(true);
     });
 
     it("refuses to forget a name that was never pinned", []() {
@@ -84,27 +96,47 @@ describe("identity_database", []() {
 
     it("grants a specific write and scopes it to that fingerprint and interface", []() {
         AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
+        bool granted;
 
-        expect(grant(acl, TRUCK_FINGERPRINT, "truck42", "can0", "rw")).toBe(true);
+        granted = grant(acl, TRUCK_FINGERPRINT, "truck42", "can0", "rw");
+
+        expect(granted).toBe(true);
         expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(true);
         expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can1")).toBe(false);
         expect(acl->write_allowed(acl->context, OTHER_FINGERPRINT, "truck42", "can0")).toBe(false);
     });
 
-    it("downgrades and revokes a grant", []() {
+    it("downgrades a grant to read only", []() {
         AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
+        bool downgraded;
 
         grant(acl, TRUCK_FINGERPRINT, "truck42", "can0", "rw");
-        expect(grant(acl, TRUCK_FINGERPRINT, "truck42", "can0", "r")).toBe(true);
+
+        downgraded = grant(acl, TRUCK_FINGERPRINT, "truck42", "can0", "r");
+
+        expect(downgraded).toBe(true);
         expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(false);
-        expect(acl->revoke(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(true);
-        expect(acl->revoke(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(false);
+    });
+
+    it("revokes a grant once", []() {
+        AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
+        bool first_revoked;
+        bool second_revoked;
+
+        grant(acl, TRUCK_FINGERPRINT, "truck42", "can0", "rw");
+
+        first_revoked = acl->revoke(acl->context, TRUCK_FINGERPRINT, "truck42", "can0");
+        second_revoked = acl->revoke(acl->context, TRUCK_FINGERPRINT, "truck42", "can0");
+
+        expect(first_revoked).toBe(true);
+        expect(second_revoked).toBe(false);
     });
 
     it("applies the global wildcard baseline", []() {
         AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
 
         grant(acl, "*", "*", "*", "rw");
+
         expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(true);
         expect(acl->write_allowed(acl->context, OTHER_FINGERPRINT, "van7", "can9")).toBe(true);
     });
@@ -114,6 +146,7 @@ describe("identity_database", []() {
 
         grant(acl, "*", "*", "*", "r");
         grant(acl, "*", "truck42", "can0", "none");
+
         expect(acl->read_allowed(acl->context, OTHER_FINGERPRINT, "truck42", "can0")).toBe(false);
         expect(acl->read_allowed(acl->context, OTHER_FINGERPRINT, "truck42", "can1")).toBe(true);
     });
@@ -123,6 +156,7 @@ describe("identity_database", []() {
 
         grant(acl, "*", "truck42", "can0", "none");
         grant(acl, TRUCK_FINGERPRINT, "*", "*", "rw");
+
         expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(true);
         expect(acl->write_allowed(acl->context, OTHER_FINGERPRINT, "truck42", "can0")).toBe(false);
     });
@@ -154,39 +188,70 @@ describe("identity_database", []() {
         expect(acl->admin_allowed(acl->context, OTHER_FINGERPRINT, "truck42", "can0")).toBe(false);
     });
 
-    it("lists acl entries with pagination", []() {
+    it("lists the first page of acl entries and flags more", []() {
         AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
         AclEntry entries[1];
+        uint8_t count;
         bool more;
 
         grant(acl, TRUCK_FINGERPRINT, "truck42", "can0", "rw");
         grant(acl, OTHER_FINGERPRINT, "truck42", "can1", "r");
 
-        expect(acl->list(acl->context, 0, entries, 1, &more)).toBe(1);
+        count = acl->list(acl->context, 0, entries, 1, &more);
+
+        expect(count).toBe(1);
         expect(more).toBe(true);
         expect((const char *)entries[0].interface_name).toBe("can0");
         expect(entries[0].can_write).toBe(true);
-        expect(acl->list(acl->context, 1, entries, 1, &more)).toBe(1);
+    });
+
+    it("lists the last page of acl entries from an offset", []() {
+        AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
+        AclEntry entries[1];
+        uint8_t count;
+        bool more;
+
+        grant(acl, TRUCK_FINGERPRINT, "truck42", "can0", "rw");
+        grant(acl, OTHER_FINGERPRINT, "truck42", "can1", "r");
+
+        count = acl->list(acl->context, 1, entries, 1, &more);
+
+        expect(count).toBe(1);
         expect(more).toBe(false);
         expect((const char *)entries[0].interface_name).toBe("can1");
         expect(entries[0].can_write).toBe(false);
     });
 
-    it("lists pins ordered by name with pagination", []() {
+    it("lists the first page of pins ordered by name", []() {
         IdentityPin pins[2];
+        uint8_t count;
         bool more;
 
         port->pin(port->context, "van7", OTHER_FINGERPRINT);
         port->pin(port->context, "truck42", TRUCK_FINGERPRINT);
         port->pin(port->context, "bus1", OTHER_FINGERPRINT);
 
-        expect(port->list(port->context, 0, pins, 2, &more)).toBe(2);
+        count = port->list(port->context, 0, pins, 2, &more);
+
+        expect(count).toBe(2);
         expect(more).toBe(true);
         expect((const char *)pins[0].agent_name).toBe("bus1");
         expect((const char *)pins[1].agent_name).toBe("truck42");
         expect((const char *)pins[1].fingerprint_hex).toBe(TRUCK_FINGERPRINT);
+    });
 
-        expect(port->list(port->context, 2, pins, 2, &more)).toBe(1);
+    it("lists the last page of pins from an offset", []() {
+        IdentityPin pins[2];
+        uint8_t count;
+        bool more;
+
+        port->pin(port->context, "van7", OTHER_FINGERPRINT);
+        port->pin(port->context, "truck42", TRUCK_FINGERPRINT);
+        port->pin(port->context, "bus1", OTHER_FINGERPRINT);
+
+        count = port->list(port->context, 2, pins, 2, &more);
+
+        expect(count).toBe(1);
         expect(more).toBe(false);
         expect((const char *)pins[0].agent_name).toBe("van7");
     });
@@ -227,16 +292,21 @@ describe("identity_database migrations", []() {
 
     it("brings a fresh db to the latest schema version", []() {
         IdentityDatabase fresh;
+        bool opened;
 
-        expect(IdentityDatabase_Open(&fresh, DB_FILE_PATH)).toBe(true);
+        opened = IdentityDatabase_Open(&fresh, DB_FILE_PATH);
         IdentityDatabase_Close(&fresh);
 
+        expect(opened).toBe(true);
         expect(readUserVersionFile(DB_FILE_PATH)).toBe(LATEST_SCHEMA_VERSION);
     });
 
     it("migrates a legacy db that has tables but no recorded version", []() {
         IdentityDatabase migrated;
+        IdentityStorePort *migrated_port;
         char fingerprint[IDENTITY_FINGERPRINT_HEX_SIZE];
+        bool opened;
+        bool found;
 
         executeRaw(
             DB_FILE_PATH,
@@ -246,18 +316,23 @@ describe("identity_database migrations", []() {
             "PRAGMA user_version = 0"
         );
 
-        expect(IdentityDatabase_Open(&migrated, DB_FILE_PATH)).toBe(true);
-        IdentityStorePort *migrated_port = IdentityDatabase_Port(&migrated);
-        expect(migrated_port->lookup(migrated_port->context, "truck42", fingerprint)).toBe(true);
-        expect((const char *)fingerprint).toBe(TRUCK_FINGERPRINT);
+        opened = IdentityDatabase_Open(&migrated, DB_FILE_PATH);
+        migrated_port = IdentityDatabase_Port(&migrated);
+        found = migrated_port->lookup(migrated_port->context, "truck42", fingerprint);
         IdentityDatabase_Close(&migrated);
 
+        expect(opened).toBe(true);
+        expect(found).toBe(true);
+        expect((const char *)fingerprint).toBe(TRUCK_FINGERPRINT);
         expect(readUserVersionFile(DB_FILE_PATH)).toBe(LATEST_SCHEMA_VERSION);
     });
 
     it("keeps the grants of a version 1 db and gives them no admin", []() {
         IdentityDatabase migrated;
         AuthorizationPort *acl;
+        bool opened;
+        bool may_write;
+        bool may_configure;
 
         executeRaw(
             DB_FILE_PATH,
@@ -268,11 +343,15 @@ describe("identity_database migrations", []() {
             "PRAGMA user_version = 1"
         );
 
-        expect(IdentityDatabase_Open(&migrated, DB_FILE_PATH)).toBe(true);
+        opened = IdentityDatabase_Open(&migrated, DB_FILE_PATH);
         acl = IdentityDatabase_AuthorizationPort(&migrated);
-        expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(true);
-        expect(acl->admin_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(false);
+        may_write = acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0");
+        may_configure = acl->admin_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0");
         IdentityDatabase_Close(&migrated);
+
+        expect(opened).toBe(true);
+        expect(may_write).toBe(true);
+        expect(may_configure).toBe(false);
     });
 
     it("refuses to open a db newer than the binary supports", []() {

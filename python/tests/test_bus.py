@@ -151,8 +151,8 @@ class TestConcurrentUse:
         receiver = given_receiving_in_background(bus, hub, timeout=0.5)
 
         elapsed = send_and_time(bus)
-
         receiver.join()
+
         assert elapsed < 0.1
         assert hub.most_concurrent_calls == 1
 
@@ -171,13 +171,13 @@ class TestFairLock:
     def test_it_serves_a_waiting_thread_before_the_holder_takes_it_back(self):
         lock = _FairLock()
         order = []
-
         with lock:
             waiter = given_waiting_for(lock, order)
+
         with lock:
             order.append("holder")
-
         waiter.join()
+
         assert order == ["waiter", "holder"]
 
 
@@ -341,6 +341,7 @@ class TestConfigure:
 
         with pytest.raises(CanOperationError, match="agent/iface"):
             bus.configure(bitrate=250000)
+
         assert calls == []
 
 

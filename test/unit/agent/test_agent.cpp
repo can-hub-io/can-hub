@@ -119,6 +119,7 @@ describe("agent", []() {
 
         it("stays registering while the ack timeout has not expired", []() {
             Agent_Tick(&agent, 1000000);
+
             Agent_Tick(&agent, 1000000 + AGENT_REGISTER_TIMEOUT_MS * 1000 - 1);
 
             expect(transport.disconnect_calls).toBe(0);
@@ -127,6 +128,7 @@ describe("agent", []() {
 
         it("disconnects when the register ack never arrives", []() {
             Agent_Tick(&agent, 1000000);
+
             Agent_Tick(&agent, 1000000 + AGENT_REGISTER_TIMEOUT_MS * 1000);
 
             expect(transport.disconnect_calls).toBe(1);
@@ -139,6 +141,7 @@ describe("agent", []() {
 
             Agent_Tick(&agent, 1000000);
             Agent_OnControlMessage(&agent, encoded, encoded_size, 2000000);
+
             Agent_Tick(&agent, 1000000 + AGENT_REGISTER_TIMEOUT_MS * 1000);
 
             expect(transport.disconnect_calls).toBe(0);
@@ -155,6 +158,7 @@ describe("agent", []() {
             Agent_Tick(&agent, second_attempt_us);
             Agent_OnConnected(&agent);
             Agent_Tick(&agent, second_attempt_us);
+
             Agent_OnControlMessage(&agent, encoded, encoded_size, second_attempt_us + 1000);
 
             expect(Agent_State(&agent)).toBe(kAGENT_STATE_RUNNING);
@@ -252,6 +256,7 @@ describe("agent", []() {
             size_t encoded_frame_size = FrameMessage_Encode(&injected, encoded_frame, sizeof(encoded_frame));
 
             Agent_OnTransportFrame(&agent, encoded_frame, encoded_frame_size);
+
             Agent_OnCanFrame(&agent, 0, &echo);
             MessageHeader_Decode(&sent_header, transport.last_frame, transport.last_frame_size);
             FrameMessage_Decode(&sent_frame, transport.last_frame + MESSAGE_HEADER_SIZE, sent_header.length);
@@ -282,6 +287,7 @@ describe("agent", []() {
 
             can.write_result = false;
             Agent_OnTransportFrame(&agent, encoded_frame, encoded_frame_size);
+
             Agent_OnCanFrame(&agent, 0, &echo);
             MessageHeader_Decode(&sent_header, transport.last_frame, transport.last_frame_size);
             FrameMessage_Decode(&sent_frame, transport.last_frame + MESSAGE_HEADER_SIZE, sent_header.length);

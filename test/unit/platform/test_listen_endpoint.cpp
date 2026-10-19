@@ -68,6 +68,7 @@ describe("listen_endpoint_build_sockaddr", []() {
 describe("listen_endpoint_format_origin", []() {
     it("renders a plain IPv4 peer", []() {
         ListenEndpoint_BuildSockaddr(AF_INET, "10.0.0.5", "7228", &address, &address_length);
+
         ListenEndpoint_FormatOrigin(&address, origin, sizeof(origin));
 
         expect((const char *)origin).toBe("10.0.0.5:7228");
@@ -75,6 +76,7 @@ describe("listen_endpoint_format_origin", []() {
 
     it("unmaps a v4-mapped peer back to plain IPv4", []() {
         ListenEndpoint_BuildSockaddr(AF_INET6, "127.0.0.1", "7227", &address, &address_length);
+
         ListenEndpoint_FormatOrigin(&address, origin, sizeof(origin));
 
         expect((const char *)origin).toBe("127.0.0.1:7227");
@@ -82,6 +84,7 @@ describe("listen_endpoint_format_origin", []() {
 
     it("renders a native IPv6 peer in brackets", []() {
         ListenEndpoint_BuildSockaddr(AF_INET6, "::1", "7227", &address, &address_length);
+
         ListenEndpoint_FormatOrigin(&address, origin, sizeof(origin));
 
         expect((const char *)origin).toBe("[::1]:7227");
@@ -91,6 +94,7 @@ describe("listen_endpoint_format_origin", []() {
 describe("listen_endpoint_format_host", []() {
     it("renders a plain IPv4 peer without its port", []() {
         ListenEndpoint_BuildSockaddr(AF_INET, "10.0.0.5", "7228", &address, &address_length);
+
         ListenEndpoint_FormatHost(&address, host, sizeof(host));
 
         expect((const char *)host).toBe("10.0.0.5");
@@ -98,6 +102,7 @@ describe("listen_endpoint_format_host", []() {
 
     it("unmaps a v4-mapped peer back to plain IPv4", []() {
         ListenEndpoint_BuildSockaddr(AF_INET6, "127.0.0.1", "7227", &address, &address_length);
+
         ListenEndpoint_FormatHost(&address, host, sizeof(host));
 
         expect((const char *)host).toBe("127.0.0.1");
@@ -105,6 +110,7 @@ describe("listen_endpoint_format_host", []() {
 
     it("renders a native IPv6 peer without brackets", []() {
         ListenEndpoint_BuildSockaddr(AF_INET6, "::1", "7227", &address, &address_length);
+
         ListenEndpoint_FormatHost(&address, host, sizeof(host));
 
         expect((const char *)host).toBe("::1");

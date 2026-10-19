@@ -30,6 +30,7 @@ describe("rejected_peers", []() {
 
     it("lists a rejected identity with its claimed name and origin", []() {
         reject("truck42", ADMIN_REJECTED_REASON_NOT_ALLOWED, 10 * SECOND_US);
+
         list(10 * SECOND_US);
 
         expect(reply.count).toBe((uint8_t)1);
@@ -43,6 +44,7 @@ describe("rejected_peers", []() {
     it("counts retries of the same identity in one entry", []() {
         reject("truck42", ADMIN_REJECTED_REASON_NOT_ALLOWED, 10 * SECOND_US);
         reject("truck42", ADMIN_REJECTED_REASON_NOT_ALLOWED, 20 * SECOND_US);
+
         list(25 * SECOND_US);
 
         expect(reply.count).toBe((uint8_t)1);
@@ -54,6 +56,7 @@ describe("rejected_peers", []() {
         reject("truck42", ADMIN_REJECTED_REASON_NOT_ALLOWED, 10 * SECOND_US);
         givenPeer(kHUB_PEER_ROLE_CLIENT, FINGERPRINT_A, "203.0.113.5:40001");
         reject("laptop", ADMIN_REJECTED_REASON_NOT_ALLOWED, 10 * SECOND_US);
+
         list(10 * SECOND_US);
 
         expect(reply.count).toBe((uint8_t)2);
@@ -62,6 +65,7 @@ describe("rejected_peers", []() {
     it("ignores a peer that carries no fingerprint", []() {
         givenPeer(kHUB_PEER_ROLE_CLIENT, "", "");
         reject("laptop", ADMIN_REJECTED_REASON_NOT_ALLOWED, 10 * SECOND_US);
+
         list(10 * SECOND_US);
 
         expect(reply.count).toBe((uint8_t)0);
@@ -70,6 +74,7 @@ describe("rejected_peers", []() {
     it("drops an identity once it is admitted", []() {
         reject("truck42", ADMIN_REJECTED_REASON_NOT_ALLOWED, 10 * SECOND_US);
         RejectedPeers_Forget(&rejected, &peer);
+
         list(10 * SECOND_US);
 
         expect(reply.count).toBe((uint8_t)0);
@@ -78,6 +83,7 @@ describe("rejected_peers", []() {
     it("makes room for a new identity by evicting the least recently seen", []() {
         reject("first", ADMIN_REJECTED_REASON_NOT_ALLOWED, 1 * SECOND_US);
         rejectDistinctPeers(REJECTED_PEERS_MAX, 2 * SECOND_US);
+
         list(100 * SECOND_US);
 
         expect(listed(FINGERPRINT_A)).toBe(false);
@@ -87,6 +93,7 @@ describe("rejected_peers", []() {
         reject("truck42", ADMIN_REJECTED_REASON_NOT_ALLOWED, 1 * SECOND_US);
         reject("truck42", ADMIN_REJECTED_REASON_NOT_ALLOWED, 2 * SECOND_US);
         rejectDistinctPeers(REJECTED_PEERS_MAX * 2, 3 * SECOND_US);
+
         list(100 * SECOND_US);
 
         expect(listed(FINGERPRINT_A)).toBe(true);
@@ -94,6 +101,7 @@ describe("rejected_peers", []() {
 
     it("pages a full table across two replies", []() {
         rejectDistinctPeers(REJECTED_PEERS_MAX, 1 * SECOND_US);
+
         list(10 * SECOND_US);
 
         expect(reply.count).toBe((uint8_t)ADMIN_REJECTED_REPLY_ENTRIES_MAX);
@@ -102,6 +110,7 @@ describe("rejected_peers", []() {
 
     it("skips the entries before the requested offset", []() {
         rejectDistinctPeers(3, 1 * SECOND_US);
+
         RejectedPeers_List(&rejected, 2, &reply, 10 * SECOND_US);
 
         expect(reply.count).toBe((uint8_t)1);

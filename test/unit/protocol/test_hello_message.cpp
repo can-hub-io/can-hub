@@ -78,6 +78,7 @@ describe("hello_message", []() {
 
         memset(long_name, 'x', sizeof(long_name) - 1);
         long_name[sizeof(long_name) - 1] = '\0';
+
         HelloMessage_Build(kPEER_ROLE_CLIENT, long_name, 0, buffer, sizeof(buffer));
         HelloMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, HELLO_BODY_SIZE);
 

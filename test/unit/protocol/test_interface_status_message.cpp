@@ -65,6 +65,7 @@ describe("interface_status_message", []() {
         uint8_t payload[INTERFACE_STATUS_BODY_SIZE] = { 0 };
 
         payload[0] = REGISTER_INTERFACES_MAX + 1;
+
         expect(InterfaceStatusMessage_Decode(&decoded, payload, INTERFACE_STATUS_BODY_SIZE)).toBe(false);
     });
 });

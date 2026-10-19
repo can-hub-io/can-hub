@@ -15,23 +15,33 @@ describe("tx_pacer", []() {
 
     it("backs off multiplicatively when new drops appear", []() {
         TxPacer pacer;
+        uint32_t first_credit;
+        uint32_t second_credit;
 
         TxPacer_Reset(&pacer);
         TxPacer_Update(&pacer, 0, 100000, 0);
 
-        expect(TxPacer_Update(&pacer, 0, 100000, 5)).toBe((uint32_t)80000);
-        expect(TxPacer_Update(&pacer, 0, 100000, 9)).toBe((uint32_t)64000);
+        first_credit = TxPacer_Update(&pacer, 0, 100000, 5);
+        second_credit = TxPacer_Update(&pacer, 0, 100000, 9);
+
+        expect(first_credit).toBe((uint32_t)80000);
+        expect(second_credit).toBe((uint32_t)64000);
     });
 
     it("ramps back additively when no new drops appear", []() {
         TxPacer pacer;
+        uint32_t first_credit;
+        uint32_t second_credit;
 
         TxPacer_Reset(&pacer);
         TxPacer_Update(&pacer, 0, 100000, 0);
         TxPacer_Update(&pacer, 0, 100000, 5);
 
-        expect(TxPacer_Update(&pacer, 0, 100000, 5)).toBe((uint32_t)92500);
-        expect(TxPacer_Update(&pacer, 0, 100000, 5)).toBe((uint32_t)100000);
+        first_credit = TxPacer_Update(&pacer, 0, 100000, 5);
+        second_credit = TxPacer_Update(&pacer, 0, 100000, 5);
+
+        expect(first_credit).toBe((uint32_t)92500);
+        expect(second_credit).toBe((uint32_t)100000);
     });
 
     it("never falls below the floor", []() {
@@ -43,6 +53,7 @@ describe("tx_pacer", []() {
         TxPacer_Reset(&pacer);
         TxPacer_Update(&pacer, 0, 160000, drops);
         credit = 160000;
+
         for(window=0; window<40; window++) {
             drops += 1;
             credit = TxPacer_Update(&pacer, 0, 160000, drops);

@@ -55,20 +55,38 @@ describe("tls_channel", []() {
         TlsClientSecurity_Free(&client_security);
     });
 
-    it("completes a handshake and carries a message", []() {
+    it("completes a handshake", []() {
+        bool client_failed = false;
+        bool started;
+        bool established;
+
+        started = startChannelPair();
+
+        established = pumpUntilEstablished(&client_failed);
+
+        expect(started).toBe(true);
+        expect(established).toBe(true);
+    });
+
+    it("carries a message once established", []() {
         const uint8_t message[] = { 0x7F, 0x00, 0x00, 0x00 };
         MessageSink sink = { NULL, captureMessage };
         bool client_failed = false;
-        bool established;
+        bool queued;
+        bool flushed;
+        bool shuttled;
 
-        expect(startChannelPair()).toBe(true);
-        established = pumpUntilEstablished(&client_failed);
-
-        expect(established).toBe(true);
-        expect(TlsChannel_Queue(&client_channel, message, sizeof(message))).toBe(true);
-        expect(TlsChannel_Flush(&client_channel)).toBe(true);
+        startChannelPair();
+        pumpUntilEstablished(&client_failed);
         captured_size = 0;
-        expect(shuttle(&client_channel, &server_channel, &sink)).toBe(true);
+
+        queued = TlsChannel_Queue(&client_channel, message, sizeof(message));
+        flushed = TlsChannel_Flush(&client_channel);
+        shuttled = shuttle(&client_channel, &server_channel, &sink);
+
+        expect(queued).toBe(true);
+        expect(flushed).toBe(true);
+        expect(shuttled).toBe(true);
         expect(captured_size).toBe(sizeof(message));
         expect((const uint8_t *)captured_message).toEqualMemory(message, sizeof(message));
     });
@@ -77,8 +95,9 @@ describe("tls_channel", []() {
         ptls_cipher_suite_t *negotiated = NULL;
         bool client_failed = false;
 
-        expect(startChannelPair()).toBe(true);
-        expect(pumpUntilEstablished(&client_failed)).toBe(true);
+        startChannelPair();
+
+        pumpUntilEstablished(&client_failed);
         negotiated = ptls_get_cipher(client_channel.tls);
 
         expect(negotiated->id).toBe(TlsAead_CipherSuites(kTLS_TRANSPORT_STREAM)[0]->id);
@@ -87,11 +106,14 @@ describe("tls_channel", []() {
     it("exposes the client fingerprint to the server after the handshake", []() {
         char fingerprint[TLS_IDENTITY_FINGERPRINT_HEX_SIZE] = "";
         bool client_failed = false;
+        bool exposed;
 
-        expect(startChannelPair()).toBe(true);
-        expect(pumpUntilEstablished(&client_failed)).toBe(true);
+        startChannelPair();
+        pumpUntilEstablished(&client_failed);
 
-        expect(TlsChannel_PeerFingerprint(&server_channel, fingerprint)).toBe(true);
+        exposed = TlsChannel_PeerFingerprint(&server_channel, fingerprint);
+
+        expect(exposed).toBe(true);
         expect(strlen(fingerprint)).toBe((size_t)64);
     });
 
@@ -100,35 +122,48 @@ describe("tls_channel", []() {
         char file_fingerprint[TLS_IDENTITY_FINGERPRINT_HEX_SIZE] = "";
         bool client_failed = false;
 
-        expect(startChannelPair()).toBe(true);
-        expect(pumpUntilEstablished(&client_failed)).toBe(true);
+        startChannelPair();
+        pumpUntilEstablished(&client_failed);
+        TlsChannel_PeerFingerprint(&server_channel, handshake_fingerprint);
 
-        expect(TlsChannel_PeerFingerprint(&server_channel, handshake_fingerprint)).toBe(true);
-        expect(TlsIdentity_FingerprintOfFile(client_certificate, file_fingerprint)).toBe(true);
+        TlsIdentity_FingerprintOfFile(client_certificate, file_fingerprint);
+
         expect((const char *)file_fingerprint).toBe((const char *)handshake_fingerprint);
     });
 
-    it("holds the first-contact pin until the transport commits it", []() {
+    it("holds the first-contact pin back during the handshake", []() {
         char pinned[PIN_STORE_FINGERPRINT_HEX_SIZE];
         bool client_failed = false;
-        bool pinned_during_handshake;
+        bool found;
 
-        expect(startChannelPair()).toBe(true);
-        expect(pumpUntilEstablished(&client_failed)).toBe(true);
-        pinned_during_handshake = PinStore_Lookup(PIN_STORE_PATH, PIN_KEY, pinned);
+        startChannelPair();
+
+        pumpUntilEstablished(&client_failed);
+        found = PinStore_Lookup(PIN_STORE_PATH, PIN_KEY, pinned);
+
+        expect(found).toBe(false);
+    });
+
+    it("stores the first-contact pin once the transport commits it", []() {
+        char pinned[PIN_STORE_FINGERPRINT_HEX_SIZE];
+        bool client_failed = false;
+        bool found;
+
+        startChannelPair();
+        pumpUntilEstablished(&client_failed);
 
         TlsClientSecurity_CommitPin(&client_security);
+        found = PinStore_Lookup(PIN_STORE_PATH, PIN_KEY, pinned);
 
-        expect(pinned_during_handshake).toBe(false);
-        expect(PinStore_Lookup(PIN_STORE_PATH, PIN_KEY, pinned)).toBe(true);
+        expect(found).toBe(true);
     });
 
     it("rejects the handshake when the pinned fingerprint differs", []() {
         bool client_failed = false;
 
         PinStore_Append(PIN_STORE_PATH, PIN_KEY, WRONG_FINGERPRINT);
+        startChannelPair();
 
-        expect(startChannelPair()).toBe(true);
         pumpUntilEstablished(&client_failed);
 
         expect(client_failed).toBe(true);

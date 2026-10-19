@@ -20,6 +20,7 @@ static const RegisterMessage van_registration = { "van7", 1, { "can2" } };
 
 static void addAgent(uint32_t peer_id, const RegisterMessage *registration);
 static HubPeer *addClient(uint32_t peer_id);
+static void addClients(uint8_t count);
 static uint8_t openInterfaceAt(HubPeer *client, uint8_t registry_index);
 
 describe("admin_views", []() {
@@ -111,18 +112,20 @@ describe("admin_views", []() {
         expect((const char *)reply.entries[2].agent_name).toBe("van7");
     });
 
-    it("flags more and honours the offset when rows exceed one reply", []() {
-        uint8_t i;
-
-        for(i=0; i<ADMIN_CLIENTS_REPLY_ENTRIES_MAX + 1; i++) {
-            addClient(CLIENT_PEER + i);
-        }
+    it("flags more when rows exceed one reply", []() {
+        addClients(ADMIN_CLIENTS_REPLY_ENTRIES_MAX + 1);
 
         AdminViews_Clients(&registry, &directory, "", 0, &clients_reply);
+
         expect(clients_reply.count).toBe(ADMIN_CLIENTS_REPLY_ENTRIES_MAX);
         expect(clients_reply.flags).toBe(ADMIN_REPLY_FLAG_MORE);
+    });
+
+    it("honours the offset of the next page", []() {
+        addClients(ADMIN_CLIENTS_REPLY_ENTRIES_MAX + 1);
 
         AdminViews_Clients(&registry, &directory, "", ADMIN_CLIENTS_REPLY_ENTRIES_MAX, &clients_reply);
+
         expect(clients_reply.count).toBe(1);
         expect(clients_reply.flags).toBe(0);
         expect(clients_reply.entries[0].peer_id).toBe((uint32_t)(CLIENT_PEER + ADMIN_CLIENTS_REPLY_ENTRIES_MAX));
@@ -163,4 +166,13 @@ static uint8_t openInterfaceAt(HubPeer *client, uint8_t registry_index)
     ClientSession_OpenInterface(&client->session, &request, &channel);
 
     return channel;
+}
+
+static void addClients(uint8_t count)
+{
+    uint8_t i;
+
+    for(i=0; i<count; i++) {
+        addClient(CLIENT_PEER + i);
+    }
 }

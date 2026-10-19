@@ -99,6 +99,7 @@ describe("socketcand_bridge", []() {
 
     it("connects to the hub then sends HELLO and LIST", []() {
         SocketcandBridge_Tick(&bridge, 0);
+
         hub_events.on_connected(hub_events.context);
 
         expect(hub.connect_calls).toBe(1);
@@ -108,27 +109,35 @@ describe("socketcand_bridge", []() {
 
     it("greets a new socketcand client", []() {
         bringUpReady();
+
         server_events.on_client_connected(server_events.context, 1);
 
         expect(strstr(SocketcandServerPortMock_Written(&server, 1), "< hi >") != nullptr).toBe(true);
     });
 
-    it("opens a bus by namespaced name and acks ok", []() {
+    it("opens a bus by namespaced name", []() {
         MessageHeader header;
         OpenMessage open;
 
         bringUpReady();
         server_events.on_client_connected(server_events.context, 1);
-        clientBytes(1, "< open truck42/can0 >");
 
+        clientBytes(1, "< open truck42/can0 >");
         MessageHeader_Decode(&header, hub.control_log[2], hub.control_sizes[2]);
         OpenMessage_Decode(&open, hub.control_log[2] + MESSAGE_HEADER_SIZE, header.length);
 
         expect(header.type).toBe((uint8_t)kMESSAGE_TYPE_OPEN);
         expect(open.interface_id).toBe((uint32_t)7);
         expect((open.flags & OPEN_FLAG_WANT_WRITE) != 0).toBe(true);
+    });
+
+    it("acks the open with < ok > once the hub accepts it", []() {
+        bringUpReady();
+        server_events.on_client_connected(server_events.context, 1);
+        clientBytes(1, "< open truck42/can0 >");
 
         feedOpenAck(OPEN_STATUS_OK, 5);
+
         expect(strstr(SocketcandServerPortMock_Written(&server, 1), "< ok >") != nullptr).toBe(true);
     });
 
@@ -162,6 +171,7 @@ describe("socketcand_bridge", []() {
         clientBytes(1, "< open truck42/can0 >");
         feedOpenAck(OPEN_STATUS_OK, 5);
         SocketcandServerPortMock_Reset(&server);
+
         clientBytes(1, "< rawmode >");
 
         expect(strstr(SocketcandServerPortMock_Written(&server, 1), "< ok >") != nullptr).toBe(true);
@@ -187,21 +197,29 @@ describe("socketcand_bridge", []() {
         expect(frame.payload[0]).toBe(0xDE);
     });
 
-    it("retries read-only when write is denied, then rejects sends", []() {
+    it("retries the open read-only when write is denied", []() {
         MessageHeader header;
         OpenMessage reopen;
 
         bringUpReady();
         server_events.on_client_connected(server_events.context, 1);
         clientBytes(1, "< open truck42/can0 >");
-        feedOpenAck(OPEN_STATUS_WRITE_DENIED, 0);
 
+        feedOpenAck(OPEN_STATUS_WRITE_DENIED, 0);
         MessageHeader_Decode(&header, hub.control_log[3], hub.control_sizes[3]);
         OpenMessage_Decode(&reopen, hub.control_log[3] + MESSAGE_HEADER_SIZE, header.length);
-        expect((reopen.flags & OPEN_FLAG_WANT_WRITE) == 0).toBe(true);
 
+        expect((reopen.flags & OPEN_FLAG_WANT_WRITE) == 0).toBe(true);
+    });
+
+    it("rejects sends on a bus it opened read-only", []() {
+        bringUpReady();
+        server_events.on_client_connected(server_events.context, 1);
+        clientBytes(1, "< open truck42/can0 >");
+        feedOpenAck(OPEN_STATUS_WRITE_DENIED, 0);
         feedOpenAck(OPEN_STATUS_OK, 6);
         clientBytes(1, "< rawmode >");
+
         clientBytes(1, "< send 123 1 ff >");
 
         expect(hub.frame_count).toBe(0);
@@ -246,6 +264,7 @@ describe("socketcand_bridge", []() {
     it("closes the client when the bus is unknown", []() {
         bringUpReady();
         server_events.on_client_connected(server_events.context, 1);
+
         clientBytes(1, "< open truck42/can9 >");
 
         expect(strstr(SocketcandServerPortMock_Written(&server, 1), "< error") != nullptr).toBe(true);
@@ -254,6 +273,7 @@ describe("socketcand_bridge", []() {
 
     it("emits a beacon on tick once ready", []() {
         bringUpReady();
+
         SocketcandBridge_Tick(&bridge, 4000000);
 
         expect(server.beacon_count > 0).toBe(true);
@@ -267,15 +287,15 @@ describe("socketcand_bridge", []() {
 
         bringUpReady();
         relistOneBus("newcar", "can0", 42, 6000000);
-
         before = hub.control_count;
         server_events.on_client_connected(server_events.context, 2);
+
         clientBytes(2, "< open newcar/can0 >");
+        MessageHeader_Decode(&header, hub.control_log[before], hub.control_sizes[before]);
+        OpenMessage_Decode(&open, hub.control_log[before] + MESSAGE_HEADER_SIZE, header.length);
 
         expect(hub.control_count).toBe((uint8_t)(before + 1));
-        MessageHeader_Decode(&header, hub.control_log[before], hub.control_sizes[before]);
         expect(header.type).toBe((uint8_t)kMESSAGE_TYPE_OPEN);
-        OpenMessage_Decode(&open, hub.control_log[before] + MESSAGE_HEADER_SIZE, header.length);
         expect(open.interface_id).toBe((uint32_t)42);
     });
 

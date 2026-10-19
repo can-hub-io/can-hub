@@ -10,6 +10,7 @@ describe("reconnect_backoff", []() {
         uint32_t delay_ms;
 
         ReconnectBackoff_Init(&backoff, 1000, 60000);
+
         delay_ms = ReconnectBackoff_NextDelayMs(&backoff);
 
         expect(delay_ms).toBe((uint32_t)1000);
@@ -22,6 +23,7 @@ describe("reconnect_backoff", []() {
         uint32_t third_delay_ms;
 
         ReconnectBackoff_Init(&backoff, 1000, 60000);
+
         first_delay_ms = ReconnectBackoff_NextDelayMs(&backoff);
         second_delay_ms = ReconnectBackoff_NextDelayMs(&backoff);
         third_delay_ms = ReconnectBackoff_NextDelayMs(&backoff);
@@ -37,6 +39,7 @@ describe("reconnect_backoff", []() {
         uint8_t i;
 
         ReconnectBackoff_Init(&backoff, 1000, 60000);
+
         for(i=0; i<10; i++) {
             delay_ms = ReconnectBackoff_NextDelayMs(&backoff);
         }

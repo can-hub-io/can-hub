@@ -22,28 +22,24 @@ ${BURST}    ${400}
 *** Test Cases ***
 Socketcand Write Burst Reaches The Bus In Full
     Create VCAN On ${LOCAL_SERVER}    vcan0
-
     ${hub_cfg}=    Hub Configuration
     ${hub}=    Start CAN HUB On ${LOCAL_SERVER} With ${hub_cfg}
-
     ${agent_cfg}=    Agent Configuration    quic://local:7227    edge    vcan0
     ${agent}=    Start CAN Agent On ${LOCAL_SERVER} With ${agent_cfg}
     Wait Until Agent ${agent} Registered On ${hub}    8
-
     # The QUIC bridge carries a fingerprint, so writes need an explicit grant.
     Run CLI On Hub ${hub}    acl    add    *    */*    rw
-
     ${bridge_cfg}=    Client Configuration    socketcand    connect=quic://local:7227    extra=--no-beacon
     ${bridge}=    Start CAN Client On ${LOCAL_SERVER} With ${bridge_cfg}
     Sleep    3s    reason=let the bridge connect and cache the interface list
-
     ${capture}=    Start Candump On ${LOCAL_SERVER}    vcan0
-    ${sent}=    Burst ${BURST} Frames Through Socketcand On ${LOCAL_SERVER} edge/vcan0    hold=5
-    Should Be Equal As Integers    ${sent}[sent]    ${BURST}
 
+    ${sent}=    Burst ${BURST} Frames Through Socketcand On ${LOCAL_SERVER} edge/vcan0    hold=5
     Wait Until Frames Captured By ${capture} Reaches ${BURST}    timeout=15
     ${delivered}=    Frames Captured By ${capture}
-    Log    delivered to bus: ${delivered}/${BURST}    console=True
-    Should Be Equal As Integers    ${delivered}    ${BURST}
     ${overflows}=    Receive Overflows On ${hub}
+    Log    delivered to bus: ${delivered}/${BURST}    console=True
+
+    Should Be Equal As Integers    ${sent}[sent]    ${BURST}
+    Should Be Equal As Integers    ${delivered}    ${BURST}
     Should Be Equal As Integers    ${overflows}    0

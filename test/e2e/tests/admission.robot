@@ -22,9 +22,9 @@ A Host Gets Four TLS Handshakes In Flight And Stalled Ones Are Reaped
     ${hub}=    Start CAN HUB On ${LOCAL_SERVER} With ${hub_cfg}
 
     ${silent}=    Open 5 Silent TCP Connections From ${WAN_SERVER} To ${LOCAL_SERVER.ip} Port 7227
-
     ${refused}=    Count Of ${silent} Closed Between 0s And 1s
     ${reaped}=    Count Of ${silent} Closed Between 9s And 13s
+
     Should Be Equal As Integers    ${refused}    1
     Should Be Equal As Integers    ${reaped}    ${HANDSHAKES_PER_HOST}
 
@@ -33,7 +33,6 @@ A Real Agent Gets In Through A Retry While QUIC Handshakes Pile Up
     ${debug}=    Create List    --log-level    debug
     ${hub_cfg}=    Hub Configuration    extra=${debug}
     ${hub}=    Start CAN HUB On ${LOCAL_SERVER} With ${hub_cfg}
-
     Drop UDP From Source Port 7227 On ${LAN_SERVER}
     Drop UDP From Source Port 7227 On ${WAN_SERVER}
     ${stalled_cfg}=    Client Configuration    list    connect=quic://local:7227
@@ -46,5 +45,6 @@ A Real Agent Gets In Through A Retry While QUIC Handshakes Pile Up
 
     ${agent_cfg}=    Agent Configuration    quic://127.0.0.1:7227    admitted    vcan0
     ${agent}=    Start CAN Agent On ${LOCAL_SERVER} With ${agent_cfg}
+
     Wait Until Agent ${agent} Registered On ${hub}    8
     Log Of ${hub} Should Contain sent a retry

@@ -111,6 +111,7 @@ describe("frame_spec", []() {
         char text[160] = "123##0";
 
         memset(text + strlen(text), 'A', (FRAME_PAYLOAD_MAX_FD + 1) * 2);
+
         parse(text);
 
         expect(parsed).toBe(false);

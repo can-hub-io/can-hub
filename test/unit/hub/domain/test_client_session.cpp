@@ -75,6 +75,7 @@ describe("client_session", []() {
 
         ClientSession_OpenInterface(&session, &reliable_request, &channel);
         ClientSession_OpenInterface(&session, &lossy_request, &channel);
+
         reliable_held = ClientSession_HoldsReliable(&session, 7);
         lossy_held = ClientSession_HoldsReliable(&session, 9);
 
@@ -104,6 +105,7 @@ describe("client_session", []() {
 
         ClientSession_OpenInterface(&session, &reliable_request, &channel);
         ClientSession_OpenInterface(&session, &lossy_request, &channel);
+
         first_taken = ClientSession_TakeReliableBinding(&session, &taken_interface);
         second_taken = ClientSession_TakeReliableBinding(&session, &taken_interface);
         lossy_kept = ClientSession_InterfaceForChannel(&session, channel, &lossy_interface);
@@ -233,6 +235,7 @@ describe("client_session", []() {
         bool set_ok;
 
         ClientSession_OpenInterface(&session, &request, &channel);
+
         set_ok = ClientSession_SetFilters(&session, channel, filters, 1);
 
         expect(set_ok).toBe(true);
@@ -271,6 +274,7 @@ describe("client_session", []() {
 
         ClientSession_OpenInterface(&session, &request, &channel);
         ClientSession_SetFilters(&session, channel, filters, 1);
+
         ClientSession_SetFilters(&session, channel, NULL, 0);
 
         expect(ClientSession_ChannelAccepts(&session, channel, 0x300)).toBe(true);

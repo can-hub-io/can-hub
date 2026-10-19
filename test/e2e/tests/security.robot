@@ -38,6 +38,7 @@ Both Transports Negotiate The Same Suite
 
     ${over_tls}=    Negotiated Cipher Suite On ${hub} Over tls
     ${over_quic}=    Negotiated Cipher Suite On ${hub} Over quic
+
     Should Be Equal    ${over_tls}    ${over_quic}
 
 Agent Identity Survives A Restart
@@ -56,10 +57,11 @@ Client Identity Survives A Restart
 
 Hub Pins The Agent Fingerprint On First Register
     ${hub}=    Start Hub Listening On Both Encrypted Transports
-    ${agent}=    Register Agent pinned On ${hub} From ${AGENT_STATE}
     ${fingerprint}=    Identity Of Agent On ${LOCAL_SERVER} In ${AGENT_STATE}
 
+    Register Agent pinned On ${hub} From ${AGENT_STATE}
     ${pins}=    Run CLI On Hub ${hub}    pins
+
     Should Contain    ${pins.stdout}    ${fingerprint}
 
 An Agent Reusing A Name With A New Identity Is Rejected
@@ -67,6 +69,7 @@ An Agent Reusing A Name With A New Identity Is Rejected
     Register Agent rekeyed On ${hub} From ${AGENT_STATE}
 
     ${impostor}=    Start Agent rekeyed On ${hub} From /tmp/security-impostor
+
     Log Of ${impostor} Should Contain rejected    timeout=10
     Hub ${hub} Should Export 1 Interfaces
 
@@ -83,6 +86,7 @@ An Allowlisted Agent Is Accepted
     Run CLI On Hub ${hub}    pins    add    allowed    ${fingerprint}
 
     Register Agent allowed On ${hub} From ${AGENT_STATE}
+
     Hub ${hub} Should Export 1 Interfaces
 
 The Hub Lists An Agent It Turned Away
@@ -92,6 +96,7 @@ The Hub Lists An Agent It Turned Away
     Log Of ${agent} Should Contain rejected    timeout=10
 
     ${pending}=    Run CLI On Hub ${hub}    pending
+
     Should Contain    ${pending.stdout}    unlisted
     Should Contain    ${pending.stdout}    ${fingerprint}
 
@@ -110,6 +115,7 @@ A Client An ACL Names Is Accepted
     Run CLI On Hub ${hub}    acl    add    ${client_fingerprint}    granted/*    r
 
     ${client}=    Dump Over ${TLS} As granted From ${CLIENT_STATE}
+
     Wait Until Client ${client} Has Open Channel    ${hub}
 
 *** Keywords ***

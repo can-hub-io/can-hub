@@ -17,15 +17,75 @@ describe("echo_correlator", []() {
     });
 
     it("matches an echo with its token in order", []() {
-        uint8_t token = 0;
+        uint8_t first_token = 0;
+        uint8_t second_token = 0;
+        bool first_matched;
+        bool second_matched;
 
         EchoCorrelator_Push(&correlator, INTERFACE_A, 7, 0x100);
         EchoCorrelator_Push(&correlator, INTERFACE_A, 9, 0x200);
 
-        expect(EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x100, &token)).toBe(true);
-        expect(token).toBe(7);
-        expect(EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x200, &token)).toBe(true);
+        first_matched = EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x100, &first_token);
+        second_matched = EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x200, &second_token);
+
+        expect(first_matched).toBe(true);
+        expect(first_token).toBe(7);
+        expect(second_matched).toBe(true);
+        expect(second_token).toBe(9);
+    });
+
+    it("discards lost entries older than the match", []() {
+        uint8_t token = 0;
+        bool newer_matched;
+        bool older_matched;
+
+        EchoCorrelator_Push(&correlator, INTERFACE_A, 7, 0x100);
+        EchoCorrelator_Push(&correlator, INTERFACE_A, 9, 0x200);
+
+        newer_matched = EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x200, &token);
+        older_matched = EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x100, &token);
+
+        expect(newer_matched).toBe(true);
         expect(token).toBe(9);
+        expect(older_matched).toBe(false);
+    });
+
+    it("drops the newest entry after a failed write", []() {
+        uint8_t token = 0;
+        bool newest_matched;
+        bool oldest_matched;
+
+        EchoCorrelator_Push(&correlator, INTERFACE_A, 7, 0x100);
+        EchoCorrelator_Push(&correlator, INTERFACE_A, 9, 0x200);
+
+        EchoCorrelator_DropNewest(&correlator, INTERFACE_A);
+        newest_matched = EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x200, &token);
+        oldest_matched = EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x100, &token);
+
+        expect(newest_matched).toBe(false);
+        expect(oldest_matched).toBe(true);
+        expect(token).toBe(7);
+    });
+
+    it("keeps interfaces independent", []() {
+        uint8_t interface_b_token = 0;
+        uint8_t interface_a_token = 0;
+        bool matched_on_interface_b;
+        bool matched_again_on_interface_b;
+        bool matched_on_interface_a;
+
+        EchoCorrelator_Push(&correlator, INTERFACE_A, 7, 0x100);
+        EchoCorrelator_Push(&correlator, INTERFACE_B, 9, 0x100);
+
+        matched_on_interface_b = EchoCorrelator_PopMatch(&correlator, INTERFACE_B, 0x100, &interface_b_token);
+        matched_again_on_interface_b = EchoCorrelator_PopMatch(&correlator, INTERFACE_B, 0x100, &interface_b_token);
+        matched_on_interface_a = EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x100, &interface_a_token);
+
+        expect(matched_on_interface_b).toBe(true);
+        expect(interface_b_token).toBe(9);
+        expect(matched_again_on_interface_b).toBe(false);
+        expect(matched_on_interface_a).toBe(true);
+        expect(interface_a_token).toBe(7);
     });
 
     it("misses when nothing was pushed", []() {
@@ -34,52 +94,21 @@ describe("echo_correlator", []() {
         expect(EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x100, &token)).toBe(false);
     });
 
-    it("discards lost entries older than the match", []() {
-        uint8_t token = 0;
-
-        EchoCorrelator_Push(&correlator, INTERFACE_A, 7, 0x100);
-        EchoCorrelator_Push(&correlator, INTERFACE_A, 9, 0x200);
-
-        expect(EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x200, &token)).toBe(true);
-        expect(token).toBe(9);
-        expect(EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x100, &token)).toBe(false);
-    });
-
-    it("drops the newest entry after a failed write", []() {
-        uint8_t token = 0;
-
-        EchoCorrelator_Push(&correlator, INTERFACE_A, 7, 0x100);
-        EchoCorrelator_Push(&correlator, INTERFACE_A, 9, 0x200);
-        EchoCorrelator_DropNewest(&correlator, INTERFACE_A);
-
-        expect(EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x200, &token)).toBe(false);
-        expect(EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x100, &token)).toBe(true);
-        expect(token).toBe(7);
-    });
-
-    it("keeps interfaces independent", []() {
-        uint8_t token = 0;
-
-        EchoCorrelator_Push(&correlator, INTERFACE_A, 7, 0x100);
-        EchoCorrelator_Push(&correlator, INTERFACE_B, 9, 0x100);
-
-        expect(EchoCorrelator_PopMatch(&correlator, INTERFACE_B, 0x100, &token)).toBe(true);
-        expect(token).toBe(9);
-        expect(EchoCorrelator_PopMatch(&correlator, INTERFACE_B, 0x100, &token)).toBe(false);
-        expect(EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x100, &token)).toBe(true);
-        expect(token).toBe(7);
-    });
-
     it("evicts the oldest entry when full", []() {
         uint8_t token = 0;
+        bool oldest_matched;
+        bool next_matched;
         uint8_t i;
 
         for(i=0; i<ECHO_CORRELATOR_PENDING_MAX + 1; i++) {
             EchoCorrelator_Push(&correlator, INTERFACE_A, i, 0x100 + i);
         }
 
-        expect(EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x100, &token)).toBe(false);
-        expect(EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x101, &token)).toBe(true);
+        oldest_matched = EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x100, &token);
+        next_matched = EchoCorrelator_PopMatch(&correlator, INTERFACE_A, 0x101, &token);
+
+        expect(oldest_matched).toBe(false);
+        expect(next_matched).toBe(true);
         expect(token).toBe(1);
     });
 });

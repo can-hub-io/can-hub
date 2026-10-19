@@ -66,12 +66,19 @@ describe("socketcand_codec", []() {
         expect(command.kind).toBe((uint8_t)kSOCKETCAND_COMMAND_UNKNOWN);
     });
 
-    it("renders fixed greetings and errors", []() {
+    it("renders the greeting", []() {
         char out[64];
 
         SocketcandCodec_RenderGreeting(out, sizeof(out));
+
         expect(strcmp(out, "< hi >") == 0).toBe(true);
+    });
+
+    it("renders an error with its text", []() {
+        char out[64];
+
         SocketcandCodec_RenderError(out, sizeof(out), "no bus open");
+
         expect(strcmp(out, "< error no bus open >") == 0).toBe(true);
     });
 
@@ -87,6 +94,7 @@ describe("socketcand_codec", []() {
         frame.payload[1] = 0x22;
         frame.payload[2] = 0x03;
         frame.payload[3] = 0x44;
+
         SocketcandCodec_RenderFrame(out, sizeof(out), &frame);
 
         expect(strcmp(out, "< frame 123 23.424242 1A220344 >") == 0).toBe(true);
@@ -100,6 +108,7 @@ describe("socketcand_codec", []() {
         frame.can_id = 0x1ABCDEF | FRAME_CAN_ID_FLAG_EFF;
         frame.timestamp_us = (uint64_t)5 * 1000000 + 7;
         frame.payload_length = 0;
+
         SocketcandCodec_RenderFrame(out, sizeof(out), &frame);
 
         expect(strcmp(out, "< frame 1ABCDEF 5.000007  >") == 0).toBe(true);

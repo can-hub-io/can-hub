@@ -188,41 +188,63 @@ describe("admin_pins_message", []() {
         expect((const char *)decoded.entries[0].fingerprint_hex).toBe(FINGERPRINT);
     });
 
-    it("round-trips the forget request and reply", []() {
-        AdminForgetMessage forget = { "truck42" };
-        AdminForgetMessage decoded_forget;
-        AdminForgetReplyMessage reply = { ADMIN_STATUS_OK };
-        AdminForgetReplyMessage decoded_reply;
+    it("round-trips the forget request", []() {
+        AdminForgetMessage message = { "truck42" };
+        AdminForgetMessage decoded;
         uint8_t buffer[256];
         size_t encoded_size;
+        bool decoded_ok;
 
-        encoded_size = AdminForgetMessage_Encode(&forget, buffer, sizeof(buffer));
-        expect(AdminForgetMessage_Decode(&decoded_forget, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE)).toBe(true);
-        expect((const char *)decoded_forget.agent_name).toBe("truck42");
+        encoded_size = AdminForgetMessage_Encode(&message, buffer, sizeof(buffer));
+        decoded_ok = AdminForgetMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
 
-        encoded_size = AdminForgetReplyMessage_Encode(&reply, buffer, sizeof(buffer));
-        expect(AdminForgetReplyMessage_Decode(&decoded_reply, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE)).toBe(true);
-        expect(decoded_reply.status).toBe(ADMIN_STATUS_OK);
+        expect(decoded_ok).toBe(true);
+        expect((const char *)decoded.agent_name).toBe("truck42");
+    });
+
+    it("round-trips the forget reply", []() {
+        AdminForgetReplyMessage message = { ADMIN_STATUS_OK };
+        AdminForgetReplyMessage decoded;
+        uint8_t buffer[256];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminForgetReplyMessage_Encode(&message, buffer, sizeof(buffer));
+        decoded_ok = AdminForgetReplyMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(decoded_ok).toBe(true);
+        expect(decoded.status).toBe(ADMIN_STATUS_OK);
     });
 });
 
 describe("admin_kick_peer_message", []() {
-    it("round-trips the peer id and the reply status", []() {
-        AdminKickPeerMessage kick = { 0x80000001 };
-        AdminKickPeerMessage decoded_kick;
-        AdminKickPeerReplyMessage reply = { ADMIN_STATUS_UNKNOWN_PEER };
-        AdminKickPeerReplyMessage decoded_reply;
+    it("round-trips the peer id", []() {
+        AdminKickPeerMessage message = { 0x80000001 };
+        AdminKickPeerMessage decoded;
         uint8_t buffer[32];
         size_t encoded_size;
+        bool decoded_ok;
 
-        encoded_size = AdminKickPeerMessage_Encode(&kick, buffer, sizeof(buffer));
+        encoded_size = AdminKickPeerMessage_Encode(&message, buffer, sizeof(buffer));
+        decoded_ok = AdminKickPeerMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
         expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + ADMIN_KICK_PEER_BODY_SIZE));
-        expect(AdminKickPeerMessage_Decode(&decoded_kick, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE)).toBe(true);
-        expect(decoded_kick.peer_id).toBe((uint32_t)0x80000001);
+        expect(decoded_ok).toBe(true);
+        expect(decoded.peer_id).toBe((uint32_t)0x80000001);
+    });
 
-        encoded_size = AdminKickPeerReplyMessage_Encode(&reply, buffer, sizeof(buffer));
-        expect(AdminKickPeerReplyMessage_Decode(&decoded_reply, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE)).toBe(true);
-        expect(decoded_reply.status).toBe(ADMIN_STATUS_UNKNOWN_PEER);
+    it("round-trips the kick-peer reply status", []() {
+        AdminKickPeerReplyMessage message = { ADMIN_STATUS_UNKNOWN_PEER };
+        AdminKickPeerReplyMessage decoded;
+        uint8_t buffer[256];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminKickPeerReplyMessage_Encode(&message, buffer, sizeof(buffer));
+        decoded_ok = AdminKickPeerReplyMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(decoded_ok).toBe(true);
+        expect(decoded.status).toBe(ADMIN_STATUS_UNKNOWN_PEER);
     });
 
     it("rejects a truncated kick peer payload", []() {
@@ -355,21 +377,32 @@ describe("admin_acl_message", []() {
         expect(decoded.can_write).toBe(0);
     });
 
-    it("round-trips an acl revoke and its reply", []() {
-        AdminAclRevokeMessage revoke = { "truck42", "can0", FINGERPRINT };
-        AdminAclRevokeMessage decoded_revoke;
-        AdminAclRevokeReplyMessage reply = { ADMIN_STATUS_UNKNOWN_AGENT };
-        AdminAclRevokeReplyMessage decoded_reply;
+    it("round-trips an acl revoke", []() {
+        AdminAclRevokeMessage message = { "truck42", "can0", FINGERPRINT };
+        AdminAclRevokeMessage decoded;
         uint8_t buffer[256];
         size_t encoded_size;
+        bool decoded_ok;
 
-        encoded_size = AdminAclRevokeMessage_Encode(&revoke, buffer, sizeof(buffer));
-        expect(AdminAclRevokeMessage_Decode(&decoded_revoke, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE)).toBe(true);
-        expect((const char *)decoded_revoke.interface_name).toBe("can0");
+        encoded_size = AdminAclRevokeMessage_Encode(&message, buffer, sizeof(buffer));
+        decoded_ok = AdminAclRevokeMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
 
-        encoded_size = AdminAclRevokeReplyMessage_Encode(&reply, buffer, sizeof(buffer));
-        expect(AdminAclRevokeReplyMessage_Decode(&decoded_reply, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE)).toBe(true);
-        expect(decoded_reply.status).toBe(ADMIN_STATUS_UNKNOWN_AGENT);
+        expect(decoded_ok).toBe(true);
+        expect((const char *)decoded.interface_name).toBe("can0");
+    });
+
+    it("round-trips an acl revoke reply", []() {
+        AdminAclRevokeReplyMessage message = { ADMIN_STATUS_UNKNOWN_AGENT };
+        AdminAclRevokeReplyMessage decoded;
+        uint8_t buffer[256];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminAclRevokeReplyMessage_Encode(&message, buffer, sizeof(buffer));
+        decoded_ok = AdminAclRevokeReplyMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(decoded_ok).toBe(true);
+        expect(decoded.status).toBe(ADMIN_STATUS_UNKNOWN_AGENT);
     });
 
     it("round-trips acl list entries", []() {

@@ -17,18 +17,24 @@ ${WRONG_FINGERPRINT}    deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
 Python Bus Receives Frames From The Bus
     ${dump}=    Start Python ${PROBE} On ${LOCAL_SERVER}    ${CONNECT}    truck42/vcan0    dump
     Log Of ${dump} Should Contain dumping truck42/vcan0
+
     Inject CAN Frame On ${LOCAL_SERVER}    vcan0    123#DEADBEEF
+
     Log Of ${dump} Should Contain 123#DEADBEEF
 
 Python Bus Receives Frames Over Reliable QUIC
     ${dump}=    Start Python ${PROBE} On ${LOCAL_SERVER}    ${QUIC_CONNECT}    truck42/vcan0    dump    --reliable
     Log Of ${dump} Should Contain dumping truck42/vcan0
+
     Inject CAN Frame On ${LOCAL_SERVER}    vcan0    456#FEEDFACE
+
     Log Of ${dump} Should Contain 456#FEEDFACE
 
 Python Bus Sends Onto The Bus
     ${candump}=    Start Candump On ${LOCAL_SERVER}
+
     ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${CONNECT}    truck42/vcan0    send    1A0    CAFE
+
     Should Be True    ${result.ok}
     Candump ${candump} Should Capture 1A0#CAFE
 
@@ -36,7 +42,9 @@ Python Bus Sends While A Notifier Receives
     ${candump}=    Start Candump On ${LOCAL_SERVER}
     ${duplex}=    Start Python ${PROBE} On ${LOCAL_SERVER}    ${CONNECT}    truck42/vcan0    duplex    1D0    50
     Log Of ${duplex} Should Contain notifier on truck42/vcan0
+
     Inject CAN Frame On ${LOCAL_SERVER}    vcan0    2D0#ABCD
+
     Log Of ${duplex} Should Contain 2D0#ABCD
     Log Of ${duplex} Should Contain sent 50
     Candump ${candump} Should Capture 1D0#00
@@ -44,45 +52,53 @@ Python Bus Sends While A Notifier Receives
 
 Python Bus Lists The Interfaces The Hub Exports
     ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${CONNECT}    truck42/vcan0    list
+
     Should Be True    ${result.ok}
     Should Contain    ${result.stdout}    canhub truck42/vcan0
 
 Python Can Discovery Finds The Hub Interfaces From The Environment
     ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${CONNECT}    truck42/vcan0    detect
+
     Should Be True    ${result.ok}
     Should Contain    ${result.stdout}    canhub truck42/vcan0
 
 Python Bus Configures Its Interface
     ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${CONNECT}    truck42/vcan0    configure    txqueuelen=600
+    ${queue}=    TX Queue Length Of vcan0 On ${LOCAL_SERVER}
 
     Should Be True    ${result.ok}
     Should Contain    ${result.stdout}    txqueuelen=600
-    ${queue}=    TX Queue Length Of vcan0 On ${LOCAL_SERVER}
     Should Be Equal As Integers    ${queue}    600
 
 Python Bus Refuses Unknown Interfaces
     ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${CONNECT}    truck42/nope    dump
+
     Should Not Be True    ${result.ok}
     Should Contain    ${result.stderr}    not found
 
 Python Bus Connects Over TLS With The Expected Hub Fingerprint
     ${fingerprint}=    Fingerprint Of ${HUB.config.state_dir}/hub.crt On ${LOCAL_SERVER}
     ${candump}=    Start Candump On ${LOCAL_SERVER}
+
     ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${TLS_CONNECT}    truck42/vcan0    send    1B0    BEBE
     ...    --state-dir    /tmp/pycan-identity    --hub-fingerprint    ${fingerprint}
+
     Should Be True    ${result.ok}
     Candump ${candump} Should Capture 1B0#BEBE
 
 Python Bus Rejects A Hub With The Wrong Fingerprint
     ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${TLS_CONNECT}    truck42/vcan0    send    1B0    BEBE
     ...    --state-dir    /tmp/pycan-identity    --hub-fingerprint    ${WRONG_FINGERPRINT}
+
     Should Not Be True    ${result.ok}
     Should Contain    ${result.stderr}    could not connect
 
 Python Bus Uses An Explicitly Injected Identity
     ${candump}=    Start Candump On ${LOCAL_SERVER}
+
     ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${TLS_CONNECT}    truck42/vcan0    send    1C0    CACA
     ...    --cert    /tmp/pycan-identity/client.crt    --key    /tmp/pycan-identity/client.key
+
     Should Be True    ${result.ok}
     Candump ${candump} Should Capture 1C0#CACA
 
