@@ -51,6 +51,7 @@ static char identity_certificate_path[TLS_IDENTITY_PATH_MAX];
 static char identity_key_path[TLS_IDENTITY_PATH_MAX];
 static char known_hubs_path[KNOWN_HUBS_PATH_MAX];
 static char pin_key[PIN_KEY_MAX];
+static char hub_fingerprint[PIN_STORE_FINGERPRINT_HEX_SIZE];
 static TransportEvents agent_core_events;
 static uint32_t hub_connect_count;
 static FrameMessage pending_can_frame[REGISTER_INTERFACES_MAX];
@@ -77,6 +78,7 @@ static void corkTransport(void);
 static void uncorkTransport(void);
 static void resumePausedCanInterfaces(const CanEvents *can_events);
 static int32_t showIdentity(void);
+static const char *pinnedHubFingerprint(void);
 
 int main(int argc, char **argv)
 {
@@ -163,7 +165,7 @@ static void printUsage(FILE *stream, const char *program)
     fprintf(
         stream,
         "usage: %s --connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>"
-        " --name <agent-name> [--state-dir <path>] [--log-level error|warn|info|debug]"
+        " --name <agent-name> [--state-dir <path>] [--hub-fingerprint <hex>] [--log-level error|warn|info|debug]"
         " [--pace-rate <bps>] <can-if> [...]\n"
         "       %s --show-identity [--state-dir <path>]   print this agent's"
         " TLS fingerprint for the hub allowlist\n",
@@ -284,6 +286,10 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
             agent_name = argv[++i];
         } else if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
             state_directory_override = argv[++i];
+        } else if (strcmp(argv[i], "--hub-fingerprint") == 0 && i + 1 < argc) {
+            if (!PinStore_ParseFingerprint(argv[++i], hub_fingerprint)) {
+                return false;
+            }
         } else if (strcmp(argv[i], "--log-level") == 0 && i + 1 < argc) {
             i++;
         } else if (strcmp(argv[i], "--pace-rate") == 0 && i + 1 < argc) {
@@ -321,7 +327,7 @@ static bool prepareSecurityMaterial(const char *host, const char *port_text)
     }
 
     snprintf(known_hubs_path, sizeof(known_hubs_path), "%s/%s", state_directory, KNOWN_HUBS_FILE);
-    snprintf(pin_key, sizeof(pin_key), "%s:%s", host, port_text);
+    PinStore_HubKey(host, port_text, pin_key, sizeof(pin_key));
 
     return true;
 }
@@ -343,7 +349,8 @@ static bool initTransport(const char *host, const char *port_text, const Transpo
         quic_security_config.key_path = identity_key_path;
         quic_security_config.pin_store_path = known_hubs_path;
         quic_security_config.pin_key = pin_key;
-        quic_security_config.pinned_fingerprint = NULL;
+        quic_security_config.pin_policy = kPIN_POLICY_ONE_HUB;
+        quic_security_config.pinned_fingerprint = pinnedHubFingerprint();
         return QuicClientTransport_Init(&quic_transport, host, port_text, transport_events, &quic_security_config);
     }
     if (transport_scheme == kCONNECT_SCHEME_TLS) {
@@ -351,7 +358,8 @@ static bool initTransport(const char *host, const char *port_text, const Transpo
         tls_security_config.key_path = identity_key_path;
         tls_security_config.pin_store_path = known_hubs_path;
         tls_security_config.pin_key = pin_key;
-        tls_security_config.pinned_fingerprint = NULL;
+        tls_security_config.pin_policy = kPIN_POLICY_ONE_HUB;
+        tls_security_config.pinned_fingerprint = pinnedHubFingerprint();
         return TlsClientTransport_Init(&tls_transport, host, port_text, transport_events, &tls_security_config);
     }
 
@@ -556,4 +564,13 @@ static int32_t showIdentity(void)
     printf("%s\n", fingerprint);
 
     return 0;
+}
+
+static const char *pinnedHubFingerprint(void)
+{
+    if (hub_fingerprint[0] == '\0') {
+        return NULL;
+    }
+
+    return hub_fingerprint;
 }

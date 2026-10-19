@@ -142,6 +142,22 @@ class BenchKeywords:
     def identity_of_client(self, server, state_dir) -> str:
         return CanClient.show_identity(server, state_dir)
 
+    @keyword("Identity Of Hub ${hub}")
+    def identity_of_hub(self, hub) -> str:
+        return hub.identity()
+
+    @keyword("Pin Hub ${address} As ${fingerprint} In ${state_dir}")
+    def pin_hub(self, address, fingerprint, state_dir):
+        with open(Path(state_dir) / "known_hubs", "a") as known_hubs:
+            known_hubs.write(f"{address} {fingerprint}\n")
+
+    @keyword("Pinned Hubs In ${state_dir}")
+    def pinned_hubs(self, state_dir) -> list[str]:
+        known_hubs = Path(state_dir) / "known_hubs"
+        if not known_hubs.exists():
+            return []
+        return known_hubs.read_text().splitlines()
+
     @keyword("Run CLI On Hub ${hub}")
     def run_cli_on_hub(self, hub, *args):
         return hub.cli(*args)

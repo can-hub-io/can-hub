@@ -100,6 +100,8 @@ static void dispatchEvent(const struct epoll_event *event);
 static void corkQuic(void);
 static void uncorkQuic(void);
 static void dispatchStreamSlotEvent(const struct epoll_event *event);
+static bool wantsIdentity(int argc, char **argv);
+static int32_t showIdentity(int argc, char **argv);
 
 int main(int argc, char **argv)
 {
@@ -114,6 +116,10 @@ int main(int argc, char **argv)
     }
 
     Log_InitFromArgs("can-hub", argc, argv);
+
+    if (wantsIdentity(argc, argv)) {
+        return showIdentity(argc, argv);
+    }
 
     if (!parseArguments(argc, argv)) {
         printUsage(stderr, argv[0]);
@@ -182,7 +188,10 @@ static void printUsage(FILE *stream, const char *program)
         ", tcp://127.0.0.1:" HUB_DEFAULT_PLAIN_TCP_PORT_TEXT ", unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n"
         "       bind-ip defaults to 0.0.0.0 (tcp: 127.0.0.1); explicit --listen replaces the network\n"
         "       defaults; --require-known-peers rejects agents whose fingerprint is not pinned"
-        " and clients no ACL names; TLS identity auto-generated\n",
+        " and clients no ACL names; TLS identity auto-generated\n"
+        "       %s --show-identity [--cert <pem>] [--state-dir <path>]   print this hub's TLS fingerprint,"
+        " what agents and clients pass as --hub-fingerprint\n",
+        program,
         program
     );
 }
@@ -627,4 +636,49 @@ static void dispatchStreamSlotEvent(const struct epoll_event *event)
     if (event->events & EPOLLIN) {
         TcpServerTransport_OnSlotReadable(transport, slot);
     }
+}
+
+static bool wantsIdentity(int argc, char **argv)
+{
+    int32_t i;
+
+    for(i=1; i<argc; i++) {
+        if (strcmp(argv[i], "--show-identity") == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static int32_t showIdentity(int argc, char **argv)
+{
+    char fingerprint[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
+    const char *certificate = NULL;
+    const char *state_directory_override = NULL;
+    int32_t i;
+
+    for(i=1; i<argc; i++) {
+        if (strcmp(argv[i], "--cert") == 0 && i + 1 < argc) {
+            certificate = argv[++i];
+        } else if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
+            state_directory_override = argv[++i];
+        }
+    }
+
+    if (certificate == NULL) {
+        if (!resolveStateDirectory(state_directory_override) || !loadIdentity()) {
+            LOG_ERROR("could not load or create TLS identity");
+            return 1;
+        }
+        certificate = identity_certificate_path;
+    }
+    if (!TlsIdentity_FingerprintOfFile(certificate, fingerprint)) {
+        LOG_ERROR("could not read the identity fingerprint");
+        return 1;
+    }
+
+    printf("%s\n", fingerprint);
+
+    return 0;
 }

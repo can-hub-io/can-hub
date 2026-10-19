@@ -7,6 +7,7 @@ clients open them, the hub routes frames and serves the admin plane.
 can-hub [--listen <scheme>://[<bind-ip>:]<port>] ...
         [--cert <pem> --key <pem>] [--state-dir <path>]
         [--require-known-peers]
+can-hub --show-identity [--cert <pem>] [--state-dir <path>]
 ```
 
 ## Listeners
@@ -69,6 +70,9 @@ names. `can-hub-cli pending` lists what was turned away. Enrollment flow in
   name→fingerprint pins and client ACLs. No external services.
 - State dir: `/var/lib/can-hub`, falling back to `~/.local/state/can-hub`
   when not writable; `--state-dir` overrides.
+- `--show-identity` prints the hub's fingerprint, what agents and clients
+  pass as `--hub-fingerprint`. Use the same `--state-dir` (or `--cert`) the
+  hub runs with.
 
 ## Counters
 

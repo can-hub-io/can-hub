@@ -48,6 +48,11 @@ class CanHub:
     def peers(self):
         return parse_peers(self.cli("peers").stdout)
 
+    def identity(self) -> str:
+        result = self.server.exec(binary("can-hub"), "--show-identity",
+                                  "--state-dir", self.config.state_dir)
+        return result.stdout.strip()
+
     def clients(self):
         return parse_clients(self.cli("clients").stdout)
 

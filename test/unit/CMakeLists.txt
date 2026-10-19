@@ -204,6 +204,12 @@ add_unit_test(test_message_framer
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
 
+add_unit_test(test_pin_store
+    SOURCES
+        platform/test_pin_store.cpp
+        ${ROOT_SRC_DIR}/platform/linux/shared/pin_store.c
+)
+
 add_unit_test(test_tls_channel
     SOURCES
         platform/test_tls_channel.cpp

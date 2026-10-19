@@ -5,7 +5,7 @@ remote buses into the tools you already use (socketcand clients, the whole
 SocketCAN ecosystem via `attach`).
 
 ```
-can-hub-client [--connect <url>] [--state-dir <path>] <command>
+can-hub-client [--connect <url>] [--state-dir <path>] [--hub-fingerprint <hex>] <command>
 can-hub-client --show-identity [--state-dir <path>]
 ```
 
@@ -13,7 +13,9 @@ can-hub-client --show-identity [--state-dir <path>]
 or `unix://path`; omitted, it uses the hub's local unix socket
 (`/run/can-hub/hub.sock`). On tls/quic the client has its own TLS identity
 (generated on first use, `--show-identity` prints its fingerprint for
-[ACLs](security.md#client-acls)) and pins the hub on first contact.
+[ACLs](security.md#client-acls)) and pins the hub on first contact. A hub
+reached under another address keeps its pin; `--hub-fingerprint` accepts that
+hub only, with no first contact ([security](security.md#pinning-the-hub)).
 
 Interfaces are addressed by the numeric id from `list` or by namespaced name
 `agent/iface`. Hub-side denials print as `hub error <code>: <detail>`.

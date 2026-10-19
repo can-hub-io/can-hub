@@ -470,6 +470,7 @@ static bool initTransport(CanHubSession *self, const char *host, const char *por
         quic_config.key_path = self->identity_key_path;
         quic_config.pin_store_path = self->known_hubs_path;
         quic_config.pin_key = self->pin_key;
+        quic_config.pin_policy = kPIN_POLICY_ANY_HUB;
         quic_config.pinned_fingerprint = (self->hub_fingerprint[0] != '\0') ? self->hub_fingerprint : NULL;
         if (!QuicClientTransport_Init(&self->quic_transport, host, port_text, events, &quic_config)) {
             return false;
@@ -483,6 +484,7 @@ static bool initTransport(CanHubSession *self, const char *host, const char *por
         tls_config.key_path = self->identity_key_path;
         tls_config.pin_store_path = self->known_hubs_path;
         tls_config.pin_key = self->pin_key;
+        tls_config.pin_policy = kPIN_POLICY_ANY_HUB;
         tls_config.pinned_fingerprint = (self->hub_fingerprint[0] != '\0') ? self->hub_fingerprint : NULL;
         if (!TlsClientTransport_Init(&self->tls_transport, host, port_text, events, &tls_config)) {
             return false;
@@ -506,8 +508,7 @@ static bool prepareSecurityMaterial(CanHubSession *self, const CanHubConnectConf
     }
 
     if (config->hub_fingerprint != NULL) {
-        snprintf(self->hub_fingerprint, sizeof(self->hub_fingerprint), "%s", config->hub_fingerprint);
-        return true;
+        return PinStore_ParseFingerprint(config->hub_fingerprint, self->hub_fingerprint);
     }
 
     if (self->state_directory[0] == '\0'
@@ -515,7 +516,7 @@ static bool prepareSecurityMaterial(CanHubSession *self, const CanHubConnectConf
         return false;
     }
     snprintf(self->known_hubs_path, sizeof(self->known_hubs_path), "%s/%s", self->state_directory, KNOWN_HUBS_FILE);
-    snprintf(self->pin_key, sizeof(self->pin_key), "%s:%s", host, port_text);
+    PinStore_HubKey(host, port_text, self->pin_key, sizeof(self->pin_key));
 
     return true;
 }

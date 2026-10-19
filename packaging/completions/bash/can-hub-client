@@ -37,10 +37,10 @@ _can_hub_client()
     _init_completion || return
 
     local commands="list dump send attach socketcand show configure"
-    local flags="--connect --state-dir --no-echo --no-beacon --listen --show-identity"
+    local flags="--connect --state-dir --hub-fingerprint --no-echo --no-beacon --listen --show-identity"
 
     case $prev in
-        --connect | --state-dir | --listen)
+        --connect | --state-dir | --hub-fingerprint | --listen)
             return
             ;;
     esac
@@ -52,7 +52,7 @@ _can_hub_client()
     local verb="" i verb_index=0
     for ((i = 1; i < cword; i++)); do
         case ${words[i]} in
-            --connect | --state-dir | --listen) ((i++)) ;;
+            --connect | --state-dir | --hub-fingerprint | --listen) ((i++)) ;;
             -*) ;;
             *) verb=${words[i]}; verb_index=i; break ;;
         esac

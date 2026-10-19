@@ -112,7 +112,8 @@ static bool attachVerifier(QuicClientSecurity *self, const QuicClientSecurityCon
             &self->profile.context,
             QuicConnection_PeerCertificateOfSession,
             config->pin_store_path,
-            config->pin_key
+            config->pin_key,
+            config->pin_policy
         );
         return true;
     }
