@@ -21,6 +21,7 @@ typedef struct {
     bool suppress_echo;
     bool can_write;
     bool reliable;
+    bool error_frames;
     uint32_t interface_id;
     uint8_t channel;
     uint8_t filter_count;
@@ -41,6 +42,7 @@ typedef struct {
     bool suppress_echo;
     bool can_write;
     bool reliable;
+    bool error_frames;
     const char *agent_name;
     const char *interface_name;
 } ChannelOpenRequest;

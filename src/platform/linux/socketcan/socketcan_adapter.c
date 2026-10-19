@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <linux/can.h>
+#include <linux/can/error.h>
 #include <linux/can/raw.h>
 #include <net/if.h>
 #include <sys/ioctl.h>
@@ -71,6 +72,20 @@ CanPort *SocketCanAdapter_Port(SocketCanAdapter *self)
 void SocketCanAdapter_SetPaceRate(SocketCanAdapter *self, uint32_t pace_rate)
 {
     self->pace_rate_override = pace_rate;
+}
+
+bool SocketCanAdapter_ReceiveErrorFrames(SocketCanAdapter *self)
+{
+    uint32_t error_mask = CAN_ERR_MASK;
+    uint8_t i;
+
+    for(i=0; i<self->interface_count; i++) {
+        if (setsockopt(self->can_fds[i], SOL_CAN_RAW, CAN_RAW_ERR_FILTER, &error_mask, sizeof(error_mask)) < 0) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 int32_t SocketCanAdapter_Fd(const SocketCanAdapter *self, uint8_t interface_index)

@@ -128,6 +128,7 @@ static void clientOnError(void *context, uint16_t code, const char *detail);
 static void clientOnDisconnected(void *context);
 static void printListReply(const ListReplyMessage *reply);
 static void printFrame(const FrameMessage *frame);
+static uint32_t printedCanId(const FrameMessage *frame);
 static int32_t runEventLoop(void);
 
 int main(int argc, char **argv)
@@ -196,7 +197,7 @@ int main(int argc, char **argv)
 static void printUsage(FILE *stream, const char *program)
 {
     fprintf(stream, "usage: %s [--connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>|unix://<path>]\n", program);
-    fprintf(stream, "       [--state-dir <path>] [--name <label>] list | dump [--no-echo] [--reliable] <interface> [<id>[:<mask>] ...]\n");
+    fprintf(stream, "       [--state-dir <path>] [--name <label>] list | dump [--no-echo] [--reliable] [--error-frames] <interface> [<id>[:<mask>] ...]\n");
     fprintf(stream, "       | send <interface> <frame>   (cansend syntax: 123#DEADBEEF, 123##1DEADBEEF, 123#R)\n");
     fprintf(stream, "       | socketcand [--listen [<bind-ip>:]<port>] [--no-beacon]\n");
     fprintf(stream, "                                           local socketcand server (default 127.0.0.1:" SOCKETCAND_DEFAULT_PORT_TEXT ")\n");
@@ -226,6 +227,8 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
             open_flags |= OPEN_FLAG_SUPPRESS_OWN_ECHO;
         } else if (strcmp(argv[i], "--reliable") == 0) {
             open_flags |= OPEN_FLAG_RELIABLE;
+        } else if (strcmp(argv[i], "--error-frames") == 0) {
+            open_flags |= OPEN_FLAG_ERROR_FRAMES;
         } else if (strcmp(argv[i], "--no-beacon") == 0) {
             beacon_enabled = false;
         } else if (strcmp(argv[i], "--listen") == 0 && i + 1 < argc) {
@@ -534,7 +537,7 @@ static void printFrame(const FrameMessage *frame)
         "(%llu.%06llu) %03X [%u] ",
         (unsigned long long)(frame->timestamp_us / 1000000),
         (unsigned long long)(frame->timestamp_us % 1000000),
-        frame->can_id & FRAME_CAN_ID_MASK,
+        printedCanId(frame),
         frame->payload_length
     );
     for(i=0; i<frame->payload_length; i++) {
@@ -542,6 +545,15 @@ static void printFrame(const FrameMessage *frame)
     }
     printf("\n");
     fflush(stdout);
+}
+
+static uint32_t printedCanId(const FrameMessage *frame)
+{
+    if (frame->can_id & FRAME_CAN_ID_FLAG_ERR) {
+        return frame->can_id;
+    }
+
+    return frame->can_id & FRAME_CAN_ID_MASK;
 }
 
 static int32_t runEventLoop(void)

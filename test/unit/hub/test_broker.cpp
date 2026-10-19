@@ -737,6 +737,34 @@ describe("broker", []() {
             expect(routed.payload).toEqual(frame.payload);
         });
 
+        it("forwards an agent error frame only to the channel that asked for it", []() {
+            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 1);
+            uint8_t error_channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, OPEN_FLAG_ERROR_FRAMES);
+            FrameMessage frame = { FRAME_CAN_ID_FLAG_ERR | 0x004, 1000, 1, 8, 0, 0, { 0 } };
+            FrameMessage routed = { 0 };
+            MessageHeader header;
+            uint8_t encoded[128];
+            size_t encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+
+            events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
+            MessageHeader_Decode(&header, transport.frame_log[0], transport.frame_sizes[0]);
+            FrameMessage_Decode(&routed, transport.frame_log[0] + MESSAGE_HEADER_SIZE, header.length);
+
+            expect(transport.frame_count).toBe(1);
+            expect(routed.channel).toBe(error_channel);
+            expect(routed.can_id).toBe((uint32_t)(FRAME_CAN_ID_FLAG_ERR | 0x004));
+        });
+
+        it("drops a client error frame instead of injecting it", []() {
+            FrameMessage frame = { FRAME_CAN_ID_FLAG_ERR | 0x004, 2000, client_channel, 8, 0, 0, { 0 } };
+            uint8_t encoded[128];
+            size_t encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+
+            events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
+
+            expect(transport.frame_count).toBe(0);
+        });
+
         it("forwards a client frame to the owning agent with its channel", []() {
             FrameMessage frame = { 0x456, 2000, client_channel, 1, 0, 0, { 0x55 } };
             FrameMessage routed;

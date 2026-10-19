@@ -371,7 +371,7 @@ static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame)
         forwarded_route_flags = frame->route_flags & (FRAME_ROUTE_FLAG_BRIDGED | FRAME_ROUTE_FLAG_ECHO);
         echo_originator_peer_id = echoOriginatorPeerId(self, peer, frame->route_flags);
     } else {
-        if (!ClientSession_CanWrite(&peer->session, frame->channel)) {
+        if (!ClientSession_CanWrite(&peer->session, frame->channel) || (frame->can_id & FRAME_CAN_ID_FLAG_ERR)) {
             self->metrics.frames_dropped++;
             return true;
         }
@@ -559,6 +559,7 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
     request.suppress_echo = (open.flags & OPEN_FLAG_SUPPRESS_OWN_ECHO) != 0;
     request.can_write = can_write;
     request.reliable = reliable;
+    request.error_frames = (open.flags & OPEN_FLAG_ERROR_FRAMES) != 0;
     request.agent_name = entry->agent_name;
     request.interface_name = entry->interface_name;
     if (ClientSession_OpenInterface(&peer->session, &request, &ack.channel)) {

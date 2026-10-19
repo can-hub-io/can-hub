@@ -16,6 +16,7 @@
 #define OPEN_FLAG_SUPPRESS_OWN_ECHO (1u << 0)
 #define OPEN_FLAG_WANT_WRITE (1u << 1)
 #define OPEN_FLAG_RELIABLE (1u << 2)
+#define OPEN_FLAG_ERROR_FRAMES (1u << 3)
 
 typedef struct {
     uint32_t interface_id;

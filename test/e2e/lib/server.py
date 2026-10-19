@@ -13,6 +13,7 @@ from .process import Process
 from .shell import Result, netns_argv, run
 
 CANDUMP_RECEIVE_BUFFER_BYTES = 4 * 1024 * 1024
+CANDUMP_ALL_ERRORS = "#FFFFFFFF"
 CANFD_MTU = 72
 
 
@@ -59,7 +60,9 @@ class Server:
             argv += ["-I", can_id]
         return self.exec(*argv, background=True, log_name="cangen")
 
-    def candump(self, *interfaces: str, log_name: str = "candump") -> Process:
+    def candump(self, *interfaces: str, log_name: str = "candump", error_frames: bool = False) -> Process:
+        if error_frames:
+            interfaces = tuple(f"{interface},{CANDUMP_ALL_ERRORS}" for interface in interfaces)
         return self.exec("candump", "-L", "-r", str(CANDUMP_RECEIVE_BUFFER_BYTES), *interfaces,
                          background=True, log_name=log_name)
 
