@@ -38,6 +38,7 @@ describe("channel_map", []() {
         bool found;
 
         ChannelMap_AssignFromAck(&map, &ack, ack.interface_count);
+
         found = ChannelMap_InterfaceForChannel(&map, 9, &interface_index);
 
         expect(found).toBe(true);
@@ -83,6 +84,7 @@ describe("channel_map", []() {
         bool channel_found;
 
         ChannelMap_AssignFromAck(&map, &ack, ack.interface_count);
+
         interface_found = ChannelMap_ChannelForInterface(&map, 1, &channel);
         channel_found = ChannelMap_InterfaceForChannel(&map, 42, &interface_index);
 

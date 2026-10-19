@@ -28,6 +28,7 @@ describe("egress_shaper", []() {
 
         EgressShaper_Init(&shaper, 0, 1000, 1000);
         EgressShaper_TryConsume(&shaper, 1000);
+
         EgressShaper_Refill(&shaper, 500000);
 
         expect(EgressShaper_TryConsume(&shaper, 500)).toBe(true);
@@ -39,6 +40,7 @@ describe("egress_shaper", []() {
 
         EgressShaper_Init(&shaper, 0, 1000, 1000);
         EgressShaper_TryConsume(&shaper, 1000);
+
         EgressShaper_Refill(&shaper, 10000000);
 
         expect(EgressShaper_TryConsume(&shaper, 1000)).toBe(true);
@@ -50,6 +52,7 @@ describe("egress_shaper", []() {
 
         EgressShaper_Init(&shaper, 0, 1000, 10000);
         EgressShaper_TryConsume(&shaper, 10000);
+
         EgressShaper_Refill(&shaper, 1500);
         EgressShaper_Refill(&shaper, 3000);
 
@@ -71,6 +74,7 @@ describe("egress_shaper", []() {
         EgressShaper shaper;
 
         EgressShaper_Init(&shaper, 0, 0, 1000);
+
         EgressShaper_SetRate(&shaper, 1000);
 
         expect(EgressShaper_TryConsume(&shaper, 1000)).toBe(true);

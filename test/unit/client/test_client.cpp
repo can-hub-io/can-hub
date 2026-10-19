@@ -75,6 +75,7 @@ describe("client", []() {
 
         Client_SetName(&client, "bridge");
         Client_SetName(&client, NULL);
+
         connect();
         decodeSentHello(0, &hello);
 
@@ -93,6 +94,7 @@ describe("client", []() {
         ListMessage list;
 
         Client_RequestList(&client, 0);
+
         connect();
         decodeSentList(1, &list);
 
@@ -104,6 +106,7 @@ describe("client", []() {
     it("emits list replies to the consumer", []() {
         Client_RequestList(&client, 0);
         connect();
+
         feedListReply(0, "truck42", "can0", TEST_INTERFACE_ID);
 
         expect(list_reply_count).toBe(1);
@@ -115,6 +118,7 @@ describe("client", []() {
         OpenMessage open;
 
         Client_OpenById(&client, TEST_INTERFACE_ID, OPEN_FLAG_WANT_WRITE);
+
         connect();
         decodeSentOpen(1, &open);
 
@@ -126,6 +130,7 @@ describe("client", []() {
     it("reports the channel and enters open on OPEN_ACK ok", []() {
         Client_OpenById(&client, TEST_INTERFACE_ID, 0);
         connect();
+
         feedOpenAck(OPEN_STATUS_OK, 5);
 
         expect(open_result_count).toBe(1);
@@ -138,6 +143,7 @@ describe("client", []() {
     it("reports a rejected open and returns to ready", []() {
         Client_OpenById(&client, TEST_INTERFACE_ID, 0);
         connect();
+
         feedOpenAck(OPEN_STATUS_REJECTED, 0);
 
         expect(open_result_count).toBe(1);
@@ -150,6 +156,7 @@ describe("client", []() {
 
         Client_OpenByName(&client, "truck42/can0", 0);
         connect();
+
         feedListReply(0, "truck42", "can0", TEST_INTERFACE_ID);
         decodeSentOpen(2, &open);
 
@@ -158,23 +165,33 @@ describe("client", []() {
         expect(open.interface_id).toBe((uint32_t)TEST_INTERFACE_ID);
     });
 
-    it("paginates LIST until the name is found", []() {
+    it("asks for the next LIST page while the name is not found", []() {
         ListMessage second_page;
 
         Client_OpenByName(&client, "truck42/can1", 0);
         connect();
+
         feedListReply(LIST_REPLY_FLAG_MORE, "truck42", "can0", 5);
         decodeSentList(2, &second_page);
+
+        expect(second_page.offset).toBe((uint16_t)1);
+    });
+
+    it("opens the name it finds on a later LIST page", []() {
+        Client_OpenByName(&client, "truck42/can1", 0);
+        connect();
+        feedListReply(LIST_REPLY_FLAG_MORE, "truck42", "can0", 5);
+
         feedListReply(0, "truck42", "can1", TEST_INTERFACE_ID);
         feedOpenAck(OPEN_STATUS_OK, 3);
 
-        expect(second_page.offset).toBe((uint16_t)1);
         expect(Client_State(&client)).toBe((uint8_t)kCLIENT_OPEN);
     });
 
     it("reports not-found when resolution exhausts the catalogue", []() {
         Client_OpenByName(&client, "truck42/can9", 0);
         connect();
+
         feedListReply(0, "truck42", "can0", TEST_INTERFACE_ID);
 
         expect(error_count).toBe(1);
@@ -190,6 +207,7 @@ describe("client", []() {
         Client_SetFilters(&client, &filter, 1);
         Client_OpenById(&client, TEST_INTERFACE_ID, 0);
         connect();
+
         feedOpenAck(OPEN_STATUS_OK, 5);
         decodeSentSubscribe(2, &subscribe);
 
@@ -210,6 +228,7 @@ describe("client", []() {
         frame.can_id = 0x321;
         frame.payload_length = 1;
         frame.payload[0] = 0xBE;
+
         Client_SendFrame(&client, &frame, 0);
         decodeSentFrame(&sent);
 
@@ -232,6 +251,7 @@ describe("client", []() {
         frame.can_id = 0x321;
         frame.payload_length = 64;
         frame.frame_flags = FRAME_FLAG_FD;
+
         for(i=0; i<16; i++) {
             if (Client_SendFrame(&client, &frame, 1000) == kCLIENT_SEND_RATE_LIMITED) {
                 rate_limited++;
@@ -257,6 +277,7 @@ describe("client", []() {
         frame.can_id = 0x321;
         frame.payload_length = 64;
         frame.frame_flags = FRAME_FLAG_FD;
+
         for(i=0; i<16; i++) {
             Client_SendFrame(&client, &frame, 1000);
         }
@@ -293,6 +314,7 @@ describe("client", []() {
         Client_OpenById(&client, TEST_INTERFACE_ID, 0);
         connect();
         feedOpenAck(OPEN_STATUS_OK, 5);
+
         feedHubFrame(5, 0x123, 0xDE);
 
         expect(frame_count).toBe(1);
@@ -302,6 +324,7 @@ describe("client", []() {
 
     it("drops hub frames before the channel is open", []() {
         connect();
+
         feedHubFrame(5, 0x123, 0xDE);
 
         expect(frame_count).toBe(0);
@@ -309,6 +332,7 @@ describe("client", []() {
 
     it("emits hub errors to the consumer", []() {
         connect();
+
         feedHubError(2, "role rejected");
 
         expect(error_count).toBe(1);
@@ -357,6 +381,7 @@ describe("client", []() {
 
     it("emits disconnect and returns to disconnected", []() {
         connect();
+
         hub_events.on_disconnected(hub_events.context, 2000);
 
         expect(disconnect_count).toBe(1);

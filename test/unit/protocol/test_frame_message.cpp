@@ -77,6 +77,7 @@ describe("frame_message", []() {
 
         encoded_size = FrameMessage_Encode(&frame, buffer, sizeof(buffer));
         truncated_size = encoded_size - MESSAGE_HEADER_SIZE - 1;
+
         decoded_ok = FrameMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, truncated_size);
 
         expect(decoded_ok).toBe(false);

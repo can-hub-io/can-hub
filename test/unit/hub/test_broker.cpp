@@ -301,6 +301,7 @@ describe("broker", []() {
         it("displaces a ghost agent when the same fingerprint reconnects", []() {
             registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
             HubTransportPortMock_Reset(&transport);
+
             registerAgentWithFingerprint(AGENT_PEER + 1, TRUCK_FINGERPRINT);
 
             expect(registerAckStatus()).toBe(REGISTER_STATUS_OK);
@@ -311,6 +312,7 @@ describe("broker", []() {
         it("rejects a same-name reconnect with a different fingerprint", []() {
             registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
             HubTransportPortMock_Reset(&transport);
+
             registerAgentWithFingerprint(AGENT_PEER + 1, OTHER_FINGERPRINT);
 
             expect(registerAckStatus()).toBe(1);
@@ -321,6 +323,7 @@ describe("broker", []() {
         it("displaces a plaintext ghost when the agent reconnects from the same host", []() {
             registerPlaintextAgentFrom(AGENT_PEER, "203.0.113.7");
             HubTransportPortMock_Reset(&transport);
+
             registerPlaintextAgentFrom(AGENT_PEER + 1, "203.0.113.7");
 
             expect(registerAckStatus()).toBe(REGISTER_STATUS_OK);
@@ -331,6 +334,7 @@ describe("broker", []() {
         it("rejects a plaintext same-name agent from another host", []() {
             registerPlaintextAgentFrom(AGENT_PEER, "203.0.113.7");
             HubTransportPortMock_Reset(&transport);
+
             registerPlaintextAgentFrom(AGENT_PEER + 1, "198.51.100.9");
 
             expect(registerAckStatus()).toBe(1);
@@ -424,6 +428,7 @@ describe("broker", []() {
             registerAgentWithFingerprint(AGENT_PEER + 1, OTHER_FINGERPRINT);
             HubTransportPortMock_Reset(&transport);
             BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
+
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
             lastReply(&reply, AdminPeersReplyMessage_Decode);
 
@@ -479,6 +484,7 @@ describe("broker", []() {
 
             registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
             connectClientWithFingerprint(CLIENT_PEER, OTHER_FINGERPRINT);
+
             listRejected(&reply);
 
             expect(reply.count).toBe((uint8_t)2);
@@ -493,6 +499,7 @@ describe("broker", []() {
 
             registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
             IdentityStoreMock_Preload(&identity_store, "truck42", TRUCK_FINGERPRINT);
+
             registerAgentWithFingerprint(AGENT_PEER + 1, TRUCK_FINGERPRINT);
             listRejected(&reply);
 
@@ -512,6 +519,7 @@ describe("broker", []() {
             AdminRejectedReplyMessage reply;
 
             IdentityStoreMock_Preload(&identity_store, "truck42", TRUCK_FINGERPRINT);
+
             registerAgentWithFingerprint(AGENT_PEER, OTHER_FINGERPRINT);
             listRejected(&reply);
 
@@ -749,7 +757,9 @@ describe("broker", []() {
         });
 
         it("closes the client leg and then the agent leg on CLOSE", []() {
-            uint8_t channel = openReliableChannel(CLIENT_PEER);
+            uint8_t channel;
+
+            channel = openReliableChannel(CLIENT_PEER);
 
             closeChannel(CLIENT_PEER, channel);
 
@@ -762,9 +772,11 @@ describe("broker", []() {
         });
 
         it("closes the client leg of a reliable channel closed while its agent is away", []() {
-            uint8_t channel = openReliableChannel(CLIENT_PEER);
+            uint8_t channel;
 
+            channel = openReliableChannel(CLIENT_PEER);
             events.on_peer_disconnected(events.context, AGENT_PEER, 0);
+
             closeChannel(CLIENT_PEER, channel);
 
             expect(transport.channel_mode_count).toBe((uint32_t)1);
@@ -788,7 +800,9 @@ describe("broker", []() {
         });
 
         it("leaves channel modes alone when a lossy channel closes", []() {
-            uint8_t channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, reliable_interface_id, 0);
+            uint8_t channel;
+
+            channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, reliable_interface_id, 0);
 
             closeChannel(CLIENT_PEER, channel);
 
@@ -828,13 +842,16 @@ describe("broker", []() {
         });
 
         it("forwards an agent error frame only to the channel that asked for it", []() {
-            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 1);
-            uint8_t error_channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, OPEN_FLAG_ERROR_FRAMES);
             FrameMessage frame = { FRAME_CAN_ID_FLAG_ERR | 0x004, 1000, 1, 8, 0, 0, { 0 } };
             FrameMessage routed = { 0 };
             MessageHeader header;
             uint8_t encoded[128];
             size_t encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+            uint32_t interface_id;
+            uint8_t error_channel;
+
+            interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 1);
+            error_channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, OPEN_FLAG_ERROR_FRAMES);
 
             events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
             MessageHeader_Decode(&header, transport.frame_log[0], transport.frame_sizes[0]);
@@ -887,6 +904,7 @@ describe("broker", []() {
             size_t encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
 
             events.on_peer_disconnected(events.context, AGENT_PEER, 0);
+
             events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
 
             expect(transport.frame_count).toBe(0);
@@ -904,11 +922,11 @@ describe("broker", []() {
             HubTransportPortMock_Reset(&transport);
 
             events.on_peer_frame(events.context, AGENT_PEER, encoded, encoded_size);
+            MessageHeader_Decode(&header, transport.frame_log[0], transport.frame_sizes[0]);
+            FrameMessage_Decode(&routed, transport.frame_log[0] + MESSAGE_HEADER_SIZE, header.length);
 
             expect(transport.frame_count).toBe(1);
             expect(transport.frame_peers[0]).toBe((uint32_t)CLIENT_PEER);
-            MessageHeader_Decode(&header, transport.frame_log[0], transport.frame_sizes[0]);
-            FrameMessage_Decode(&routed, transport.frame_log[0] + MESSAGE_HEADER_SIZE, header.length);
             expect(routed.channel).toBe(client_channel);
         });
 
@@ -1024,18 +1042,17 @@ describe("broker", []() {
             agent_status.entries[0].channel = 1;
             agent_status.entries[0].advertised_rate = 250000;
             encoded_size = InterfaceStatusMessage_Encode(&agent_status, encoded, sizeof(encoded));
-            sendControlFrom(AGENT_PEER, encoded, encoded_size);
 
+            sendControlFrom(AGENT_PEER, encoded, encoded_size);
             for(i=0; i<transport.control_count; i++) {
                 MessageHeader_Decode(&header, transport.control_log[i], transport.control_sizes[i]);
                 if (transport.control_peers[i] == (uint32_t)CLIENT_PEER && header.type == kMESSAGE_TYPE_INTERFACE_STATUS) {
                     found = i;
+                    InterfaceStatusMessage_Decode(&relayed, transport.control_log[i] + MESSAGE_HEADER_SIZE, header.length);
                 }
             }
 
             expect(found >= 0).toBe(true);
-            MessageHeader_Decode(&header, transport.control_log[found], transport.control_sizes[found]);
-            InterfaceStatusMessage_Decode(&relayed, transport.control_log[found] + MESSAGE_HEADER_SIZE, header.length);
             expect(relayed.entries[0].channel).toBe(client_channel);
             expect(relayed.entries[0].advertised_rate).toBe((uint32_t)200000);
         });
@@ -1123,6 +1140,7 @@ describe("broker", []() {
 
         it("admits another host while one host is at its share", []() {
             connectPeersAwaitingHelloFrom(CROWDED_HOST, PER_HOST_SHARE);
+
             connectPeerFrom(AWAITING_PEER_BASE + PER_HOST_SHARE, QUIET_HOST);
 
             expect(transport.close_count).toBe(0);
@@ -1131,6 +1149,7 @@ describe("broker", []() {
         it("frees the host's share once a peer says hello", []() {
             connectPeersAwaitingHelloFrom(CROWDED_HOST, PER_HOST_SHARE);
             sayHelloAsClient(AWAITING_PEER_BASE);
+
             connectPeerFrom(AWAITING_PEER_BASE + PER_HOST_SHARE, CROWDED_HOST);
 
             expect(transport.close_count).toBe(0);
@@ -1145,6 +1164,7 @@ describe("broker", []() {
 
         it("always admits a local peer", []() {
             connectPeersAwaitingHelloFromDistinctHosts(HUB_WIDE_SHARE);
+
             connectPeer(ADMIN_PEER, NULL, true);
 
             expect(transport.close_count).toBe(0);
@@ -1170,6 +1190,7 @@ describe("broker", []() {
             size_t encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
 
             connectPeer(999, NULL, false);
+
             sendControlFrom(999, encoded, encoded_size);
             error_type = lastReply(&error, ErrorMessage_Decode);
 
@@ -1283,6 +1304,7 @@ describe("broker", []() {
                 BrokerDriver_ConnectClient(&events, CLIENT_PEER + 100 + i);
             }
             HubTransportPortMock_Reset(&transport);
+
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
             reply_type = lastReply(&reply, AdminPeersReplyMessage_Decode);
 
@@ -1303,24 +1325,22 @@ describe("broker", []() {
             connectPeer(777, NULL, false);
             encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
             sendControlFrom(777, encoded, encoded_size);
-
             encoded_size = AdminPeersMessage_Encode(&request, encoded, sizeof(encoded));
+
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
             lastReply(&reply, AdminPeersReplyMessage_Decode);
-
             for(i=0; i<reply.count; i++) {
                 if (reply.entries[i].peer_id == 777) {
                     named = reply.entries[i].agent_name;
                 }
             }
+
             expect((const char *)named).toBe("dashboard");
         });
 
         it("kicks a registered agent by name", []() {
             AdminKickMessage kick = { "truck42" };
             AdminKickReplyMessage reply;
-            ListMessage list = { 0 };
-            ListReplyMessage catalogue;
             uint8_t reply_type;
             uint8_t encoded[256];
             size_t encoded_size = AdminKickMessage_Encode(&kick, encoded, sizeof(encoded));
@@ -1332,10 +1352,21 @@ describe("broker", []() {
             expect(reply.status).toBe(ADMIN_STATUS_OK);
             expect(transport.close_count).toBe(1);
             expect(transport.last_closed_peer).toBe((uint32_t)AGENT_PEER);
+        });
 
+        it("drops the interfaces of a kicked agent from the catalogue", []() {
+            AdminKickMessage kick = { "truck42" };
+            ListMessage list = { 0 };
+            ListReplyMessage catalogue;
+            uint8_t encoded[256];
+            size_t encoded_size = AdminKickMessage_Encode(&kick, encoded, sizeof(encoded));
+
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
             encoded_size = ListMessage_Encode(&list, encoded, sizeof(encoded));
+
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
             lastReply(&catalogue, ListReplyMessage_Decode);
+
             expect(catalogue.count).toBe(0);
         });
 
@@ -1446,10 +1477,13 @@ describe("broker", []() {
             uint8_t reply_type;
             uint8_t encoded[256];
             size_t encoded_size;
-            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
-            uint8_t channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, 0);
+            uint32_t interface_id;
+            uint8_t channel;
 
+            interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, 0);
             encoded_size = AdminClientsMessage_Encode(&request, encoded, sizeof(encoded));
+
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
             reply_type = lastReply(&reply, AdminClientsReplyMessage_Decode);
 
@@ -1485,13 +1519,16 @@ describe("broker", []() {
         });
 
         it("stamps injections towards the agent with the sender token", []() {
-            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
-            uint8_t channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, 0);
-            FrameMessage frame = { 0x456, 2000, channel, 1, 0, 0, { 0x55 } };
+            FrameMessage frame = { 0x456, 2000, 0, 1, 0, 0, { 0x55 } };
             FrameMessage forwarded;
             MessageHeader header;
             uint8_t encoded[128];
-            size_t encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+            size_t encoded_size;
+            uint32_t interface_id;
+
+            interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            frame.channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, 0);
+            encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
 
             events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
             MessageHeader_Decode(&header, transport.frame_log[0], transport.frame_sizes[0]);
@@ -1750,6 +1787,7 @@ describe("broker", []() {
 
             connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
             HubTransportPortMock_Reset(&transport);
+
             events.on_peer_control(events.context, CLIENT_PEER, encoded, encoded_size, 0);
             MessageHeader_Decode(&header, transport.control_log[0], transport.control_sizes[0]);
             OpenAckMessage_Decode(&ack, transport.control_log[0] + MESSAGE_HEADER_SIZE, header.length);
@@ -1762,6 +1800,7 @@ describe("broker", []() {
 
             AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true, true);
             connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
+
             channel = openInterface(CLIENT_PEER, can0_interface_id, OPEN_FLAG_WANT_WRITE);
 
             expect(channel != 0xFF).toBe(true);
@@ -1777,6 +1816,7 @@ describe("broker", []() {
             AuthorizationMock_Grant(&authorization, "*", "truck42", "can0", false, false);
             connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
             HubTransportPortMock_Reset(&transport);
+
             events.on_peer_control(events.context, CLIENT_PEER, encoded, encoded_size, 0);
             MessageHeader_Decode(&header, transport.control_log[0], transport.control_sizes[0]);
             OpenAckMessage_Decode(&ack, transport.control_log[0] + MESSAGE_HEADER_SIZE, header.length);
@@ -1788,6 +1828,7 @@ describe("broker", []() {
             uint8_t channel;
 
             connectClientWithFingerprint(CLIENT_PEER, TRUCK_FINGERPRINT);
+
             channel = openInterface(CLIENT_PEER, can0_interface_id, 0);
 
             expect(channel != 0xFF).toBe(true);
@@ -1842,6 +1883,7 @@ describe("broker", []() {
             size_t encoded_size = AdminAclRevokeMessage_Encode(&request, encoded, sizeof(encoded));
 
             AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true, true);
+
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
             lastReply(&reply, AdminAclRevokeReplyMessage_Decode);
 
@@ -1857,6 +1899,7 @@ describe("broker", []() {
             size_t encoded_size = AdminAclListMessage_Encode(&request, encoded, sizeof(encoded));
 
             AuthorizationMock_Grant(&authorization, TRUCK_FINGERPRINT, "truck42", "can0", true, true);
+
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
             reply_type = lastReply(&reply, AdminAclListReplyMessage_Decode);
 
@@ -1922,7 +1965,28 @@ describe("broker", []() {
             client_channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, 0);
         });
 
-        it("queues a refused frame and drains it when the peer is writable", []() {
+        it("queues a frame the transport refused instead of counting it dropped", []() {
+            FrameMessage frame = { 0x123, 1000, 0, 1, 0, 0, { 0x55 } };
+            AdminPeersMessage request = { 0 };
+            AdminPeersReplyMessage reply;
+            uint8_t frame_encoded[128];
+            uint8_t encoded[128];
+            size_t frame_size = FrameMessage_Encode(&frame, frame_encoded, sizeof(frame_encoded));
+            size_t encoded_size = AdminPeersMessage_Encode(&request, encoded, sizeof(encoded));
+
+            events.on_peer_frame(events.context, AGENT_PEER, frame_encoded, frame_size);
+            transport.frame_result = false;
+
+            events.on_peer_frame(events.context, AGENT_PEER, frame_encoded, frame_size);
+            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
+            lastReply(&reply, AdminPeersReplyMessage_Decode);
+
+            expect(reply.entries[1].peer_id).toBe((uint32_t)CLIENT_PEER);
+            expect(reply.entries[1].frames_forwarded).toBe((uint32_t)1);
+            expect(reply.entries[1].frames_dropped).toBe((uint32_t)0);
+        });
+
+        it("drains the queued frame once the peer is writable", []() {
             FrameMessage frame = { 0x123, 1000, 0, 1, 0, 0, { 0x55 } };
             AdminPeersMessage request = { 0 };
             AdminPeersReplyMessage reply;
@@ -1934,14 +1998,8 @@ describe("broker", []() {
             events.on_peer_frame(events.context, AGENT_PEER, frame_encoded, frame_size);
             transport.frame_result = false;
             events.on_peer_frame(events.context, AGENT_PEER, frame_encoded, frame_size);
-            sendControlFrom(ADMIN_PEER, encoded, encoded_size);
-            lastReply(&reply, AdminPeersReplyMessage_Decode);
-
-            expect(reply.entries[1].peer_id).toBe((uint32_t)CLIENT_PEER);
-            expect(reply.entries[1].frames_forwarded).toBe((uint32_t)1);
-            expect(reply.entries[1].frames_dropped).toBe((uint32_t)0);
-
             transport.frame_result = true;
+
             events.on_peer_writable(events.context, CLIENT_PEER);
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
             lastReply(&reply, AdminPeersReplyMessage_Decode);
@@ -1961,6 +2019,7 @@ describe("broker", []() {
             int i;
 
             transport.frame_result = false;
+
             for(i=0; i<EGRESS_QUEUE_CHANNEL_CAP + 5; i++) {
                 events.on_peer_frame(events.context, AGENT_PEER, frame_encoded, frame_size);
             }
@@ -1987,6 +2046,7 @@ describe("broker", []() {
             transport.frame_result = true;
             routable_size = FrameMessage_Encode(&unroutable, frame_encoded, sizeof(frame_encoded));
             events.on_peer_frame(events.context, AGENT_PEER, frame_encoded, routable_size);
+
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
             lastReply(&reply, AdminStatusReplyMessage_Decode);
 
@@ -2002,6 +2062,7 @@ describe("broker", []() {
             size_t encoded_size = AdminStatusMessage_Encode(encoded, sizeof(encoded));
 
             transport.receive_overflows = 70;
+
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
             lastReply(&reply, AdminStatusReplyMessage_Decode);
 
@@ -2019,6 +2080,7 @@ describe("broker", []() {
             size_t encoded_size = AdminInterfacesMessage_Encode(&request, encoded, sizeof(encoded));
 
             events.on_peer_frame(events.context, AGENT_PEER, frame_encoded, frame_size);
+
             sendControlFrom(ADMIN_PEER, encoded, encoded_size);
             reply_type = lastReply(&reply, AdminInterfacesReplyMessage_Decode);
 
@@ -2037,10 +2099,20 @@ describe("broker", []() {
             size_t encoded_size = ListMessage_Encode(&list, encoded, sizeof(encoded));
 
             transport.control_result = false;
+
             sendControlFrom(CLIENT_PEER, encoded, encoded_size);
 
             expect(transport.close_count).toBe(1);
             expect(transport.last_closed_peer).toBe((uint32_t)CLIENT_PEER);
+        });
+
+        it("keeps an unknown peer until its hello deadline", []() {
+            connectPeer(999, NULL, false);
+
+            Broker_Tick(&broker, 0);
+            Broker_Tick(&broker, 4999999);
+
+            expect(transport.close_count).toBe(0);
         });
 
         it("evicts an unknown peer that misses the hello deadline telling it why", []() {
@@ -2048,13 +2120,11 @@ describe("broker", []() {
             uint8_t error_type;
 
             connectPeer(999, NULL, false);
-
             Broker_Tick(&broker, 0);
-            Broker_Tick(&broker, 4999999);
-            expect(transport.close_count).toBe(0);
 
             Broker_Tick(&broker, 5000000);
             error_type = lastReply(&error, ErrorMessage_Decode);
+
             expect(error_type).toBe(kMESSAGE_TYPE_ERROR);
             expect(error.code).toBe(kERROR_CODE_HELLO_TIMEOUT);
             expect(transport.close_count).toBe(1);

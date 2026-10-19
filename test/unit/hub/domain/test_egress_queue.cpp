@@ -56,6 +56,7 @@ describe("egress_queue", []() {
         for(i=0; i<EGRESS_QUEUE_CHANNEL_CAP; i++) {
             pushChannel(5, (uint8_t)i);
         }
+
         result = EgressQueue_Push(&queue, 5, payload, sizeof(payload), 0, &evicted);
 
         expect(result == kEGRESS_PUSH_EVICTED_SELF).toBe(true);
@@ -74,13 +75,21 @@ describe("egress_queue", []() {
             fillChannel(channel, EGRESS_QUEUE_CHANNEL_CAP);
         }
 
-        expect(queue.used).toBe((uint16_t)EGRESS_QUEUE_SLOTS_MAX);
-
         result = EgressQueue_Push(&queue, 3, payload, sizeof(payload), 0, &evicted);
 
         expect(result == kEGRESS_PUSH_EVICTED_OTHER).toBe(true);
         expect(EgressQueue_ChannelPending(&queue, 3)).toBe(true);
         expect(evicted != 3).toBe(true);
+    });
+
+    it("fills the pool with every channel at its cap", []() {
+        uint8_t channel;
+
+        for(channel=10; channel<10 + EGRESS_QUEUE_SLOTS_MAX / EGRESS_QUEUE_CHANNEL_CAP; channel++) {
+            fillChannel(channel, EGRESS_QUEUE_CHANNEL_CAP);
+        }
+
+        expect(queue.used).toBe((uint16_t)EGRESS_QUEUE_SLOTS_MAX);
     });
 
     it("round-robins across channels with pending frames", []() {

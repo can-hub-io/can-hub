@@ -37,6 +37,7 @@ describe("message_framer", []() {
 
         MessageFramer_Push(&framer, message, size);
         MessageFramer_Push(&framer, message, size);
+
         MessageFramer_Drain(&framer, &sink);
 
         expect(drained_count).toBe((size_t)2);

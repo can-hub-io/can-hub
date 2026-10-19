@@ -31,6 +31,7 @@ describe("interface_name", []() {
 
         addEntry("truck42", "can0", 3);
         addEntry("truck42", "can1", 9);
+
         found = InterfaceName_Find(&reply, "truck42/can1", &interface_id);
 
         expect(found).toBe(true);
@@ -42,6 +43,7 @@ describe("interface_name", []() {
         bool found;
 
         addEntry("truck4", "can0", 3);
+
         found = InterfaceName_Find(&reply, "truck42/can0", &interface_id);
 
         expect(found).toBe(false);
@@ -52,6 +54,7 @@ describe("interface_name", []() {
         bool found;
 
         addEntry("truck42", "can0", 3);
+
         found = InterfaceName_Find(&reply, "truck42/can9", &interface_id);
 
         expect(found).toBe(false);

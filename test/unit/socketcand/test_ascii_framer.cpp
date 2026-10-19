@@ -45,14 +45,17 @@ describe("ascii_framer", []() {
         char command[64];
         size_t length = 0;
         bool first;
+        bool first_match;
         bool second;
+        bool second_match;
         bool third;
 
         pushText("< open can0 >< rawmode >");
+
         first = AsciiFramer_Next(&framer, command, sizeof(command), &length);
-        bool first_match = strstr(command, "open can0") != nullptr;
+        first_match = strstr(command, "open can0") != nullptr;
         second = AsciiFramer_Next(&framer, command, sizeof(command), &length);
-        bool second_match = strstr(command, "rawmode") != nullptr;
+        second_match = strstr(command, "rawmode") != nullptr;
         third = AsciiFramer_Next(&framer, command, sizeof(command), &length);
 
         expect(first).toBe(true);
@@ -62,20 +65,32 @@ describe("ascii_framer", []() {
         expect(third).toBe(false);
     });
 
-    it("waits for the closing bracket across pushes", []() {
+    it("holds a command back until its closing bracket", []() {
         char command[64];
         size_t length = 0;
-        bool incomplete;
-        bool complete;
+        bool found;
 
         pushText("< raw");
-        incomplete = AsciiFramer_Next(&framer, command, sizeof(command), &length);
-        pushText("mode >");
-        complete = AsciiFramer_Next(&framer, command, sizeof(command), &length);
-        bool match = strstr(command, "rawmode") != nullptr;
 
-        expect(incomplete).toBe(false);
-        expect(complete).toBe(true);
+        found = AsciiFramer_Next(&framer, command, sizeof(command), &length);
+
+        expect(found).toBe(false);
+    });
+
+    it("completes a command across pushes", []() {
+        char command[64];
+        size_t length = 0;
+        bool found;
+        bool match;
+
+        pushText("< raw");
+        AsciiFramer_Next(&framer, command, sizeof(command), &length);
+
+        pushText("mode >");
+        found = AsciiFramer_Next(&framer, command, sizeof(command), &length);
+        match = strstr(command, "rawmode") != nullptr;
+
+        expect(found).toBe(true);
         expect(match).toBe(true);
     });
 
@@ -83,10 +98,12 @@ describe("ascii_framer", []() {
         char command[64];
         size_t length = 0;
         bool found;
+        bool match;
 
         pushText("garbage< echo >");
+
         found = AsciiFramer_Next(&framer, command, sizeof(command), &length);
-        bool match = strstr(command, "echo") != nullptr;
+        match = strstr(command, "echo") != nullptr;
 
         expect(found).toBe(true);
         expect(match).toBe(true);
@@ -94,7 +111,9 @@ describe("ascii_framer", []() {
 
     it("push takes only what fits the buffer", []() {
         std::string oversized(ASCII_FRAMER_BUFFER_SIZE + 100, 'x');
-        size_t taken = pushText(oversized.c_str());
+        size_t taken;
+
+        taken = pushText(oversized.c_str());
 
         expect(taken).toBe((size_t)ASCII_FRAMER_BUFFER_SIZE);
     });
@@ -102,22 +121,26 @@ describe("ascii_framer", []() {
     it("extracts every command from a burst larger than the buffer", []() {
         std::string burst;
         size_t want = 0;
+        size_t extracted;
+
         while (burst.size() < (size_t)ASCII_FRAMER_BUFFER_SIZE * 8) {
             burst += "< send 123 8 0011223344556677 >";
             want++;
         }
 
-        size_t extracted = drainAll((const uint8_t *)burst.data(), burst.size());
+        extracted = drainAll((const uint8_t *)burst.data(), burst.size());
 
         expect(extracted).toBe(want);
     });
 
     it("drops a single command longer than the buffer and recovers", []() {
         std::string stream = "< ";
+        size_t extracted;
+
         stream += std::string(ASCII_FRAMER_BUFFER_SIZE + 100, 'A');
         stream += " >< echo >";
 
-        size_t extracted = drainAll((const uint8_t *)stream.data(), stream.size());
+        extracted = drainAll((const uint8_t *)stream.data(), stream.size());
 
         expect(extracted).toBe((size_t)1);
     });

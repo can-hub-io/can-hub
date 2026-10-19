@@ -23,18 +23,27 @@ describe("quic_datagram_backlog", []() {
         expect(QuicDatagramBacklog_IsEmpty(&backlog)).toBe(true);
     });
 
-    it("returns a pushed datagram by value then empties on pop", []() {
+    it("returns a pushed datagram by value", []() {
         const uint8_t payload[] = { 0xDE, 0xAD, 0xBE, 0xEF };
         const uint8_t *front;
         size_t size = 0;
+        bool pushed;
 
-        expect(QuicDatagramBacklog_Push(&backlog, payload, sizeof(payload))).toBe(true);
+        pushed = QuicDatagramBacklog_Push(&backlog, payload, sizeof(payload));
         front = QuicDatagramBacklog_Front(&backlog, &size);
 
+        expect(pushed).toBe(true);
         expect(size).toBe((size_t)sizeof(payload));
         expect(memcmp(front, payload, sizeof(payload)) == 0).toBe(true);
+    });
+
+    it("empties once its only datagram is popped", []() {
+        const uint8_t payload[] = { 0xDE, 0xAD, 0xBE, 0xEF };
+
+        QuicDatagramBacklog_Push(&backlog, payload, sizeof(payload));
 
         QuicDatagramBacklog_PopFront(&backlog);
+
         expect(QuicDatagramBacklog_IsEmpty(&backlog)).toBe(true);
     });
 
@@ -46,15 +55,23 @@ describe("quic_datagram_backlog", []() {
     });
 
     it("preserves fifo order", []() {
+        uint8_t first;
+        uint8_t second;
+        uint8_t third;
+
         pushByte(1);
         pushByte(2);
         pushByte(3);
 
-        expect((int)frontByte()).toBe(1);
+        first = frontByte();
         QuicDatagramBacklog_PopFront(&backlog);
-        expect((int)frontByte()).toBe(2);
+        second = frontByte();
         QuicDatagramBacklog_PopFront(&backlog);
-        expect((int)frontByte()).toBe(3);
+        third = frontByte();
+
+        expect((int)first).toBe(1);
+        expect((int)second).toBe(2);
+        expect((int)third).toBe(3);
     });
 
     it("rejects a push once full", []() {

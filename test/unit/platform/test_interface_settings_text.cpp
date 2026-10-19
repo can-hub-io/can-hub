@@ -107,6 +107,7 @@ describe("interface_settings_text", []() {
 
     it("prints one line per field the settings carry", []() {
         parse({ "bitrate", "500000", "sample-point", "0.875", "fd", "on", "up" });
+
         print();
 
         expect(printed).toBe(std::string(

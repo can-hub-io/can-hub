@@ -59,6 +59,7 @@ describe("interface_catalogue", []() {
         reply.count = 1;
         setEntry(&reply.entries[0], 7, "truck42", "can0");
         InterfaceCatalogue_AppendPage(&catalogue, &reply);
+
         InterfaceCatalogue_Reset(&catalogue);
 
         expect(InterfaceCatalogue_Count(&catalogue)).toBe(0);

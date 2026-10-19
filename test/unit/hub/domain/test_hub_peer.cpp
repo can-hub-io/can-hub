@@ -26,23 +26,41 @@ describe("hub_peer", []() {
         memset(&peer, 0, sizeof(peer));
     });
 
-    it("adopts the agent and client roles regardless of locality", []() {
-        expect(HubPeer_AdoptRole(&peer, kPEER_ROLE_AGENT)).toBe(true);
+    it("adopts the agent role on a remote peer", []() {
+        bool adopted;
+
+        adopted = HubPeer_AdoptRole(&peer, kPEER_ROLE_AGENT);
+
+        expect(adopted).toBe(true);
         expect(peer.role).toBe(kHUB_PEER_ROLE_AGENT);
+    });
 
-        peer.role = kHUB_PEER_ROLE_UNKNOWN;
+    it("adopts the client role on a remote peer", []() {
+        bool adopted;
 
-        expect(HubPeer_AdoptRole(&peer, kPEER_ROLE_CLIENT)).toBe(true);
+        adopted = HubPeer_AdoptRole(&peer, kPEER_ROLE_CLIENT);
+
+        expect(adopted).toBe(true);
         expect(peer.role).toBe(kHUB_PEER_ROLE_CLIENT);
     });
 
-    it("adopts the admin role only for local peers", []() {
-        expect(HubPeer_AdoptRole(&peer, kPEER_ROLE_ADMIN)).toBe(false);
+    it("refuses the admin role to a remote peer", []() {
+        bool adopted;
+
+        adopted = HubPeer_AdoptRole(&peer, kPEER_ROLE_ADMIN);
+
+        expect(adopted).toBe(false);
         expect(peer.role).toBe(kHUB_PEER_ROLE_UNKNOWN);
+    });
+
+    it("adopts the admin role on a local peer", []() {
+        bool adopted;
 
         peer.local = true;
 
-        expect(HubPeer_AdoptRole(&peer, kPEER_ROLE_ADMIN)).toBe(true);
+        adopted = HubPeer_AdoptRole(&peer, kPEER_ROLE_ADMIN);
+
+        expect(adopted).toBe(true);
         expect(peer.role).toBe(kHUB_PEER_ROLE_ADMIN);
     });
 

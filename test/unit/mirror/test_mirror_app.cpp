@@ -46,6 +46,7 @@ describe("mirror_app", []() {
 
         MirrorApp_SetName(&mirror, "bridge");
         MirrorApp_SetName(&mirror, NULL);
+
         connect();
         decodeSentHello(0, &hello);
 
@@ -76,6 +77,7 @@ describe("mirror_app", []() {
         OpenMessage retry;
 
         connect();
+
         feedOpenAck(OPEN_STATUS_WRITE_DENIED, 0);
         decodeSentOpen(2, &retry);
 
@@ -84,6 +86,7 @@ describe("mirror_app", []() {
 
     it("enters pumping with write granted on OPEN_ACK ok", []() {
         connect();
+
         feedOpenAck(OPEN_STATUS_OK, 5);
 
         expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_PUMPING);
@@ -93,6 +96,7 @@ describe("mirror_app", []() {
     it("writes hub frames to the local can port while pumping", []() {
         connect();
         feedOpenAck(OPEN_STATUS_OK, 5);
+
         feedHubFrame(5, 0x123, 0xDE, 0xAD);
 
         expect(can.write_count).toBe(1);
@@ -107,6 +111,7 @@ describe("mirror_app", []() {
 
         connect();
         feedOpenAck(OPEN_STATUS_OK, 5);
+
         sendLocalFrame(0x321, 0xBE);
         decodeSentFrame(&frame);
 
@@ -117,22 +122,31 @@ describe("mirror_app", []() {
 
     it("drops local can frames before the channel is open", []() {
         connect();
+
         sendLocalFrame(0x321, 0xBE);
 
         expect(hub.frame_count).toBe(0);
     });
 
-    it("downgrades to read-only when write is denied", []() {
-        OpenMessage open;
+    it("retries the open without want-write when write is denied", []() {
+        OpenMessage retry;
 
         connect();
+
         feedOpenAck(OPEN_STATUS_WRITE_DENIED, 0);
-        decodeSentOpen(2, &open);
-        feedOpenAck(OPEN_STATUS_OK, 6);
-        sendLocalFrame(0x321, 0xBE);
+        decodeSentOpen(2, &retry);
 
         expect(hub.control_count).toBe(3);
-        expect((open.flags & OPEN_FLAG_WANT_WRITE) != 0).toBe(false);
+        expect((retry.flags & OPEN_FLAG_WANT_WRITE) != 0).toBe(false);
+    });
+
+    it("pumps read-only after the retry and keeps local frames off the hub", []() {
+        connect();
+        feedOpenAck(OPEN_STATUS_WRITE_DENIED, 0);
+        feedOpenAck(OPEN_STATUS_OK, 6);
+
+        sendLocalFrame(0x321, 0xBE);
+
         expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_PUMPING);
         expect(MirrorApp_CanWrite(&mirror)).toBe(false);
         expect(hub.frame_count).toBe(0);
@@ -143,12 +157,21 @@ describe("mirror_app", []() {
 
         MirrorApp_SetReliable(&mirror, true);
         connect();
+
         feedOpenAck(OPEN_STATUS_WRITE_DENIED, 0);
         decodeSentOpen(2, &retry);
-        feedOpenAck(OPEN_STATUS_OK, 6);
 
         expect((retry.flags & OPEN_FLAG_WANT_WRITE) != 0).toBe(false);
         expect((retry.flags & OPEN_FLAG_RELIABLE) != 0).toBe(true);
+    });
+
+    it("makes the read-only channel reliable once it opens", []() {
+        MirrorApp_SetReliable(&mirror, true);
+        connect();
+        feedOpenAck(OPEN_STATUS_WRITE_DENIED, 0);
+
+        feedOpenAck(OPEN_STATUS_OK, 6);
+
         expect(hub.channel_mode_count).toBe((uint32_t)1);
         expect(hub.last_channel_mode_channel).toBe((uint8_t)6);
         expect(hub.last_channel_mode_reliable).toBe(true);
@@ -156,6 +179,7 @@ describe("mirror_app", []() {
 
     it("fails on a rejected open", []() {
         connect();
+
         feedOpenAck(OPEN_STATUS_REJECTED, 0);
 
         expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_FAILED);
@@ -164,6 +188,7 @@ describe("mirror_app", []() {
     it("fails on disconnect", []() {
         connect();
         feedOpenAck(OPEN_STATUS_OK, 5);
+
         hub_events.on_disconnected(hub_events.context, 2000);
 
         expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_FAILED);
@@ -171,6 +196,7 @@ describe("mirror_app", []() {
 
     it("fails on a hub error message", []() {
         connect();
+
         feedHubError();
 
         expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_FAILED);
@@ -180,20 +206,28 @@ describe("mirror_app", []() {
         OpenMessage open;
 
         connectByName("truck42/can0");
+
         feedListReply(0, "truck42", "can0", TEST_INTERFACE_ID);
         decodeSentOpen(2, &open);
 
         expect(sentMessageType(1)).toBe((uint8_t)kMESSAGE_TYPE_LIST);
         expect(sentMessageType(2)).toBe((uint8_t)kMESSAGE_TYPE_OPEN);
         expect(open.interface_id).toBe((uint32_t)TEST_INTERFACE_ID);
+    });
+
+    it("pumps once the open of a resolved name succeeds", []() {
+        connectByName("truck42/can0");
+        feedListReply(0, "truck42", "can0", TEST_INTERFACE_ID);
 
         feedOpenAck(OPEN_STATUS_OK, 5);
+
         expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_PUMPING);
     });
 
     it("paginates LIST until the name is found", []() {
         connectByName("truck42/can1");
         feedListReply(LIST_REPLY_FLAG_MORE, "truck42", "can0", 5);
+
         feedListReply(0, "truck42", "can1", TEST_INTERFACE_ID);
         feedOpenAck(OPEN_STATUS_OK, 5);
 
@@ -202,6 +236,7 @@ describe("mirror_app", []() {
 
     it("fails when the namespaced name is not in the catalogue", []() {
         connectByName("truck42/can9");
+
         feedListReply(0, "truck42", "can0", TEST_INTERFACE_ID);
 
         expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_FAILED);
