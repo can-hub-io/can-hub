@@ -105,6 +105,8 @@ _can_hub_cli()
                 COMPREPLY=($(compgen -W "add delete join leave" -- "$cur"))
             elif [[ $sub == "join" || $sub == "leave" ]] && (( cword == i + 3 )); then
                 COMPREPLY=($(compgen -W "$(_can_hub_cli_dynamic interfaces)" -- "$cur"))
+            elif [[ $sub == "join" ]] && (( cword == i + 4 )); then
+                COMPREPLY=($(compgen -W "both sends receives" -- "$cur"))
             fi
             ;;
         interface)

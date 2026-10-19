@@ -65,6 +65,7 @@ static void addBridge(const char *source, const char *destination, uint8_t id_co
 static void deleteBridge(const char *source, const char *destination);
 static void addGroup(const char *name, uint8_t id_count, const uint32_t *ids);
 static void joinGroup(const char *name, const char *member);
+static void joinGroupAs(const char *name, const char *member, uint8_t direction, uint8_t id_count, const uint32_t *ids);
 static void leaveGroup(const char *name, const char *member);
 static void deleteGroup(const char *name);
 static void listGroups(void);
@@ -89,7 +90,7 @@ static bool storeRemove(void *context, const BridgeEndpoint *source, const Bridg
 static bool storeLoad(void *context, uint16_t position, BridgeRoute *route);
 static bool storeSaveGroup(void *context, const BridgeGroup *group);
 static bool storeRemoveGroup(void *context, const char *name);
-static bool storeAddMember(void *context, const char *name, const BridgeEndpoint *member);
+static bool storeAddMember(void *context, const char *name, const BridgeGroupMember *member);
 static bool storeRemoveMember(void *context, const char *name, const BridgeEndpoint *member);
 static bool storeLoadGroup(void *context, uint16_t position, BridgeGroup *group);
 static BridgeGroup *storedGroup(BridgeStoreMock *self, const char *name);
@@ -572,6 +573,75 @@ describe("broker bus bridges", []() {
             expect(framesTo(BUS_PEER)).toBe(1);
         });
     });
+
+    describe("group member roles", []() {
+        beforeEach([]() {
+            resetStore();
+            startHub();
+            connectAgents();
+            connectLab();
+            addGroup("fleet", 0, NULL);
+            joinGroup("fleet", "truck42/can0");
+        });
+
+        it("feeds nothing from a member that only receives", []() {
+            joinGroupAs("fleet", "bus7/can0", ADMIN_GROUP_MEMBER_RECEIVES, 0, NULL);
+
+            frameFromAgent(BUS_PEER, BUS_CAN0_CHANNEL, PASSED_ID, 0);
+
+            expect(framesTo(TRUCK_PEER)).toBe(0);
+        });
+
+        it("feeds nothing into a member that only sends", []() {
+            joinGroupAs("fleet", "bus7/can0", ADMIN_GROUP_MEMBER_SENDS, 0, NULL);
+            joinGroup("fleet", "lab/can0");
+
+            frameFromAgent(TRUCK_PEER, TRUCK_CAN0_CHANNEL, PASSED_ID, 0);
+
+            expect(framesTo(BUS_PEER)).toBe(0);
+            expect(framesTo(LAB_PEER)).toBe(1);
+        });
+
+        it("feeds only the ids a member may send", []() {
+            const uint32_t ids[] = { PASSED_ID };
+
+            joinGroupAs("fleet", "bus7/can0", ADMIN_GROUP_MEMBER_BOTH, 1, ids);
+
+            frameFromAgent(BUS_PEER, BUS_CAN0_CHANNEL, FILTERED_ID, 0);
+            frameFromAgent(BUS_PEER, BUS_CAN0_CHANNEL, PASSED_ID, 0);
+            injected = lastFrameTo(TRUCK_PEER);
+
+            expect(framesTo(TRUCK_PEER)).toBe(1);
+            expect(injected.can_id).toBe((uint32_t)PASSED_ID);
+        });
+
+        it("lists the role and the ids of every member", []() {
+            const uint32_t ids[] = { PASSED_ID };
+
+            joinGroupAs("fleet", "bus7/can0", ADMIN_GROUP_MEMBER_SENDS, 1, ids);
+            listGroups();
+
+            expect(listed_group.entries[0].member_count).toBe(2);
+            expect(listed_group.entries[0].members[1].direction).toBe((uint8_t)ADMIN_GROUP_MEMBER_SENDS);
+            expect(listed_group.entries[0].members[1].filters[0].can_id).toBe((uint32_t)PASSED_ID);
+            expect(store.groups[0].members[1].direction).toBe((uint8_t)kBRIDGE_MEMBER_SENDS);
+        });
+
+        it("writes what a client sends into the group only into the members that receive", []() {
+            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, GROUP_INTERFACE_INDEX);
+            uint8_t channel;
+
+            joinGroupAs("fleet", "bus7/can0", ADMIN_GROUP_MEMBER_SENDS, 0, NULL);
+            BrokerDriver_ConnectClient(&events, CLIENT_PEER);
+            channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, OPEN_FLAG_WANT_WRITE);
+            HubTransportPortMock_Reset(&transport);
+
+            writeFromClient(CLIENT_PEER, channel, PASSED_ID);
+
+            expect(framesTo(TRUCK_PEER)).toBe(1);
+            expect(framesTo(BUS_PEER)).toBe(0);
+        });
+    });
 });
 
 /* ---------- private ---------- */
@@ -817,6 +887,25 @@ static void addGroup(const char *name, uint8_t id_count, const uint32_t *ids)
     sendAdmin(encoded, AdminGroupSetMessage_Encode(&request, encoded, sizeof(encoded)));
 }
 
+static void joinGroupAs(const char *name, const char *member, uint8_t direction, uint8_t id_count, const uint32_t *ids)
+{
+    AdminGroupMemberMessage request;
+    uint8_t encoded[ADMIN_REQUEST_BUFFER_SIZE];
+    uint8_t i;
+
+    memset(&request, 0, sizeof(request));
+    snprintf(request.name, sizeof(request.name), "%s", name);
+    endpointFrom(member, &request.member);
+    request.direction = direction;
+    request.filter_count = id_count;
+    for(i=0; i<id_count; i++) {
+        request.filters[i].can_id = ids[i];
+        request.filters[i].can_mask = EXACT_MASK;
+    }
+
+    sendAdmin(encoded, AdminGroupMemberMessage_Encode(kMESSAGE_TYPE_ADMIN_GROUP_JOIN, &request, encoded, sizeof(encoded)));
+}
+
 static void joinGroup(const char *name, const char *member)
 {
     AdminGroupMemberMessage request;
@@ -872,8 +961,8 @@ static void storeGroup(const char *name, const char *first, const char *second)
 
     memset(group, 0, sizeof(*group));
     snprintf(group->name, sizeof(group->name), "%s", name);
-    InterfaceName_Split(first, group->members[0].agent_name, group->members[0].interface_name);
-    InterfaceName_Split(second, group->members[1].agent_name, group->members[1].interface_name);
+    InterfaceName_Split(first, group->members[0].endpoint.agent_name, group->members[0].endpoint.interface_name);
+    InterfaceName_Split(second, group->members[1].endpoint.agent_name, group->members[1].endpoint.interface_name);
     group->member_count = 2;
 }
 
@@ -921,13 +1010,20 @@ static bool storeRemoveGroup(void *context, const char *name)
     return true;
 }
 
-static bool storeAddMember(void *context, const char *name, const BridgeEndpoint *member)
+static bool storeAddMember(void *context, const char *name, const BridgeGroupMember *member)
 {
     BridgeStoreMock *self = (BridgeStoreMock *)context;
     BridgeGroup *stored = storedGroup(self, name);
+    uint8_t i;
 
     if (stored == NULL) {
         return false;
+    }
+    for(i=0; i<stored->member_count; i++) {
+        if (BridgeEndpoint_Equals(&stored->members[i].endpoint, &member->endpoint)) {
+            stored->members[i] = *member;
+            return true;
+        }
     }
     stored->members[stored->member_count++] = *member;
 
@@ -944,7 +1040,7 @@ static bool storeRemoveMember(void *context, const char *name, const BridgeEndpo
         return false;
     }
     for(i=0; i<stored->member_count; i++) {
-        if (BridgeEndpoint_Equals(&stored->members[i], member)) {
+        if (BridgeEndpoint_Equals(&stored->members[i].endpoint, member)) {
             stored->members[i] = stored->members[--stored->member_count];
             return true;
         }

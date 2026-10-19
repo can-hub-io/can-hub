@@ -36,6 +36,40 @@ bool BridgeGroup_HasMember(const BridgeGroup *group, const BridgeEndpoint *membe
     return memberIndex(group, member, &index);
 }
 
+bool BridgeGroup_Carries(const BridgeGroup *group, const BridgeEndpoint *source, uint32_t can_id)
+{
+    const BridgeGroupMember *member;
+    uint8_t index;
+
+    if (!memberIndex(group, source, &index)) {
+        return false;
+    }
+
+    member = &group->members[index];
+    if (member->direction == kBRIDGE_MEMBER_RECEIVES) {
+        return false;
+    }
+    if (!BridgeFilters_Pass(member->filters, member->filter_count, can_id)) {
+        return false;
+    }
+
+    return BridgeFilters_Pass(group->filters, group->filter_count, can_id);
+}
+
+bool BridgeGroupMember_IsValid(const BridgeGroupMember *member)
+{
+    if (!BridgeEndpoint_IsNamed(&member->endpoint)) {
+        return false;
+    }
+
+    return member->direction < kBRIDGE_MEMBER_MAX && member->filter_count <= BRIDGE_MEMBER_FILTERS_MAX;
+}
+
+bool BridgeGroupMember_Receives(const BridgeGroupMember *member)
+{
+    return member->direction != kBRIDGE_MEMBER_SENDS;
+}
+
 void BridgeGroups_Reset(BridgeGroups *self)
 {
     memset(self, 0, sizeof(*self));
@@ -94,17 +128,19 @@ bool BridgeGroups_Remove(BridgeGroups *self, const char *name)
     return true;
 }
 
-uint8_t BridgeGroups_Join(BridgeGroups *self, const char *name, const BridgeEndpoint *member)
+uint8_t BridgeGroups_Join(BridgeGroups *self, const char *name, const BridgeGroupMember *member)
 {
     BridgeGroup *group;
+    uint8_t group_index;
     uint8_t index;
 
-    if (!findIndex(self, name, &index) || !BridgeEndpoint_IsNamed(member)) {
+    if (!findIndex(self, name, &group_index) || !BridgeGroupMember_IsValid(member)) {
         return kBRIDGE_GROUP_JOIN_UNKNOWN;
     }
 
-    group = &self->slots[index].group;
-    if (BridgeGroup_HasMember(group, member)) {
+    group = &self->slots[group_index].group;
+    if (memberIndex(group, &member->endpoint, &index)) {
+        group->members[index] = *member;
         return kBRIDGE_GROUP_JOIN_OK;
     }
     if (group->member_count == BRIDGE_GROUP_MEMBERS_MAX) {
@@ -238,7 +274,7 @@ static bool memberIndex(const BridgeGroup *group, const BridgeEndpoint *member, 
     uint8_t i;
 
     for(i=0; i<group->member_count; i++) {
-        if (BridgeEndpoint_Equals(&group->members[i], member)) {
+        if (BridgeEndpoint_Equals(&group->members[i].endpoint, member)) {
             *index = i;
             return true;
         }

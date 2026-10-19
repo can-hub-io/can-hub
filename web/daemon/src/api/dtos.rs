@@ -10,7 +10,7 @@ use crate::protocol::admin::{
     RejectedEntry, RejectionReason, Status, CTRLMODE_BERR_REPORTING, CTRLMODE_FD, CTRLMODE_LISTEN_ONLY,
     CTRLMODE_LOOPBACK, CTRLMODE_ONE_SHOT, CTRLMODE_TRIPLE_SAMPLING, SETTING_BITRATE, SETTING_CTRLMODE,
     SETTING_DATA_BITRATE, SETTING_DATA_SAMPLE_POINT, SETTING_LINK, SETTING_RESTART_MS, SETTING_SAMPLE_POINT,
-    SETTING_BIT_TIMING, SETTING_DATA_BIT_TIMING, SETTING_STATE, SETTING_TERMINATION, SETTING_TXQUEUELEN,
+    SETTING_BIT_TIMING, SETTING_DATA_BIT_TIMING, SETTING_STATE, SETTING_TERMINATION, SETTING_TXQUEUELEN, GROUP_MEMBER_RECEIVES, GROUP_MEMBER_SENDS,
 };
 
 /// Wire sample points are tenths of a percent; the API speaks fractions.
@@ -149,6 +149,12 @@ pub(crate) struct BridgeGroupNameBody {
 pub(crate) struct BridgeGroupMemberBody {
     pub name: String,
     pub member: BridgeEndpointDto,
+    /// "both" (default) | "sends" | "receives"; ignored on removal.
+    #[serde(default)]
+    pub direction: Option<String>,
+    /// What the member sends into the group, up to 8; ignored on removal.
+    #[serde(default)]
+    pub filters: Vec<CanFilterDto>,
 }
 
 #[derive(Serialize)]
@@ -157,6 +163,8 @@ pub(crate) struct BridgeGroupMemberDto {
     pub agent_name: String,
     pub interface_name: String,
     pub online: bool,
+    pub direction: &'static str,
+    pub filters: Vec<CanFilterDto>,
 }
 
 #[derive(Serialize)]
@@ -185,6 +193,12 @@ impl From<GroupEntry> for BridgeGroupDto {
                     agent_name: member.endpoint.agent_name,
                     interface_name: member.endpoint.interface_name,
                     online: member.online,
+                    direction: member_direction_name(member.direction),
+                    filters: member
+                        .filters
+                        .into_iter()
+                        .map(|filter| CanFilterDto { can_id: filter.can_id, can_mask: filter.can_mask })
+                        .collect(),
                 })
                 .collect(),
             forwarded: entry.forwarded,
@@ -697,6 +711,14 @@ fn rejection_reason_name(reason: RejectionReason) -> &'static str {
     match reason {
         RejectionReason::NotAllowed => "not-allowed",
         RejectionReason::FingerprintMismatch => "fingerprint-mismatch",
+    }
+}
+
+pub(crate) fn member_direction_name(direction: u8) -> &'static str {
+    match direction {
+        GROUP_MEMBER_SENDS => "sends",
+        GROUP_MEMBER_RECEIVES => "receives",
+        _ => "both",
     }
 }
 

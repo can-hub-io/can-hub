@@ -21,9 +21,17 @@ const BRIDGE_STATE_SOURCE_ONLINE: u8 = 0x01;
 const BRIDGE_STATE_DESTINATION_ONLINE: u8 = 0x02;
 
 const GROUP_NAME_SIZE: usize = 32;
-const GROUP_ENTRY_SIZE: usize = 2616;
-const GROUP_MEMBER_SIZE: usize = 152;
+const GROUP_ENTRY_SIZE: usize = 3640;
+const GROUP_MEMBER_SIZE: usize = 216;
 const GROUP_MEMBER_ONLINE: u8 = 0x01;
+
+/// Filters one group member carries at most.
+pub const GROUP_MEMBER_FILTERS_MAX: usize = 8;
+
+/// How a member takes part in its group (JOIN @180, LIST member @145).
+pub const GROUP_MEMBER_BOTH: u8 = 0;
+pub const GROUP_MEMBER_SENDS: u8 = 1;
+pub const GROUP_MEMBER_RECEIVES: u8 = 2;
 
 /// Members a bridge group holds at most.
 pub const GROUP_MEMBERS_MAX: usize = 16;
@@ -532,6 +540,8 @@ fn write_bridge_endpoints(out: &mut [u8], source: &BridgeEndpoint, destination: 
 pub struct GroupMember {
     pub endpoint: BridgeEndpoint,
     pub online: bool,
+    pub direction: u8,
+    pub filters: Vec<CanFilter>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -567,14 +577,30 @@ pub fn encode_group_delete(name: &str) -> [u8; 36] {
     out
 }
 
-/// ADMIN_GROUP_JOIN / ADMIN_GROUP_LEAVE (total 180): name[32] @4, member @36
-/// (agent_name[128] + interface_name[16]).
-pub fn encode_group_member(message_type: MessageType, name: &str, member: &BridgeEndpoint) -> [u8; 180] {
-    let mut out = [0u8; 180];
-    Header::write(&mut out, message_type, 0, 176);
+/// ADMIN_GROUP_JOIN / ADMIN_GROUP_LEAVE (total 248): name[32] @4, member @36
+/// (agent_name[128] + interface_name[16]), direction @180, filter_count @181,
+/// filters[8] @184. LEAVE ignores direction and filters; filters past the 8th
+/// are not sent.
+pub fn encode_group_member(
+    message_type: MessageType,
+    name: &str,
+    member: &BridgeEndpoint,
+    direction: u8,
+    filters: &[CanFilter],
+) -> [u8; 248] {
+    let mut out = [0u8; 248];
+    let sent = &filters[..filters.len().min(GROUP_MEMBER_FILTERS_MAX)];
+    Header::write(&mut out, message_type, 0, 244);
     write_fixed_str(&mut out, HEADER_SIZE, GROUP_NAME_SIZE, name);
     write_fixed_str(&mut out, HEADER_SIZE + 32, AGENT_NAME_SIZE, &member.agent_name);
     write_fixed_str(&mut out, HEADER_SIZE + 32 + AGENT_NAME_SIZE, INTERFACE_NAME_SIZE, &member.interface_name);
+    out[HEADER_SIZE + 176] = direction;
+    out[HEADER_SIZE + 177] = sent.len() as u8;
+    for (index, filter) in sent.iter().enumerate() {
+        let base = HEADER_SIZE + 180 + index * BRIDGE_FILTER_SIZE;
+        out[base..base + 4].copy_from_slice(&filter.can_id.to_le_bytes());
+        out[base + 4..base + 8].copy_from_slice(&filter.can_mask.to_le_bytes());
+    }
     out
 }
 
@@ -754,8 +780,9 @@ pub fn decode_bridge_list_reply(buffer: &[u8]) -> Result<Page<BridgeEntry>, Deco
 
 /// ADMIN_GROUP_LIST_REPLY (8 + count * 2616). Entry layout (entry-relative):
 /// name[32] @0, filter_count @32, member_count @33, filters[16] @36,
-/// forwarded u64 @168, dropped u64 @176, members[16] @184, each 152 bytes:
-/// endpoint @0, state @144 (bit 0 online).
+/// forwarded u64 @168, dropped u64 @176, members[16] @184, each 216 bytes:
+/// endpoint @0, state @144 (bit 0 online), direction @145, filter_count @146,
+/// filters[8] @148.
 pub fn decode_group_list_reply(buffer: &[u8]) -> Result<Page<GroupEntry>, DecodeError> {
     decode_page(buffer, MessageType::AdminGroupListReply, GROUP_ENTRY_SIZE, |entry| {
         let filter_count = (entry[32] as usize).min(BRIDGE_FILTERS_MAX);
@@ -771,9 +798,17 @@ pub fn decode_group_list_reply(buffer: &[u8]) -> Result<Page<GroupEntry>, Decode
             members: (0..member_count)
                 .map(|index| {
                     let base = 184 + index * GROUP_MEMBER_SIZE;
+                    let member_filter_count = (entry[base + 146] as usize).min(GROUP_MEMBER_FILTERS_MAX);
                     GroupMember {
                         endpoint: read_bridge_endpoint(entry, base),
                         online: entry[base + 144] & GROUP_MEMBER_ONLINE != 0,
+                        direction: entry[base + 145],
+                        filters: (0..member_filter_count)
+                            .map(|filter| CanFilter {
+                                can_id: read_u32(entry, base + 148 + filter * BRIDGE_FILTER_SIZE),
+                                can_mask: read_u32(entry, base + 152 + filter * BRIDGE_FILTER_SIZE),
+                            })
+                            .collect(),
                     }
                 })
                 .collect(),
@@ -1055,9 +1090,13 @@ mod tests {
     #[test]
     fn group_member_request_layout() {
         let member = BridgeEndpoint { agent_name: "truck42".into(), interface_name: "can0".into() };
-        let request = encode_group_member(MessageType::AdminGroupJoin, "fleet", &member);
+        let filters = [CanFilter { can_id: 0x100, can_mask: 0x7FF }];
+        let request = encode_group_member(MessageType::AdminGroupJoin, "fleet", &member, GROUP_MEMBER_SENDS, &filters);
         assert_eq!(request[0], MessageType::AdminGroupJoin as u8);
-        assert_eq!(read_u16(&request, 2), 176);
+        assert_eq!(read_u16(&request, 2), 244);
+        assert_eq!(request[180], GROUP_MEMBER_SENDS);
+        assert_eq!(request[181], 1);
+        assert_eq!(read_u32(&request, 184), 0x100);
         assert_eq!(read_fixed_str(&request, 4, GROUP_NAME_SIZE), "fleet");
         assert_eq!(read_fixed_str(&request, 36, AGENT_NAME_SIZE), "truck42");
         assert_eq!(read_fixed_str(&request, 36 + AGENT_NAME_SIZE, INTERFACE_NAME_SIZE), "can0");
@@ -1073,6 +1112,9 @@ mod tests {
         buffer[8 + 168..8 + 176].copy_from_slice(&7u64.to_le_bytes());
         write_fixed_str(&mut buffer, 8 + 184, AGENT_NAME_SIZE, "truck42");
         buffer[8 + 184 + 144] = GROUP_MEMBER_ONLINE;
+        buffer[8 + 184 + 145] = GROUP_MEMBER_RECEIVES;
+        buffer[8 + 184 + 146] = 1;
+        buffer[8 + 184 + 148..8 + 184 + 152].copy_from_slice(&0x321u32.to_le_bytes());
         write_fixed_str(&mut buffer, 8 + 184 + GROUP_MEMBER_SIZE, AGENT_NAME_SIZE, "lab");
         let page = decode_group_list_reply(&buffer).unwrap();
         let entry = &page.entries[0];
@@ -1080,6 +1122,8 @@ mod tests {
         assert_eq!(entry.forwarded, 7);
         assert_eq!(entry.members.len(), 2);
         assert!(entry.members[0].online);
+        assert_eq!(entry.members[0].direction, GROUP_MEMBER_RECEIVES);
+        assert_eq!(entry.members[0].filters[0].can_id, 0x321);
         assert_eq!(entry.members[1].endpoint.agent_name, "lab");
         assert!(!entry.members[1].online);
     }

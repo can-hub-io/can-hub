@@ -78,8 +78,12 @@ export interface Bridge {
   dropped: number
 }
 
+export type MemberDirection = 'both' | 'sends' | 'receives'
+
 export interface BridgeGroupMember extends BridgeEndpoint {
   online: boolean
+  direction: MemberDirection
+  filters: CanFilter[]
 }
 
 export interface BridgeGroup {
@@ -276,8 +280,8 @@ export const api = {
     send('/api/bridges/delete', 'POST', { source, destination }),
   bridgeGroupSet: (name: string, filters: CanFilter[]) => send('/api/bridge-groups', 'POST', { name, filters }),
   bridgeGroupDelete: (name: string) => send('/api/bridge-groups/delete', 'POST', { name }),
-  bridgeGroupJoin: (name: string, member: BridgeEndpoint) =>
-    send('/api/bridge-groups/members', 'POST', { name, member }),
+  bridgeGroupJoin: (name: string, member: BridgeEndpoint, direction: MemberDirection, filters: CanFilter[]) =>
+    send('/api/bridge-groups/members', 'POST', { name, member, direction, filters }),
   bridgeGroupLeave: (name: string, member: BridgeEndpoint) =>
     send('/api/bridge-groups/members/delete', 'POST', { name, member }),
   interfaceSettings: (agentName: string, interfaceName: string) =>

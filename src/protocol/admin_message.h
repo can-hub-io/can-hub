@@ -62,12 +62,13 @@
 #define ADMIN_GROUP_MEMBERS_MAX 16
 #define ADMIN_GROUP_SET_BODY_SIZE 164
 #define ADMIN_GROUP_DELETE_BODY_SIZE 32
-#define ADMIN_GROUP_MEMBER_BODY_SIZE 176
+#define ADMIN_GROUP_MEMBER_BODY_SIZE 244
+#define ADMIN_GROUP_MEMBER_FILTERS_MAX 8
 #define ADMIN_GROUP_REPLY_BODY_SIZE 4
 #define ADMIN_GROUP_LIST_BODY_SIZE 4
 #define ADMIN_GROUP_LIST_REPLY_FIXED_FIELDS_SIZE 4
 #define ADMIN_GROUP_LIST_REPLY_ENTRIES_MAX 1
-#define ADMIN_GROUP_LIST_REPLY_ENTRY_SIZE 2616
+#define ADMIN_GROUP_LIST_REPLY_ENTRY_SIZE 3640
 
 #define ADMIN_FINGERPRINT_HEX_SIZE 65
 #define ADMIN_REPLY_FLAG_MORE (1u << 0)
@@ -91,6 +92,10 @@
 #define ADMIN_BRIDGE_STATE_SOURCE_ONLINE (1u << 0)
 #define ADMIN_BRIDGE_STATE_DESTINATION_ONLINE (1u << 1)
 #define ADMIN_GROUP_MEMBER_ONLINE (1u << 0)
+
+#define ADMIN_GROUP_MEMBER_BOTH 0
+#define ADMIN_GROUP_MEMBER_SENDS 1
+#define ADMIN_GROUP_MEMBER_RECEIVES 2
 
 #define ADMIN_REJECTED_REASON_NOT_ALLOWED 0
 #define ADMIN_REJECTED_REASON_FINGERPRINT_MISMATCH 1
@@ -356,6 +361,9 @@ typedef struct {
 typedef struct {
     char name[ADMIN_GROUP_NAME_SIZE];
     AdminBridgeEndpoint member;
+    uint8_t direction;
+    uint8_t filter_count;
+    CanFilter filters[ADMIN_GROUP_MEMBER_FILTERS_MAX];
 } AdminGroupMemberMessage;
 
 typedef struct {
@@ -369,6 +377,9 @@ typedef struct {
 typedef struct {
     AdminBridgeEndpoint endpoint;
     uint8_t state;
+    uint8_t direction;
+    uint8_t filter_count;
+    CanFilter filters[ADMIN_GROUP_MEMBER_FILTERS_MAX];
 } AdminGroupMember;
 
 typedef struct {

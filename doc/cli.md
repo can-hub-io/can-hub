@@ -41,7 +41,8 @@ Noun-first grammar; an omitted verb lists.
 | `group` | bridge groups with their members, state and counters |
 | `group add <name> [<id>[:<mask>] ...]` | create a group of buses that behave as one, or replace its ids ([groups](hub.md#groups)) |
 | `group delete <name>` | drop a group |
-| `group join\|leave <name> <agent>/<iface>` | add a bus to a group, or remove it |
+| `group join <name> <agent>/<iface> [both\|sends\|receives] [<id>[:<mask>] ...]` | add a bus to a group or change it: `sends` only feeds the group, `receives` only gets it; ids (up to 8) limit what it sends |
+| `group leave <name> <agent>/<iface>` | remove a bus from a group |
 
 ## Interface settings
 

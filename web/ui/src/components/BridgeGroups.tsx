@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { api, type BridgeGroup, type Interface } from '../api'
+import { api, type BridgeGroup, type Interface, type MemberDirection } from '../api'
 import { useAction, usePolling } from '../hooks'
 import { endpointOf, filtersOf, nameOf, textOf } from '../lib/bridges'
 import { InterfaceNames } from './Bridges'
@@ -8,7 +8,16 @@ import { Button } from './ui/button'
 import { ConfirmButton } from './ui/confirm'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
 import { Input } from './ui/input'
+import { selectClass } from '../lib'
 import { Table, Tbody, Td, Th, Thead, Tr } from './ui/table'
+
+const MEMBER_FILTERS_MAX = 8
+
+const DIRECTION_LABELS: Record<MemberDirection, string> = {
+  both: 'sends and receives',
+  sends: 'only sends',
+  receives: 'only receives',
+}
 
 export function BridgeGroups({ interfaces }: { interfaces: Interface[] | null }) {
   const { data, error, refresh } = usePolling(api.bridgeGroups)
@@ -107,13 +116,19 @@ function MembersDialog({ group, interfaces, onChanged, onClose }: {
 }) {
   const action = useAction(onChanged)
   const [member, setMember] = useState('')
+  const [direction, setDirection] = useState<MemberDirection>('both')
+  const [ids, setIds] = useState('')
 
   const join = (event: React.FormEvent) => {
     event.preventDefault()
     const endpoint = endpointOf(member)
+    const filters = filtersOf(ids)
     if (!endpoint) return action.setError('Name the bus as agent/interface')
-    action.run(() => api.bridgeGroupJoin(group.name, endpoint), `${member} joined ${group.name}`)
+    if (typeof filters === 'string') return action.setError(filters)
+    if (filters.length > MEMBER_FILTERS_MAX) return action.setError(`A member takes at most ${MEMBER_FILTERS_MAX} ids`)
+    action.run(() => api.bridgeGroupJoin(group.name, endpoint, direction, filters), `${member} saved in ${group.name}`)
     setMember('')
+    setIds('')
   }
 
   return (
@@ -126,9 +141,11 @@ function MembersDialog({ group, interfaces, onChanged, onClose }: {
         <ul className="divide-y divide-gray-100 rounded-md border border-gray-200">
           {group.members.map((m) => (
             <li key={nameOf(m)} className="flex items-center justify-between px-3 py-2 text-sm">
-              <span className="flex items-center gap-2">
+              <span className="flex flex-wrap items-center gap-2">
                 {nameOf(m)}
                 <Badge variant={m.online ? 'success' : 'warning'}>{m.online ? 'online' : 'offline'}</Badge>
+                <Badge variant="secondary">{DIRECTION_LABELS[m.direction]}</Badge>
+                <span className="font-mono text-xs text-gray-500">{textOf(m.filters)}</span>
               </span>
               <Button
                 variant="outline"
@@ -142,17 +159,31 @@ function MembersDialog({ group, interfaces, onChanged, onClose }: {
           ))}
           {group.members.length === 0 && <li className="px-3 py-2 text-sm text-gray-500">No members yet.</li>}
         </ul>
-        <form className="flex gap-2" onSubmit={join}>
+        <form className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]" onSubmit={join}>
           <Input
-            className="flex-1"
             list="group-member-interfaces"
             placeholder="agent/iface"
             value={member}
             onChange={(e) => setMember(e.target.value)}
           />
+          <select
+            className={selectClass}
+            value={direction}
+            onChange={(e) => setDirection(e.target.value as MemberDirection)}
+          >
+            <option value="both">sends and receives</option>
+            <option value="sends">only sends</option>
+            <option value="receives">only receives</option>
+          </select>
+          <Input
+            placeholder="ids it sends: 100 200:700 (empty = all)"
+            value={ids}
+            onChange={(e) => setIds(e.target.value)}
+          />
+          <Button type="submit" disabled={action.pending}>Add or update</Button>
           <InterfaceNames id="group-member-interfaces" interfaces={interfaces} />
-          <Button type="submit" disabled={action.pending}>Add</Button>
         </form>
+        <p className="text-xs text-gray-500">Adding a member that is already in the group updates its direction and ids.</p>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>Done</Button>
         </DialogFooter>

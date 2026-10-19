@@ -9,8 +9,9 @@
 
 /*
  * Where one frame captured on a bus must be injected: the destination of
- * every route out of that bus and every other member of every group it
- * belongs to, when their filters let the frame through. A bus is a target
+ * every route out of that bus and every other receiving member of every
+ * group it sends into, when the filters of the route, or of the group and
+ * of the sending member, let the frame through. A bus is a target
  * once whatever reaches it, and never the bus the frame came from; the
  * counters of the first route or group that reaches it are charged.
  */

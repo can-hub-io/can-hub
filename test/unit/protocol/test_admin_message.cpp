@@ -516,7 +516,7 @@ describe("admin_acl_message", []() {
     });
 
     it("round-trips a group join", []() {
-        AdminGroupMemberMessage request = { "fleet", { "truck42", "can0" } };
+        AdminGroupMemberMessage request = { "fleet", { "truck42", "can0" }, ADMIN_GROUP_MEMBER_SENDS, 1, { { 0x100, 0x7FF } } };
         AdminGroupMemberMessage decoded;
         MessageHeader header;
         uint8_t buffer[512];
@@ -530,6 +530,8 @@ describe("admin_acl_message", []() {
         expect(header.type).toBe((uint8_t)kMESSAGE_TYPE_ADMIN_GROUP_JOIN);
         expect(decoded_ok).toBe(true);
         expect((const char *)decoded.member.agent_name).toBe("truck42");
+        expect(decoded.direction).toBe((uint8_t)ADMIN_GROUP_MEMBER_SENDS);
+        expect(decoded.filters[0].can_id).toBe((uint32_t)0x100);
     });
 
     it("refuses to encode a member message of another type", []() {
@@ -552,7 +554,7 @@ describe("admin_acl_message", []() {
         reply.entries[0].member_count = 2;
         reply.entries[0].forwarded = 9;
         reply.entries[0].members[0] = { { "truck42", "can0" }, ADMIN_GROUP_MEMBER_ONLINE };
-        reply.entries[0].members[1] = { { "lab", "can1" }, 0 };
+        reply.entries[0].members[1] = { { "lab", "can1" }, 0, ADMIN_GROUP_MEMBER_RECEIVES, 1, { { 0x200, 0x7FF } } };
 
         encoded_size = AdminGroupListReplyMessage_Encode(&reply, buffer, sizeof(buffer));
         decoded_ok = AdminGroupListReplyMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
@@ -562,6 +564,8 @@ describe("admin_acl_message", []() {
         expect(decoded.entries[0].forwarded).toBe((uint64_t)9);
         expect(decoded.entries[0].members[0].state).toBe((uint8_t)ADMIN_GROUP_MEMBER_ONLINE);
         expect((const char *)decoded.entries[0].members[1].endpoint.interface_name).toBe("can1");
+        expect(decoded.entries[0].members[1].direction).toBe((uint8_t)ADMIN_GROUP_MEMBER_RECEIVES);
+        expect(decoded.entries[0].members[1].filters[0].can_id).toBe((uint32_t)0x200);
     });
 
     it("rejects encoding an acl list entry with an unterminated agent name", []() {

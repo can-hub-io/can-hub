@@ -84,7 +84,7 @@ static bool target_can_admin;
 static InterfaceSettings target_settings;
 static AdminBridgeSetMessage target_bridge;
 static AdminGroupSetMessage target_group;
-static AdminBridgeEndpoint target_member;
+static AdminGroupMemberMessage target_member;
 static uint32_t target_peer_id;
 static uint16_t page_offset;
 static bool page_header_printed;
@@ -101,6 +101,9 @@ static bool mapBridgeCommand(const char *words[], uint8_t word_count);
 static bool parseBridgeEndpoint(const char *text, AdminBridgeEndpoint *endpoint);
 static bool mapGroupCommand(const char *words[], uint8_t word_count);
 static bool parseFilters(const char *words[], uint8_t word_count, CanFilter *filters, uint8_t *filter_count);
+static bool parseMemberRole(const char *words[], uint8_t word_count);
+static bool memberDirection(const char *word, uint8_t *direction);
+static const char *memberDirectionName(uint8_t direction);
 static bool parseAclLevel(const char *text);
 static bool parseInterfaceRef(const char *text);
 static bool parseNamespacedInterface(const char *text);
@@ -212,7 +215,10 @@ static void printUsage(FILE *stream, const char *program)
     fprintf(stream, "  group                  bridge groups: buses that behave as one, with their members\n");
     fprintf(stream, "  group add <name> [<id>[:<mask>] ...]          create a group, or replace its ids\n");
     fprintf(stream, "  group delete <name>    drop a group\n");
-    fprintf(stream, "  group join|leave <name> <agent>/<iface>       add or remove a member bus\n");
+    fprintf(stream, "  group join <name> <agent>/<iface> [both|sends|receives] [<id>[:<mask>] ...]\n");
+    fprintf(stream, "                         add a member bus, or change it: sends = only feeds the group,\n");
+    fprintf(stream, "                         receives = only gets it, ids = what it sends (up to 8)\n");
+    fprintf(stream, "  group leave <name> <agent>/<iface>            remove a member bus\n");
     fprintf(stream, "default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
 }
 
@@ -454,19 +460,61 @@ static bool mapGroupCommand(const char *words[], uint8_t word_count)
         command = kCLI_COMMAND_GROUP_DELETE;
         return word_count == GROUP_COMMAND_NAME_WORDS;
     }
-    if (word_count != GROUP_COMMAND_MEMBER_WORDS || !parseBridgeEndpoint(words[3], &target_member)) {
+    if (word_count < GROUP_COMMAND_MEMBER_WORDS || !parseBridgeEndpoint(words[3], &target_member.member)) {
         return false;
-    }
-    if (strcmp(words[1], "join") == 0) {
-        command = kCLI_COMMAND_GROUP_JOIN;
-        return true;
     }
     if (strcmp(words[1], "leave") == 0) {
         command = kCLI_COMMAND_GROUP_LEAVE;
-        return true;
+        return word_count == GROUP_COMMAND_MEMBER_WORDS;
+    }
+    if (strcmp(words[1], "join") != 0) {
+        return false;
     }
 
-    return false;
+    command = kCLI_COMMAND_GROUP_JOIN;
+    return parseMemberRole(words + GROUP_COMMAND_MEMBER_WORDS, (uint8_t)(word_count - GROUP_COMMAND_MEMBER_WORDS));
+}
+
+static bool parseMemberRole(const char *words[], uint8_t word_count)
+{
+    uint8_t first_filter = 0;
+
+    if (word_count > 0 && memberDirection(words[0], &target_member.direction)) {
+        first_filter = 1;
+    }
+    if (word_count - first_filter > ADMIN_GROUP_MEMBER_FILTERS_MAX) {
+        LOG_ERROR("a member takes at most %u ids", ADMIN_GROUP_MEMBER_FILTERS_MAX);
+        return false;
+    }
+
+    return parseFilters(words + first_filter, (uint8_t)(word_count - first_filter), target_member.filters, &target_member.filter_count);
+}
+
+static bool memberDirection(const char *word, uint8_t *direction)
+{
+    if (strcmp(word, "both") == 0) {
+        *direction = ADMIN_GROUP_MEMBER_BOTH;
+    } else if (strcmp(word, "sends") == 0) {
+        *direction = ADMIN_GROUP_MEMBER_SENDS;
+    } else if (strcmp(word, "receives") == 0) {
+        *direction = ADMIN_GROUP_MEMBER_RECEIVES;
+    } else {
+        return false;
+    }
+
+    return true;
+}
+
+static const char *memberDirectionName(uint8_t direction)
+{
+    if (direction == ADMIN_GROUP_MEMBER_SENDS) {
+        return "sends";
+    }
+    if (direction == ADMIN_GROUP_MEMBER_RECEIVES) {
+        return "receives";
+    }
+
+    return "both";
 }
 
 static bool parseFilters(const char *words[], uint8_t word_count, CanFilter *filters, uint8_t *filter_count)
@@ -853,8 +901,8 @@ static void sendRequest(void)
         memcpy(group_delete.name, target_group.name, sizeof(group_delete.name));
         encoded_size = AdminGroupDeleteMessage_Encode(&group_delete, encoded, sizeof(encoded));
     } else if (command == kCLI_COMMAND_GROUP_JOIN || command == kCLI_COMMAND_GROUP_LEAVE) {
+        group_member = target_member;
         memcpy(group_member.name, target_group.name, sizeof(group_member.name));
-        group_member.member = target_member;
         encoded_size = AdminGroupMemberMessage_Encode(
             command == kCLI_COMMAND_GROUP_JOIN ? kMESSAGE_TYPE_ADMIN_GROUP_JOIN : kMESSAGE_TYPE_ADMIN_GROUP_LEAVE,
             &group_member,
@@ -1334,7 +1382,14 @@ static void handleGroupListReply(const uint8_t *payload, uint16_t payload_length
         );
         for(m=0; m<entry->member_count; m++) {
             formatEndpoint(&entry->members[m].endpoint, member, sizeof(member));
-            printf("  %-24s %s\n", member, (entry->members[m].state & ADMIN_GROUP_MEMBER_ONLINE) ? "online" : "offline");
+            formatBridgeFilters(entry->members[m].filters, entry->members[m].filter_count, filters, sizeof(filters));
+            printf(
+                "  %-24s %-8s %-9s ids %s\n",
+                member,
+                (entry->members[m].state & ADMIN_GROUP_MEMBER_ONLINE) ? "online" : "offline",
+                memberDirectionName(entry->members[m].direction),
+                filters
+            );
         }
     }
 
@@ -1355,7 +1410,7 @@ static void printGroupReply(uint8_t status)
     }
 
     exit_code = 0;
-    formatEndpoint(&target_member, member, sizeof(member));
+    formatEndpoint(&target_member.member, member, sizeof(member));
     if (command == kCLI_COMMAND_GROUP_ADD) {
         formatBridgeFilters(target_group.filters, target_group.filter_count, filters, sizeof(filters));
         printf("group %s %s\n", target_group.name, filters);
