@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "protocol/register_message.h"
+#include "protocol/subscribe_message.h"
 
 #define ADMIN_STATUS_REPLY_BODY_SIZE 44
 #define ADMIN_PEERS_BODY_SIZE 4
@@ -48,6 +49,15 @@
 #define ADMIN_REJECTED_REPLY_FIXED_FIELDS_SIZE 4
 #define ADMIN_REJECTED_REPLY_ENTRIES_MAX 15
 #define ADMIN_REJECTED_REPLY_ENTRY_SIZE 264
+#define ADMIN_BRIDGE_ENDPOINT_SIZE 144
+#define ADMIN_BRIDGE_SET_BODY_SIZE 420
+#define ADMIN_BRIDGE_SET_REPLY_BODY_SIZE 4
+#define ADMIN_BRIDGE_DELETE_BODY_SIZE 288
+#define ADMIN_BRIDGE_DELETE_REPLY_BODY_SIZE 4
+#define ADMIN_BRIDGE_LIST_BODY_SIZE 4
+#define ADMIN_BRIDGE_LIST_REPLY_FIXED_FIELDS_SIZE 4
+#define ADMIN_BRIDGE_LIST_REPLY_ENTRIES_MAX 8
+#define ADMIN_BRIDGE_LIST_REPLY_ENTRY_SIZE 440
 
 #define ADMIN_FINGERPRINT_HEX_SIZE 65
 #define ADMIN_REPLY_FLAG_MORE (1u << 0)
@@ -57,6 +67,15 @@
 #define ADMIN_STATUS_UNKNOWN_AGENT 1
 #define ADMIN_STATUS_UNKNOWN_PEER 1
 #define ADMIN_STATUS_PIN_FAILED 1
+
+#define ADMIN_BRIDGE_STATUS_OK 0
+#define ADMIN_BRIDGE_STATUS_INVALID 1
+#define ADMIN_BRIDGE_STATUS_FULL 2
+#define ADMIN_BRIDGE_STATUS_STORE_FAILED 3
+#define ADMIN_BRIDGE_STATUS_UNKNOWN 4
+
+#define ADMIN_BRIDGE_STATE_SOURCE_ONLINE (1u << 0)
+#define ADMIN_BRIDGE_STATE_DESTINATION_ONLINE (1u << 1)
 
 #define ADMIN_REJECTED_REASON_NOT_ALLOWED 0
 #define ADMIN_REJECTED_REASON_FINGERPRINT_MISMATCH 1
@@ -263,6 +282,51 @@ typedef struct {
     AdminRejectedReplyEntry entries[ADMIN_REJECTED_REPLY_ENTRIES_MAX];
 } AdminRejectedReplyMessage;
 
+typedef struct {
+    char agent_name[REGISTER_AGENT_NAME_SIZE];
+    char interface_name[REGISTER_INTERFACE_NAME_SIZE];
+} AdminBridgeEndpoint;
+
+typedef struct {
+    AdminBridgeEndpoint source;
+    AdminBridgeEndpoint destination;
+    uint8_t filter_count;
+    CanFilter filters[SUBSCRIBE_FILTERS_MAX];
+} AdminBridgeSetMessage;
+
+typedef struct {
+    uint8_t status;
+} AdminBridgeSetReplyMessage;
+
+typedef struct {
+    AdminBridgeEndpoint source;
+    AdminBridgeEndpoint destination;
+} AdminBridgeDeleteMessage;
+
+typedef struct {
+    uint8_t status;
+} AdminBridgeDeleteReplyMessage;
+
+typedef struct {
+    uint16_t offset;
+} AdminBridgeListMessage;
+
+typedef struct {
+    AdminBridgeEndpoint source;
+    AdminBridgeEndpoint destination;
+    uint8_t filter_count;
+    uint8_t state;
+    CanFilter filters[SUBSCRIBE_FILTERS_MAX];
+    uint64_t forwarded;
+    uint64_t dropped;
+} AdminBridgeListReplyEntry;
+
+typedef struct {
+    uint8_t count;
+    uint8_t flags;
+    AdminBridgeListReplyEntry entries[ADMIN_BRIDGE_LIST_REPLY_ENTRIES_MAX];
+} AdminBridgeListReplyMessage;
+
 size_t AdminStatusMessage_Encode(uint8_t *buffer, size_t buffer_size);
 
 size_t AdminStatusReplyMessage_Encode(const AdminStatusReplyMessage *self, uint8_t *buffer, size_t buffer_size);
@@ -345,3 +409,23 @@ bool AdminRejectedMessage_Decode(AdminRejectedMessage *self, const uint8_t *payl
 
 size_t AdminRejectedReplyMessage_Encode(const AdminRejectedReplyMessage *self, uint8_t *buffer, size_t buffer_size);
 bool AdminRejectedReplyMessage_Decode(AdminRejectedReplyMessage *self, const uint8_t *payload, size_t payload_length);
+
+const char *AdminBridgeStatus_Name(uint8_t status);
+
+size_t AdminBridgeSetMessage_Encode(const AdminBridgeSetMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminBridgeSetMessage_Decode(AdminBridgeSetMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminBridgeSetReplyMessage_Encode(const AdminBridgeSetReplyMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminBridgeSetReplyMessage_Decode(AdminBridgeSetReplyMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminBridgeDeleteMessage_Encode(const AdminBridgeDeleteMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminBridgeDeleteMessage_Decode(AdminBridgeDeleteMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminBridgeDeleteReplyMessage_Encode(const AdminBridgeDeleteReplyMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminBridgeDeleteReplyMessage_Decode(AdminBridgeDeleteReplyMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminBridgeListMessage_Encode(const AdminBridgeListMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminBridgeListMessage_Decode(AdminBridgeListMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminBridgeListReplyMessage_Encode(const AdminBridgeListReplyMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminBridgeListReplyMessage_Decode(AdminBridgeListReplyMessage *self, const uint8_t *payload, size_t payload_length);

@@ -220,7 +220,7 @@ describe("broker", []() {
     describe("agent registration", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, NULL, false);
             events = Broker_Events(&broker);
         });
 
@@ -294,7 +294,7 @@ describe("broker", []() {
     describe("agent ghost displacement", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, NULL, false);
             events = Broker_Events(&broker);
         });
 
@@ -347,7 +347,7 @@ describe("broker", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
             IdentityStoreMock_Reset(&identity_store);
-            Broker_Init(&broker, &transport.port, &identity_store.port, NULL, false);
+            Broker_Init(&broker, &transport.port, &identity_store.port, NULL, NULL, false);
             events = Broker_Events(&broker);
         });
 
@@ -392,7 +392,7 @@ describe("broker", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
             IdentityStoreMock_Reset(&identity_store);
-            Broker_Init(&broker, &transport.port, &identity_store.port, NULL, true);
+            Broker_Init(&broker, &transport.port, &identity_store.port, NULL, NULL, true);
             events = Broker_Events(&broker);
         });
 
@@ -448,7 +448,7 @@ describe("broker", []() {
             HubTransportPortMock_Reset(&transport);
             IdentityStoreMock_Reset(&identity_store);
             AuthorizationMock_Reset(&authorization);
-            Broker_Init(&broker, &transport.port, &identity_store.port, &authorization.port, true);
+            Broker_Init(&broker, &transport.port, &identity_store.port, &authorization.port, NULL, true);
             events = Broker_Events(&broker);
         });
 
@@ -511,7 +511,7 @@ describe("broker", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
             IdentityStoreMock_Reset(&identity_store);
-            Broker_Init(&broker, &transport.port, &identity_store.port, NULL, false);
+            Broker_Init(&broker, &transport.port, &identity_store.port, NULL, NULL, false);
             events = Broker_Events(&broker);
         });
 
@@ -532,7 +532,7 @@ describe("broker", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
             IdentityStoreMock_Reset(&identity_store);
-            Broker_Init(&broker, &transport.port, &identity_store.port, NULL, true);
+            Broker_Init(&broker, &transport.port, &identity_store.port, NULL, NULL, true);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
         });
@@ -562,7 +562,7 @@ describe("broker", []() {
     describe("client control plane", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);
@@ -619,7 +619,7 @@ describe("broker", []() {
     describe("reliable channels", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, NULL, false);
             events = Broker_Events(&broker);
         });
 
@@ -683,7 +683,7 @@ describe("broker", []() {
     describe("reliable delivery with a full destination", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgentWithCapabilities(
                 &events,
@@ -723,7 +723,7 @@ describe("broker", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
             AuthorizationMock_Reset(&authorization);
-            Broker_Init(&broker, &transport.port, NULL, &authorization.port, false);
+            Broker_Init(&broker, &transport.port, NULL, &authorization.port, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgentWithCapabilities(
                 &events,
@@ -815,7 +815,7 @@ describe("broker", []() {
             uint32_t interface_id;
 
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);
@@ -1103,7 +1103,7 @@ describe("broker", []() {
     describe("liveness", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, NULL, false);
             events = Broker_Events(&broker);
             connectPeer(AGENT_PEER, NULL, false);
         });
@@ -1127,7 +1127,7 @@ describe("broker", []() {
     describe("admission before hello", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, NULL, false);
             events = Broker_Events(&broker);
         });
 
@@ -1175,7 +1175,7 @@ describe("broker", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
             IdentityStoreMock_Reset(&identity_store);
-            Broker_Init(&broker, &transport.port, &identity_store.port, NULL, false);
+            Broker_Init(&broker, &transport.port, &identity_store.port, NULL, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);
@@ -1512,7 +1512,7 @@ describe("broker", []() {
     describe("echo fan-out", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);
@@ -1688,7 +1688,7 @@ describe("broker", []() {
     describe("peer capacity", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, NULL, false);
             events = Broker_Events(&broker);
         });
 
@@ -1714,7 +1714,7 @@ describe("broker", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
             AuthorizationMock_Reset(&authorization);
-            Broker_Init(&broker, &transport.port, NULL, &authorization.port, false);
+            Broker_Init(&broker, &transport.port, NULL, &authorization.port, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             can0_interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
@@ -1856,7 +1856,7 @@ describe("broker", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
             AuthorizationMock_Reset(&authorization);
-            Broker_Init(&broker, &transport.port, NULL, &authorization.port, false);
+            Broker_Init(&broker, &transport.port, NULL, &authorization.port, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
         });
@@ -1917,7 +1917,7 @@ describe("broker", []() {
             memset(&overreporting_identity_store, 0, sizeof(overreporting_identity_store));
             overreporting_authorization.list = overreportingAclList;
             overreporting_identity_store.list = overreportingPinList;
-            Broker_Init(&broker, &transport.port, &overreporting_identity_store, &overreporting_authorization, false);
+            Broker_Init(&broker, &transport.port, &overreporting_identity_store, &overreporting_authorization, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
         });
@@ -1956,7 +1956,7 @@ describe("broker", []() {
             uint32_t interface_id;
 
             HubTransportPortMock_Reset(&transport);
-            Broker_Init(&broker, &transport.port, NULL, NULL, false);
+            Broker_Init(&broker, &transport.port, NULL, NULL, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectClient(&events, CLIENT_PEER);
@@ -2143,7 +2143,7 @@ describe("broker", []() {
         beforeEach([]() {
             HubTransportPortMock_Reset(&transport);
             AuthorizationMock_Reset(&authorization);
-            Broker_Init(&broker, &transport.port, NULL, &authorization.port, false);
+            Broker_Init(&broker, &transport.port, NULL, &authorization.port, NULL, false);
             events = Broker_Events(&broker);
             BrokerDriver_ConnectAgent(&events, &transport, AGENT_PEER, &truck_registration);
             BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);

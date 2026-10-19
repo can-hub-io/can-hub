@@ -16,7 +16,7 @@ use crate::auth::password::verify_password;
 use crate::auth::store::Credential;
 use crate::auth::Permission;
 use crate::protocol::admin::{
-    AclLevel, ConfigureOp, ConfigureReply, InterfaceSettings, CONFIGURE_STATUS_OK, SETTING_BITRATE,
+    AclLevel, BridgeEndpoint, CanFilter, BRIDGE_FILTERS_MAX, ConfigureOp, ConfigureReply, InterfaceSettings, CONFIGURE_STATUS_OK, SETTING_BITRATE,
 };
 use crate::telemetry::TelemetryFrame;
 
@@ -59,6 +59,11 @@ pub(crate) async fn interfaces(State(state): State<AppState>) -> Result<Json<Vec
 pub(crate) async fn acls(State(state): State<AppState>) -> Result<Json<Vec<AclDto>>, ApiError> {
     let entries = with_admin(&state, |client| client.acl_list()).await?;
     Ok(Json(entries.into_iter().map(AclDto::from).collect()))
+}
+
+pub(crate) async fn bridges(State(state): State<AppState>) -> Result<Json<Vec<BridgeDto>>, ApiError> {
+    let entries = with_admin(&state, |client| client.bridges()).await?;
+    Ok(Json(entries.into_iter().map(BridgeDto::from).collect()))
 }
 
 pub(crate) async fn pins(State(state): State<AppState>) -> Result<Json<Vec<PinDto>>, ApiError> {
@@ -107,6 +112,29 @@ pub(crate) async fn acl_revoke(State(state): State<AppState>, Json(body): Json<A
         })
         .await?,
     )
+}
+
+pub(crate) async fn bridge_set(State(state): State<AppState>, Json(body): Json<BridgeBody>) -> ActionResponse {
+    if body.filters.len() > BRIDGE_FILTERS_MAX {
+        return Err(ApiError::BadRequest(format!("a bridge takes at most {BRIDGE_FILTERS_MAX} filters")));
+    }
+    let source = BridgeEndpoint::from(body.source);
+    let destination = BridgeEndpoint::from(body.destination);
+    let filters: Vec<CanFilter> = body.filters.into_iter().map(CanFilter::from).collect();
+    bridged(with_admin(&state, move |client| client.bridge_set(&source, &destination, &filters)).await?)
+}
+
+pub(crate) async fn bridge_delete(State(state): State<AppState>, Json(body): Json<BridgeDeleteBody>) -> ActionResponse {
+    let source = BridgeEndpoint::from(body.source);
+    let destination = BridgeEndpoint::from(body.destination);
+    bridged(with_admin(&state, move |client| client.bridge_delete(&source, &destination)).await?)
+}
+
+fn bridged(status: u8) -> ActionResponse {
+    if status != 0 {
+        return Err(ApiError::Bridge(status));
+    }
+    Ok(Json(ActionResult { ok: true }))
 }
 
 /// Classic CAN tops out at 1 Mbit/s; anything above is a typo or an attempt to

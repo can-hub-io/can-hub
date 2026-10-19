@@ -35,6 +35,9 @@ Noun-first grammar; an omitted verb lists.
 | `acl add <fp\|*> <agent\|*>/<iface\|*> none\|r\|rw\|rwa` | grant a permission level ([semantics](security.md#client-acls)) |
 | `acl delete <fp\|*> <agent\|*>/<iface\|*>` | drop a grant |
 | `pending` | identities the hub turned away, to authorize ([enrolling](security.md#enrolling-what-knocked)) |
+| `bridge` | bus-to-bus routes with their state and counters |
+| `bridge add <agent>/<iface> <agent>/<iface> [<id>[:<mask>] ...]` | inject what the first bus carries into the second, all of it or only the ids given; adding again replaces the ids ([bridging buses](hub.md#bridging-buses)) |
+| `bridge delete <agent>/<iface> <agent>/<iface>` | drop a route |
 
 ## Interface settings
 

@@ -45,6 +45,7 @@ windows:
 	$(CMAKE) --build $(_BUILD_WINDOWS)
 
 _E2E_IMAGE := can-hub-bench
+E2E_SUITE ?= tests
 
 release:
 	$(CMAKE) -B $(_BUILD_RELEASE) \
@@ -123,7 +124,7 @@ e2e: release web-daemon e2e-image
 	    -v $(abspath .):/work \
 	    -e CAN_HUB_WEB_BIN=/work/web/daemon/target/release/can-hub-web \
 	    $(_E2E_IMAGE) \
-	    robot --outputdir /work/build/e2e tests
+	    robot --outputdir /work/build/e2e $(E2E_SUITE)
 
 # Single source of the project version is the manifests that must agree
 # (C/CMake, Python wheel, Rust web daemon and its lock, and the OpenAPI contract

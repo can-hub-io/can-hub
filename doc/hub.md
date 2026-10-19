@@ -67,12 +67,49 @@ names. `can-hub-cli pending` lists what was turned away. Enrollment flow in
 - Live state (sessions, interface catalogue, open channels) is in memory and
   dies with the connection — an agent that drops disappears from `list`.
 - Persistent state lives in `hub.db` (SQLite, in the state dir): agent
-  name→fingerprint pins and client ACLs. No external services.
+  name→fingerprint pins, client ACLs and bridge routes. No external services.
 - State dir: `/var/lib/can-hub`, falling back to `~/.local/state/can-hub`
   when not writable; `--state-dir` overrides.
 - `--show-identity` prints the hub's fingerprint, what agents and clients
   pass as `--hub-fingerprint`. Use the same `--state-dir` (or `--cert`) the
   hub runs with.
+
+## Bridging buses
+
+The hub can inject what one bus carries into another, across agents and
+sites: a fleet's diagnostic ids collected on a lab bus, a production bus
+mirrored to a test bench, two buses joined into one.
+
+```sh
+can-hub-cli bridge add truck42/can0 lab/can1            # everything, one way
+can-hub-cli bridge add truck42/can0 lab/can1 7DF 7E0:7F0  # only these ids
+can-hub-cli bridge add lab/can1 truck42/can0            # and back: one bus
+can-hub-cli bridge
+source                   destination              state    forwarded    dropped      ids
+truck42/can0             lab/can1                 active   1520         0            7DF 7E0:7F0
+lab/can1                 truck42/can0             active   88           0            all
+```
+
+- A route goes one way: what the source bus carries, its bus echo of client
+  injections included, is injected into the destination. Several routes may
+  share a source (fan-out) or a destination (fan-in).
+- Ids are hex, `<id>` for that id only or `<id>:<mask>` for every id that
+  matches under the mask, the same syntax as `can-hub-client dump`. No ids
+  bridges everything. Error frames are never bridged.
+- One hop only: the hub marks what it injects and never bridges that frame
+  again, so routes in both directions join two buses without a loop. Clients
+  see such a frame with the bridged flag. A second agent on the very same
+  physical bus would see the injection as plain traffic; do not export one
+  bus through two agents that are both bridged.
+- Routes name interfaces, so they wait for agents that are offline (state
+  `waiting`; frames for an offline destination count as dropped) and apply
+  again when they reconnect. They live in `hub.db` and survive restarts.
+  The hub holds up to 64.
+- Bridged frames travel like client injections: lossy and paced to the
+  destination. Use bridges for telemetry, diagnostics and replication, not
+  for control loops over the network.
+- Administration only: routes bypass client ACLs. The [web panel](web.md)
+  manages them under Bridges, with the `bridges.manage` permission.
 
 ## Counters
 

@@ -153,6 +153,34 @@ An ACL Grant Can Be Revoked
 
     Status Of ${revoked} Should Be    200
 
+A Bridge Route Is Listed With Its Filters
+    ${route}=    Set Variable    ${{ {"source": {"agentName": "truck42", "interfaceName": "vcan0"}, "destination": {"agentName": "lab", "interfaceName": "vcan0"}, "filters": [{"canId": 256, "canMask": 1792}]} }}
+
+    ${added}=    POST /api/bridges On ${WEB} With ${route}
+    ${bridges}=    GET /api/bridges On ${WEB}
+
+    Status Of ${added} Should Be    200
+    Status Of ${bridges} Should Be    200
+    Each Item Of ${bridges} Should Match    Bridge
+    Should Be Equal As Integers    ${bridges.json}[0][filters][0][canMask]    1792
+
+A Bridge Route Into Its Own Bus Is A Bad Request
+    ${route}=    Set Variable    ${{ {"source": {"agentName": "truck42", "interfaceName": "vcan0"}, "destination": {"agentName": "truck42", "interfaceName": "vcan0"}} }}
+
+    ${refused}=    POST /api/bridges On ${WEB} With ${route}
+
+    Status Of ${refused} Should Be    400
+
+A Bridge Route Can Be Deleted Once
+    ${route}=    Set Variable    ${{ {"source": {"agentName": "truck42", "interfaceName": "vcan0"}, "destination": {"agentName": "bench", "interfaceName": "can9"}} }}
+    POST /api/bridges On ${WEB} With ${route}
+
+    ${deleted}=    POST /api/bridges/delete On ${WEB} With ${route}
+    ${deleted_again}=    POST /api/bridges/delete On ${WEB} With ${route}
+
+    Status Of ${deleted} Should Be    200
+    Status Of ${deleted_again} Should Be    404
+
 Kick By Peer Id
     ${peers}=    GET /api/peers On ${WEB}
     ${peer}=    Get From List    ${peers.json}    0

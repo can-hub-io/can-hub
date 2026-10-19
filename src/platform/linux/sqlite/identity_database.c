@@ -4,10 +4,14 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "protocol/wire.h"
+
 #define LINE_BUFFER_SIZE 512
 #define IMPORT_KEY_MAX 256
 #define PRAGMA_BUFFER_SIZE 64
-#define SCHEMA_VERSION 2
+#define SCHEMA_VERSION 3
+#define BRIDGE_FILTER_MASK_OFFSET 4
+#define BRIDGE_FILTERS_BLOB_MAX (BRIDGE_FILTERS_MAX * CAN_FILTER_SIZE)
 
 #define SCHEMA_BASELINE \
     "CREATE TABLE IF NOT EXISTS agent_identities (" \
@@ -26,6 +30,16 @@
 
 #define SCHEMA_ACL_ADMIN "ALTER TABLE client_acls ADD COLUMN can_admin INTEGER NOT NULL DEFAULT 0"
 
+#define SCHEMA_BRIDGE_ROUTES \
+    "CREATE TABLE IF NOT EXISTS bridge_routes (" \
+    "source_agent TEXT NOT NULL," \
+    "source_interface TEXT NOT NULL," \
+    "destination_agent TEXT NOT NULL," \
+    "destination_interface TEXT NOT NULL," \
+    "filters BLOB NOT NULL," \
+    "PRIMARY KEY (source_agent, source_interface, destination_agent, destination_interface)" \
+    ")"
+
 typedef struct {
     int32_t version;
     const char *statements;
@@ -34,6 +48,7 @@ typedef struct {
 static const SchemaMigration SCHEMA_MIGRATIONS[] = {
     { 1, SCHEMA_BASELINE },
     { 2, SCHEMA_ACL_ADMIN },
+    { 3, SCHEMA_BRIDGE_ROUTES },
 };
 
 static bool migrateSchema(IdentityDatabase *self);
@@ -58,6 +73,12 @@ static bool aclGrant(void *context, const AclEntry *entry);
 static bool aclRevoke(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name);
 static uint8_t aclList(void *context, uint16_t offset, AclEntry *entries, uint8_t max_entries, bool *more);
 static bool aclKnows(void *context, const char *fingerprint_hex);
+static bool bridgeSave(void *context, const BridgeRoute *route);
+static bool bridgeRemove(void *context, const BridgeEndpoint *source, const BridgeEndpoint *destination);
+static bool bridgeLoad(void *context, uint16_t position, BridgeRoute *route);
+static void bindEndpoints(sqlite3_stmt *statement, const BridgeEndpoint *source, const BridgeEndpoint *destination);
+static void copyColumnText(sqlite3_stmt *statement, int32_t column, char *destination, size_t destination_size);
+static bool readFiltersBlob(sqlite3_stmt *statement, int32_t column, BridgeRoute *route);
 
 /* ---------- public ---------- */
 
@@ -77,6 +98,10 @@ bool IdentityDatabase_Open(IdentityDatabase *self, const char *path)
     self->authorization_port.revoke = aclRevoke;
     self->authorization_port.list = aclList;
     self->authorization_port.knows = aclKnows;
+    self->bridge_port.context = self;
+    self->bridge_port.save = bridgeSave;
+    self->bridge_port.remove = bridgeRemove;
+    self->bridge_port.load = bridgeLoad;
 
     if (sqlite3_open(path, &self->database) != SQLITE_OK) {
         IdentityDatabase_Close(self);
@@ -106,6 +131,11 @@ IdentityStorePort *IdentityDatabase_Port(IdentityDatabase *self)
 AuthorizationPort *IdentityDatabase_AuthorizationPort(IdentityDatabase *self)
 {
     return &self->authorization_port;
+}
+
+BridgeStorePort *IdentityDatabase_BridgePort(IdentityDatabase *self)
+{
+    return &self->bridge_port;
 }
 
 bool IdentityDatabase_ImportPinFile(IdentityDatabase *self, const char *path)
@@ -506,4 +536,125 @@ static bool aclKnows(void *context, const char *fingerprint_hex)
     sqlite3_finalize(statement);
 
     return known;
+}
+
+static bool bridgeSave(void *context, const BridgeRoute *route)
+{
+    IdentityDatabase *self = context;
+    sqlite3_stmt *statement = NULL;
+    uint8_t filters[BRIDGE_FILTERS_BLOB_MAX];
+    uint8_t i;
+    bool saved;
+
+    if (sqlite3_prepare_v2(
+            self->database,
+            "INSERT INTO bridge_routes (source_agent, source_interface, destination_agent, destination_interface, filters)"
+            " VALUES (?1, ?2, ?3, ?4, ?5)"
+            " ON CONFLICT (source_agent, source_interface, destination_agent, destination_interface)"
+            " DO UPDATE SET filters = ?5",
+            -1,
+            &statement,
+            NULL
+        ) != SQLITE_OK) {
+        return false;
+    }
+
+    for(i=0; i<route->filter_count; i++) {
+        Wire_WriteU32(filters + i * CAN_FILTER_SIZE, route->filters[i].can_id);
+        Wire_WriteU32(filters + i * CAN_FILTER_SIZE + BRIDGE_FILTER_MASK_OFFSET, route->filters[i].can_mask);
+    }
+
+    bindEndpoints(statement, &route->source, &route->destination);
+    sqlite3_bind_blob(statement, 5, filters, route->filter_count * CAN_FILTER_SIZE, SQLITE_STATIC);
+    saved = sqlite3_step(statement) == SQLITE_DONE;
+    sqlite3_finalize(statement);
+
+    return saved;
+}
+
+static bool bridgeRemove(void *context, const BridgeEndpoint *source, const BridgeEndpoint *destination)
+{
+    IdentityDatabase *self = context;
+    sqlite3_stmt *statement = NULL;
+    bool removed;
+
+    if (sqlite3_prepare_v2(
+            self->database,
+            "DELETE FROM bridge_routes WHERE source_agent = ?1 AND source_interface = ?2"
+            " AND destination_agent = ?3 AND destination_interface = ?4",
+            -1,
+            &statement,
+            NULL
+        ) != SQLITE_OK) {
+        return false;
+    }
+
+    bindEndpoints(statement, source, destination);
+    removed = sqlite3_step(statement) == SQLITE_DONE;
+    sqlite3_finalize(statement);
+
+    return removed;
+}
+
+static bool bridgeLoad(void *context, uint16_t position, BridgeRoute *route)
+{
+    IdentityDatabase *self = context;
+    sqlite3_stmt *statement = NULL;
+    bool loaded = false;
+
+    if (sqlite3_prepare_v2(
+            self->database,
+            "SELECT source_agent, source_interface, destination_agent, destination_interface, filters FROM bridge_routes"
+            " ORDER BY rowid LIMIT 1 OFFSET ?1",
+            -1,
+            &statement,
+            NULL
+        ) != SQLITE_OK) {
+        return false;
+    }
+
+    sqlite3_bind_int(statement, 1, position);
+    if (sqlite3_step(statement) == SQLITE_ROW) {
+        memset(route, 0, sizeof(*route));
+        copyColumnText(statement, 0, route->source.agent_name, sizeof(route->source.agent_name));
+        copyColumnText(statement, 1, route->source.interface_name, sizeof(route->source.interface_name));
+        copyColumnText(statement, 2, route->destination.agent_name, sizeof(route->destination.agent_name));
+        copyColumnText(statement, 3, route->destination.interface_name, sizeof(route->destination.interface_name));
+        loaded = readFiltersBlob(statement, 4, route);
+    }
+    sqlite3_finalize(statement);
+
+    return loaded;
+}
+
+static void bindEndpoints(sqlite3_stmt *statement, const BridgeEndpoint *source, const BridgeEndpoint *destination)
+{
+    sqlite3_bind_text(statement, 1, source->agent_name, -1, SQLITE_STATIC);
+    sqlite3_bind_text(statement, 2, source->interface_name, -1, SQLITE_STATIC);
+    sqlite3_bind_text(statement, 3, destination->agent_name, -1, SQLITE_STATIC);
+    sqlite3_bind_text(statement, 4, destination->interface_name, -1, SQLITE_STATIC);
+}
+
+static void copyColumnText(sqlite3_stmt *statement, int32_t column, char *destination, size_t destination_size)
+{
+    snprintf(destination, destination_size, "%s", (const char *)sqlite3_column_text(statement, column));
+}
+
+static bool readFiltersBlob(sqlite3_stmt *statement, int32_t column, BridgeRoute *route)
+{
+    const uint8_t *filters = sqlite3_column_blob(statement, column);
+    int32_t size = sqlite3_column_bytes(statement, column);
+    uint8_t i;
+
+    if (size % CAN_FILTER_SIZE != 0 || size > BRIDGE_FILTERS_BLOB_MAX) {
+        return false;
+    }
+
+    route->filter_count = (uint8_t)(size / CAN_FILTER_SIZE);
+    for(i=0; i<route->filter_count; i++) {
+        route->filters[i].can_id = Wire_ReadU32(filters + i * CAN_FILTER_SIZE);
+        route->filters[i].can_mask = Wire_ReadU32(filters + i * CAN_FILTER_SIZE + BRIDGE_FILTER_MASK_OFFSET);
+    }
+
+    return true;
 }

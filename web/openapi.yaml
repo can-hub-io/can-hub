@@ -451,6 +451,60 @@ paths:
         '409': { $ref: '#/components/responses/HubRejected' }
         '502': { $ref: '#/components/responses/HubUnreachable' }
 
+  /api/bridges:
+    get:
+      tags: [actions]
+      summary: List bus-to-bus routes with their counters
+      description: 'Permission: bridges.manage'
+      responses:
+        '200':
+          description: Bridge routes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Bridge' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+    post:
+      tags: [actions]
+      summary: Bridge one bus into another
+      description: >-
+        Permission: bridges.manage. Frames captured on the source that pass the
+        filters (none = all) are injected into the destination. Setting a route
+        again replaces its filters. 400 when both ends are the same bus, 409
+        when the hub holds no more routes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BridgeBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/HubRejected' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/bridges/delete:
+    post:
+      tags: [actions]
+      summary: Drop a bus-to-bus route
+      description: 'Permission: bridges.manage. 404 when there is no such route.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BridgeDeleteBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/BadRequest' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
   /api/audit:
     get:
       tags: [management]
@@ -736,7 +790,7 @@ components:
 
     Permission:
       type: string
-      enum: [views.read, peers.kick, interfaces.config, pins.manage, acl.manage, users.manage]
+      enum: [views.read, peers.kick, interfaces.config, pins.manage, acl.manage, bridges.manage, users.manage]
 
     AclLevel:
       type: string
@@ -915,6 +969,53 @@ components:
         agentName: { type: string }
         interfaceName: { type: string }
         level: { $ref: '#/components/schemas/AclLevel' }
+
+    BridgeEndpoint:
+      type: object
+      required: [agentName, interfaceName]
+      properties:
+        agentName: { type: string }
+        interfaceName: { type: string }
+
+    CanFilter:
+      type: object
+      required: [canId, canMask]
+      description: A frame passes when id & canMask == canId & canMask.
+      properties:
+        canId: { type: integer, format: int32 }
+        canMask: { type: integer, format: int32 }
+
+    Bridge:
+      type: object
+      required: [source, destination, filters, sourceOnline, destinationOnline, forwarded, dropped]
+      properties:
+        source: { $ref: '#/components/schemas/BridgeEndpoint' }
+        destination: { $ref: '#/components/schemas/BridgeEndpoint' }
+        filters:
+          type: array
+          items: { $ref: '#/components/schemas/CanFilter' }
+        sourceOnline: { type: boolean }
+        destinationOnline: { type: boolean }
+        forwarded: { type: integer, format: int64 }
+        dropped: { type: integer, format: int64, description: 'Frames for a destination that was offline' }
+
+    BridgeBody:
+      type: object
+      required: [source, destination]
+      properties:
+        source: { $ref: '#/components/schemas/BridgeEndpoint' }
+        destination: { $ref: '#/components/schemas/BridgeEndpoint' }
+        filters:
+          type: array
+          maxItems: 16
+          items: { $ref: '#/components/schemas/CanFilter' }
+
+    BridgeDeleteBody:
+      type: object
+      required: [source, destination]
+      properties:
+        source: { $ref: '#/components/schemas/BridgeEndpoint' }
+        destination: { $ref: '#/components/schemas/BridgeEndpoint' }
 
     Pin:
       type: object

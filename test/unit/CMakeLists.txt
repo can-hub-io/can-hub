@@ -204,6 +204,18 @@ add_unit_test(test_message_framer
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
 
+add_unit_test(test_bridge_routes
+    SOURCES
+        hub/domain/test_bridge_routes.cpp
+        ${ROOT_SRC_DIR}/hub/domain/bridge_routes.c
+)
+
+add_unit_test(test_filter_spec
+    SOURCES
+        platform/test_filter_spec.cpp
+        ${ROOT_SRC_DIR}/platform/linux/shared/filter_spec.c
+)
+
 add_unit_test(test_pin_store
     SOURCES
         platform/test_pin_store.cpp
@@ -235,6 +247,7 @@ add_unit_test(test_identity_database
     SOURCES
         platform/test_identity_database.cpp
         ${ROOT_SRC_DIR}/platform/linux/sqlite/identity_database.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
 )
 target_link_libraries(test_identity_database PRIVATE sqlite3)
 
@@ -347,6 +360,7 @@ add_unit_test(test_broker
         hub/test_broker.cpp
         ${ROOT_SRC_DIR}/hub/broker.c
         ${ROOT_SRC_DIR}/hub/domain/admin_views.c
+        ${ROOT_SRC_DIR}/hub/domain/bridge_routes.c
         ${ROOT_SRC_DIR}/hub/domain/echo_tokens.c
         ${ROOT_SRC_DIR}/hub/domain/egress_queue.c
         ${ROOT_SRC_DIR}/hub/domain/frame_routes.c
@@ -371,6 +385,38 @@ add_unit_test(test_broker
         ${ROOT_SRC_DIR}/shared/bounded_string.c
 )
 target_link_libraries(test_broker PRIVATE port_mocks)
+
+add_unit_test(test_broker_bridges
+    SOURCES
+        hub/test_broker_bridges.cpp
+        ${ROOT_SRC_DIR}/hub/broker.c
+        ${ROOT_SRC_DIR}/hub/domain/admin_views.c
+        ${ROOT_SRC_DIR}/hub/domain/bridge_routes.c
+        ${ROOT_SRC_DIR}/hub/domain/echo_tokens.c
+        ${ROOT_SRC_DIR}/hub/domain/egress_queue.c
+        ${ROOT_SRC_DIR}/hub/domain/frame_routes.c
+        ${ROOT_SRC_DIR}/protocol/error_message.c
+        ${ROOT_SRC_DIR}/hub/domain/hub_peer.c
+        ${ROOT_SRC_DIR}/hub/domain/interface_registry.c
+        ${ROOT_SRC_DIR}/shared/egress_shaper.c
+        ${ROOT_SRC_DIR}/hub/domain/client_session.c
+        ${ROOT_SRC_DIR}/hub/domain/peer_directory.c
+        ${ROOT_SRC_DIR}/hub/domain/rejected_peers.c
+        ${ROOT_SRC_DIR}/protocol/admin_message.c
+        ${ROOT_SRC_DIR}/protocol/frame_message.c
+        ${ROOT_SRC_DIR}/protocol/hello_message.c
+        ${ROOT_SRC_DIR}/protocol/list_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/open_message.c
+        ${ROOT_SRC_DIR}/protocol/register_message.c
+        ${ROOT_SRC_DIR}/protocol/subscribe_message.c
+        ${ROOT_SRC_DIR}/protocol/ifconfig_message.c
+        ${ROOT_SRC_DIR}/protocol/interface_name.c
+        ${ROOT_SRC_DIR}/protocol/interface_status_message.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
+)
+target_link_libraries(test_broker_bridges PRIVATE port_mocks)
 
 add_unit_test(test_frame_spec
     SOURCES

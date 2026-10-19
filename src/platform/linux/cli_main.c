@@ -10,6 +10,7 @@
 #include "platform/linux/shared/cli_meta.h"
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
+#include "platform/linux/shared/filter_spec.h"
 #include "platform/linux/shared/hub_defaults.h"
 #include "platform/linux/shared/interface_settings_text.h"
 #include "platform/linux/shared/log.h"
@@ -20,6 +21,7 @@
 #include "protocol/error_message.h"
 #include "protocol/hello_message.h"
 #include "protocol/ifconfig_message.h"
+#include "protocol/interface_name.h"
 #include "protocol/list_message.h"
 #include "protocol/message_header.h"
 
@@ -28,6 +30,8 @@
 #define TCP_SLOT 0
 #define COMMAND_WORDS_MAX 32
 #define INTERFACE_COMMAND_TARGET_WORDS 3
+#define BRIDGE_COMMAND_TARGET_WORDS 4
+#define FILTER_TEXT_SIZE 24
 
 typedef enum tcli_command_e {
     kCLI_COMMAND_STATUS = 0,
@@ -47,6 +51,9 @@ typedef enum tcli_command_e {
     kCLI_COMMAND_PENDING,
     kCLI_COMMAND_INTERFACE_SET,
     kCLI_COMMAND_INTERFACE_SHOW,
+    kCLI_COMMAND_BRIDGES,
+    kCLI_COMMAND_BRIDGE_ADD,
+    kCLI_COMMAND_BRIDGE_DELETE,
     kCLI_COMMAND_MAX,
 } TCLI_COMMAND;
 
@@ -68,6 +75,7 @@ static bool target_can_read;
 static bool target_can_write;
 static bool target_can_admin;
 static InterfaceSettings target_settings;
+static AdminBridgeSetMessage target_bridge;
 static uint32_t target_peer_id;
 static uint16_t page_offset;
 static bool page_header_printed;
@@ -80,6 +88,8 @@ static bool mapCommand(const char *words[], uint8_t word_count);
 static bool mapCompleteKind(const char *kind);
 static bool parsePeerId(const char *text);
 static bool mapInterfaceCommand(const char *words[], uint8_t word_count);
+static bool mapBridgeCommand(const char *words[], uint8_t word_count);
+static bool parseBridgeEndpoint(const char *text, AdminBridgeEndpoint *endpoint);
 static bool parseAclLevel(const char *text);
 static bool parseInterfaceRef(const char *text);
 static bool parseNamespacedInterface(const char *text);
@@ -99,6 +109,10 @@ static void handleListReply(const uint8_t *payload, uint16_t payload_length);
 static void handlePinsReply(const uint8_t *payload, uint16_t payload_length);
 static void handleAclListReply(const uint8_t *payload, uint16_t payload_length);
 static void handleRejectedReply(const uint8_t *payload, uint16_t payload_length);
+static void handleBridgeListReply(const uint8_t *payload, uint16_t payload_length);
+static void printBridgeReply(uint8_t status, const char *action);
+static void formatBridgeFilters(const CanFilter *filters, uint8_t filter_count, char *out, size_t out_size);
+static void formatEndpoint(const AdminBridgeEndpoint *endpoint, char *out, size_t out_size);
 static const char *rejectionReasonName(uint8_t reason);
 static void printClientRow(const AdminClientsReplyEntry *entry, const char *indent);
 static void printActionReply(uint8_t status, const char *action, const char *target_kind, const char *target);
@@ -176,6 +190,10 @@ static void printUsage(FILE *stream, const char *program)
     fprintf(stream, "  acl add <fp|*> <agent|*>/<iface|*> none|r|rw|rwa  grant (* = baseline, a = configure)\n");
     fprintf(stream, "  acl delete <fp|*> <agent|*>/<iface|*>          drop a grant\n");
     fprintf(stream, "  pending                identities the hub turned away, to authorize\n");
+    fprintf(stream, "  bridge                 bus-to-bus routes with their counters\n");
+    fprintf(stream, "  bridge add <agent>/<iface> <agent>/<iface> [<id>[:<mask>] ...]  forward frames from the first bus\n");
+    fprintf(stream, "                         into the second, all or only the ids given (adding again replaces the ids)\n");
+    fprintf(stream, "  bridge delete <agent>/<iface> <agent>/<iface>  drop a route\n");
     fprintf(stream, "default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
 }
 
@@ -225,6 +243,9 @@ static bool mapCommand(const char *words[], uint8_t word_count)
 {
     if (word_count >= INTERFACE_COMMAND_TARGET_WORDS && strcmp(words[0], "interface") == 0) {
         return mapInterfaceCommand(words, word_count);
+    }
+    if (word_count >= 1 && strcmp(words[0], "bridge") == 0) {
+        return mapBridgeCommand(words, word_count);
     }
 
     if (word_count == 1) {
@@ -353,6 +374,47 @@ static bool mapInterfaceCommand(const char *words[], uint8_t word_count)
     return parseNamespacedInterface(words[2]);
 }
 
+static bool mapBridgeCommand(const char *words[], uint8_t word_count)
+{
+    uint8_t i;
+
+    memset(&target_bridge, 0, sizeof(target_bridge));
+    if (word_count == 1) {
+        command = kCLI_COMMAND_BRIDGES;
+        return true;
+    }
+    if (word_count < BRIDGE_COMMAND_TARGET_WORDS) {
+        return false;
+    }
+    if (!parseBridgeEndpoint(words[2], &target_bridge.source) || !parseBridgeEndpoint(words[3], &target_bridge.destination)) {
+        return false;
+    }
+
+    if (strcmp(words[1], "delete") == 0) {
+        command = kCLI_COMMAND_BRIDGE_DELETE;
+        return word_count == BRIDGE_COMMAND_TARGET_WORDS;
+    }
+    if (strcmp(words[1], "add") != 0 || word_count - BRIDGE_COMMAND_TARGET_WORDS > SUBSCRIBE_FILTERS_MAX) {
+        return false;
+    }
+
+    command = kCLI_COMMAND_BRIDGE_ADD;
+    for(i=BRIDGE_COMMAND_TARGET_WORDS; i<word_count; i++) {
+        if (!FilterSpec_Parse(words[i], &target_bridge.filters[target_bridge.filter_count])) {
+            LOG_ERROR("bad filter %s, expected <id>[:<mask>] in hex", words[i]);
+            return false;
+        }
+        target_bridge.filter_count++;
+    }
+
+    return true;
+}
+
+static bool parseBridgeEndpoint(const char *text, AdminBridgeEndpoint *endpoint)
+{
+    return InterfaceName_Split(text, endpoint->agent_name, endpoint->interface_name);
+}
+
 static bool parseAclLevel(const char *text)
 {
     target_can_read = false;
@@ -464,6 +526,8 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
     AdminPinAddReplyMessage pin_add_reply;
     AdminAclSetReplyMessage acl_set_reply;
     AdminAclRevokeReplyMessage acl_revoke_reply;
+    AdminBridgeSetReplyMessage bridge_set_reply;
+    AdminBridgeDeleteReplyMessage bridge_delete_reply;
     ConfigureReplyMessage configure_reply;
     ErrorMessage error;
     char peer_id_text[16];
@@ -573,6 +637,22 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
         exit_code = 0;
         return;
     }
+    if (header.type == kMESSAGE_TYPE_ADMIN_BRIDGE_LIST_REPLY) {
+        handleBridgeListReply(data + MESSAGE_HEADER_SIZE, header.length);
+        return;
+    }
+    if (header.type == kMESSAGE_TYPE_ADMIN_BRIDGE_SET_REPLY) {
+        if (AdminBridgeSetReplyMessage_Decode(&bridge_set_reply, data + MESSAGE_HEADER_SIZE, header.length)) {
+            printBridgeReply(bridge_set_reply.status, "bridge");
+        }
+        return;
+    }
+    if (header.type == kMESSAGE_TYPE_ADMIN_BRIDGE_DELETE_REPLY) {
+        if (AdminBridgeDeleteReplyMessage_Decode(&bridge_delete_reply, data + MESSAGE_HEADER_SIZE, header.length)) {
+            printBridgeReply(bridge_delete_reply.status, "deleted bridge");
+        }
+        return;
+    }
     if (header.type == kMESSAGE_TYPE_CONFIGURE_REPLY) {
         if (!ConfigureReplyMessage_Decode(&configure_reply, data + MESSAGE_HEADER_SIZE, header.length)) {
             exit_code = 1;
@@ -607,6 +687,8 @@ static void sendRequest(void)
     AdminAclRevokeMessage acl_revoke;
     AdminAclListMessage acl_list = { page_offset };
     AdminRejectedMessage rejected = { page_offset };
+    AdminBridgeListMessage bridge_list = { page_offset };
+    AdminBridgeDeleteMessage bridge_delete;
     ConfigureMessage configure;
     uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size = 0;
@@ -665,6 +747,14 @@ static void sendRequest(void)
         snprintf(acl_revoke.interface_name, sizeof(acl_revoke.interface_name), "%s", target_interface);
         snprintf(acl_revoke.fingerprint_hex, sizeof(acl_revoke.fingerprint_hex), "%s", target_fingerprint);
         encoded_size = AdminAclRevokeMessage_Encode(&acl_revoke, encoded, sizeof(encoded));
+    } else if (command == kCLI_COMMAND_BRIDGES) {
+        encoded_size = AdminBridgeListMessage_Encode(&bridge_list, encoded, sizeof(encoded));
+    } else if (command == kCLI_COMMAND_BRIDGE_ADD) {
+        encoded_size = AdminBridgeSetMessage_Encode(&target_bridge, encoded, sizeof(encoded));
+    } else if (command == kCLI_COMMAND_BRIDGE_DELETE) {
+        bridge_delete.source = target_bridge.source;
+        bridge_delete.destination = target_bridge.destination;
+        encoded_size = AdminBridgeDeleteMessage_Encode(&bridge_delete, encoded, sizeof(encoded));
     } else if (command == kCLI_COMMAND_INTERFACE_SET || command == kCLI_COMMAND_INTERFACE_SHOW) {
         memset(&configure, 0, sizeof(configure));
         snprintf(configure.agent_name, sizeof(configure.agent_name), "%s", target_agent);
@@ -1070,6 +1160,87 @@ static void printClientRow(const AdminClientsReplyEntry *entry, const char *inde
         entry->frames_forwarded,
         entry->frames_dropped
     );
+}
+
+static void handleBridgeListReply(const uint8_t *payload, uint16_t payload_length)
+{
+    AdminBridgeListReplyMessage reply;
+    const AdminBridgeListReplyEntry *entry;
+    char source[REGISTER_AGENT_NAME_SIZE + REGISTER_INTERFACE_NAME_SIZE];
+    char destination[REGISTER_AGENT_NAME_SIZE + REGISTER_INTERFACE_NAME_SIZE];
+    char filters[SUBSCRIBE_FILTERS_MAX * FILTER_TEXT_SIZE];
+    uint8_t i;
+
+    if (!AdminBridgeListReplyMessage_Decode(&reply, payload, payload_length)) {
+        exit_code = 1;
+        return;
+    }
+
+    if (!page_header_printed) {
+        printf("%-24s %-24s %-8s %-12s %-12s %s\n", "source", "destination", "state", "forwarded", "dropped", "ids");
+        page_header_printed = true;
+    }
+    for(i=0; i<reply.count; i++) {
+        entry = &reply.entries[i];
+        formatEndpoint(&entry->source, source, sizeof(source));
+        formatEndpoint(&entry->destination, destination, sizeof(destination));
+        formatBridgeFilters(entry->filters, entry->filter_count, filters, sizeof(filters));
+        printf(
+            "%-24s %-24s %-8s %-12llu %-12llu %s\n",
+            source,
+            destination,
+            entry->state == (ADMIN_BRIDGE_STATE_SOURCE_ONLINE | ADMIN_BRIDGE_STATE_DESTINATION_ONLINE) ? "active" : "waiting",
+            (unsigned long long)entry->forwarded,
+            (unsigned long long)entry->dropped,
+            filters
+        );
+    }
+
+    if (!requestNextPage(reply.flags, reply.count)) {
+        exit_code = 0;
+    }
+}
+
+static void printBridgeReply(uint8_t status, const char *action)
+{
+    char source[REGISTER_AGENT_NAME_SIZE + REGISTER_INTERFACE_NAME_SIZE];
+    char destination[REGISTER_AGENT_NAME_SIZE + REGISTER_INTERFACE_NAME_SIZE];
+    char filters[SUBSCRIBE_FILTERS_MAX * FILTER_TEXT_SIZE];
+
+    if (status != ADMIN_BRIDGE_STATUS_OK) {
+        LOG_ERROR("%s", AdminBridgeStatus_Name(status));
+        exit_code = 1;
+        return;
+    }
+
+    formatEndpoint(&target_bridge.source, source, sizeof(source));
+    formatEndpoint(&target_bridge.destination, destination, sizeof(destination));
+    exit_code = 0;
+    if (command != kCLI_COMMAND_BRIDGE_ADD) {
+        printf("%s %s -> %s\n", action, source, destination);
+        return;
+    }
+
+    formatBridgeFilters(target_bridge.filters, target_bridge.filter_count, filters, sizeof(filters));
+    printf("%s %s -> %s %s\n", action, source, destination, filters);
+}
+
+static void formatBridgeFilters(const CanFilter *filters, uint8_t filter_count, char *out, size_t out_size)
+{
+    char filter[FILTER_TEXT_SIZE];
+    size_t position = 0;
+    uint8_t i;
+
+    snprintf(out, out_size, "%s", filter_count == 0 ? "all" : "");
+    for(i=0; i<filter_count; i++) {
+        FilterSpec_Format(&filters[i], filter, sizeof(filter));
+        position += (size_t)snprintf(out + position, out_size - position, "%s%s", i == 0 ? "" : " ", filter);
+    }
+}
+
+static void formatEndpoint(const AdminBridgeEndpoint *endpoint, char *out, size_t out_size)
+{
+    snprintf(out, out_size, "%s/%s", endpoint->agent_name, endpoint->interface_name);
 }
 
 static void printActionReply(uint8_t status, const char *action, const char *target_kind, const char *target)

@@ -215,6 +215,7 @@ set(HUB_SOURCES
     src/hub/domain/egress_queue.c
     src/hub/domain/frame_routes.c
     src/hub/domain/hub_peer.c
+    src/hub/domain/bridge_routes.c
     src/hub/domain/interface_registry.c
     src/hub/domain/peer_directory.c
     src/hub/domain/rejected_peers.c
@@ -259,6 +260,7 @@ set(CLIENT_SOURCES
     src/platform/linux/clock/clock.c
     src/platform/linux/shared/connect_url.c
     src/platform/linux/shared/epoll_registry.c
+    src/platform/linux/shared/filter_spec.c
     src/platform/linux/shared/interface_settings_text.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/shared/tcp_keepalive.c

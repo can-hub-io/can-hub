@@ -53,8 +53,9 @@ The daemon holds full admin power over the socket; who may do what in the
 browser is enforced in the web layer. Users (argon2id passwords) belong to
 groups; groups hold permissions by operation class — `views.read`,
 `peers.kick`, `interfaces.config`, `pins.manage`, `acl.manage`,
-`users.manage` — and a user's effective permission is the union across its
-groups. The last `users.manage` holder cannot be removed (anti-lockout).
+`bridges.manage`, `users.manage` — and a user's effective permission is the
+union across its groups. An `admins` group seeded before a permission existed
+receives it once on upgrade. The last `users.manage` holder cannot be removed (anti-lockout).
 All of this lives in `web.db`; the hub's `hub.db` and the agent/client
 identities are untouched.
 

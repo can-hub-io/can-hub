@@ -103,6 +103,10 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
         .route("/api/acls", get(handlers::acls).post(handlers::acl_set))
         .route("/api/acls/revoke", post(handlers::acl_revoke)));
 
+    let bridges_manage = guarded(&state, Some(Permission::BridgesManage), Router::new()
+        .route("/api/bridges", get(handlers::bridges).post(handlers::bridge_set))
+        .route("/api/bridges/delete", post(handlers::bridge_delete)));
+
     let users_manage = guarded(&state, Some(Permission::UsersManage), Router::new()
         .route("/api/audit", get(handlers::list_audit_log))
         .route("/api/permissions", get(handlers::list_permissions))
@@ -123,6 +127,7 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
         .merge(interfaces_config)
         .merge(pins_manage)
         .merge(acl_manage)
+        .merge(bridges_manage)
         .merge(users_manage)
         // Any unmatched /api/* path is a 404 JSON, never the SPA fallback.
         .route("/api/{*rest}", any(api_not_found))

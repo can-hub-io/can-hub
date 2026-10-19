@@ -83,6 +83,7 @@ static bool resolveStateDirectory(const char *state_directory_override);
 static bool loadIdentity(void);
 static IdentityStorePort *identityStore(void);
 static AuthorizationPort *authorizationStore(void);
+static BridgeStorePort *bridgeStore(void);
 static void importLegacyPinFile(void);
 static void applyDefaultListen(ListenAddress *listen_address, const char *bind_address, const char *port_text);
 static bool startListeners(const char *unix_path, const char *certificate, const char *key, bool explicit_listen);
@@ -380,7 +381,7 @@ static bool startListeners(const char *unix_path, const char *certificate, const
     }
 
     identity_store = identityStore();
-    HubApp_Init(&app, &mux_port, identity_store, authorizationStore(), require_known_peers);
+    HubApp_Init(&app, &mux_port, identity_store, authorizationStore(), bridgeStore(), require_known_peers);
 
     return true;
 }
@@ -408,6 +409,11 @@ static IdentityStorePort *identityStore(void)
 static AuthorizationPort *authorizationStore(void)
 {
     return database_open ? IdentityDatabase_AuthorizationPort(&identity_database) : NULL;
+}
+
+static BridgeStorePort *bridgeStore(void)
+{
+    return database_open ? IdentityDatabase_BridgePort(&identity_database) : NULL;
 }
 
 static void importLegacyPinFile(void)

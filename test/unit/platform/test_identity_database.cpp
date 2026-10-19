@@ -11,12 +11,14 @@ extern "C" {
 #define OTHER_FINGERPRINT "0000000000000000000000000000000000000000000000000000000000000000"
 #define PIN_FILE_PATH "/tmp/can_hub_test_known_agents"
 #define DB_FILE_PATH "/tmp/can_hub_test_migrations.db"
-#define LATEST_SCHEMA_VERSION 2
+#define LATEST_SCHEMA_VERSION 3
 
 static IdentityDatabase database;
 static IdentityStorePort *port;
+static BridgeStorePort *bridges;
 
 static int32_t readUserVersionFile(const char *path);
+static BridgeRoute route(const char *source_agent, const char *destination_agent);
 static void executeRaw(const char *path, const char *sql);
 static bool grant(AuthorizationPort *acl, const char *fingerprint_hex, const char *agent_name, const char *interface_name, const char *level);
 
@@ -270,6 +272,7 @@ describe("identity_database", []() {
 
     it("imports a known_agents pin file without overwriting existing pins", []() {
         char fingerprint[IDENTITY_FINGERPRINT_HEX_SIZE];
+
         FILE *pin_file = fopen(PIN_FILE_PATH, "w");
 
         fprintf(pin_file, "truck42 %s\n", OTHER_FINGERPRINT);
@@ -282,6 +285,65 @@ describe("identity_database", []() {
         expect(port->lookup(port->context, "truck42", fingerprint)).toBe(true);
         expect((const char *)fingerprint).toBe(TRUCK_FINGERPRINT);
         expect(port->lookup(port->context, "van7", fingerprint)).toBe(true);
+    });
+});
+
+describe("identity_database bridge routes", []() {
+    beforeEach([]() {
+        IdentityDatabase_Open(&database, ":memory:");
+        bridges = IdentityDatabase_BridgePort(&database);
+    });
+
+    afterEach([]() {
+        IdentityDatabase_Close(&database);
+    });
+
+    it("loads a saved route with its filters", []() {
+        BridgeRoute saved = route("truck42", "bus7");
+        BridgeRoute loaded;
+        bool found;
+
+        saved.filter_count = 1;
+        saved.filters[0] = { 0x100, 0x7FF };
+
+        bridges->save(bridges->context, &saved);
+        found = bridges->load(bridges->context, 0, &loaded);
+
+        expect(found).toBe(true);
+        expect((const char *)loaded.source.agent_name).toBe("truck42");
+        expect((const char *)loaded.destination.agent_name).toBe("bus7");
+        expect(loaded.filter_count).toBe(1);
+        expect(loaded.filters[0].can_id).toBe((uint32_t)0x100);
+        expect(loaded.filters[0].can_mask).toBe((uint32_t)0x7FF);
+    });
+
+    it("replaces the filters of a route saved again", []() {
+        BridgeRoute saved = route("truck42", "bus7");
+        BridgeRoute loaded;
+        BridgeRoute extra;
+        bool second_found;
+
+        bridges->save(bridges->context, &saved);
+        saved.filter_count = 1;
+        saved.filters[0] = { 0x200, 0x7FF };
+
+        bridges->save(bridges->context, &saved);
+        bridges->load(bridges->context, 0, &loaded);
+        second_found = bridges->load(bridges->context, 1, &extra);
+
+        expect(second_found).toBe(false);
+        expect(loaded.filters[0].can_id).toBe((uint32_t)0x200);
+    });
+
+    it("forgets a removed route", []() {
+        BridgeRoute saved = route("truck42", "bus7");
+        BridgeRoute loaded;
+
+        bridges->save(bridges->context, &saved);
+
+        bridges->remove(bridges->context, &saved.source, &saved.destination);
+
+        expect(bridges->load(bridges->context, 0, &loaded)).toBe(false);
     });
 });
 
@@ -402,4 +464,17 @@ static bool grant(AuthorizationPort *acl, const char *fingerprint_hex, const cha
     entry.can_admin = strchr(level, 'a') != NULL;
 
     return acl->grant(acl->context, &entry);
+}
+
+static BridgeRoute route(const char *source_agent, const char *destination_agent)
+{
+    BridgeRoute built;
+
+    memset(&built, 0, sizeof(built));
+    snprintf(built.source.agent_name, sizeof(built.source.agent_name), "%s", source_agent);
+    snprintf(built.source.interface_name, sizeof(built.source.interface_name), "can0");
+    snprintf(built.destination.agent_name, sizeof(built.destination.agent_name), "%s", destination_agent);
+    snprintf(built.destination.interface_name, sizeof(built.destination.interface_name), "can0");
+
+    return built;
 }

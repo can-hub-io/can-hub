@@ -1,10 +1,12 @@
 #pragma once
 
+#include "hub/domain/bridge_routes.h"
 #include "hub/domain/interface_registry.h"
 #include "hub/domain/frame_routes.h"
 #include "hub/domain/peer_directory.h"
 #include "hub/domain/rejected_peers.h"
 #include "hub/ports/authorization_port.h"
+#include "hub/ports/bridge_store_port.h"
 #include "hub/ports/hub_transport_events.h"
 #include "hub/ports/identity_store_port.h"
 #include "hub/ports/hub_transport_port.h"
@@ -36,7 +38,9 @@ typedef struct {
     HubTransportPort *transport;
     IdentityStorePort *identity_store;
     AuthorizationPort *authorization;
+    BridgeStorePort *bridge_store;
     InterfaceRegistry registry;
+    BridgeRoutes bridges;
     PeerDirectory directory;
     HubMetrics metrics;
     PendingIfconfig pending_ifconfig[BROKER_PENDING_IFCONFIG_MAX];
@@ -54,6 +58,7 @@ void Broker_Init(
     HubTransportPort *transport,
     IdentityStorePort *identity_store,
     AuthorizationPort *authorization,
+    BridgeStorePort *bridge_store,
     bool require_known_peers
 );
 HubTransportEvents Broker_Events(Broker *self);

@@ -57,6 +57,26 @@ export interface Acl {
   level: string
 }
 
+export interface BridgeEndpoint {
+  agentName: string
+  interfaceName: string
+}
+
+export interface CanFilter {
+  canId: number
+  canMask: number
+}
+
+export interface Bridge {
+  source: BridgeEndpoint
+  destination: BridgeEndpoint
+  filters: CanFilter[]
+  sourceOnline: boolean
+  destinationOnline: boolean
+  forwarded: number
+  dropped: number
+}
+
 export interface Pin {
   agentName: string
   fingerprintHex: string
@@ -225,6 +245,7 @@ export const api = {
   acls: () => getJson<Acl[]>('/api/acls'),
   pins: () => getJson<Pin[]>('/api/pins'),
   rejected: () => getJson<Rejected[]>('/api/rejected'),
+  bridges: () => getJson<Bridge[]>('/api/bridges'),
 
   kickPeer: (peerId: number) => send(`/api/peers/${peerId}/kick`, 'POST'),
   kickAgent: (name: string) => send(`/api/agents/${encodeURIComponent(name)}/kick`, 'POST'),
@@ -235,6 +256,10 @@ export const api = {
     send('/api/acls', 'POST', { fingerprintHex, agentName, interfaceName, level }),
   aclRevoke: (fingerprintHex: string, agentName: string, interfaceName: string) =>
     send('/api/acls/revoke', 'POST', { fingerprintHex, agentName, interfaceName }),
+  bridgeSet: (source: BridgeEndpoint, destination: BridgeEndpoint, filters: CanFilter[]) =>
+    send('/api/bridges', 'POST', { source, destination, filters }),
+  bridgeDelete: (source: BridgeEndpoint, destination: BridgeEndpoint) =>
+    send('/api/bridges/delete', 'POST', { source, destination }),
   interfaceSettings: (agentName: string, interfaceName: string) =>
     getJson<InterfaceSettings>(
       `/api/interfaces/${encodeURIComponent(agentName)}/${encodeURIComponent(interfaceName)}/settings`,
@@ -281,6 +306,7 @@ export const PERMISSION = {
   interfacesConfig: 'interfaces.config',
   pinsManage: 'pins.manage',
   aclManage: 'acl.manage',
+  bridgesManage: 'bridges.manage',
   usersManage: 'users.manage',
 } as const
 
