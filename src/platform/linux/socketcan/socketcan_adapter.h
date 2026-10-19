@@ -36,6 +36,7 @@ void SocketCanAdapter_SetPaceRate(SocketCanAdapter *self, uint32_t pace_rate);
  * channels that asked for them.
  */
 bool SocketCanAdapter_ReceiveErrorFrames(SocketCanAdapter *self);
+uint16_t SocketCanAdapter_FdInterfaces(const SocketCanAdapter *self);
 void SocketCanAdapter_Close(SocketCanAdapter *self);
 CanPort *SocketCanAdapter_Port(SocketCanAdapter *self);
 int32_t SocketCanAdapter_Fd(const SocketCanAdapter *self, uint8_t interface_index);

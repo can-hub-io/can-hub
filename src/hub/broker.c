@@ -95,6 +95,7 @@ static void loadBridgeRoutes(Broker *self);
 static void loadBridgeGroups(Broker *self);
 static bool bridgesConfigured(Broker *self);
 static bool isGroupEndpoint(const BridgeEndpoint *endpoint);
+static bool channelRefusesFrame(Broker *self, const HubPeer *client, const FrameMessage *frame);
 static void openGroupInterface(Broker *self, const char *name);
 static void closeGroupInterface(Broker *self, const char *name);
 static BridgeGroupSlot *groupOfChannel(Broker *self, const HubPeer *client, uint8_t channel, const InterfaceEntry **entry);
@@ -106,8 +107,9 @@ static void bridgeInto(Broker *self, const BridgeTarget *target, const FrameMess
 static void handleIfconfigReply(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleInterfaceStatus(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void relayPaceToClients(Broker *self, uint32_t interface_id, uint32_t pace_rate);
-static bool rememberPendingIfconfig(Broker *self, uint32_t requester_peer_id, uint32_t agent_peer_id, uint32_t *request_id);
-static bool takePendingIfconfig(Broker *self, uint32_t agent_peer_id, uint32_t request_id, uint32_t *requester_peer_id);
+static bool rememberPendingIfconfig(Broker *self, uint32_t requester_peer_id, const InterfaceEntry *entry, uint32_t *request_id);
+static bool takePendingIfconfig(Broker *self, uint32_t agent_peer_id, uint32_t request_id, PendingIfconfig *taken);
+static void learnFdFromSettings(Broker *self, uint32_t interface_id, const InterfaceSettings *settings);
 static void releasePendingIfconfig(Broker *self, uint32_t peer_id);
 static uint8_t configureStatus(uint8_t agent_status);
 static void replyConfigure(Broker *self, HubPeer *peer, uint8_t status);
@@ -470,6 +472,10 @@ static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame)
         group = groupOfChannel(self, peer, frame->channel, &group_entry);
         if (group != NULL) {
             writeIntoGroup(self, peer, group, group_entry, frame);
+            return true;
+        }
+        if (channelRefusesFrame(self, peer, frame)) {
+            self->metrics.frames_dropped++;
             return true;
         }
         route_count = FrameRoutes_FromClient(
@@ -1083,7 +1089,7 @@ static void handleConfigure(Broker *self, HubPeer *peer, const MessageHeader *he
     }
 
     memset(&forward, 0, sizeof(forward));
-    if (!rememberPendingIfconfig(self, peer->peer_id, agent->peer_id, &forward.request_id)) {
+    if (!rememberPendingIfconfig(self, peer->peer_id, entry, &forward.request_id)) {
         replyConfigure(self, peer, CONFIGURE_STATUS_AGENT_UNREACHABLE);
         return;
     }
@@ -1461,6 +1467,20 @@ static bool bridgesConfigured(Broker *self)
     return !BridgeRoutes_IsEmpty(&self->bridges) || !BridgeGroups_IsEmpty(&self->groups);
 }
 
+static bool channelRefusesFrame(Broker *self, const HubPeer *client, const FrameMessage *frame)
+{
+    const InterfaceEntry *entry;
+    uint32_t interface_id;
+
+    if (!ClientSession_InterfaceForChannel(&client->session, frame->channel, &interface_id)) {
+        return false;
+    }
+
+    entry = InterfaceRegistry_FindById(&self->registry, interface_id);
+
+    return entry != NULL && InterfaceEntry_RefusesFrame(entry, frame->frame_flags);
+}
+
 static bool isGroupEndpoint(const BridgeEndpoint *endpoint)
 {
     return strcmp(endpoint->agent_name, BRIDGE_GROUP_AGENT_NAME) == 0;
@@ -1611,6 +1631,10 @@ static void bridgeInto(Broker *self, const BridgeTarget *target, const FrameMess
         target->destination->agent_name,
         target->destination->interface_name
     );
+    if (destination != NULL && InterfaceEntry_RefusesFrame(destination, frame->frame_flags)) {
+        (*target->dropped)++;
+        return;
+    }
     agent = (destination != NULL) ? PeerDirectory_Find(&self->directory, destination->agent_peer_id) : NULL;
     token = (agent != NULL) ? EchoTokens_Issue(&agent->echo_tokens, ECHO_TOKENS_BRIDGE_OWNER) : FRAME_ROUTE_NO_TOKEN;
     if (token == FRAME_ROUTE_NO_TOKEN) {
@@ -1631,7 +1655,7 @@ static void handleIfconfigReply(Broker *self, HubPeer *peer, const MessageHeader
     IfconfigReplyMessage reply;
     ConfigureReplyMessage relayed;
     HubPeer *requester;
-    uint32_t requester_peer_id;
+    PendingIfconfig pending;
     uint8_t encoded[CONTROL_BUFFER_SIZE];
 
     if (peer->role != kHUB_PEER_ROLE_AGENT) {
@@ -1640,11 +1664,12 @@ static void handleIfconfigReply(Broker *self, HubPeer *peer, const MessageHeader
     if (!IfconfigReplyMessage_Decode(&reply, payload, header->length)) {
         return;
     }
-    if (!takePendingIfconfig(self, peer->peer_id, reply.request_id, &requester_peer_id)) {
+    if (!takePendingIfconfig(self, peer->peer_id, reply.request_id, &pending)) {
         return;
     }
 
-    requester = PeerDirectory_Find(&self->directory, requester_peer_id);
+    learnFdFromSettings(self, pending.interface_id, &reply.settings);
+    requester = PeerDirectory_Find(&self->directory, pending.requester_peer_id);
     if (requester == NULL) {
         return;
     }
@@ -1789,7 +1814,7 @@ static void recordRejection(Broker *self, const HubPeer *peer, const char *name,
     RejectedPeers_Record(&self->rejected_peers, &rejection);
 }
 
-static bool rememberPendingIfconfig(Broker *self, uint32_t requester_peer_id, uint32_t agent_peer_id, uint32_t *request_id)
+static bool rememberPendingIfconfig(Broker *self, uint32_t requester_peer_id, const InterfaceEntry *entry, uint32_t *request_id)
 {
     uint8_t i;
 
@@ -1800,7 +1825,8 @@ static bool rememberPendingIfconfig(Broker *self, uint32_t requester_peer_id, ui
         self->next_ifconfig_request_id++;
         self->pending_ifconfig[i].in_use = true;
         self->pending_ifconfig[i].requester_peer_id = requester_peer_id;
-        self->pending_ifconfig[i].agent_peer_id = agent_peer_id;
+        self->pending_ifconfig[i].agent_peer_id = entry->agent_peer_id;
+        self->pending_ifconfig[i].interface_id = entry->interface_id;
         self->pending_ifconfig[i].request_id = self->next_ifconfig_request_id;
         *request_id = self->next_ifconfig_request_id;
         return true;
@@ -1809,7 +1835,7 @@ static bool rememberPendingIfconfig(Broker *self, uint32_t requester_peer_id, ui
     return false;
 }
 
-static bool takePendingIfconfig(Broker *self, uint32_t agent_peer_id, uint32_t request_id, uint32_t *requester_peer_id)
+static bool takePendingIfconfig(Broker *self, uint32_t agent_peer_id, uint32_t request_id, PendingIfconfig *taken)
 {
     uint8_t i;
 
@@ -1823,12 +1849,25 @@ static bool takePendingIfconfig(Broker *self, uint32_t agent_peer_id, uint32_t r
         if (self->pending_ifconfig[i].request_id != request_id) {
             continue;
         }
-        *requester_peer_id = self->pending_ifconfig[i].requester_peer_id;
+        *taken = self->pending_ifconfig[i];
         self->pending_ifconfig[i].in_use = false;
         return true;
     }
 
     return false;
+}
+
+/*
+ * Turning CAN FD on or off changes what the interface accepts; the settings
+ * the agent reports back after a CONFIGURE say which it is now.
+ */
+static void learnFdFromSettings(Broker *self, uint32_t interface_id, const InterfaceSettings *settings)
+{
+    if ((settings->fields & INTERFACE_FIELD_CTRLMODE) == 0 || (settings->ctrlmode_mask & INTERFACE_CTRLMODE_FD) == 0) {
+        return;
+    }
+
+    InterfaceRegistry_SetFdCapable(&self->registry, interface_id, (settings->ctrlmode_flags & INTERFACE_CTRLMODE_FD) != 0);
 }
 
 static void releasePendingIfconfig(Broker *self, uint32_t peer_id)

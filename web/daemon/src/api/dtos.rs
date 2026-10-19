@@ -521,6 +521,7 @@ impl From<ClientEntry> for ClientDto {
 pub(crate) struct InterfaceDto {
     pub interface_id: u32,
     pub subscriber_count: u8,
+    pub mode: &'static str,
     pub frames_received: u64,
     pub tx_dropped: u64,
     pub agent_name: String,
@@ -532,6 +533,7 @@ impl From<InterfaceEntry> for InterfaceDto {
         InterfaceDto {
             interface_id: entry.interface_id,
             subscriber_count: entry.subscriber_count,
+            mode: interface_mode_name(entry.mode),
             frames_received: entry.frames_received,
             tx_dropped: entry.tx_dropped,
             agent_name: entry.agent_name,
@@ -695,6 +697,14 @@ fn rejection_reason_name(reason: RejectionReason) -> &'static str {
     match reason {
         RejectionReason::NotAllowed => "not-allowed",
         RejectionReason::FingerprintMismatch => "fingerprint-mismatch",
+    }
+}
+
+fn interface_mode_name(mode: u8) -> &'static str {
+    match mode {
+        1 => "classic",
+        2 => "fd",
+        _ => "unknown",
     }
 }
 

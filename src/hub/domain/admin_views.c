@@ -4,6 +4,7 @@
 
 #include "shared/bounded_string.h"
 
+static uint8_t interfaceMode(const InterfaceEntry *entry);
 static uint8_t countAgentInterfaces(const InterfaceRegistry *registry, uint32_t agent_peer_id);
 static uint8_t countSubscribers(const PeerDirectory *directory, uint32_t interface_id);
 static bool clientHasOpenChannels(const HubPeer *peer);
@@ -164,6 +165,7 @@ void AdminViews_Interfaces(
         entry->subscriber_count = countSubscribers(directory, interface_entry->interface_id);
         entry->frames_received = interface_entry->frames_received;
         entry->tx_dropped = interface_entry->tx_dropped;
+        entry->mode = interfaceMode(interface_entry);
         memcpy(entry->agent_name, interface_entry->agent_name, REGISTER_AGENT_NAME_SIZE);
         memcpy(entry->interface_name, interface_entry->interface_name, REGISTER_INTERFACE_NAME_SIZE);
     }
@@ -251,4 +253,13 @@ static bool appendClientRow(
     entry->frames_dropped = frames_dropped;
 
     return true;
+}
+
+static uint8_t interfaceMode(const InterfaceEntry *entry)
+{
+    if (!entry->fd_reported) {
+        return ADMIN_INTERFACE_MODE_UNKNOWN;
+    }
+
+    return entry->fd_capable ? ADMIN_INTERFACE_MODE_FD : ADMIN_INTERFACE_MODE_CLASSIC;
 }

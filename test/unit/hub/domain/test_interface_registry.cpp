@@ -2,6 +2,7 @@
 
 extern "C" {
 #include "hub/domain/interface_registry.h"
+#include "protocol/frame_message.h"
 }
 
 static InterfaceRegistry registry;
@@ -23,6 +24,44 @@ describe("interface_registry", []() {
         expect(ack.interface_count).toBe(2);
         expect(ack.channels[0]).toBe(0);
         expect(ack.channels[1]).toBe(1);
+    });
+
+    it("refuses FD frames only on an interface reported classic", []() {
+        const RegisterMessage reported = { "bench", 2, { "fd0", "classic0" }, true, 0x0001 };
+        RegisterAckMessage ack;
+        const InterfaceEntry *fd_entry;
+        const InterfaceEntry *classic_entry;
+
+        InterfaceRegistry_RegisterAgent(&registry, 100, &reported, &ack);
+        fd_entry = InterfaceRegistry_FindByName(&registry, "bench", "fd0");
+        classic_entry = InterfaceRegistry_FindByName(&registry, "bench", "classic0");
+
+        expect(InterfaceEntry_RefusesFrame(fd_entry, FRAME_FLAG_FD)).toBe(false);
+        expect(InterfaceEntry_RefusesFrame(classic_entry, FRAME_FLAG_FD)).toBe(true);
+        expect(InterfaceEntry_RefusesFrame(classic_entry, 0)).toBe(false);
+    });
+
+    it("refuses nothing on an interface its agent did not report", []() {
+        RegisterAckMessage ack;
+        const InterfaceEntry *entry;
+
+        InterfaceRegistry_RegisterAgent(&registry, 100, &truck_registration, &ack);
+        entry = InterfaceRegistry_FindByName(&registry, "truck42", "can0");
+
+        expect(InterfaceEntry_RefusesFrame(entry, FRAME_FLAG_FD)).toBe(false);
+    });
+
+    it("takes CAN FD once it is switched on", []() {
+        const RegisterMessage reported = { "bench", 1, { "classic0" }, true, 0 };
+        RegisterAckMessage ack;
+        const InterfaceEntry *entry;
+
+        InterfaceRegistry_RegisterAgent(&registry, 100, &reported, &ack);
+        entry = InterfaceRegistry_FindByName(&registry, "bench", "classic0");
+
+        InterfaceRegistry_SetFdCapable(&registry, entry->interface_id, true);
+
+        expect(InterfaceEntry_RefusesFrame(entry, FRAME_FLAG_FD)).toBe(false);
     });
 
     it("rejects a colliding agent and interface name pair", []() {

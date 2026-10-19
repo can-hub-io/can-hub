@@ -52,6 +52,23 @@ bool SocketCanAdapter_Open(SocketCanAdapter *self, const RegisterMessage *regist
     return true;
 }
 
+uint16_t SocketCanAdapter_FdInterfaces(const SocketCanAdapter *self)
+{
+    struct ifreq interface_request;
+    uint16_t fd_interfaces = 0;
+    uint8_t i;
+
+    for(i=0; i<self->interface_count; i++) {
+        memset(&interface_request, 0, sizeof(interface_request));
+        snprintf(interface_request.ifr_name, IFNAMSIZ, "%s", self->interface_names[i]);
+        if (ioctl(self->can_fds[i], SIOCGIFMTU, &interface_request) == 0 && interface_request.ifr_mtu == CANFD_MTU) {
+            fd_interfaces |= (uint16_t)(1u << i);
+        }
+    }
+
+    return fd_interfaces;
+}
+
 void SocketCanAdapter_Close(SocketCanAdapter *self)
 {
     uint8_t i;

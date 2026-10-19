@@ -60,6 +60,7 @@
 
 #define INTERFACE_ENTRY_ID_OFFSET 0
 #define INTERFACE_ENTRY_SUBSCRIBERS_OFFSET 4
+#define INTERFACE_ENTRY_MODE_OFFSET 5
 #define INTERFACE_ENTRY_FRAMES_OFFSET 8
 #define INTERFACE_ENTRY_AGENT_NAME_OFFSET 16
 #define INTERFACE_ENTRY_INTERFACE_NAME_OFFSET 144
@@ -1557,6 +1558,7 @@ static void writeInterfaceEntry(uint8_t *destination, const AdminInterfacesReply
 {
     Wire_WriteU32(destination + INTERFACE_ENTRY_ID_OFFSET, entry->interface_id);
     destination[INTERFACE_ENTRY_SUBSCRIBERS_OFFSET] = entry->subscriber_count;
+    destination[INTERFACE_ENTRY_MODE_OFFSET] = entry->mode;
     Wire_WriteU64(destination + INTERFACE_ENTRY_FRAMES_OFFSET, entry->frames_received);
     memcpy(destination + INTERFACE_ENTRY_AGENT_NAME_OFFSET, entry->agent_name, strlen(entry->agent_name));
     memcpy(destination + INTERFACE_ENTRY_INTERFACE_NAME_OFFSET, entry->interface_name, strlen(entry->interface_name));
@@ -1567,6 +1569,7 @@ static void readInterfaceEntry(const uint8_t *source, AdminInterfacesReplyEntry 
 {
     entry->interface_id = Wire_ReadU32(source + INTERFACE_ENTRY_ID_OFFSET);
     entry->subscriber_count = source[INTERFACE_ENTRY_SUBSCRIBERS_OFFSET];
+    entry->mode = source[INTERFACE_ENTRY_MODE_OFFSET];
     entry->frames_received = Wire_ReadU64(source + INTERFACE_ENTRY_FRAMES_OFFSET);
     memcpy(entry->agent_name, source + INTERFACE_ENTRY_AGENT_NAME_OFFSET, REGISTER_AGENT_NAME_SIZE);
     entry->agent_name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';

@@ -58,6 +58,10 @@ class BenchKeywords:
     def enable_can_fd_on(self, server, name="vcan0"):
         server.enable_can_fd(name)
 
+    @keyword("Make CAN Classic On ${server}")
+    def make_can_classic_on(self, server, name="vcan0"):
+        server.make_can_classic(name)
+
     # ---------- configuration builders ----------
 
     @keyword("Hub Configuration")

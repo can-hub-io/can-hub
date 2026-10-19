@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "protocol/frame_message.h"
 #include "shared/bounded_string.h"
 
 #define PACE_EFFECTIVE_PERCENT 80
@@ -56,6 +57,8 @@ bool InterfaceRegistry_RegisterAgent(
         entry->interface_id = self->next_interface_id++;
         entry->agent_peer_id = agent_peer_id;
         entry->agent_channel = i;
+        entry->fd_reported = registration->fd_reported;
+        entry->fd_capable = (registration->fd_interfaces & (1u << i)) != 0;
         memcpy(entry->agent_name, registration->agent_name, REGISTER_AGENT_NAME_SIZE);
         memcpy(entry->interface_name, registration->interface_names[i], REGISTER_INTERFACE_NAME_SIZE);
 
@@ -119,6 +122,23 @@ void InterfaceRegistry_RemoveVirtual(InterfaceRegistry *self, uint32_t interface
 bool InterfaceEntry_IsVirtual(const InterfaceEntry *entry)
 {
     return entry->agent_peer_id == INTERFACE_REGISTRY_HUB_PEER;
+}
+
+bool InterfaceEntry_RefusesFrame(const InterfaceEntry *entry, uint8_t frame_flags)
+{
+    return (frame_flags & FRAME_FLAG_FD) != 0 && entry->fd_reported && !entry->fd_capable;
+}
+
+void InterfaceRegistry_SetFdCapable(InterfaceRegistry *self, uint32_t interface_id, bool fd_capable)
+{
+    uint32_t i;
+
+    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
+        if (self->entries[i].in_use && self->entries[i].interface_id == interface_id) {
+            self->entries[i].fd_reported = true;
+            self->entries[i].fd_capable = fd_capable;
+        }
+    }
 }
 
 bool InterfaceRegistry_CollidingPeer(

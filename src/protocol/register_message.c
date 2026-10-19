@@ -3,10 +3,13 @@
 #include <string.h>
 
 #include "protocol/message_header.h"
+#include "protocol/wire.h"
 
 #define AGENT_NAME_OFFSET 0
 #define INTERFACE_COUNT_OFFSET 128
 #define INTERFACE_NAMES_OFFSET 132
+#define FLAGS_OFFSET 129
+#define FD_INTERFACES_OFFSET 130
 
 #define ACK_STATUS_OFFSET 0
 #define ACK_INTERFACE_COUNT_OFFSET 1
@@ -42,6 +45,10 @@ size_t RegisterMessage_Encode(const RegisterMessage *self, uint8_t *buffer, size
     memset(body, 0, REGISTER_BODY_SIZE);
     memcpy(body + AGENT_NAME_OFFSET, self->agent_name, strlen(self->agent_name));
     body[INTERFACE_COUNT_OFFSET] = self->interface_count;
+    if (self->fd_reported) {
+        body[FLAGS_OFFSET] = REGISTER_FLAG_FD_REPORTED;
+        Wire_WriteU16(body + FD_INTERFACES_OFFSET, self->fd_interfaces);
+    }
     for(i=0; i<self->interface_count; i++) {
         memcpy(
             body + INTERFACE_NAMES_OFFSET + i * REGISTER_INTERFACE_NAME_SIZE,
@@ -67,6 +74,8 @@ bool RegisterMessage_Decode(RegisterMessage *self, const uint8_t *payload, size_
     if (self->interface_count > REGISTER_INTERFACES_MAX) {
         return false;
     }
+    self->fd_reported = (payload[FLAGS_OFFSET] & REGISTER_FLAG_FD_REPORTED) != 0;
+    self->fd_interfaces = self->fd_reported ? Wire_ReadU16(payload + FD_INTERFACES_OFFSET) : 0;
 
     for(i=0; i<self->interface_count; i++) {
         memcpy(
