@@ -1041,8 +1041,9 @@ components:
 
     Interface:
       type: object
-      required: [interfaceId, subscriberCount, framesReceived, txDropped, agentName, interfaceName]
+      required: [interfaceId, subscriberCount, mode, framesReceived, txDropped, agentName, interfaceName]
       properties:
+        mode: { type: string, enum: [unknown, classic, fd], description: 'CAN FD as the agent reports it; a classic interface gets no FD frames from the hub' }
         interfaceId: { type: integer, format: uint32 }
         subscriberCount: { type: integer, format: uint8 }
         framesReceived: { type: integer, format: uint64 }

@@ -138,7 +138,10 @@ keep their own status codes; no duplicate ERROR is sent for those.
 REGISTER (total 392)
 @4   agent_name char[128]
 @132 interface_count u8
-@133 reserved u8[3]
+@133 flags u8          (bit 0: fd_interfaces is reported)
+@134 fd_interfaces u16 (bit i: interface i carries CAN FD, its MTU is 72;
+                        only meaningful with flag bit 0. An agent that does
+                        not report it gets FD frames forwarded as before.)
 @136 interface_names char[16][16]
 
 REGISTER_ACK (total 24)
@@ -426,7 +429,10 @@ ADMIN_INTERFACES_REPLY (total 8 + count * 168)
 @8   entries, each 168 bytes:
      +0   interface_id u32
      +4   subscriber_count u8  (clients holding the interface open right now)
-     +5   reserved u8[3]
+     +5   mode u8              (0 not reported, 1 classic CAN, 2 CAN FD; a
+                                classic interface gets no FD frames from the
+                                hub, they are dropped and counted)
+     +6   reserved u8[2]
      +8   frames_received u64  (frames seen on the interface, both directions)
      +16  agent_name char[128]
      +144 interface_name char[16]

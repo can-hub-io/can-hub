@@ -57,6 +57,32 @@ describe("register_message", []() {
         expect(decoded_ok).toBe(false);
     });
 
+    it("round-trips which interfaces carry CAN FD", []() {
+        RegisterMessage registration = { "truck42", 2, { "can0", "can1" }, true, 0x0002 };
+        RegisterMessage decoded;
+        uint8_t buffer[512];
+        size_t encoded_size;
+
+        encoded_size = RegisterMessage_Encode(&registration, buffer, sizeof(buffer));
+        RegisterMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(decoded.fd_reported).toBe(true);
+        expect(decoded.fd_interfaces).toBe((uint16_t)0x0002);
+    });
+
+    it("reads no CAN FD report from an agent that sends none", []() {
+        RegisterMessage registration = { "truck42", 1, { "can0" } };
+        RegisterMessage decoded;
+        uint8_t buffer[512];
+        size_t encoded_size;
+
+        encoded_size = RegisterMessage_Encode(&registration, buffer, sizeof(buffer));
+        RegisterMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(decoded.fd_reported).toBe(false);
+        expect(decoded.fd_interfaces).toBe((uint16_t)0);
+    });
+
     it("round-trips an ack with channels", []() {
         RegisterAckMessage ack = { REGISTER_STATUS_OK, 2, { 1, 2 } };
         RegisterAckMessage decoded;

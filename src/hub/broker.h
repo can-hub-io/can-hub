@@ -33,6 +33,7 @@ typedef struct {
     bool in_use;
     uint32_t requester_peer_id;
     uint32_t agent_peer_id;
+    uint32_t interface_id;
     uint32_t request_id;
 } PendingIfconfig;
 

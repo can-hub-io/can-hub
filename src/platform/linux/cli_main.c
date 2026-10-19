@@ -132,6 +132,7 @@ static void printClientRow(const AdminClientsReplyEntry *entry, const char *inde
 static void printActionReply(uint8_t status, const char *action, const char *target_kind, const char *target);
 static void printConfigureReply(const ConfigureReplyMessage *reply);
 static const char *aclLevelName(bool can_read, bool can_write, bool can_admin);
+static const char *interfaceModeName(uint8_t mode);
 static const char *roleName(uint8_t role);
 static const char *transportName(uint8_t transport_kind);
 static void formatUptime(uint32_t seconds, char *out, size_t size);
@@ -1089,20 +1090,21 @@ static void handleInterfacesReply(const uint8_t *payload, uint16_t payload_lengt
 
     if (!page_header_printed) {
         printf(
-            "%-10s %-32s %-16s %-12s %-12s %s\n",
-            "id", "agent", "interface", "subscribers", "frames", "tx-dropped"
+            "%-10s %-32s %-16s %-12s %-12s %-12s %s\n",
+            "id", "agent", "interface", "subscribers", "frames", "tx-dropped", "mode"
         );
         page_header_printed = true;
     }
     for(i=0; i<reply.count; i++) {
         printf(
-            "%-10u %-32s %-16s %-12u %-12llu %llu\n",
+            "%-10u %-32s %-16s %-12u %-12llu %-12llu %s\n",
             reply.entries[i].interface_id,
             reply.entries[i].agent_name,
             reply.entries[i].interface_name,
             reply.entries[i].subscriber_count,
             (unsigned long long)reply.entries[i].frames_received,
-            (unsigned long long)reply.entries[i].tx_dropped
+            (unsigned long long)reply.entries[i].tx_dropped,
+            interfaceModeName(reply.entries[i].mode)
         );
     }
 
@@ -1452,6 +1454,18 @@ static void printConfigureReply(const ConfigureReplyMessage *reply)
     printf("%s/%s\n", target_agent, target_interface);
     InterfaceSettingsText_Print(stdout, &reply->settings);
     exit_code = 0;
+}
+
+static const char *interfaceModeName(uint8_t mode)
+{
+    if (mode == ADMIN_INTERFACE_MODE_FD) {
+        return "fd";
+    }
+    if (mode == ADMIN_INTERFACE_MODE_CLASSIC) {
+        return "classic";
+    }
+
+    return "-";
 }
 
 static const char *aclLevelName(bool can_read, bool can_write, bool can_admin)

@@ -17,6 +17,8 @@
  * a colliding registration is rejected whole. A virtual entry is an
  * interface the hub itself serves (a bridge group): it belongs to no agent,
  * its agent peer id is INTERFACE_REGISTRY_HUB_PEER, which no peer ever has.
+ * An agent may report which of its interfaces carry CAN FD; an interface
+ * known to be classic refuses FD frames, one not reported takes them all.
  */
 typedef struct {
     bool in_use;
@@ -26,6 +28,8 @@ typedef struct {
     uint64_t frames_received;
     uint64_t tx_dropped;
     uint32_t advertised_rate;
+    bool fd_reported;
+    bool fd_capable;
     EgressShaper shaper;
     char agent_name[REGISTER_AGENT_NAME_SIZE];
     char interface_name[REGISTER_INTERFACE_NAME_SIZE];
@@ -51,6 +55,8 @@ const InterfaceEntry *InterfaceRegistry_AddVirtual(
 );
 void InterfaceRegistry_RemoveVirtual(InterfaceRegistry *self, uint32_t interface_id);
 bool InterfaceEntry_IsVirtual(const InterfaceEntry *entry);
+bool InterfaceEntry_RefusesFrame(const InterfaceEntry *entry, uint8_t frame_flags);
+void InterfaceRegistry_SetFdCapable(InterfaceRegistry *self, uint32_t interface_id, bool fd_capable);
 bool InterfaceRegistry_CollidingPeer(
     const InterfaceRegistry *self,
     const RegisterMessage *registration,

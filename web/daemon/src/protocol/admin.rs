@@ -126,6 +126,8 @@ pub struct PinEntry {
 pub struct InterfaceEntry {
     pub interface_id: u32,
     pub subscriber_count: u8,
+    /// 0 not reported by the agent, 1 classic CAN, 2 CAN FD.
+    pub mode: u8,
     pub frames_received: u64,
     pub tx_dropped: u64,
     pub agent_name: String,
@@ -691,6 +693,7 @@ pub fn decode_interfaces_reply(buffer: &[u8]) -> Result<Page<InterfaceEntry>, De
     decode_page(buffer, MessageType::AdminInterfacesReply, 168, |entry| InterfaceEntry {
         interface_id: read_u32(entry, 0),
         subscriber_count: entry[4],
+        mode: entry[5],
         frames_received: read_u64(entry, 8),
         agent_name: read_fixed_str(entry, 16, AGENT_NAME_SIZE),
         interface_name: read_fixed_str(entry, 144, INTERFACE_NAME_SIZE),

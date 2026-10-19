@@ -44,6 +44,7 @@ export interface Client {
 export interface Interface {
   interfaceId: number
   subscriberCount: number
+  mode: 'unknown' | 'classic' | 'fd'
   framesReceived: number
   txDropped: number
   agentName: string

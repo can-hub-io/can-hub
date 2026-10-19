@@ -107,6 +107,12 @@ lab/can1                 truck42/can0             active   88           0       
   `waiting`; frames for an offline destination count as dropped) and apply
   again when they reconnect. They live in `hub.db` and survive restarts.
   The hub holds up to 64.
+- The agent reports which of its interfaces carry CAN FD (MTU 72; a vcan
+  is FD unless its MTU is set to 16). The hub never injects an FD frame into
+  a classic bus, whether a route, a group or a client sends it: it drops and
+  counts it (the route's or group's `dropped`, the hub's frame drops).
+  `can-hub-cli interfaces` shows each bus as `fd` or `classic`, `-` for an
+  agent too old to report it, and `interface set ... fd on|off` updates it.
 - Bridged frames travel like client injections: lossy and paced to the
   destination. Use bridges for telemetry, diagnostics and replication, not
   for control loops over the network.

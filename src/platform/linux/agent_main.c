@@ -123,6 +123,8 @@ int main(int argc, char **argv)
         return 1;
     }
     SocketCanAdapter_SetPaceRate(&can_adapter, pace_rate_override);
+    registration.fd_reported = true;
+    registration.fd_interfaces = SocketCanAdapter_FdInterfaces(&can_adapter);
 
     agent_core_events = AgentApp_TransportEvents(&app);
     transport_events = loggingTransportEvents();

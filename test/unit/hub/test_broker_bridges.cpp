@@ -24,6 +24,9 @@ extern "C" {
 #define GROUP_INTERFACE_INDEX 4
 #define VIEWER_PEER 201
 #define RESERVED_PEER 103
+#define CLASSIC_PEER 104
+#define CLASSIC_CAN0_CHANNEL 0
+#define CLASSIC_INTERFACE_INDEX 3
 #define BUS_INTERFACE_INDEX 2
 #define PASSED_ID 0x100
 #define FILTERED_ID 0x200
@@ -47,6 +50,7 @@ static HubTransportEvents events;
 static const RegisterMessage truck_registration = { "truck42", 2, { "can0", "can1" } };
 static const RegisterMessage bus_registration = { "bus7", 1, { "can0" } };
 static const RegisterMessage lab_registration = { "lab", 1, { "can0" } };
+static const RegisterMessage classic_registration = { "classic", 1, { "can0" }, true, 0 };
 static const RegisterMessage reserved_registration = { "group", 1, { "can0" } };
 static uint8_t viewer_channel;
 static AdminGroupListReplyMessage listed_group;
@@ -70,6 +74,7 @@ static uint8_t openFleetAs(uint32_t client_peer_id, uint8_t open_flags);
 static void writeFromClient(uint32_t client_peer_id, uint8_t channel, uint32_t can_id);
 static void listBridges(void);
 static void frameFromAgent(uint32_t agent_peer_id, uint8_t channel, uint32_t can_id, uint8_t route_flags);
+static void fdFrameFromAgent(uint32_t agent_peer_id, uint8_t channel, uint32_t can_id);
 static void echoFromBus(uint8_t token);
 static uint8_t framesTo(uint32_t peer_id);
 static FrameMessage lastFrameTo(uint32_t peer_id);
@@ -516,6 +521,57 @@ describe("broker bus bridges", []() {
             expect(transport.last_closed_peer).toBe((uint32_t)RESERVED_PEER);
         });
     });
+
+    describe("CAN FD", []() {
+        beforeEach([]() {
+            resetStore();
+            startHub();
+            connectAgents();
+            BrokerDriver_ConnectAgent(&events, &transport, CLASSIC_PEER, &classic_registration);
+            HubTransportPortMock_Reset(&transport);
+        });
+
+        it("drops and counts an FD frame bridged into a classic bus", []() {
+            uint8_t delivered;
+
+            addBridge("truck42/can0", "classic/can0", 0, NULL);
+
+            fdFrameFromAgent(TRUCK_PEER, TRUCK_CAN0_CHANNEL, PASSED_ID);
+            frameFromAgent(TRUCK_PEER, TRUCK_CAN0_CHANNEL, FILTERED_ID, 0);
+            delivered = framesTo(CLASSIC_PEER);
+            injected = lastFrameTo(CLASSIC_PEER);
+            listBridges();
+
+            expect(delivered).toBe(1);
+            expect(injected.can_id).toBe((uint32_t)FILTERED_ID);
+            expect(listed.entries[0].dropped).toBe((uint64_t)1);
+            expect(listed.entries[0].forwarded).toBe((uint64_t)1);
+        });
+
+        it("drops an FD frame a client writes into a classic bus", []() {
+            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, CLASSIC_INTERFACE_INDEX);
+            FrameMessage frame;
+            uint8_t encoded[FRAME_BUFFER_SIZE];
+            size_t encoded_size;
+
+            BrokerDriver_ConnectClient(&events, CLIENT_PEER);
+            frame = { PASSED_ID, 2000, BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, OPEN_FLAG_WANT_WRITE), 12, FRAME_FLAG_FD, 0, { 0x55 } };
+            encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+            HubTransportPortMock_Reset(&transport);
+
+            events.on_peer_frame(events.context, CLIENT_PEER, encoded, encoded_size);
+
+            expect(framesTo(CLASSIC_PEER)).toBe(0);
+        });
+
+        it("still bridges an FD frame into a bus whose agent reports nothing", []() {
+            addBridge("classic/can0", "bus7/can0", 0, NULL);
+
+            fdFrameFromAgent(CLASSIC_PEER, CLASSIC_CAN0_CHANNEL, PASSED_ID);
+
+            expect(framesTo(BUS_PEER)).toBe(1);
+        });
+    });
 });
 
 /* ---------- private ---------- */
@@ -936,4 +992,13 @@ static void writeFromClient(uint32_t client_peer_id, uint8_t channel, uint32_t c
     size_t encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
 
     events.on_peer_frame(events.context, client_peer_id, encoded, encoded_size);
+}
+
+static void fdFrameFromAgent(uint32_t agent_peer_id, uint8_t channel, uint32_t can_id)
+{
+    FrameMessage frame = { can_id, 1000, channel, 12, FRAME_FLAG_FD, 0, { 0xAA } };
+    uint8_t encoded[FRAME_BUFFER_SIZE];
+    size_t encoded_size = FrameMessage_Encode(&frame, encoded, sizeof(encoded));
+
+    events.on_peer_frame(events.context, agent_peer_id, encoded, encoded_size);
 }

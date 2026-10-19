@@ -24,7 +24,7 @@ Noun-first grammar; an omitted verb lists.
 | `agents show <name>` | one agent: its interfaces and consuming clients |
 | `agents kick <name>` | disconnect an agent by registered name |
 | `clients` | open client channels, one row per channel |
-| `interfaces` | interface catalogue with subscriber and traffic counters |
+| `interfaces` | interface catalogue with subscriber and traffic counters, and whether each bus carries CAN FD (`fd`, `classic`, or `-` when its agent does not report it) |
 | `interface show <agent>/<iface>` | the settings the bus holds now: link, state, bit timing, modes, TX queue |
 | `interface set <agent>/<iface> <setting>...` | reconfigure a bus, every setting in one step ([settings](#interface-settings)) |
 | `interface up\|down <agent>/<iface>` | bring a bus up or down |

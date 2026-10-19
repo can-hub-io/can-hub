@@ -84,6 +84,10 @@
 #define ADMIN_BRIDGE_STATUS_STORE_FAILED 3
 #define ADMIN_BRIDGE_STATUS_UNKNOWN 4
 
+#define ADMIN_INTERFACE_MODE_UNKNOWN 0
+#define ADMIN_INTERFACE_MODE_CLASSIC 1
+#define ADMIN_INTERFACE_MODE_FD 2
+
 #define ADMIN_BRIDGE_STATE_SOURCE_ONLINE (1u << 0)
 #define ADMIN_BRIDGE_STATE_DESTINATION_ONLINE (1u << 1)
 #define ADMIN_GROUP_MEMBER_ONLINE (1u << 0)
@@ -265,6 +269,7 @@ typedef struct {
     uint64_t tx_dropped;
     char agent_name[REGISTER_AGENT_NAME_SIZE];
     char interface_name[REGISTER_INTERFACE_NAME_SIZE];
+    uint8_t mode;
 } AdminInterfacesReplyEntry;
 
 typedef struct {

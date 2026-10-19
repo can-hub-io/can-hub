@@ -16,6 +16,7 @@ from .shell import Result, netns_argv, run
 CANDUMP_RECEIVE_BUFFER_BYTES = 4 * 1024 * 1024
 CANDUMP_ALL_ERRORS = "#FFFFFFFF"
 CANFD_MTU = 72
+CAN_MTU = 16
 
 
 class Server:
@@ -51,6 +52,11 @@ class Server:
 
     def link(self, name: str) -> dict:
         return json.loads(self.exec("ip", "-j", "link", "show", "dev", name).stdout)[0]
+
+    def make_can_classic(self, name: str) -> None:
+        self.exec("ip", "link", "set", name, "down")
+        self.exec("ip", "link", "set", name, "mtu", str(CAN_MTU))
+        self.exec("ip", "link", "set", name, "up")
 
     def enable_can_fd(self, name: str) -> None:
         self.exec("ip", "link", "set", name, "down")

@@ -224,6 +224,7 @@ mod tests {
             InterfaceEntry {
                 interface_id: 1,
                 subscriber_count: 1,
+                mode: 0,
                 frames_received: 300,
                 tx_dropped: 0,
                 agent_name: "truck42".into(),
@@ -233,6 +234,7 @@ mod tests {
             InterfaceEntry {
                 interface_id: 2,
                 subscriber_count: 0,
+                mode: 0,
                 frames_received: 999,
                 tx_dropped: 0,
                 agent_name: "truck42".into(),
