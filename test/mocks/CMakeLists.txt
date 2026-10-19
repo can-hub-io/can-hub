@@ -12,3 +12,4 @@ target_include_directories(port_mocks PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${ROOT_SRC_DIR}
 )
+target_compile_options(port_mocks PRIVATE ${CAN_HUB_TEST_WARNINGS})

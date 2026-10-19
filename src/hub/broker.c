@@ -14,6 +14,7 @@
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
 #include "protocol/subscribe_message.h"
+#include "shared/bounded_string.h"
 
 #define CONTROL_BUFFER_SIZE 4096
 #define PING_REPLY_FLAG 0x01
@@ -250,13 +251,13 @@ static void onPeerConnected(void *context, uint32_t peer_id, const HubPeerConnec
     peer->transport_kind = info->transport_kind;
     peer->connected_at_us = now_us;
     if (info->fingerprint_hex != NULL) {
-        strncpy(peer->fingerprint_hex, info->fingerprint_hex, IDENTITY_FINGERPRINT_HEX_SIZE - 1);
+        BoundedString_Copy(peer->fingerprint_hex, sizeof(peer->fingerprint_hex), info->fingerprint_hex);
     }
     if (info->origin != NULL) {
-        strncpy(peer->origin, info->origin, HUB_PEER_ORIGIN_SIZE - 1);
+        BoundedString_Copy(peer->origin, sizeof(peer->origin), info->origin);
     }
     if (info->origin_host != NULL) {
-        strncpy(peer->origin_host, info->origin_host, HUB_PEER_ORIGIN_SIZE - 1);
+        BoundedString_Copy(peer->origin_host, sizeof(peer->origin_host), info->origin_host);
     }
 }
 
@@ -1362,7 +1363,7 @@ static void sendError(Broker *self, uint32_t peer_id, uint16_t code, const char 
 
     memset(&error, 0, sizeof(error));
     error.code = code;
-    strncpy(error.detail, detail, ERROR_DETAIL_SIZE - 1);
+    BoundedString_Copy(error.detail, sizeof(error.detail), detail);
     encoded_size = ErrorMessage_Encode(&error, encoded, sizeof(encoded));
 
     self->transport->send_control(self->transport->context, peer_id, encoded, encoded_size);

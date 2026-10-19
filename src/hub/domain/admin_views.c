@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "shared/bounded_string.h"
+
 static uint8_t countAgentInterfaces(const InterfaceRegistry *registry, uint32_t agent_peer_id);
 static uint8_t countSubscribers(const PeerDirectory *directory, uint32_t interface_id);
 static bool clientHasOpenChannels(const HubPeer *peer);
@@ -243,8 +245,8 @@ static bool appendClientRow(
     entry->peer_id = peer_id;
     entry->interface_id = interface_id;
     entry->channel = channel;
-    strncpy(entry->agent_name, agent_name, REGISTER_AGENT_NAME_SIZE - 1);
-    strncpy(entry->interface_name, interface_name, REGISTER_INTERFACE_NAME_SIZE - 1);
+    BoundedString_Copy(entry->agent_name, sizeof(entry->agent_name), agent_name);
+    BoundedString_Copy(entry->interface_name, sizeof(entry->interface_name), interface_name);
     entry->frames_forwarded = frames_forwarded;
     entry->frames_dropped = frames_dropped;
 

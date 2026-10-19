@@ -1,5 +1,6 @@
 #include "authorization_mock.h"
 
+#include <stdio.h>
 #include <string.h>
 
 static bool mockReadAllowed(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name);

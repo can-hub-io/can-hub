@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "protocol/hello_message.h"
+#include "shared/bounded_string.h"
 
 static bool isSamePlaintextAgent(const HubPeer *self, const HubPeer *other);
 
@@ -25,7 +26,7 @@ bool HubPeer_AdoptRole(HubPeer *self, uint8_t wire_role)
 
 void HubPeer_SetAgentName(HubPeer *self, const char *agent_name)
 {
-    strncpy(self->agent_name, agent_name, REGISTER_AGENT_NAME_SIZE - 1);
+    BoundedString_Copy(self->agent_name, sizeof(self->agent_name), agent_name);
 }
 
 bool HubPeer_IsSameAgent(const HubPeer *self, const HubPeer *other)

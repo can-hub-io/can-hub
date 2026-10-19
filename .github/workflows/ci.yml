@@ -14,13 +14,22 @@ concurrency:
 jobs:
   test-x86_64:
     runs-on: ubuntu-latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
     steps:
       - uses: actions/checkout@v4
       - name: install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           sudo apt-get update
-          sudo apt-get install -y ninja-build
+          sudo apt-get install -y ninja-build ccache
+      - name: compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-x86_64-${{ github.sha }}
+          restore-keys: ccache-x86_64-
       - name: cache build trees
         uses: actions/cache@v4
         with:
@@ -44,13 +53,22 @@ jobs:
   # against what a user gets rather than a path in an environment variable.
   python:
     runs-on: ubuntu-latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
     steps:
       - uses: actions/checkout@v4
       - name: install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           sudo apt-get update
-          sudo apt-get install -y ninja-build
+          sudo apt-get install -y ninja-build ccache
+      - name: compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-python-${{ github.sha }}
+          restore-keys: ccache-python-
       - name: build and bundle libcanhub
         run: |
           make release
@@ -63,6 +81,9 @@ jobs:
 
   cross-armhf:
     runs-on: ubuntu-24.04-arm
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
     steps:
       - uses: actions/checkout@v4
       - name: install dependencies
@@ -70,7 +91,13 @@ jobs:
           sudo dpkg --add-architecture armhf
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           sudo apt-get update
-          sudo apt-get install -y ninja-build gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+          sudo apt-get install -y ninja-build gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf ccache
+      - name: compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-armhf-${{ github.sha }}
+          restore-keys: ccache-armhf-
       - name: cache build tree
         uses: actions/cache@v4
         with:
@@ -129,13 +156,22 @@ jobs:
   # by nothing. cross-armhf covers the same engine in its AArch32 form.
   cross-arm64:
     runs-on: ubuntu-24.04-arm
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
     steps:
       - uses: actions/checkout@v4
       - name: install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           sudo apt-get update
-          sudo apt-get install -y ninja-build gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get install -y ninja-build gcc-aarch64-linux-gnu g++-aarch64-linux-gnu ccache
+      - name: compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-arm64-${{ github.sha }}
+          restore-keys: ccache-arm64-
       - name: cache build tree
         uses: actions/cache@v4
         with:
@@ -171,6 +207,8 @@ jobs:
   windows-libcanhub:
     runs-on: ubuntu-latest
     env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
       LLVM_MINGW_VERSION: "20260602"
       LLVM_MINGW_SHA256: 9d191203f9768ead60662d3ae53cdf28e0a28b1e6d44b7f329b9202cb2add337
     steps:
@@ -179,13 +217,19 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           sudo apt-get update
-          sudo apt-get install -y ninja-build
+          sudo apt-get install -y ninja-build ccache
       - name: install llvm-mingw
         run: |
           curl -fsSL -o /tmp/llvm-mingw.tar.xz "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/llvm-mingw-$LLVM_MINGW_VERSION-ucrt-ubuntu-22.04-x86_64.tar.xz"
           echo "$LLVM_MINGW_SHA256  /tmp/llvm-mingw.tar.xz" | sha256sum -c
           mkdir -p "$HOME/llvm-mingw"
           tar -xf /tmp/llvm-mingw.tar.xz --strip-components=1 -C "$HOME/llvm-mingw"
+      - name: compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-mingw-x86_64-${{ github.sha }}
+          restore-keys: ccache-mingw-x86_64-
       - name: cache build tree
         uses: actions/cache@v4
         with:
@@ -267,13 +311,16 @@ jobs:
 
   deb:
     runs-on: ubuntu-latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
     steps:
       - uses: actions/checkout@v4
       - name: install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build lintian
+          sudo apt-get install -y cmake ninja-build lintian ccache
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -283,6 +330,12 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/ui/package-lock.json
+      - name: compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-deb-${{ github.sha }}
+          restore-keys: ccache-deb-
       - name: cache build tree
         uses: actions/cache@v4
         with:

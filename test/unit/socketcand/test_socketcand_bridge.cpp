@@ -54,15 +54,6 @@ static void bringUpReady()
     feedListReplyOneBus();
 }
 
-static void feedOpenAckFor(uint8_t status, uint8_t channel, uint32_t interface_id)
-{
-    OpenAckMessage ack = { status, channel, interface_id };
-    uint8_t wire[64];
-    size_t size = OpenAckMessage_Encode(&ack, wire, sizeof(wire));
-
-    hub_events.on_control(hub_events.context, wire, size, 2000);
-}
-
 static void relistOneBus(const char *agent, const char *interface, uint32_t interface_id, uint64_t now_us)
 {
     ListReplyMessage reply;
@@ -78,14 +69,6 @@ static void relistOneBus(const char *agent, const char *interface, uint32_t inte
     strncpy(reply.entries[0].interface_name, interface, REGISTER_INTERFACE_NAME_SIZE - 1);
     size = ListReplyMessage_Encode(&reply, wire, sizeof(wire));
     hub_events.on_control(hub_events.context, wire, size, now_us);
-}
-
-static void openRawAndAck(uint32_t connection_id)
-{
-    server_events.on_client_connected(server_events.context, connection_id);
-    clientBytes(connection_id, "< open truck42/can0 >");
-    feedOpenAckFor(OPEN_STATUS_OK, 5, 7);
-    clientBytes(connection_id, "< rawmode >");
 }
 
 static void feedFrameOnChannel(uint8_t channel)
