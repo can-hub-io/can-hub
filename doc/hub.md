@@ -128,14 +128,19 @@ injected into every other member, never back into the one it came from.
 can-hub-cli group add fleet 7DF 7E0:7F0       # create, or replace the ids
 can-hub-cli group join fleet truck42/can0
 can-hub-cli group join fleet truck43/can0
-can-hub-cli group join fleet lab/can1
+can-hub-cli group join fleet lab/can1 receives
 can-hub-cli group
 fleet  forwarded 2210  dropped 0  ids 7DF 7E0:7F0
-  truck42/can0             online
-  truck43/can0             online
-  lab/can1                 online
+  truck42/can0             online   both      ids all
+  truck43/can0             online   both      ids all
+  lab/can1                 online   receives  ids all
 ```
 
+- A member may take part one way: `group join fleet lab/can1 receives`
+  feeds it the group but keeps its own frames out, `sends` the opposite
+  (a production bus mirrored, never written). Ids after the direction
+  (up to 8) limit what that member sends, on top of the group ids. Joining
+  again changes a member's direction and ids.
 - With routes alone that takes a route per ordered pair of buses; a group
   is one line per bus. A frame from truck42 reaches lab directly, not
   through another member: one hop, as for routes.

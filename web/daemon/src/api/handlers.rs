@@ -16,7 +16,7 @@ use crate::auth::password::verify_password;
 use crate::auth::store::Credential;
 use crate::auth::Permission;
 use crate::protocol::admin::{
-    AclLevel, BridgeEndpoint, CanFilter, BRIDGE_FILTERS_MAX, ConfigureOp, ConfigureReply, InterfaceSettings, CONFIGURE_STATUS_OK, SETTING_BITRATE,
+    AclLevel, BridgeEndpoint, CanFilter, BRIDGE_FILTERS_MAX, ConfigureOp, ConfigureReply, InterfaceSettings, CONFIGURE_STATUS_OK, SETTING_BITRATE, GROUP_MEMBER_BOTH, GROUP_MEMBER_FILTERS_MAX, GROUP_MEMBER_RECEIVES, GROUP_MEMBER_SENDS,
 };
 use crate::telemetry::TelemetryFrame;
 
@@ -148,13 +148,27 @@ pub(crate) async fn bridge_group_delete(State(state): State<AppState>, Json(body
 }
 
 pub(crate) async fn bridge_group_join(State(state): State<AppState>, Json(body): Json<BridgeGroupMemberBody>) -> ActionResponse {
+    if body.filters.len() > GROUP_MEMBER_FILTERS_MAX {
+        return Err(ApiError::BadRequest(format!("a member takes at most {GROUP_MEMBER_FILTERS_MAX} filters")));
+    }
+    let direction = parse_member_direction(body.direction.as_deref())?;
     let member = BridgeEndpoint::from(body.member);
-    grouped(with_admin(&state, move |client| client.group_join(&body.name, &member)).await?)
+    let filters: Vec<CanFilter> = body.filters.into_iter().map(CanFilter::from).collect();
+    grouped(with_admin(&state, move |client| client.group_join(&body.name, &member, direction, &filters)).await?)
 }
 
 pub(crate) async fn bridge_group_leave(State(state): State<AppState>, Json(body): Json<BridgeGroupMemberBody>) -> ActionResponse {
     let member = BridgeEndpoint::from(body.member);
     grouped(with_admin(&state, move |client| client.group_leave(&body.name, &member)).await?)
+}
+
+fn parse_member_direction(raw: Option<&str>) -> Result<u8, ApiError> {
+    match raw {
+        None | Some("both") => Ok(GROUP_MEMBER_BOTH),
+        Some("sends") => Ok(GROUP_MEMBER_SENDS),
+        Some("receives") => Ok(GROUP_MEMBER_RECEIVES),
+        Some(other) => Err(ApiError::BadRequest(format!("direction must be both, sends or receives, got {other}"))),
+    }
 }
 
 fn grouped(status: u8) -> ActionResponse {

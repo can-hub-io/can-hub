@@ -11,7 +11,7 @@ extern "C" {
 #define OTHER_FINGERPRINT "0000000000000000000000000000000000000000000000000000000000000000"
 #define PIN_FILE_PATH "/tmp/can_hub_test_known_agents"
 #define DB_FILE_PATH "/tmp/can_hub_test_migrations.db"
-#define LATEST_SCHEMA_VERSION 4
+#define LATEST_SCHEMA_VERSION 5
 
 static IdentityDatabase database;
 static IdentityStorePort *port;
@@ -20,6 +20,7 @@ static BridgeStorePort *bridges;
 static int32_t readUserVersionFile(const char *path);
 static BridgeRoute route(const char *source_agent, const char *destination_agent);
 static BridgeGroup group(const char *name);
+static BridgeGroupMember member(const char *agent_name);
 static void executeRaw(const char *path, const char *sql);
 static bool grant(AuthorizationPort *acl, const char *fingerprint_hex, const char *agent_name, const char *interface_name, const char *level);
 
@@ -360,12 +361,15 @@ describe("identity_database bridge groups", []() {
 
     it("loads a saved group with its filters and members", []() {
         BridgeGroup saved = group("fleet");
-        BridgeEndpoint truck = route("truck42", "bus7").source;
+        BridgeGroupMember truck = member("truck42");
         BridgeGroup loaded;
         bool found;
 
         saved.filter_count = 1;
         saved.filters[0] = { 0x100, 0x7FF };
+        truck.direction = kBRIDGE_MEMBER_SENDS;
+        truck.filter_count = 1;
+        truck.filters[0] = { 0x200, 0x7FF };
         bridges->save_group(bridges->context, &saved);
 
         bridges->add_member(bridges->context, "fleet", &truck);
@@ -375,18 +379,20 @@ describe("identity_database bridge groups", []() {
         expect((const char *)loaded.name).toBe("fleet");
         expect(loaded.filters[0].can_id).toBe((uint32_t)0x100);
         expect(loaded.member_count).toBe(1);
-        expect((const char *)loaded.members[0].agent_name).toBe("truck42");
+        expect((const char *)loaded.members[0].endpoint.agent_name).toBe("truck42");
+        expect(loaded.members[0].direction).toBe((uint8_t)kBRIDGE_MEMBER_SENDS);
+        expect(loaded.members[0].filters[0].can_id).toBe((uint32_t)0x200);
     });
 
     it("forgets a member that leaves", []() {
         BridgeGroup saved = group("fleet");
-        BridgeEndpoint truck = route("truck42", "bus7").source;
+        BridgeGroupMember truck = member("truck42");
         BridgeGroup loaded;
 
         bridges->save_group(bridges->context, &saved);
         bridges->add_member(bridges->context, "fleet", &truck);
 
-        bridges->remove_member(bridges->context, "fleet", &truck);
+        bridges->remove_member(bridges->context, "fleet", &truck.endpoint);
         bridges->load_group(bridges->context, 0, &loaded);
 
         expect(loaded.member_count).toBe(0);
@@ -394,7 +400,7 @@ describe("identity_database bridge groups", []() {
 
     it("forgets a removed group with its members", []() {
         BridgeGroup saved = group("fleet");
-        BridgeEndpoint truck = route("truck42", "bus7").source;
+        BridgeGroupMember truck = member("truck42");
         BridgeGroup recreated = group("fleet");
         BridgeGroup loaded;
 
@@ -548,6 +554,16 @@ static BridgeGroup group(const char *name)
 
     memset(&built, 0, sizeof(built));
     snprintf(built.name, sizeof(built.name), "%s", name);
+
+    return built;
+}
+
+static BridgeGroupMember member(const char *agent_name)
+{
+    BridgeGroupMember built;
+
+    memset(&built, 0, sizeof(built));
+    built.endpoint = route(agent_name, "unused").source;
 
     return built;
 }

@@ -92,8 +92,14 @@
 #define GROUP_ENTRY_FORWARDED_OFFSET 168
 #define GROUP_ENTRY_DROPPED_OFFSET 176
 #define GROUP_ENTRY_MEMBERS_OFFSET 184
-#define GROUP_ENTRY_MEMBER_SIZE 152
+#define GROUP_ENTRY_MEMBER_SIZE 216
 #define GROUP_ENTRY_MEMBER_STATE_OFFSET 144
+#define GROUP_ENTRY_MEMBER_DIRECTION_OFFSET 145
+#define GROUP_ENTRY_MEMBER_FILTER_COUNT_OFFSET 146
+#define GROUP_ENTRY_MEMBER_FILTERS_OFFSET 148
+#define GROUP_MEMBER_DIRECTION_OFFSET 176
+#define GROUP_MEMBER_FILTER_COUNT_OFFSET 177
+#define GROUP_MEMBER_FILTERS_OFFSET 180
 
 static size_t encodeFixedBody(uint8_t type, size_t body_size, uint8_t *buffer, size_t buffer_size, uint8_t **body);
 static bool isNameTerminated(const char *agent_name);
@@ -139,6 +145,7 @@ static void writeBridgeEntry(uint8_t *destination, const AdminBridgeListReplyEnt
 static bool readBridgeEntry(const uint8_t *source, AdminBridgeListReplyEntry *entry);
 static bool isGroupNameValid(const char *name);
 static bool readGroupName(const uint8_t *source, char *name);
+static bool areGroupMembersValid(const AdminGroupListReplyEntry *entry);
 static void writeGroupEntry(uint8_t *destination, const AdminGroupListReplyEntry *entry);
 static bool readGroupEntry(const uint8_t *source, AdminGroupListReplyEntry *entry);
 
@@ -1195,6 +1202,9 @@ size_t AdminGroupMemberMessage_Encode(uint8_t type, const AdminGroupMemberMessag
     if (!isGroupNameValid(self->name) || !isBridgeEndpointValid(&self->member)) {
         return 0;
     }
+    if (self->direction > ADMIN_GROUP_MEMBER_RECEIVES || self->filter_count > ADMIN_GROUP_MEMBER_FILTERS_MAX) {
+        return 0;
+    }
 
     total_size = encodeFixedBody(type, ADMIN_GROUP_MEMBER_BODY_SIZE, buffer, buffer_size, &body);
     if (total_size == 0) {
@@ -1203,6 +1213,9 @@ size_t AdminGroupMemberMessage_Encode(uint8_t type, const AdminGroupMemberMessag
 
     memcpy(body + GROUP_NAME_OFFSET, self->name, strlen(self->name));
     writeBridgeEndpoint(body + GROUP_MEMBER_OFFSET, &self->member);
+    body[GROUP_MEMBER_DIRECTION_OFFSET] = self->direction;
+    body[GROUP_MEMBER_FILTER_COUNT_OFFSET] = self->filter_count;
+    writeBridgeFilters(body + GROUP_MEMBER_FILTERS_OFFSET, self->filters, self->filter_count);
 
     return total_size;
 }
@@ -1213,7 +1226,18 @@ bool AdminGroupMemberMessage_Decode(AdminGroupMemberMessage *self, const uint8_t
         return false;
     }
 
-    return readBridgeEndpoint(payload + GROUP_MEMBER_OFFSET, &self->member);
+    if (!readBridgeEndpoint(payload + GROUP_MEMBER_OFFSET, &self->member)) {
+        return false;
+    }
+
+    self->direction = payload[GROUP_MEMBER_DIRECTION_OFFSET];
+    self->filter_count = payload[GROUP_MEMBER_FILTER_COUNT_OFFSET];
+    if (self->direction > ADMIN_GROUP_MEMBER_RECEIVES || self->filter_count > ADMIN_GROUP_MEMBER_FILTERS_MAX) {
+        return false;
+    }
+    readBridgeFilters(payload + GROUP_MEMBER_FILTERS_OFFSET, self->filters, self->filter_count);
+
+    return true;
 }
 
 size_t AdminGroupReplyMessage_Encode(uint8_t type, const AdminGroupReplyMessage *self, uint8_t *buffer, size_t buffer_size)
@@ -1257,6 +1281,9 @@ size_t AdminGroupListReplyMessage_Encode(const AdminGroupListReplyMessage *self,
             return 0;
         }
         if (self->entries[i].filter_count > SUBSCRIBE_FILTERS_MAX || self->entries[i].member_count > ADMIN_GROUP_MEMBERS_MAX) {
+            return 0;
+        }
+        if (!areGroupMembersValid(&self->entries[i])) {
             return 0;
         }
     }
@@ -1705,6 +1732,19 @@ static bool readGroupName(const uint8_t *source, char *name)
     return name[0] != '\0';
 }
 
+static bool areGroupMembersValid(const AdminGroupListReplyEntry *entry)
+{
+    uint8_t i;
+
+    for(i=0; i<entry->member_count; i++) {
+        if (entry->members[i].filter_count > ADMIN_GROUP_MEMBER_FILTERS_MAX) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 static void writeGroupEntry(uint8_t *destination, const AdminGroupListReplyEntry *entry)
 {
     uint8_t *member;
@@ -1720,6 +1760,9 @@ static void writeGroupEntry(uint8_t *destination, const AdminGroupListReplyEntry
         member = destination + GROUP_ENTRY_MEMBERS_OFFSET + i * GROUP_ENTRY_MEMBER_SIZE;
         writeBridgeEndpoint(member, &entry->members[i].endpoint);
         member[GROUP_ENTRY_MEMBER_STATE_OFFSET] = entry->members[i].state;
+        member[GROUP_ENTRY_MEMBER_DIRECTION_OFFSET] = entry->members[i].direction;
+        member[GROUP_ENTRY_MEMBER_FILTER_COUNT_OFFSET] = entry->members[i].filter_count;
+        writeBridgeFilters(member + GROUP_ENTRY_MEMBER_FILTERS_OFFSET, entry->members[i].filters, entry->members[i].filter_count);
     }
 }
 
@@ -1746,6 +1789,12 @@ static bool readGroupEntry(const uint8_t *source, AdminGroupListReplyEntry *entr
             return false;
         }
         entry->members[i].state = member[GROUP_ENTRY_MEMBER_STATE_OFFSET];
+        entry->members[i].direction = member[GROUP_ENTRY_MEMBER_DIRECTION_OFFSET];
+        entry->members[i].filter_count = member[GROUP_ENTRY_MEMBER_FILTER_COUNT_OFFSET];
+        if (entry->members[i].filter_count > ADMIN_GROUP_MEMBER_FILTERS_MAX) {
+            return false;
+        }
+        readBridgeFilters(member + GROUP_ENTRY_MEMBER_FILTERS_OFFSET, entry->members[i].filters, entry->members[i].filter_count);
     }
 
     return true;

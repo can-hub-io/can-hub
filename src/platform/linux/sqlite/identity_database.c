@@ -9,7 +9,7 @@
 #define LINE_BUFFER_SIZE 512
 #define IMPORT_KEY_MAX 256
 #define PRAGMA_BUFFER_SIZE 64
-#define SCHEMA_VERSION 4
+#define SCHEMA_VERSION 5
 #define BRIDGE_FILTER_MASK_OFFSET 4
 #define BRIDGE_FILTERS_BLOB_MAX (BRIDGE_FILTERS_MAX * CAN_FILTER_SIZE)
 
@@ -40,6 +40,10 @@
     "PRIMARY KEY (source_agent, source_interface, destination_agent, destination_interface)" \
     ")"
 
+#define SCHEMA_GROUP_MEMBER_DIRECTION \
+    "ALTER TABLE bridge_group_members ADD COLUMN direction INTEGER NOT NULL DEFAULT 0;" \
+    "ALTER TABLE bridge_group_members ADD COLUMN filters BLOB NOT NULL DEFAULT x''"
+
 #define SCHEMA_BRIDGE_GROUPS \
     "CREATE TABLE IF NOT EXISTS bridge_groups (" \
     "name TEXT PRIMARY KEY," \
@@ -62,6 +66,7 @@ static const SchemaMigration SCHEMA_MIGRATIONS[] = {
     { 2, SCHEMA_ACL_ADMIN },
     { 3, SCHEMA_BRIDGE_ROUTES },
     { 4, SCHEMA_BRIDGE_GROUPS },
+    { 5, SCHEMA_GROUP_MEMBER_DIRECTION },
 };
 
 static bool migrateSchema(IdentityDatabase *self);
@@ -91,11 +96,11 @@ static bool bridgeRemove(void *context, const BridgeEndpoint *source, const Brid
 static bool bridgeLoad(void *context, uint16_t position, BridgeRoute *route);
 static void bindEndpoints(sqlite3_stmt *statement, const BridgeEndpoint *source, const BridgeEndpoint *destination);
 static void copyColumnText(sqlite3_stmt *statement, int32_t column, char *destination, size_t destination_size);
-static bool readFiltersBlob(sqlite3_stmt *statement, int32_t column, CanFilter *filters, uint8_t *filter_count);
+static bool readFiltersBlob(sqlite3_stmt *statement, int32_t column, CanFilter *filters, uint8_t filters_max, uint8_t *filter_count);
 static void writeFiltersBlob(const CanFilter *filters, uint8_t filter_count, uint8_t *blob);
 static bool groupSave(void *context, const BridgeGroup *group);
 static bool groupRemove(void *context, const char *name);
-static bool groupAddMember(void *context, const char *name, const BridgeEndpoint *member);
+static bool groupAddMember(void *context, const char *name, const BridgeGroupMember *member);
 static bool groupRemoveMember(void *context, const char *name, const BridgeEndpoint *member);
 static bool groupLoad(void *context, uint16_t position, BridgeGroup *group);
 static bool loadGroupMembers(IdentityDatabase *self, BridgeGroup *group);
@@ -642,7 +647,7 @@ static bool bridgeLoad(void *context, uint16_t position, BridgeRoute *route)
         copyColumnText(statement, 1, route->source.interface_name, sizeof(route->source.interface_name));
         copyColumnText(statement, 2, route->destination.agent_name, sizeof(route->destination.agent_name));
         copyColumnText(statement, 3, route->destination.interface_name, sizeof(route->destination.interface_name));
-        loaded = readFiltersBlob(statement, 4, route->filters, &route->filter_count);
+        loaded = readFiltersBlob(statement, 4, route->filters, BRIDGE_FILTERS_MAX, &route->filter_count);
     }
     sqlite3_finalize(statement);
 
@@ -662,13 +667,13 @@ static void copyColumnText(sqlite3_stmt *statement, int32_t column, char *destin
     snprintf(destination, destination_size, "%s", (const char *)sqlite3_column_text(statement, column));
 }
 
-static bool readFiltersBlob(sqlite3_stmt *statement, int32_t column, CanFilter *filters, uint8_t *filter_count)
+static bool readFiltersBlob(sqlite3_stmt *statement, int32_t column, CanFilter *filters, uint8_t filters_max, uint8_t *filter_count)
 {
     const uint8_t *blob = sqlite3_column_blob(statement, column);
     int32_t size = sqlite3_column_bytes(statement, column);
     uint8_t i;
 
-    if (size % CAN_FILTER_SIZE != 0 || size > BRIDGE_FILTERS_BLOB_MAX) {
+    if (size % CAN_FILTER_SIZE != 0 || size > filters_max * CAN_FILTER_SIZE) {
         return false;
     }
 
@@ -729,14 +734,35 @@ static bool groupRemove(void *context, const char *name)
     return executeNamed(self, "DELETE FROM bridge_groups WHERE name = ?1", name);
 }
 
-static bool groupAddMember(void *context, const char *name, const BridgeEndpoint *member)
+static bool groupAddMember(void *context, const char *name, const BridgeGroupMember *member)
 {
-    return executeMember(
-        context,
-        "INSERT OR IGNORE INTO bridge_group_members (group_name, agent_name, interface_name) VALUES (?1, ?2, ?3)",
-        name,
-        member
-    );
+    IdentityDatabase *self = context;
+    sqlite3_stmt *statement = NULL;
+    uint8_t filters[BRIDGE_FILTERS_BLOB_MAX];
+    bool saved;
+
+    if (sqlite3_prepare_v2(
+            self->database,
+            "INSERT INTO bridge_group_members (group_name, agent_name, interface_name, direction, filters)"
+            " VALUES (?1, ?2, ?3, ?4, ?5)"
+            " ON CONFLICT (group_name, agent_name, interface_name) DO UPDATE SET direction = ?4, filters = ?5",
+            -1,
+            &statement,
+            NULL
+        ) != SQLITE_OK) {
+        return false;
+    }
+
+    writeFiltersBlob(member->filters, member->filter_count, filters);
+    sqlite3_bind_text(statement, 1, name, -1, SQLITE_STATIC);
+    sqlite3_bind_text(statement, 2, member->endpoint.agent_name, -1, SQLITE_STATIC);
+    sqlite3_bind_text(statement, 3, member->endpoint.interface_name, -1, SQLITE_STATIC);
+    sqlite3_bind_int(statement, 4, member->direction);
+    sqlite3_bind_blob(statement, 5, filters, member->filter_count * CAN_FILTER_SIZE, SQLITE_STATIC);
+    saved = sqlite3_step(statement) == SQLITE_DONE;
+    sqlite3_finalize(statement);
+
+    return saved;
 }
 
 static bool groupRemoveMember(void *context, const char *name, const BridgeEndpoint *member)
@@ -769,7 +795,7 @@ static bool groupLoad(void *context, uint16_t position, BridgeGroup *group)
     if (sqlite3_step(statement) == SQLITE_ROW) {
         memset(group, 0, sizeof(*group));
         copyColumnText(statement, 0, group->name, sizeof(group->name));
-        loaded = readFiltersBlob(statement, 1, group->filters, &group->filter_count);
+        loaded = readFiltersBlob(statement, 1, group->filters, BRIDGE_FILTERS_MAX, &group->filter_count);
     }
     sqlite3_finalize(statement);
 
@@ -779,11 +805,12 @@ static bool groupLoad(void *context, uint16_t position, BridgeGroup *group)
 static bool loadGroupMembers(IdentityDatabase *self, BridgeGroup *group)
 {
     sqlite3_stmt *statement = NULL;
-    BridgeEndpoint *member;
+    BridgeGroupMember *member;
 
     if (sqlite3_prepare_v2(
             self->database,
-            "SELECT agent_name, interface_name FROM bridge_group_members WHERE group_name = ?1 ORDER BY rowid",
+            "SELECT agent_name, interface_name, direction, filters FROM bridge_group_members"
+            " WHERE group_name = ?1 ORDER BY rowid",
             -1,
             &statement,
             NULL
@@ -794,8 +821,12 @@ static bool loadGroupMembers(IdentityDatabase *self, BridgeGroup *group)
     sqlite3_bind_text(statement, 1, group->name, -1, SQLITE_STATIC);
     while (group->member_count < BRIDGE_GROUP_MEMBERS_MAX && sqlite3_step(statement) == SQLITE_ROW) {
         member = &group->members[group->member_count++];
-        copyColumnText(statement, 0, member->agent_name, sizeof(member->agent_name));
-        copyColumnText(statement, 1, member->interface_name, sizeof(member->interface_name));
+        copyColumnText(statement, 0, member->endpoint.agent_name, sizeof(member->endpoint.agent_name));
+        copyColumnText(statement, 1, member->endpoint.interface_name, sizeof(member->endpoint.interface_name));
+        member->direction = (uint8_t)sqlite3_column_int(statement, 2);
+        if (!readFiltersBlob(statement, 3, member->filters, BRIDGE_MEMBER_FILTERS_MAX, &member->filter_count)) {
+            member->filter_count = 0;
+        }
     }
     sqlite3_finalize(statement);
 

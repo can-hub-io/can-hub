@@ -562,7 +562,7 @@ paths:
   /api/bridge-groups/members:
     post:
       tags: [actions]
-      summary: Add a bus to a bridge group
+      summary: Add a bus to a bridge group, or update its direction and ids
       description: 'Permission: bridges.manage. 404 for an unknown group, 409 when it already has 16 members.'
       requestBody:
         required: true
@@ -1109,11 +1109,16 @@ components:
 
     BridgeGroupMember:
       type: object
-      required: [agentName, interfaceName, online]
+      required: [agentName, interfaceName, online, direction, filters]
       properties:
         agentName: { type: string }
         interfaceName: { type: string }
         online: { type: boolean }
+        direction: { type: string, enum: [both, sends, receives] }
+        filters:
+          type: array
+          description: What the member sends into the group (none = all)
+          items: { $ref: '#/components/schemas/CanFilter' }
 
     BridgeGroup:
       type: object
@@ -1151,6 +1156,15 @@ components:
       properties:
         name: { type: string }
         member: { $ref: '#/components/schemas/BridgeEndpoint' }
+        direction:
+          type: string
+          enum: [both, sends, receives]
+          description: 'Default both: sends only feeds the group, receives only gets it. Ignored on removal.'
+        filters:
+          type: array
+          maxItems: 8
+          description: What the member sends into the group (none = all). Ignored on removal.
+          items: { $ref: '#/components/schemas/CanFilter' }
 
     Pin:
       type: object

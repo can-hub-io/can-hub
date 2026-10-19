@@ -150,13 +150,13 @@ impl<T: Read + Write> AdminClient<T> {
         Ok(admin::decode_status_byte(&reply, MessageType::AdminGroupDeleteReply)?)
     }
 
-    pub fn group_join(&mut self, name: &str, member: &BridgeEndpoint) -> Result<u8> {
-        let reply = self.exchange(&admin::encode_group_member(MessageType::AdminGroupJoin, name, member))?;
+    pub fn group_join(&mut self, name: &str, member: &BridgeEndpoint, direction: u8, filters: &[CanFilter]) -> Result<u8> {
+        let reply = self.exchange(&admin::encode_group_member(MessageType::AdminGroupJoin, name, member, direction, filters))?;
         Ok(admin::decode_status_byte(&reply, MessageType::AdminGroupJoinReply)?)
     }
 
     pub fn group_leave(&mut self, name: &str, member: &BridgeEndpoint) -> Result<u8> {
-        let reply = self.exchange(&admin::encode_group_member(MessageType::AdminGroupLeave, name, member))?;
+        let reply = self.exchange(&admin::encode_group_member(MessageType::AdminGroupLeave, name, member, 0, &[]))?;
         Ok(admin::decode_status_byte(&reply, MessageType::AdminGroupLeaveReply)?)
     }
 

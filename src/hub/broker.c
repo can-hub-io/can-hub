@@ -87,7 +87,7 @@ static void handleAdminGroupLeave(Broker *self, HubPeer *peer, const MessageHead
 static void handleAdminGroupList(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static uint8_t applyGroup(Broker *self, const AdminGroupSetMessage *request);
 static uint8_t removeGroup(Broker *self, const char *name);
-static uint8_t joinGroup(Broker *self, const char *name, const BridgeEndpoint *member);
+static uint8_t joinGroup(Broker *self, const char *name, const BridgeGroupMember *member);
 static uint8_t leaveGroup(Broker *self, const char *name, const BridgeEndpoint *member);
 static void fillGroupEntry(Broker *self, const BridgeGroupSlot *slot, AdminGroupListReplyEntry *entry);
 static void sendGroupReply(Broker *self, HubPeer *peer, uint8_t type, uint8_t status);
@@ -1286,13 +1286,17 @@ static void handleAdminGroupDelete(Broker *self, HubPeer *peer, const MessageHea
 static void handleAdminGroupJoin(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
 {
     AdminGroupMemberMessage request;
-    BridgeEndpoint member;
+    BridgeGroupMember member;
 
     if (peer->role != kHUB_PEER_ROLE_ADMIN || !AdminGroupMemberMessage_Decode(&request, payload, header->length)) {
         return;
     }
 
-    memcpy(&member, &request.member, sizeof(member));
+    memset(&member, 0, sizeof(member));
+    memcpy(&member.endpoint, &request.member, sizeof(member.endpoint));
+    member.direction = request.direction;
+    member.filter_count = request.filter_count;
+    memcpy(member.filters, request.filters, sizeof(member.filters));
     sendGroupReply(self, peer, kMESSAGE_TYPE_ADMIN_GROUP_JOIN_REPLY, joinGroup(self, request.name, &member));
 }
 
@@ -1377,20 +1381,17 @@ static uint8_t removeGroup(Broker *self, const char *name)
     return ADMIN_BRIDGE_STATUS_OK;
 }
 
-static uint8_t joinGroup(Broker *self, const char *name, const BridgeEndpoint *member)
+static uint8_t joinGroup(Broker *self, const char *name, const BridgeGroupMember *member)
 {
     BridgeGroupSlot *slot = BridgeGroups_Find(&self->groups, name);
 
     if (slot == NULL) {
         return ADMIN_BRIDGE_STATUS_UNKNOWN;
     }
-    if (isGroupEndpoint(member)) {
+    if (isGroupEndpoint(&member->endpoint) || !BridgeGroupMember_IsValid(member)) {
         return ADMIN_BRIDGE_STATUS_INVALID;
     }
-    if (BridgeGroup_HasMember(&slot->group, member)) {
-        return ADMIN_BRIDGE_STATUS_OK;
-    }
-    if (slot->group.member_count == BRIDGE_GROUP_MEMBERS_MAX) {
+    if (!BridgeGroup_HasMember(&slot->group, &member->endpoint) && slot->group.member_count == BRIDGE_GROUP_MEMBERS_MAX) {
         return ADMIN_BRIDGE_STATUS_FULL;
     }
     if (self->bridge_store != NULL && !self->bridge_store->add_member(self->bridge_store->context, name, member)) {
@@ -1430,8 +1431,11 @@ static void fillGroupEntry(Broker *self, const BridgeGroupSlot *slot, AdminGroup
     entry->forwarded = slot->forwarded;
     entry->dropped = slot->dropped;
     for(i=0; i<slot->group.member_count; i++) {
-        memcpy(&entry->members[i].endpoint, &slot->group.members[i], sizeof(entry->members[i].endpoint));
-        if (endpointOnline(self, &slot->group.members[i])) {
+        memcpy(&entry->members[i].endpoint, &slot->group.members[i].endpoint, sizeof(entry->members[i].endpoint));
+        entry->members[i].direction = slot->group.members[i].direction;
+        entry->members[i].filter_count = slot->group.members[i].filter_count;
+        memcpy(entry->members[i].filters, slot->group.members[i].filters, sizeof(entry->members[i].filters));
+        if (endpointOnline(self, &slot->group.members[i].endpoint)) {
             entry->members[i].state = ADMIN_GROUP_MEMBER_ONLINE;
         }
     }
@@ -1529,8 +1533,8 @@ static BridgeGroupSlot *groupOfChannel(Broker *self, const HubPeer *client, uint
 }
 
 /*
- * A frame a client writes into a group reaches every member bus and every
- * other client of the group at once; the bus echoes come back bridged and
+ * A frame a client writes into a group reaches every member bus that
+ * receives and every other client of the group at once; the bus echoes come back bridged and
  * are not shown again.
  */
 static void writeIntoGroup(Broker *self, const HubPeer *writer, BridgeGroupSlot *slot, const InterfaceEntry *entry, const FrameMessage *frame)
@@ -1541,8 +1545,10 @@ static void writeIntoGroup(Broker *self, const HubPeer *writer, BridgeGroupSlot 
     target.forwarded = &slot->forwarded;
     target.dropped = &slot->dropped;
     for(i=0; i<slot->group.member_count; i++) {
-        target.destination = &slot->group.members[i];
-        bridgeInto(self, &target, frame);
+        if (BridgeGroupMember_Receives(&slot->group.members[i])) {
+            target.destination = &slot->group.members[i].endpoint;
+            bridgeInto(self, &target, frame);
+        }
     }
 
     showToGroup(self, entry, frame, writer->peer_id, 0);
@@ -1557,10 +1563,7 @@ static uint16_t showToGroups(Broker *self, const BridgeEndpoint *origin, const F
 
     for(i=0; i<BRIDGE_GROUPS_MAX; i++) {
         slot = BridgeGroups_Slot(&self->groups, i);
-        if (slot == NULL || !BridgeGroup_HasMember(&slot->group, origin)) {
-            continue;
-        }
-        if (!BridgeFilters_Pass(slot->group.filters, slot->group.filter_count, frame->can_id)) {
+        if (slot == NULL || !BridgeGroup_Carries(&slot->group, origin, frame->can_id)) {
             continue;
         }
         entry = InterfaceRegistry_FindByName(&self->registry, BRIDGE_GROUP_AGENT_NAME, slot->group.name);

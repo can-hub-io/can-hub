@@ -568,22 +568,29 @@ ADMIN_GROUP_SET (total 168)
 ADMIN_GROUP_DELETE (total 36)
 @4   name char[32]
 
-ADMIN_GROUP_JOIN / ADMIN_GROUP_LEAVE (total 180)
+ADMIN_GROUP_JOIN / ADMIN_GROUP_LEAVE (total 248)
 @4   name char[32]
 @36  member agent_name char[128]
 @164 member interface_name char[16]
+@180 direction u8      (0 both, 1 sends: feeds the group and gets nothing,
+                        2 receives: gets the group and feeds nothing;
+                        ignored by LEAVE)
+@181 filter_count u8   (0-8: what the member sends; 0 = all; ignored by LEAVE)
+@182 reserved u16
+@184 filters, 8 slots of 8 bytes as in ADMIN_BRIDGE_SET
 
 ADMIN_GROUP_*_REPLY (total 8)
 @4   status u8 (codes as in ADMIN_BRIDGE_SET_REPLY: 1 bad name, 2 no more
                 groups or the group already has 16 members, 3 could not be
-                stored, 4 no such group or member; joining a member twice is ok)
+                stored, 4 no such group or member; joining a member again replaces its
+                direction and filters)
 @5   reserved u8[3]
 
 ADMIN_GROUP_LIST (total 8)
 @4   offset u16        (pagination start index)
 @6   reserved u16
 
-ADMIN_GROUP_LIST_REPLY (total 8 + count * 2616)
+ADMIN_GROUP_LIST_REPLY (total 8 + count * 3640)
 @4   count u8          (0-1 groups in this reply)
 @5   flags u8          (bit 0: more groups beyond offset + count)
 @6   reserved u16
@@ -596,10 +603,14 @@ ADMIN_GROUP_LIST_REPLY (total 8 + count * 2616)
      +164 reserved u32
      +168 forwarded u64
      +176 dropped u64  (frames for a member that was offline)
-     +184 members, 16 slots of 152 bytes:
+     +184 members, 16 slots of 216 bytes:
           +0   agent_name char[128], interface_name char[16]
           +144 state u8 (bit 0: online)
-          +145 reserved u8[7]
+          +145 direction u8 (as in JOIN)
+          +146 filter_count u8
+          +147 reserved u8
+          +148 filters, 8 slots of 8 bytes
+          +212 reserved u32
 
 A frame captured on a member that passes the group filters is injected into
 every other member of the group. A bus reached by several routes and groups

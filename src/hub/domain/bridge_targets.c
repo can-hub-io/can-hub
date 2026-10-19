@@ -54,14 +54,13 @@ static uint16_t collectGroups(BridgeGroups *groups, const BridgeEndpoint *source
 
     for(i=0; i<BRIDGE_GROUPS_MAX; i++) {
         slot = BridgeGroups_Slot(groups, i);
-        if (slot == NULL || !BridgeGroup_HasMember(&slot->group, source)) {
-            continue;
-        }
-        if (!BridgeFilters_Pass(slot->group.filters, slot->group.filter_count, can_id)) {
+        if (slot == NULL || !BridgeGroup_Carries(&slot->group, source, can_id)) {
             continue;
         }
         for(m=0; m<slot->group.member_count; m++) {
-            count = addTarget(targets, count, source, &slot->group.members[m], &slot->forwarded, &slot->dropped);
+            if (BridgeGroupMember_Receives(&slot->group.members[m])) {
+                count = addTarget(targets, count, source, &slot->group.members[m].endpoint, &slot->forwarded, &slot->dropped);
+            }
         }
     }
 

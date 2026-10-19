@@ -105,6 +105,8 @@ _can-hub-cli()
             elif [[ $sub == join || $sub == leave ]] && (( CURRENT == verb_index + 3 )); then
                 values=(${(f)"$(_can_hub_cli_dynamic interfaces)"})
                 _describe 'interface' values
+            elif [[ $sub == join ]] && (( CURRENT == verb_index + 4 )); then
+                _values 'direction' 'both' 'sends' 'receives'
             fi
             ;;
         interface)

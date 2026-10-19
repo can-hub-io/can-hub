@@ -18,6 +18,7 @@ static BridgeTarget targets[BRIDGE_TARGETS_MAX];
 static const CanFilter passed_only[] = { { PASSED_ID, FRAME_CAN_ID_MASK } };
 
 static BridgeEndpoint endpoint(const char *agent_name);
+static BridgeGroupMember memberOf(const char *agent_name, uint8_t direction);
 static void groupOf(const char *name, const char *first, const char *second, const char *third);
 static uint16_t targetsFrom(const char *agent_name, uint32_t can_id);
 static bool targeted(uint16_t count, const char *agent_name);
@@ -36,7 +37,7 @@ describe("bridge_groups", []() {
     });
 
     it("keeps the members when a group is set again", []() {
-        BridgeEndpoint truck = endpoint("truck42");
+        BridgeGroupMember truck = memberOf("truck42", kBRIDGE_MEMBER_BOTH);
 
         BridgeGroups_Set(&groups, "fleet", 0, NULL);
         BridgeGroups_Join(&groups, "fleet", &truck);
@@ -48,7 +49,7 @@ describe("bridge_groups", []() {
     });
 
     it("joins a member once however often it joins", []() {
-        BridgeEndpoint truck = endpoint("truck42");
+        BridgeGroupMember truck = memberOf("truck42", kBRIDGE_MEMBER_BOTH);
 
         BridgeGroups_Set(&groups, "fleet", 0, NULL);
 
@@ -59,21 +60,21 @@ describe("bridge_groups", []() {
     });
 
     it("refuses a member into a group it does not hold", []() {
-        BridgeEndpoint truck = endpoint("truck42");
+        BridgeGroupMember truck = memberOf("truck42", kBRIDGE_MEMBER_BOTH);
 
         expect(BridgeGroups_Join(&groups, "fleet", &truck)).toBe((uint8_t)kBRIDGE_GROUP_JOIN_UNKNOWN);
     });
 
     it("refuses a member once the group is full", []() {
         char name[32];
-        BridgeEndpoint member;
-        BridgeEndpoint extra = endpoint("overflow");
+        BridgeGroupMember member;
+        BridgeGroupMember extra = memberOf("overflow", kBRIDGE_MEMBER_BOTH);
         uint8_t i;
 
         BridgeGroups_Set(&groups, "fleet", 0, NULL);
         for(i=0; i<BRIDGE_GROUP_MEMBERS_MAX; i++) {
             snprintf(name, sizeof(name), "bus%u", i);
-            member = endpoint(name);
+            member = memberOf(name, kBRIDGE_MEMBER_BOTH);
             BridgeGroups_Join(&groups, "fleet", &member);
         }
 
@@ -154,6 +155,54 @@ describe("bridge_targets", []() {
         expect(targetsFrom("truck42", PASSED_ID)).toBe((uint16_t)2);
     });
 
+    it("feeds nothing from a member that only receives", []() {
+        BridgeGroupMember listener = memberOf("lab", kBRIDGE_MEMBER_RECEIVES);
+
+        groupOf("fleet", "truck42", "bench", NULL);
+        BridgeGroups_Join(&groups, "fleet", &listener);
+
+        expect(targetsFrom("lab", PASSED_ID)).toBe((uint16_t)0);
+        expect(targetsFrom("truck42", PASSED_ID)).toBe((uint16_t)2);
+    });
+
+    it("feeds nothing into a member that only sends", []() {
+        BridgeGroupMember source = memberOf("lab", kBRIDGE_MEMBER_SENDS);
+        uint16_t count;
+
+        groupOf("fleet", "truck42", "bench", NULL);
+        BridgeGroups_Join(&groups, "fleet", &source);
+
+        count = targetsFrom("truck42", PASSED_ID);
+
+        expect(count).toBe((uint16_t)1);
+        expect(targeted(count, "lab")).toBe(false);
+        expect(targetsFrom("lab", PASSED_ID)).toBe((uint16_t)2);
+    });
+
+    it("feeds only the ids a member may send", []() {
+        BridgeGroupMember filtered = memberOf("lab", kBRIDGE_MEMBER_BOTH);
+
+        filtered.filter_count = 1;
+        filtered.filters[0] = passed_only[0];
+        groupOf("fleet", "truck42", NULL, NULL);
+        BridgeGroups_Join(&groups, "fleet", &filtered);
+
+        expect(targetsFrom("lab", PASSED_ID)).toBe((uint16_t)1);
+        expect(targetsFrom("lab", OTHER_ID)).toBe((uint16_t)0);
+        expect(targetsFrom("truck42", OTHER_ID)).toBe((uint16_t)1);
+    });
+
+    it("changes a member that joins again", []() {
+        BridgeGroupMember listener = memberOf("lab", kBRIDGE_MEMBER_RECEIVES);
+
+        groupOf("fleet", "truck42", "lab", NULL);
+
+        BridgeGroups_Join(&groups, "fleet", &listener);
+
+        expect(BridgeGroups_Find(&groups, "fleet")->group.member_count).toBe(2);
+        expect(targetsFrom("lab", PASSED_ID)).toBe((uint16_t)0);
+    });
+
     it("never targets anything for an error frame", []() {
         groupOf("fleet", "truck42", "lab", NULL);
 
@@ -175,13 +224,13 @@ static BridgeEndpoint endpoint(const char *agent_name)
 static void groupOf(const char *name, const char *first, const char *second, const char *third)
 {
     const char *members[] = { first, second, third };
-    BridgeEndpoint member;
+    BridgeGroupMember member;
     uint8_t i;
 
     BridgeGroups_Set(&groups, name, 0, NULL);
     for(i=0; i<3; i++) {
         if (members[i] != NULL) {
-            member = endpoint(members[i]);
+            member = memberOf(members[i], kBRIDGE_MEMBER_BOTH);
             BridgeGroups_Join(&groups, name, &member);
         }
     }
@@ -205,4 +254,15 @@ static bool targeted(uint16_t count, const char *agent_name)
     }
 
     return false;
+}
+
+static BridgeGroupMember memberOf(const char *agent_name, uint8_t direction)
+{
+    BridgeGroupMember built;
+
+    memset(&built, 0, sizeof(built));
+    built.endpoint = endpoint(agent_name);
+    built.direction = direction;
+
+    return built;
 }

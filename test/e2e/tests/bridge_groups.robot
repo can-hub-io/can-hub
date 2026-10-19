@@ -118,3 +118,36 @@ A Group Applies Again After A Hub Restart
     ${delivered}=    Frames Captured By ${lab_capture}
 
     Should Be Equal As Integers    ${delivered}    ${FRAMES}
+
+A Member That Only Receives Does Not Feed The Group
+    ${hub}=    Start CAN HUB On ${LOCAL_SERVER} With Agents truck On ${LAN_SERVER} And lab On ${LOCAL_SERVER}
+    Run CLI On Hub ${hub}    group    add    fleet
+    Run CLI On Hub ${hub}    group    join    fleet    truck/vcan0
+    Run CLI On Hub ${hub}    group    join    fleet    lab/vcan0    receives
+    ${truck_capture}=    Start Candump On ${LAN_SERVER}    vcan0
+    ${lab_capture}=    Start Candump On ${LOCAL_SERVER}    vcan0
+
+    Send ${FRAMES} Frames On ${LAN_SERVER} vcan0    can_id=123
+    Send ${FRAMES} Frames On ${LOCAL_SERVER} vcan0    can_id=456
+    ${truck_on_lab}=    Wait Until Capture ${lab_capture} Settles    can_id=123    quiet=1
+    ${lab_on_truck}=    Frames With Id 456 Captured By ${truck_capture}
+
+    Should Be Equal As Integers    ${truck_on_lab}    ${FRAMES}
+    Should Be Equal As Integers    ${lab_on_truck}    0
+
+A Member Sends Only The Ids It May
+    ${hub}=    Start CAN HUB On ${LOCAL_SERVER} With Agents truck On ${LAN_SERVER} And lab On ${LOCAL_SERVER}
+    Run CLI On Hub ${hub}    group    add    fleet
+    Run CLI On Hub ${hub}    group    join    fleet    truck/vcan0
+    Run CLI On Hub ${hub}    group    join    fleet    lab/vcan0    100
+    ${truck_capture}=    Start Candump On ${LAN_SERVER}    vcan0
+
+    Send ${FRAMES} Frames On ${LOCAL_SERVER} vcan0    can_id=200
+    Send ${FRAMES} Frames On ${LOCAL_SERVER} vcan0    can_id=100
+    ${passed}=    Wait Until Capture ${truck_capture} Settles    can_id=100    quiet=1
+    ${held_back}=    Frames With Id 200 Captured By ${truck_capture}
+    ${listed}=    Run CLI On Hub ${hub}    group
+
+    Should Be Equal As Integers    ${passed}    ${FRAMES}
+    Should Be Equal As Integers    ${held_back}    0
+    Should Match Regexp    ${listed.stdout}    lab/vcan0\\s+online\\s+both\\s+ids 100
