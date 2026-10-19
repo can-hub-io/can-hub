@@ -1,8 +1,9 @@
-//! Admin message family (0x10..=0x31): request encoders and reply decoders.
+//! Admin message family (0x10..=0x3B): request encoders and reply decoders.
 //!
 //! The layouts mirror the authoritative C codec in
 //! `src/protocol/admin_message.c`, including the pin/ACL mutations
-//! (0x22, 0x24..=0x29) and the bus-to-bus bridges (0x2A, 0x2B, 0x2E..=0x31).
+//! (0x22, 0x24..=0x29), the bus-to-bus bridges (0x2A, 0x2B, 0x2E..=0x31)
+//! and the bridge groups (0x32..=0x3B).
 
 use super::{
     read_fixed_str, read_u16, read_u32, read_u64, write_fixed_str, DecodeError, Header,
@@ -18,6 +19,14 @@ const BRIDGE_FILTER_SIZE: usize = 8;
 const BRIDGE_ENTRY_SIZE: usize = 440;
 const BRIDGE_STATE_SOURCE_ONLINE: u8 = 0x01;
 const BRIDGE_STATE_DESTINATION_ONLINE: u8 = 0x02;
+
+const GROUP_NAME_SIZE: usize = 32;
+const GROUP_ENTRY_SIZE: usize = 2616;
+const GROUP_MEMBER_SIZE: usize = 152;
+const GROUP_MEMBER_ONLINE: u8 = 0x01;
+
+/// Members a bridge group holds at most.
+pub const GROUP_MEMBERS_MAX: usize = 16;
 
 /// Filters a bridge route carries at most, as SUBSCRIBE does.
 pub const BRIDGE_FILTERS_MAX: usize = 16;
@@ -517,6 +526,61 @@ fn write_bridge_endpoints(out: &mut [u8], source: &BridgeEndpoint, destination: 
     );
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupMember {
+    pub endpoint: BridgeEndpoint,
+    pub online: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupEntry {
+    pub name: String,
+    pub filters: Vec<CanFilter>,
+    pub members: Vec<GroupMember>,
+    pub forwarded: u64,
+    pub dropped: u64,
+}
+
+/// ADMIN_GROUP_SET (total 168): name[32] @4, filter_count @36, filters[16]
+/// @40. Filters past the 16th are not sent.
+pub fn encode_group_set(name: &str, filters: &[CanFilter]) -> [u8; 168] {
+    let mut out = [0u8; 168];
+    let sent = &filters[..filters.len().min(BRIDGE_FILTERS_MAX)];
+    Header::write(&mut out, MessageType::AdminGroupSet, 0, 164);
+    write_fixed_str(&mut out, HEADER_SIZE, GROUP_NAME_SIZE, name);
+    out[HEADER_SIZE + 32] = sent.len() as u8;
+    for (index, filter) in sent.iter().enumerate() {
+        let base = HEADER_SIZE + 36 + index * BRIDGE_FILTER_SIZE;
+        out[base..base + 4].copy_from_slice(&filter.can_id.to_le_bytes());
+        out[base + 4..base + 8].copy_from_slice(&filter.can_mask.to_le_bytes());
+    }
+    out
+}
+
+/// ADMIN_GROUP_DELETE (total 36): name[32] @4.
+pub fn encode_group_delete(name: &str) -> [u8; 36] {
+    let mut out = [0u8; 36];
+    Header::write(&mut out, MessageType::AdminGroupDelete, 0, 32);
+    write_fixed_str(&mut out, HEADER_SIZE, GROUP_NAME_SIZE, name);
+    out
+}
+
+/// ADMIN_GROUP_JOIN / ADMIN_GROUP_LEAVE (total 180): name[32] @4, member @36
+/// (agent_name[128] + interface_name[16]).
+pub fn encode_group_member(message_type: MessageType, name: &str, member: &BridgeEndpoint) -> [u8; 180] {
+    let mut out = [0u8; 180];
+    Header::write(&mut out, message_type, 0, 176);
+    write_fixed_str(&mut out, HEADER_SIZE, GROUP_NAME_SIZE, name);
+    write_fixed_str(&mut out, HEADER_SIZE + 32, AGENT_NAME_SIZE, &member.agent_name);
+    write_fixed_str(&mut out, HEADER_SIZE + 32 + AGENT_NAME_SIZE, INTERFACE_NAME_SIZE, &member.interface_name);
+    out
+}
+
+/// ADMIN_GROUP_LIST (total 8): a pagination offset (one group per page).
+pub fn encode_group_list(offset: u16) -> [u8; 8] {
+    encode_paginated(MessageType::AdminGroupList, offset)
+}
+
 // ---------------------------------------------------------------- replies
 
 fn expect(buffer: &[u8], message_type: MessageType, min_len: usize) -> Result<Header, DecodeError> {
@@ -681,6 +745,37 @@ pub fn decode_bridge_list_reply(buffer: &[u8]) -> Result<Page<BridgeEntry>, Deco
             destination_online: entry[289] & BRIDGE_STATE_DESTINATION_ONLINE != 0,
             forwarded: read_u64(entry, 424),
             dropped: read_u64(entry, 432),
+        }
+    })
+}
+
+/// ADMIN_GROUP_LIST_REPLY (8 + count * 2616). Entry layout (entry-relative):
+/// name[32] @0, filter_count @32, member_count @33, filters[16] @36,
+/// forwarded u64 @168, dropped u64 @176, members[16] @184, each 152 bytes:
+/// endpoint @0, state @144 (bit 0 online).
+pub fn decode_group_list_reply(buffer: &[u8]) -> Result<Page<GroupEntry>, DecodeError> {
+    decode_page(buffer, MessageType::AdminGroupListReply, GROUP_ENTRY_SIZE, |entry| {
+        let filter_count = (entry[32] as usize).min(BRIDGE_FILTERS_MAX);
+        let member_count = (entry[33] as usize).min(GROUP_MEMBERS_MAX);
+        GroupEntry {
+            name: read_fixed_str(entry, 0, GROUP_NAME_SIZE),
+            filters: (0..filter_count)
+                .map(|index| CanFilter {
+                    can_id: read_u32(entry, 36 + index * BRIDGE_FILTER_SIZE),
+                    can_mask: read_u32(entry, 40 + index * BRIDGE_FILTER_SIZE),
+                })
+                .collect(),
+            members: (0..member_count)
+                .map(|index| {
+                    let base = 184 + index * GROUP_MEMBER_SIZE;
+                    GroupMember {
+                        endpoint: read_bridge_endpoint(entry, base),
+                        online: entry[base + 144] & GROUP_MEMBER_ONLINE != 0,
+                    }
+                })
+                .collect(),
+            forwarded: read_u64(entry, 168),
+            dropped: read_u64(entry, 176),
         }
     })
 }
@@ -952,6 +1047,38 @@ mod tests {
         assert!(entry.source_online);
         assert!(!entry.destination_online);
         assert_eq!(entry.forwarded, 42);
+    }
+
+    #[test]
+    fn group_member_request_layout() {
+        let member = BridgeEndpoint { agent_name: "truck42".into(), interface_name: "can0".into() };
+        let request = encode_group_member(MessageType::AdminGroupJoin, "fleet", &member);
+        assert_eq!(request[0], MessageType::AdminGroupJoin as u8);
+        assert_eq!(read_u16(&request, 2), 176);
+        assert_eq!(read_fixed_str(&request, 4, GROUP_NAME_SIZE), "fleet");
+        assert_eq!(read_fixed_str(&request, 36, AGENT_NAME_SIZE), "truck42");
+        assert_eq!(read_fixed_str(&request, 36 + AGENT_NAME_SIZE, INTERFACE_NAME_SIZE), "can0");
+    }
+
+    #[test]
+    fn group_list_reply_decodes_members() {
+        let mut buffer = vec![0u8; 8 + GROUP_ENTRY_SIZE];
+        Header::write(&mut buffer, MessageType::AdminGroupListReply, 0, (4 + GROUP_ENTRY_SIZE) as u16);
+        buffer[4] = 1;
+        write_fixed_str(&mut buffer, 8, GROUP_NAME_SIZE, "fleet");
+        buffer[8 + 33] = 2;
+        buffer[8 + 168..8 + 176].copy_from_slice(&7u64.to_le_bytes());
+        write_fixed_str(&mut buffer, 8 + 184, AGENT_NAME_SIZE, "truck42");
+        buffer[8 + 184 + 144] = GROUP_MEMBER_ONLINE;
+        write_fixed_str(&mut buffer, 8 + 184 + GROUP_MEMBER_SIZE, AGENT_NAME_SIZE, "lab");
+        let page = decode_group_list_reply(&buffer).unwrap();
+        let entry = &page.entries[0];
+        assert_eq!(entry.name, "fleet");
+        assert_eq!(entry.forwarded, 7);
+        assert_eq!(entry.members.len(), 2);
+        assert!(entry.members[0].online);
+        assert_eq!(entry.members[1].endpoint.agent_name, "lab");
+        assert!(!entry.members[1].online);
     }
 
     #[test]

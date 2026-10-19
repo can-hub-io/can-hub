@@ -207,7 +207,17 @@ add_unit_test(test_message_framer
 add_unit_test(test_bridge_routes
     SOURCES
         hub/domain/test_bridge_routes.cpp
+        ${ROOT_SRC_DIR}/hub/domain/bridge_groups.c
         ${ROOT_SRC_DIR}/hub/domain/bridge_routes.c
+        ${ROOT_SRC_DIR}/hub/domain/bridge_targets.c
+)
+
+add_unit_test(test_bridge_groups
+    SOURCES
+        hub/domain/test_bridge_groups.cpp
+        ${ROOT_SRC_DIR}/hub/domain/bridge_groups.c
+        ${ROOT_SRC_DIR}/hub/domain/bridge_routes.c
+        ${ROOT_SRC_DIR}/hub/domain/bridge_targets.c
 )
 
 add_unit_test(test_filter_spec
@@ -360,7 +370,9 @@ add_unit_test(test_broker
         hub/test_broker.cpp
         ${ROOT_SRC_DIR}/hub/broker.c
         ${ROOT_SRC_DIR}/hub/domain/admin_views.c
+        ${ROOT_SRC_DIR}/hub/domain/bridge_groups.c
         ${ROOT_SRC_DIR}/hub/domain/bridge_routes.c
+        ${ROOT_SRC_DIR}/hub/domain/bridge_targets.c
         ${ROOT_SRC_DIR}/hub/domain/echo_tokens.c
         ${ROOT_SRC_DIR}/hub/domain/egress_queue.c
         ${ROOT_SRC_DIR}/hub/domain/frame_routes.c
@@ -391,7 +403,9 @@ add_unit_test(test_broker_bridges
         hub/test_broker_bridges.cpp
         ${ROOT_SRC_DIR}/hub/broker.c
         ${ROOT_SRC_DIR}/hub/domain/admin_views.c
+        ${ROOT_SRC_DIR}/hub/domain/bridge_groups.c
         ${ROOT_SRC_DIR}/hub/domain/bridge_routes.c
+        ${ROOT_SRC_DIR}/hub/domain/bridge_targets.c
         ${ROOT_SRC_DIR}/hub/domain/echo_tokens.c
         ${ROOT_SRC_DIR}/hub/domain/egress_queue.c
         ${ROOT_SRC_DIR}/hub/domain/frame_routes.c

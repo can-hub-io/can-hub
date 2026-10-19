@@ -105,7 +105,11 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
 
     let bridges_manage = guarded(&state, Some(Permission::BridgesManage), Router::new()
         .route("/api/bridges", get(handlers::bridges).post(handlers::bridge_set))
-        .route("/api/bridges/delete", post(handlers::bridge_delete)));
+        .route("/api/bridges/delete", post(handlers::bridge_delete))
+        .route("/api/bridge-groups", get(handlers::bridge_groups).post(handlers::bridge_group_set))
+        .route("/api/bridge-groups/delete", post(handlers::bridge_group_delete))
+        .route("/api/bridge-groups/members", post(handlers::bridge_group_join))
+        .route("/api/bridge-groups/members/delete", post(handlers::bridge_group_leave)));
 
     let users_manage = guarded(&state, Some(Permission::UsersManage), Router::new()
         .route("/api/audit", get(handlers::list_audit_log))

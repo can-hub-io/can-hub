@@ -77,6 +77,18 @@ export interface Bridge {
   dropped: number
 }
 
+export interface BridgeGroupMember extends BridgeEndpoint {
+  online: boolean
+}
+
+export interface BridgeGroup {
+  name: string
+  filters: CanFilter[]
+  members: BridgeGroupMember[]
+  forwarded: number
+  dropped: number
+}
+
 export interface Pin {
   agentName: string
   fingerprintHex: string
@@ -246,6 +258,7 @@ export const api = {
   pins: () => getJson<Pin[]>('/api/pins'),
   rejected: () => getJson<Rejected[]>('/api/rejected'),
   bridges: () => getJson<Bridge[]>('/api/bridges'),
+  bridgeGroups: () => getJson<BridgeGroup[]>('/api/bridge-groups'),
 
   kickPeer: (peerId: number) => send(`/api/peers/${peerId}/kick`, 'POST'),
   kickAgent: (name: string) => send(`/api/agents/${encodeURIComponent(name)}/kick`, 'POST'),
@@ -260,6 +273,12 @@ export const api = {
     send('/api/bridges', 'POST', { source, destination, filters }),
   bridgeDelete: (source: BridgeEndpoint, destination: BridgeEndpoint) =>
     send('/api/bridges/delete', 'POST', { source, destination }),
+  bridgeGroupSet: (name: string, filters: CanFilter[]) => send('/api/bridge-groups', 'POST', { name, filters }),
+  bridgeGroupDelete: (name: string) => send('/api/bridge-groups/delete', 'POST', { name }),
+  bridgeGroupJoin: (name: string, member: BridgeEndpoint) =>
+    send('/api/bridge-groups/members', 'POST', { name, member }),
+  bridgeGroupLeave: (name: string, member: BridgeEndpoint) =>
+    send('/api/bridge-groups/members/delete', 'POST', { name, member }),
   interfaceSettings: (agentName: string, interfaceName: string) =>
     getJson<InterfaceSettings>(
       `/api/interfaces/${encodeURIComponent(agentName)}/${encodeURIComponent(interfaceName)}/settings`,

@@ -111,6 +111,31 @@ lab/can1                 truck42/can0             active   88           0       
 - Administration only: routes bypass client ACLs. The [web panel](web.md)
   manages them under Bridges, with the `bridges.manage` permission.
 
+### Groups
+
+A group joins several buses into one: whatever arrives on any member is
+injected into every other member, never back into the one it came from.
+
+```sh
+can-hub-cli group add fleet 7DF 7E0:7F0       # create, or replace the ids
+can-hub-cli group join fleet truck42/can0
+can-hub-cli group join fleet truck43/can0
+can-hub-cli group join fleet lab/can1
+can-hub-cli group
+fleet  forwarded 2210  dropped 0  ids 7DF 7E0:7F0
+  truck42/can0             online
+  truck43/can0             online
+  lab/can1                 online
+```
+
+- With routes alone that takes a route per ordered pair of buses; a group
+  is one line per bus. A frame from truck42 reaches lab directly, not
+  through another member: one hop, as for routes.
+- A bus reached by several routes and groups is injected once.
+- Up to 16 groups of up to 16 members; names are 1-31 of
+  `A-Z a-z 0-9 . _ -`. Members may be offline and apply when they connect.
+  Groups live in `hub.db` with the routes.
+
 ## Counters
 
 `can-hub-cli status` exposes hub-wide frame counters; `peers`, `clients` and

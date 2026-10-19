@@ -31,6 +31,8 @@
 #define COMMAND_WORDS_MAX 32
 #define INTERFACE_COMMAND_TARGET_WORDS 3
 #define BRIDGE_COMMAND_TARGET_WORDS 4
+#define GROUP_COMMAND_NAME_WORDS 3
+#define GROUP_COMMAND_MEMBER_WORDS 4
 #define FILTER_TEXT_SIZE 24
 
 typedef enum tcli_command_e {
@@ -54,6 +56,11 @@ typedef enum tcli_command_e {
     kCLI_COMMAND_BRIDGES,
     kCLI_COMMAND_BRIDGE_ADD,
     kCLI_COMMAND_BRIDGE_DELETE,
+    kCLI_COMMAND_GROUPS,
+    kCLI_COMMAND_GROUP_ADD,
+    kCLI_COMMAND_GROUP_DELETE,
+    kCLI_COMMAND_GROUP_JOIN,
+    kCLI_COMMAND_GROUP_LEAVE,
     kCLI_COMMAND_MAX,
 } TCLI_COMMAND;
 
@@ -76,6 +83,8 @@ static bool target_can_write;
 static bool target_can_admin;
 static InterfaceSettings target_settings;
 static AdminBridgeSetMessage target_bridge;
+static AdminGroupSetMessage target_group;
+static AdminBridgeEndpoint target_member;
 static uint32_t target_peer_id;
 static uint16_t page_offset;
 static bool page_header_printed;
@@ -90,6 +99,8 @@ static bool parsePeerId(const char *text);
 static bool mapInterfaceCommand(const char *words[], uint8_t word_count);
 static bool mapBridgeCommand(const char *words[], uint8_t word_count);
 static bool parseBridgeEndpoint(const char *text, AdminBridgeEndpoint *endpoint);
+static bool mapGroupCommand(const char *words[], uint8_t word_count);
+static bool parseFilters(const char *words[], uint8_t word_count, CanFilter *filters, uint8_t *filter_count);
 static bool parseAclLevel(const char *text);
 static bool parseInterfaceRef(const char *text);
 static bool parseNamespacedInterface(const char *text);
@@ -110,6 +121,9 @@ static void handlePinsReply(const uint8_t *payload, uint16_t payload_length);
 static void handleAclListReply(const uint8_t *payload, uint16_t payload_length);
 static void handleRejectedReply(const uint8_t *payload, uint16_t payload_length);
 static void handleBridgeListReply(const uint8_t *payload, uint16_t payload_length);
+static void handleGroupListReply(const uint8_t *payload, uint16_t payload_length);
+static void printGroupReply(uint8_t status);
+static const char *groupStatusText(uint8_t status);
 static void printBridgeReply(uint8_t status, const char *action);
 static void formatBridgeFilters(const CanFilter *filters, uint8_t filter_count, char *out, size_t out_size);
 static void formatEndpoint(const AdminBridgeEndpoint *endpoint, char *out, size_t out_size);
@@ -194,6 +208,10 @@ static void printUsage(FILE *stream, const char *program)
     fprintf(stream, "  bridge add <agent>/<iface> <agent>/<iface> [<id>[:<mask>] ...]  forward frames from the first bus\n");
     fprintf(stream, "                         into the second, all or only the ids given (adding again replaces the ids)\n");
     fprintf(stream, "  bridge delete <agent>/<iface> <agent>/<iface>  drop a route\n");
+    fprintf(stream, "  group                  bridge groups: buses that behave as one, with their members\n");
+    fprintf(stream, "  group add <name> [<id>[:<mask>] ...]          create a group, or replace its ids\n");
+    fprintf(stream, "  group delete <name>    drop a group\n");
+    fprintf(stream, "  group join|leave <name> <agent>/<iface>       add or remove a member bus\n");
     fprintf(stream, "default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
 }
 
@@ -246,6 +264,9 @@ static bool mapCommand(const char *words[], uint8_t word_count)
     }
     if (word_count >= 1 && strcmp(words[0], "bridge") == 0) {
         return mapBridgeCommand(words, word_count);
+    }
+    if (word_count >= 1 && strcmp(words[0], "group") == 0) {
+        return mapGroupCommand(words, word_count);
     }
 
     if (word_count == 1) {
@@ -376,8 +397,6 @@ static bool mapInterfaceCommand(const char *words[], uint8_t word_count)
 
 static bool mapBridgeCommand(const char *words[], uint8_t word_count)
 {
-    uint8_t i;
-
     memset(&target_bridge, 0, sizeof(target_bridge));
     if (word_count == 1) {
         command = kCLI_COMMAND_BRIDGES;
@@ -399,12 +418,67 @@ static bool mapBridgeCommand(const char *words[], uint8_t word_count)
     }
 
     command = kCLI_COMMAND_BRIDGE_ADD;
-    for(i=BRIDGE_COMMAND_TARGET_WORDS; i<word_count; i++) {
-        if (!FilterSpec_Parse(words[i], &target_bridge.filters[target_bridge.filter_count])) {
+
+    return parseFilters(
+        words + BRIDGE_COMMAND_TARGET_WORDS,
+        (uint8_t)(word_count - BRIDGE_COMMAND_TARGET_WORDS),
+        target_bridge.filters,
+        &target_bridge.filter_count
+    );
+}
+
+static bool mapGroupCommand(const char *words[], uint8_t word_count)
+{
+    memset(&target_group, 0, sizeof(target_group));
+    memset(&target_member, 0, sizeof(target_member));
+    if (word_count == 1) {
+        command = kCLI_COMMAND_GROUPS;
+        return true;
+    }
+    if (word_count < GROUP_COMMAND_NAME_WORDS) {
+        return false;
+    }
+    snprintf(target_group.name, sizeof(target_group.name), "%s", words[2]);
+
+    if (strcmp(words[1], "add") == 0 && word_count - GROUP_COMMAND_NAME_WORDS <= SUBSCRIBE_FILTERS_MAX) {
+        command = kCLI_COMMAND_GROUP_ADD;
+        return parseFilters(
+            words + GROUP_COMMAND_NAME_WORDS,
+            (uint8_t)(word_count - GROUP_COMMAND_NAME_WORDS),
+            target_group.filters,
+            &target_group.filter_count
+        );
+    }
+    if (strcmp(words[1], "delete") == 0) {
+        command = kCLI_COMMAND_GROUP_DELETE;
+        return word_count == GROUP_COMMAND_NAME_WORDS;
+    }
+    if (word_count != GROUP_COMMAND_MEMBER_WORDS || !parseBridgeEndpoint(words[3], &target_member)) {
+        return false;
+    }
+    if (strcmp(words[1], "join") == 0) {
+        command = kCLI_COMMAND_GROUP_JOIN;
+        return true;
+    }
+    if (strcmp(words[1], "leave") == 0) {
+        command = kCLI_COMMAND_GROUP_LEAVE;
+        return true;
+    }
+
+    return false;
+}
+
+static bool parseFilters(const char *words[], uint8_t word_count, CanFilter *filters, uint8_t *filter_count)
+{
+    uint8_t i;
+
+    *filter_count = 0;
+    for(i=0; i<word_count; i++) {
+        if (!FilterSpec_Parse(words[i], &filters[*filter_count])) {
             LOG_ERROR("bad filter %s, expected <id>[:<mask>] in hex", words[i]);
             return false;
         }
-        target_bridge.filter_count++;
+        (*filter_count)++;
     }
 
     return true;
@@ -528,6 +602,7 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
     AdminAclRevokeReplyMessage acl_revoke_reply;
     AdminBridgeSetReplyMessage bridge_set_reply;
     AdminBridgeDeleteReplyMessage bridge_delete_reply;
+    AdminGroupReplyMessage group_reply;
     ConfigureReplyMessage configure_reply;
     ErrorMessage error;
     char peer_id_text[16];
@@ -653,6 +728,17 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
         }
         return;
     }
+    if (header.type == kMESSAGE_TYPE_ADMIN_GROUP_LIST_REPLY) {
+        handleGroupListReply(data + MESSAGE_HEADER_SIZE, header.length);
+        return;
+    }
+    if (header.type == kMESSAGE_TYPE_ADMIN_GROUP_SET_REPLY || header.type == kMESSAGE_TYPE_ADMIN_GROUP_DELETE_REPLY
+        || header.type == kMESSAGE_TYPE_ADMIN_GROUP_JOIN_REPLY || header.type == kMESSAGE_TYPE_ADMIN_GROUP_LEAVE_REPLY) {
+        if (AdminGroupReplyMessage_Decode(&group_reply, data + MESSAGE_HEADER_SIZE, header.length)) {
+            printGroupReply(group_reply.status);
+        }
+        return;
+    }
     if (header.type == kMESSAGE_TYPE_CONFIGURE_REPLY) {
         if (!ConfigureReplyMessage_Decode(&configure_reply, data + MESSAGE_HEADER_SIZE, header.length)) {
             exit_code = 1;
@@ -689,6 +775,9 @@ static void sendRequest(void)
     AdminRejectedMessage rejected = { page_offset };
     AdminBridgeListMessage bridge_list = { page_offset };
     AdminBridgeDeleteMessage bridge_delete;
+    AdminGroupDeleteMessage group_delete;
+    AdminGroupMemberMessage group_member;
+    AdminGroupListMessage group_list = { page_offset };
     ConfigureMessage configure;
     uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size = 0;
@@ -755,6 +844,22 @@ static void sendRequest(void)
         bridge_delete.source = target_bridge.source;
         bridge_delete.destination = target_bridge.destination;
         encoded_size = AdminBridgeDeleteMessage_Encode(&bridge_delete, encoded, sizeof(encoded));
+    } else if (command == kCLI_COMMAND_GROUPS) {
+        encoded_size = AdminGroupListMessage_Encode(&group_list, encoded, sizeof(encoded));
+    } else if (command == kCLI_COMMAND_GROUP_ADD) {
+        encoded_size = AdminGroupSetMessage_Encode(&target_group, encoded, sizeof(encoded));
+    } else if (command == kCLI_COMMAND_GROUP_DELETE) {
+        memcpy(group_delete.name, target_group.name, sizeof(group_delete.name));
+        encoded_size = AdminGroupDeleteMessage_Encode(&group_delete, encoded, sizeof(encoded));
+    } else if (command == kCLI_COMMAND_GROUP_JOIN || command == kCLI_COMMAND_GROUP_LEAVE) {
+        memcpy(group_member.name, target_group.name, sizeof(group_member.name));
+        group_member.member = target_member;
+        encoded_size = AdminGroupMemberMessage_Encode(
+            command == kCLI_COMMAND_GROUP_JOIN ? kMESSAGE_TYPE_ADMIN_GROUP_JOIN : kMESSAGE_TYPE_ADMIN_GROUP_LEAVE,
+            &group_member,
+            encoded,
+            sizeof(encoded)
+        );
     } else if (command == kCLI_COMMAND_INTERFACE_SET || command == kCLI_COMMAND_INTERFACE_SHOW) {
         memset(&configure, 0, sizeof(configure));
         snprintf(configure.agent_name, sizeof(configure.agent_name), "%s", target_agent);
@@ -1198,6 +1303,80 @@ static void handleBridgeListReply(const uint8_t *payload, uint16_t payload_lengt
 
     if (!requestNextPage(reply.flags, reply.count)) {
         exit_code = 0;
+    }
+}
+
+static void handleGroupListReply(const uint8_t *payload, uint16_t payload_length)
+{
+    static AdminGroupListReplyMessage reply;
+    const AdminGroupListReplyEntry *entry;
+    char member[REGISTER_AGENT_NAME_SIZE + REGISTER_INTERFACE_NAME_SIZE];
+    char filters[SUBSCRIBE_FILTERS_MAX * FILTER_TEXT_SIZE];
+    uint8_t i;
+    uint8_t m;
+
+    if (!AdminGroupListReplyMessage_Decode(&reply, payload, payload_length)) {
+        exit_code = 1;
+        return;
+    }
+
+    for(i=0; i<reply.count; i++) {
+        entry = &reply.entries[i];
+        formatBridgeFilters(entry->filters, entry->filter_count, filters, sizeof(filters));
+        printf(
+            "%s  forwarded %llu  dropped %llu  ids %s\n",
+            entry->name,
+            (unsigned long long)entry->forwarded,
+            (unsigned long long)entry->dropped,
+            filters
+        );
+        for(m=0; m<entry->member_count; m++) {
+            formatEndpoint(&entry->members[m].endpoint, member, sizeof(member));
+            printf("  %-24s %s\n", member, (entry->members[m].state & ADMIN_GROUP_MEMBER_ONLINE) ? "online" : "offline");
+        }
+    }
+
+    if (!requestNextPage(reply.flags, reply.count)) {
+        exit_code = 0;
+    }
+}
+
+static void printGroupReply(uint8_t status)
+{
+    char member[REGISTER_AGENT_NAME_SIZE + REGISTER_INTERFACE_NAME_SIZE];
+    char filters[SUBSCRIBE_FILTERS_MAX * FILTER_TEXT_SIZE];
+
+    if (status != ADMIN_BRIDGE_STATUS_OK) {
+        LOG_ERROR("%s", groupStatusText(status));
+        exit_code = 1;
+        return;
+    }
+
+    exit_code = 0;
+    formatEndpoint(&target_member, member, sizeof(member));
+    if (command == kCLI_COMMAND_GROUP_ADD) {
+        formatBridgeFilters(target_group.filters, target_group.filter_count, filters, sizeof(filters));
+        printf("group %s %s\n", target_group.name, filters);
+    } else if (command == kCLI_COMMAND_GROUP_DELETE) {
+        printf("deleted group %s\n", target_group.name);
+    } else if (command == kCLI_COMMAND_GROUP_JOIN) {
+        printf("%s joined %s\n", member, target_group.name);
+    } else {
+        printf("%s left %s\n", member, target_group.name);
+    }
+}
+
+static const char *groupStatusText(uint8_t status)
+{
+    switch (status) {
+        case ADMIN_BRIDGE_STATUS_INVALID:
+            return "a group name is 1-31 of A-Z a-z 0-9 . _ -";
+        case ADMIN_BRIDGE_STATUS_FULL:
+            return "the hub holds no more groups, or the group already has 16 members";
+        case ADMIN_BRIDGE_STATUS_UNKNOWN:
+            return "no such group or member";
+        default:
+            return AdminBridgeStatus_Name(status);
     }
 }
 

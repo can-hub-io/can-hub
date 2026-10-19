@@ -24,6 +24,8 @@ pub enum ApiError {
     Configure { status: u8, detail: String },
     /// ADMIN_BRIDGE_SET/DELETE came back with a non-zero status.
     Bridge(u8),
+    /// An ADMIN_GROUP_* change came back with a non-zero status.
+    Group(u8),
     /// web.db error (conflict → 409, otherwise 500).
     Store(StoreError),
 }
@@ -45,6 +47,7 @@ impl IntoResponse for ApiError {
             }
             ApiError::Configure { status, detail } => configure_failure(status, detail),
             ApiError::Bridge(status) => bridge_failure(status),
+            ApiError::Group(status) => group_failure(status),
             ApiError::Store(StoreError::Conflict(detail)) => (StatusCode::CONFLICT, detail.to_string()),
             ApiError::Store(error) => (StatusCode::INTERNAL_SERVER_ERROR, format!("store error: {error:?}")),
         };
@@ -63,6 +66,16 @@ fn bridge_failure(status: u8) -> (StatusCode, String) {
         BRIDGE_STATUS_FULL => (StatusCode::CONFLICT, "the hub holds no more bridges"),
         BRIDGE_STATUS_UNKNOWN => (StatusCode::NOT_FOUND, "no such bridge"),
         _ => (StatusCode::INTERNAL_SERVER_ERROR, "could not store the bridge"),
+    };
+    (code, reason.to_string())
+}
+
+fn group_failure(status: u8) -> (StatusCode, String) {
+    let (code, reason) = match status {
+        BRIDGE_STATUS_INVALID => (StatusCode::BAD_REQUEST, "a group name is 1-31 of A-Z a-z 0-9 . _ -"),
+        BRIDGE_STATUS_FULL => (StatusCode::CONFLICT, "the hub holds no more groups, or the group already has 16 members"),
+        BRIDGE_STATUS_UNKNOWN => (StatusCode::NOT_FOUND, "no such group or member"),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, "could not store the group"),
     };
     (code, reason.to_string())
 }

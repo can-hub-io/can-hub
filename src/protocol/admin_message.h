@@ -58,6 +58,16 @@
 #define ADMIN_BRIDGE_LIST_REPLY_FIXED_FIELDS_SIZE 4
 #define ADMIN_BRIDGE_LIST_REPLY_ENTRIES_MAX 8
 #define ADMIN_BRIDGE_LIST_REPLY_ENTRY_SIZE 440
+#define ADMIN_GROUP_NAME_SIZE 32
+#define ADMIN_GROUP_MEMBERS_MAX 16
+#define ADMIN_GROUP_SET_BODY_SIZE 164
+#define ADMIN_GROUP_DELETE_BODY_SIZE 32
+#define ADMIN_GROUP_MEMBER_BODY_SIZE 176
+#define ADMIN_GROUP_REPLY_BODY_SIZE 4
+#define ADMIN_GROUP_LIST_BODY_SIZE 4
+#define ADMIN_GROUP_LIST_REPLY_FIXED_FIELDS_SIZE 4
+#define ADMIN_GROUP_LIST_REPLY_ENTRIES_MAX 1
+#define ADMIN_GROUP_LIST_REPLY_ENTRY_SIZE 2616
 
 #define ADMIN_FINGERPRINT_HEX_SIZE 65
 #define ADMIN_REPLY_FLAG_MORE (1u << 0)
@@ -76,6 +86,7 @@
 
 #define ADMIN_BRIDGE_STATE_SOURCE_ONLINE (1u << 0)
 #define ADMIN_BRIDGE_STATE_DESTINATION_ONLINE (1u << 1)
+#define ADMIN_GROUP_MEMBER_ONLINE (1u << 0)
 
 #define ADMIN_REJECTED_REASON_NOT_ALLOWED 0
 #define ADMIN_REJECTED_REASON_FINGERPRINT_MISMATCH 1
@@ -327,6 +338,50 @@ typedef struct {
     AdminBridgeListReplyEntry entries[ADMIN_BRIDGE_LIST_REPLY_ENTRIES_MAX];
 } AdminBridgeListReplyMessage;
 
+typedef struct {
+    char name[ADMIN_GROUP_NAME_SIZE];
+    uint8_t filter_count;
+    CanFilter filters[SUBSCRIBE_FILTERS_MAX];
+} AdminGroupSetMessage;
+
+typedef struct {
+    char name[ADMIN_GROUP_NAME_SIZE];
+} AdminGroupDeleteMessage;
+
+typedef struct {
+    char name[ADMIN_GROUP_NAME_SIZE];
+    AdminBridgeEndpoint member;
+} AdminGroupMemberMessage;
+
+typedef struct {
+    uint8_t status;
+} AdminGroupReplyMessage;
+
+typedef struct {
+    uint16_t offset;
+} AdminGroupListMessage;
+
+typedef struct {
+    AdminBridgeEndpoint endpoint;
+    uint8_t state;
+} AdminGroupMember;
+
+typedef struct {
+    char name[ADMIN_GROUP_NAME_SIZE];
+    uint8_t filter_count;
+    uint8_t member_count;
+    CanFilter filters[SUBSCRIBE_FILTERS_MAX];
+    uint64_t forwarded;
+    uint64_t dropped;
+    AdminGroupMember members[ADMIN_GROUP_MEMBERS_MAX];
+} AdminGroupListReplyEntry;
+
+typedef struct {
+    uint8_t count;
+    uint8_t flags;
+    AdminGroupListReplyEntry entries[ADMIN_GROUP_LIST_REPLY_ENTRIES_MAX];
+} AdminGroupListReplyMessage;
+
 size_t AdminStatusMessage_Encode(uint8_t *buffer, size_t buffer_size);
 
 size_t AdminStatusReplyMessage_Encode(const AdminStatusReplyMessage *self, uint8_t *buffer, size_t buffer_size);
@@ -429,3 +484,21 @@ bool AdminBridgeListMessage_Decode(AdminBridgeListMessage *self, const uint8_t *
 
 size_t AdminBridgeListReplyMessage_Encode(const AdminBridgeListReplyMessage *self, uint8_t *buffer, size_t buffer_size);
 bool AdminBridgeListReplyMessage_Decode(AdminBridgeListReplyMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminGroupSetMessage_Encode(const AdminGroupSetMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminGroupSetMessage_Decode(AdminGroupSetMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminGroupDeleteMessage_Encode(const AdminGroupDeleteMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminGroupDeleteMessage_Decode(AdminGroupDeleteMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminGroupMemberMessage_Encode(uint8_t type, const AdminGroupMemberMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminGroupMemberMessage_Decode(AdminGroupMemberMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminGroupReplyMessage_Encode(uint8_t type, const AdminGroupReplyMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminGroupReplyMessage_Decode(AdminGroupReplyMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminGroupListMessage_Encode(const AdminGroupListMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminGroupListMessage_Decode(AdminGroupListMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminGroupListReplyMessage_Encode(const AdminGroupListReplyMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminGroupListReplyMessage_Decode(AdminGroupListReplyMessage *self, const uint8_t *payload, size_t payload_length);

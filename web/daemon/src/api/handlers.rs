@@ -66,6 +66,11 @@ pub(crate) async fn bridges(State(state): State<AppState>) -> Result<Json<Vec<Br
     Ok(Json(entries.into_iter().map(BridgeDto::from).collect()))
 }
 
+pub(crate) async fn bridge_groups(State(state): State<AppState>) -> Result<Json<Vec<BridgeGroupDto>>, ApiError> {
+    let entries = with_admin(&state, |client| client.groups()).await?;
+    Ok(Json(entries.into_iter().map(BridgeGroupDto::from).collect()))
+}
+
 pub(crate) async fn pins(State(state): State<AppState>) -> Result<Json<Vec<PinDto>>, ApiError> {
     let entries = with_admin(&state, |client| client.pins()).await?;
     Ok(Json(entries.into_iter().map(PinDto::from).collect()))
@@ -128,6 +133,35 @@ pub(crate) async fn bridge_delete(State(state): State<AppState>, Json(body): Jso
     let source = BridgeEndpoint::from(body.source);
     let destination = BridgeEndpoint::from(body.destination);
     bridged(with_admin(&state, move |client| client.bridge_delete(&source, &destination)).await?)
+}
+
+pub(crate) async fn bridge_group_set(State(state): State<AppState>, Json(body): Json<BridgeGroupBody>) -> ActionResponse {
+    if body.filters.len() > BRIDGE_FILTERS_MAX {
+        return Err(ApiError::BadRequest(format!("a group takes at most {BRIDGE_FILTERS_MAX} filters")));
+    }
+    let filters: Vec<CanFilter> = body.filters.into_iter().map(CanFilter::from).collect();
+    grouped(with_admin(&state, move |client| client.group_set(&body.name, &filters)).await?)
+}
+
+pub(crate) async fn bridge_group_delete(State(state): State<AppState>, Json(body): Json<BridgeGroupNameBody>) -> ActionResponse {
+    grouped(with_admin(&state, move |client| client.group_delete(&body.name)).await?)
+}
+
+pub(crate) async fn bridge_group_join(State(state): State<AppState>, Json(body): Json<BridgeGroupMemberBody>) -> ActionResponse {
+    let member = BridgeEndpoint::from(body.member);
+    grouped(with_admin(&state, move |client| client.group_join(&body.name, &member)).await?)
+}
+
+pub(crate) async fn bridge_group_leave(State(state): State<AppState>, Json(body): Json<BridgeGroupMemberBody>) -> ActionResponse {
+    let member = BridgeEndpoint::from(body.member);
+    grouped(with_admin(&state, move |client| client.group_leave(&body.name, &member)).await?)
+}
+
+fn grouped(status: u8) -> ActionResponse {
+    if status != 0 {
+        return Err(ApiError::Group(status));
+    }
+    Ok(Json(ActionResult { ok: true }))
 }
 
 fn bridged(status: u8) -> ActionResponse {

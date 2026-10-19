@@ -505,6 +505,95 @@ paths:
         '404': { $ref: '#/components/responses/BadRequest' }
         '502': { $ref: '#/components/responses/HubUnreachable' }
 
+  /api/bridge-groups:
+    get:
+      tags: [actions]
+      summary: List bridge groups with their members and counters
+      description: 'Permission: bridges.manage'
+      responses:
+        '200':
+          description: Bridge groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BridgeGroup' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+    post:
+      tags: [actions]
+      summary: Create a bridge group, or replace its filters
+      description: >-
+        Permission: bridges.manage. A frame captured on a member that passes
+        the filters (none = all) is injected into every other member. Members
+        are kept when the group exists. 400 for a bad name (1-31 of
+        A-Z a-z 0-9 . _ -), 409 when the hub holds no more groups.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BridgeGroupBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/HubRejected' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/bridge-groups/delete:
+    post:
+      tags: [actions]
+      summary: Drop a bridge group
+      description: 'Permission: bridges.manage. 404 when there is no such group.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BridgeGroupNameBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/BadRequest' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/bridge-groups/members:
+    post:
+      tags: [actions]
+      summary: Add a bus to a bridge group
+      description: 'Permission: bridges.manage. 404 for an unknown group, 409 when it already has 16 members.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BridgeGroupMemberBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/HubRejected' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
+  /api/bridge-groups/members/delete:
+    post:
+      tags: [actions]
+      summary: Remove a bus from a bridge group
+      description: 'Permission: bridges.manage. 404 when the group or the member is unknown.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BridgeGroupMemberBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Action' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/BadRequest' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
   /api/audit:
     get:
       tags: [management]
@@ -1016,6 +1105,51 @@ components:
       properties:
         source: { $ref: '#/components/schemas/BridgeEndpoint' }
         destination: { $ref: '#/components/schemas/BridgeEndpoint' }
+
+    BridgeGroupMember:
+      type: object
+      required: [agentName, interfaceName, online]
+      properties:
+        agentName: { type: string }
+        interfaceName: { type: string }
+        online: { type: boolean }
+
+    BridgeGroup:
+      type: object
+      required: [name, filters, members, forwarded, dropped]
+      properties:
+        name: { type: string }
+        filters:
+          type: array
+          items: { $ref: '#/components/schemas/CanFilter' }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/BridgeGroupMember' }
+        forwarded: { type: integer, format: int64 }
+        dropped: { type: integer, format: int64, description: 'Frames for a member that was offline' }
+
+    BridgeGroupBody:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, pattern: '^[A-Za-z0-9._-]{1,31}$' }
+        filters:
+          type: array
+          maxItems: 16
+          items: { $ref: '#/components/schemas/CanFilter' }
+
+    BridgeGroupNameBody:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+
+    BridgeGroupMemberBody:
+      type: object
+      required: [name, member]
+      properties:
+        name: { type: string }
+        member: { $ref: '#/components/schemas/BridgeEndpoint' }
 
     Pin:
       type: object
