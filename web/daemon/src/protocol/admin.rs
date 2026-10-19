@@ -160,6 +160,9 @@ pub const SETTING_RESTART_MS: u32 = 1 << 5;
 pub const SETTING_TXQUEUELEN: u32 = 1 << 6;
 pub const SETTING_LINK: u32 = 1 << 7;
 pub const SETTING_STATE: u32 = 1 << 8;
+pub const SETTING_BIT_TIMING: u32 = 1 << 9;
+pub const SETTING_DATA_BIT_TIMING: u32 = 1 << 10;
+pub const SETTING_TERMINATION: u32 = 1 << 11;
 
 pub const CTRLMODE_LOOPBACK: u32 = 1 << 0;
 pub const CTRLMODE_LISTEN_ONLY: u32 = 1 << 1;
@@ -168,8 +171,39 @@ pub const CTRLMODE_ONE_SHOT: u32 = 1 << 3;
 pub const CTRLMODE_BERR_REPORTING: u32 = 1 << 4;
 pub const CTRLMODE_FD: u32 = 1 << 5;
 
-const SETTINGS_SIZE: usize = 40;
+const SETTINGS_SIZE: usize = 88;
 pub const CONFIGURE_DETAIL_SIZE: usize = 64;
+
+/// Raw bit timing: time quantum in ns and segment lengths in quanta.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BitTiming {
+    pub tq: u32,
+    pub prop_seg: u32,
+    pub phase_seg1: u32,
+    pub phase_seg2: u32,
+    pub sjw: u32,
+    pub brp: u32,
+}
+
+impl BitTiming {
+    fn write(&self, out: &mut [u8], offset: usize) {
+        let members = [self.tq, self.prop_seg, self.phase_seg1, self.phase_seg2, self.sjw, self.brp];
+        for (index, value) in members.iter().enumerate() {
+            out[offset + index * 4..offset + index * 4 + 4].copy_from_slice(&value.to_le_bytes());
+        }
+    }
+
+    fn read(buffer: &[u8], offset: usize) -> BitTiming {
+        BitTiming {
+            tq: read_u32(buffer, offset),
+            prop_seg: read_u32(buffer, offset + 4),
+            phase_seg1: read_u32(buffer, offset + 8),
+            phase_seg2: read_u32(buffer, offset + 12),
+            sjw: read_u32(buffer, offset + 16),
+            brp: read_u32(buffer, offset + 20),
+        }
+    }
+}
 
 /// The settings block of CONFIGURE / CONFIGURE_REPLY. `fields` names the
 /// members that carry a value: what to change in a request, what the device
@@ -187,6 +221,9 @@ pub struct InterfaceSettings {
     pub txqueuelen: u32,
     pub link_up: bool,
     pub can_state: u8,
+    pub termination: u16,
+    pub bit_timing: BitTiming,
+    pub data_bit_timing: BitTiming,
 }
 
 impl InterfaceSettings {
@@ -202,6 +239,9 @@ impl InterfaceSettings {
         out[offset + 28..offset + 32].copy_from_slice(&self.txqueuelen.to_le_bytes());
         out[offset + 32] = u8::from(self.link_up);
         out[offset + 33] = self.can_state;
+        out[offset + 34..offset + 36].copy_from_slice(&self.termination.to_le_bytes());
+        self.bit_timing.write(out, offset + 36);
+        self.data_bit_timing.write(out, offset + 60);
     }
 
     fn read(buffer: &[u8], offset: usize) -> InterfaceSettings {
@@ -217,6 +257,9 @@ impl InterfaceSettings {
             txqueuelen: read_u32(buffer, offset + 28),
             link_up: buffer[offset + 32] != 0,
             can_state: buffer[offset + 33],
+            termination: read_u16(buffer, offset + 34),
+            bit_timing: BitTiming::read(buffer, offset + 36),
+            data_bit_timing: BitTiming::read(buffer, offset + 60),
         }
     }
 }
@@ -317,17 +360,17 @@ pub fn encode_kick_peer(peer_id: u32) -> [u8; 8] {
     out
 }
 
-/// CONFIGURE (total 192): apply or read back one interface's settings by
+/// CONFIGURE (total 240): apply or read back one interface's settings by
 /// namespaced pair. Body: agent_name[128] @4, interface_name[16] @132,
-/// op @148, 3 reserved, settings[40] @152.
+/// op @148, 3 reserved, settings[88] @152.
 pub fn encode_configure(
     agent_name: &str,
     interface_name: &str,
     op: ConfigureOp,
     settings: &InterfaceSettings,
-) -> [u8; 192] {
-    let mut out = [0u8; 192];
-    Header::write(&mut out, MessageType::Configure, 0, 188);
+) -> [u8; 240] {
+    let mut out = [0u8; 240];
+    Header::write(&mut out, MessageType::Configure, 0, 236);
     write_fixed_str(&mut out, 4, AGENT_NAME_SIZE, agent_name);
     write_fixed_str(&mut out, 132, INTERFACE_NAME_SIZE, interface_name);
     out[148] = op as u8;
@@ -537,7 +580,7 @@ pub fn decode_rejected_reply(buffer: &[u8]) -> Result<Page<RejectedEntry>, Decod
     })
 }
 
-/// CONFIGURE_REPLY (total 112): status @4, settings[40] @8, detail[64] @48.
+/// CONFIGURE_REPLY (total 160): status @4, settings[88] @8, detail[64] @96.
 pub fn decode_configure_reply(buffer: &[u8]) -> Result<ConfigureReply, DecodeError> {
     expect(buffer, MessageType::ConfigureReply, HEADER_SIZE + 4 + SETTINGS_SIZE + CONFIGURE_DETAIL_SIZE)?;
     Ok(ConfigureReply {
@@ -820,7 +863,7 @@ mod tests {
         let request = encode_configure("truck42", "can0", ConfigureOp::Apply, &settings);
 
         assert_eq!(request[0], MessageType::Configure as u8);
-        assert_eq!(read_u16(&request, 2), 188);
+        assert_eq!(read_u16(&request, 2), 236);
         assert_eq!(read_fixed_str(&request, 4, AGENT_NAME_SIZE), "truck42");
         assert_eq!(read_fixed_str(&request, 132, INTERFACE_NAME_SIZE), "can0");
         assert_eq!(request[148], ConfigureOp::Apply as u8);
@@ -831,12 +874,19 @@ mod tests {
 
     #[test]
     fn configure_reply_decodes_settings_and_detail() {
-        let mut buffer = vec![0u8; 112];
-        let reported = InterfaceSettings { fields: SETTING_LINK | SETTING_STATE, link_up: true, can_state: 3, ..Default::default() };
-        Header::write(&mut buffer, MessageType::ConfigureReply, 0, 108);
+        let mut buffer = vec![0u8; 160];
+        let reported = InterfaceSettings {
+            fields: SETTING_LINK | SETTING_STATE | SETTING_BIT_TIMING | SETTING_TERMINATION,
+            link_up: true,
+            can_state: 3,
+            termination: 120,
+            bit_timing: BitTiming { tq: 125, prop_seg: 6, phase_seg1: 7, phase_seg2: 2, sjw: 1, brp: 5 },
+            ..Default::default()
+        };
+        Header::write(&mut buffer, MessageType::ConfigureReply, 0, 156);
         buffer[4] = 3;
         reported.write(&mut buffer, 8);
-        write_fixed_str(&mut buffer, 48, CONFIGURE_DETAIL_SIZE, "Device or resource busy");
+        write_fixed_str(&mut buffer, 96, CONFIGURE_DETAIL_SIZE, "Device or resource busy");
 
         let reply = decode_configure_reply(&buffer).unwrap();
 

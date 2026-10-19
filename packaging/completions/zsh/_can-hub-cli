@@ -26,8 +26,8 @@ _can_hub_setting_words()
 {
     case $1 in
         fd | listen-only | loopback | one-shot | triple-sampling | berr-reporting) _values 'state' 'on' 'off' ;;
-        bitrate | dbitrate | sample-point | dsample-point | restart-ms | txqueuelen) _message 'value' ;;
-        *) _values 'setting' bitrate sample-point dbitrate dsample-point fd listen-only loopback one-shot triple-sampling berr-reporting restart-ms txqueuelen up down ;;
+        bitrate | dbitrate | sample-point | dsample-point | restart-ms | txqueuelen | termination | tq | prop-seg | phase-seg1 | phase-seg2 | sjw | dtq | dprop-seg | dphase-seg1 | dphase-seg2 | dsjw) _message 'value' ;;
+        *) _values 'setting' bitrate sample-point dbitrate dsample-point fd listen-only loopback one-shot triple-sampling berr-reporting restart-ms txqueuelen termination tq prop-seg phase-seg1 phase-seg2 sjw dtq dprop-seg dphase-seg1 dphase-seg2 dsjw up down ;;
     esac
 }
 

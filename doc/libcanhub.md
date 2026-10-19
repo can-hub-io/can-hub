@@ -97,7 +97,9 @@ if (canhub_configure(session, "truck42/can0", &requested, &effective, 5000) != C
 }
 ```
 
-Sample points are in tenths of a percent (875 = 87.5%). It works with or
+Sample points are in tenths of a percent (875 = 87.5%). Raw timing goes in
+`bit_timing`/`data_bit_timing` (`CANHUB_SETTING_BIT_TIMING`, time quantum in
+ns, segments in quanta) instead of a bitrate; `termination` is in ohms. It works with or
 without an open interface. `CANHUB_ERR_CONFIGURE_DENIED` without an `rwa`
 grant, `CANHUB_ERR_APPLY_FAILED` when the agent could not apply it,
 `CANHUB_ERR_AGENT_UNREACHABLE` when the agent dropped mid-request.

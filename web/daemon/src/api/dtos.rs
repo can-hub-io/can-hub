@@ -6,11 +6,11 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::admin::{
-    AclEntry, AclLevel, AgentEntry, ClientEntry, InterfaceEntry, InterfaceSettings, PeerEntry, PinEntry,
+    AclEntry, AclLevel, AgentEntry, BitTiming, ClientEntry, InterfaceEntry, InterfaceSettings, PeerEntry, PinEntry,
     RejectedEntry, RejectionReason, Status, CTRLMODE_BERR_REPORTING, CTRLMODE_FD, CTRLMODE_LISTEN_ONLY,
     CTRLMODE_LOOPBACK, CTRLMODE_ONE_SHOT, CTRLMODE_TRIPLE_SAMPLING, SETTING_BITRATE, SETTING_CTRLMODE,
     SETTING_DATA_BITRATE, SETTING_DATA_SAMPLE_POINT, SETTING_LINK, SETTING_RESTART_MS, SETTING_SAMPLE_POINT,
-    SETTING_STATE, SETTING_TXQUEUELEN,
+    SETTING_BIT_TIMING, SETTING_DATA_BIT_TIMING, SETTING_STATE, SETTING_TERMINATION, SETTING_TXQUEUELEN,
 };
 
 /// Wire sample points are tenths of a percent; the API speaks fractions.
@@ -70,9 +70,51 @@ pub(crate) struct InterfaceSettingsBody {
     pub data_sample_point: Option<f64>,
     pub restart_ms: Option<u32>,
     pub txqueuelen: Option<u32>,
+    pub termination: Option<u16>,
+    pub bit_timing: Option<BitTimingDto>,
+    pub data_bit_timing: Option<BitTimingDto>,
     pub up: Option<bool>,
     #[serde(default)]
     pub modes: BTreeMap<String, bool>,
+}
+
+/// Raw bit timing: time quantum in ns, segments in quanta. In a request each
+/// member is optional; a reply carries them all.
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct BitTimingDto {
+    pub tq: Option<u32>,
+    pub prop_seg: Option<u32>,
+    pub phase_seg1: Option<u32>,
+    pub phase_seg2: Option<u32>,
+    pub sjw: Option<u32>,
+    pub brp: Option<u32>,
+}
+
+impl BitTimingDto {
+    fn to_timing(&self) -> BitTiming {
+        BitTiming {
+            tq: self.tq.unwrap_or(0),
+            prop_seg: self.prop_seg.unwrap_or(0),
+            phase_seg1: self.phase_seg1.unwrap_or(0),
+            phase_seg2: self.phase_seg2.unwrap_or(0),
+            sjw: self.sjw.unwrap_or(0),
+            brp: self.brp.unwrap_or(0),
+        }
+    }
+}
+
+impl From<BitTiming> for BitTimingDto {
+    fn from(timing: BitTiming) -> Self {
+        BitTimingDto {
+            tq: Some(timing.tq),
+            prop_seg: Some(timing.prop_seg),
+            phase_seg1: Some(timing.phase_seg1),
+            phase_seg2: Some(timing.phase_seg2),
+            sjw: Some(timing.sjw),
+            brp: Some(timing.brp),
+        }
+    }
 }
 
 impl InterfaceSettingsBody {
@@ -102,6 +144,18 @@ impl InterfaceSettingsBody {
         if let Some(txqueuelen) = self.txqueuelen {
             settings.fields |= SETTING_TXQUEUELEN;
             settings.txqueuelen = txqueuelen;
+        }
+        if let Some(termination) = self.termination {
+            settings.fields |= SETTING_TERMINATION;
+            settings.termination = termination;
+        }
+        if let Some(timing) = &self.bit_timing {
+            settings.fields |= SETTING_BIT_TIMING;
+            settings.bit_timing = timing.to_timing();
+        }
+        if let Some(timing) = &self.data_bit_timing {
+            settings.fields |= SETTING_DATA_BIT_TIMING;
+            settings.data_bit_timing = timing.to_timing();
         }
         if let Some(up) = self.up {
             settings.fields |= SETTING_LINK;
@@ -143,6 +197,12 @@ pub(crate) struct InterfaceSettingsDto {
     pub restart_ms: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub txqueuelen: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub termination: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bit_timing: Option<BitTimingDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_bit_timing: Option<BitTimingDto>,
     pub modes: BTreeMap<&'static str, bool>,
 }
 
@@ -168,6 +228,9 @@ impl From<InterfaceSettings> for InterfaceSettingsDto {
                 .then(|| f64::from(settings.data_sample_point) / SAMPLE_POINT_SCALE),
             restart_ms: has(SETTING_RESTART_MS).then_some(settings.restart_ms),
             txqueuelen: has(SETTING_TXQUEUELEN).then_some(settings.txqueuelen),
+            termination: has(SETTING_TERMINATION).then_some(settings.termination),
+            bit_timing: has(SETTING_BIT_TIMING).then(|| BitTimingDto::from(settings.bit_timing)),
+            data_bit_timing: has(SETTING_DATA_BIT_TIMING).then(|| BitTimingDto::from(settings.data_bit_timing)),
             modes,
         }
     }

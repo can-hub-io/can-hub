@@ -7,9 +7,11 @@
 #include "protocol/ifconfig_message.h"
 #include "protocol/interface_status_message.h"
 #include "protocol/message_header.h"
+#include "shared/bounded_string.h"
 
 #define MICROSECONDS_PER_MILLISECOND 1000
 #define PING_REPLY_FLAG 0x01
+#define TIMING_CONFLICT_DETAIL "give a bitrate or a time quantum and segments, not both"
 
 typedef void (*TControlHandler)(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
 
@@ -397,6 +399,10 @@ static uint8_t applyIfconfig(Agent *self, const IfconfigMessage *request, uint8_
         return IFCONFIG_STATUS_OK;
     }
     if (request->op != IFCONFIG_OP_APPLY) {
+        return IFCONFIG_STATUS_APPLY_FAILED;
+    }
+    if (InterfaceSettings_HasTimingConflict(&request->settings)) {
+        BoundedString_Copy(detail, IFCONFIG_DETAIL_SIZE, TIMING_CONFLICT_DETAIL);
         return IFCONFIG_STATUS_APPLY_FAILED;
     }
     if (!self->can->configure(self->can->context, interface_index, &request->settings, detail)) {

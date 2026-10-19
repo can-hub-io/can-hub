@@ -1,7 +1,7 @@
 import pytest
 
 import canhub._native as native
-from canhub.settings import InterfaceSettings, from_native, to_native
+from canhub.settings import BitTiming, InterfaceSettings, from_native, to_native
 
 
 class TestToNative:
@@ -26,8 +26,22 @@ class TestToNative:
         assert settings.link_up == 0
 
     def test_it_rejects_an_unknown_setting(self):
-        with pytest.raises(ValueError, match="unknown setting termination"):
-            to_native(termination=True)
+        with pytest.raises(ValueError, match="unknown setting presume_ack"):
+            to_native(presume_ack=True)
+
+    def test_it_sets_the_raw_timing_members_it_is_given(self):
+        settings = to_native(bit_timing=BitTiming(tq=125, prop_seg=6, phase_seg1=7, phase_seg2=2))
+
+        assert settings.fields == native.SETTING_BIT_TIMING
+        assert settings.bit_timing.tq == 125
+        assert settings.bit_timing.phase_seg2 == 2
+        assert settings.bit_timing.sjw == 0
+
+    def test_it_sets_the_termination(self):
+        settings = to_native(termination=120)
+
+        assert settings.fields == native.SETTING_TERMINATION
+        assert settings.termination == 120
 
     def test_it_rejects_a_sample_point_outside_zero_and_one(self):
         with pytest.raises(ValueError):
@@ -62,3 +76,13 @@ class TestFromNative:
         assert settings.state == "bus-off"
         assert settings.modes == {"fd": True, "loopback": False}
         assert settings.sample_point == 0.875
+
+    def test_it_reports_the_timing_the_kernel_settled_on(self):
+        reported = native.new_settings()
+        reported.fields = native.SETTING_BIT_TIMING
+        reported.bit_timing.tq = 125
+        reported.bit_timing.brp = 5
+
+        settings = from_native(reported)
+
+        assert settings.bit_timing == BitTiming(tq=125, prop_seg=0, phase_seg1=0, phase_seg2=0, sjw=0, brp=5)

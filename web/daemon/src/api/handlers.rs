@@ -538,6 +538,21 @@ mod tests {
     }
 
     #[test]
+    fn settings_body_carries_raw_timing_and_termination() {
+        let body: InterfaceSettingsBody =
+            serde_json::from_str(r#"{"bitTiming":{"tq":125,"propSeg":6,"phaseSeg1":7,"phaseSeg2":2},"termination":120}"#)
+                .unwrap();
+
+        let settings = body.to_settings().unwrap();
+
+        assert_eq!(settings.fields, crate::protocol::admin::SETTING_BIT_TIMING | crate::protocol::admin::SETTING_TERMINATION);
+        assert_eq!(settings.bit_timing.tq, 125);
+        assert_eq!(settings.bit_timing.phase_seg2, 2);
+        assert_eq!(settings.bit_timing.sjw, 0);
+        assert_eq!(settings.termination, 120);
+    }
+
+    #[test]
     fn settings_body_rejects_an_unknown_mode_and_an_empty_request() {
         let unknown: InterfaceSettingsBody = serde_json::from_str(r#"{"modes":{"termination":true}}"#).unwrap();
         let empty = InterfaceSettingsBody::default();

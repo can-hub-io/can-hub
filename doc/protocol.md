@@ -196,25 +196,27 @@ only to frames the hub fans out toward the client; it never affects injection
 toward the agent. SUBSCRIBE on an unopened channel returns an ERROR and is
 otherwise ignored (no SUBSCRIBE_ACK).
 
-IFCONFIG (total 68, hub -> agent)
+IFCONFIG (total 116, hub -> agent)
 @4   request_id u32            (hub-chosen, echoed by the reply)
 @8   interface_name char[16]
 @24  op u8 (0 apply, 1 query)
 @25  reserved u8[3]
-@28  settings (40 bytes, below)
+@28  settings (88 bytes, below)
 
-IFCONFIG_REPLY (total 116, agent -> hub)
+IFCONFIG_REPLY (total 164, agent -> hub)
 @4   request_id u32
 @8   status u8 (0 ok, 1 unknown interface, 2 apply failed)
 @9   reserved u8[3]
-@12  settings (40 bytes): what the device holds after the request
-@52  detail char[64]           (why it failed, e.g. the kernel's netlink message)
+@12  settings (88 bytes): what the device holds after the request
+@100 detail char[64]           (why it failed, e.g. the kernel's netlink message)
 
-settings (40 bytes, shared by IFCONFIG, IFCONFIG_REPLY, CONFIGURE, CONFIGURE_REPLY)
+settings (88 bytes, shared by IFCONFIG, IFCONFIG_REPLY, CONFIGURE, CONFIGURE_REPLY)
 +0   fields u32                (which members carry a value: bit 0 bitrate,
                                 1 sample_point, 2 data_bitrate,
                                 3 data_sample_point, 4 ctrlmode, 5 restart_ms,
-                                6 txqueuelen, 7 link, 8 can_state)
+                                6 txqueuelen, 7 link, 8 can_state,
+                                9 bit_timing, 10 data_bit_timing,
+                                11 termination)
 +4   bitrate u32               (bits per second)
 +8   data_bitrate u32          (CAN FD data phase, bits per second)
 +12  sample_point u16          (tenths of a percent: 875 = 87.5%; 0-1000)
@@ -228,9 +230,19 @@ settings (40 bytes, shared by IFCONFIG, IFCONFIG_REPLY, CONFIGURE, CONFIGURE_REP
 +32  link_up u8 (0/1)
 +33  can_state u8              (reported only: 0 error-active, 1 error-warning,
                                 2 error-passive, 3 bus-off, 4 stopped, 5 sleeping)
-+34  reserved u8[6]
++34  termination u16           (ohms, 0 = off)
++36  bit_timing (24 bytes)     (nominal: tq u32 in ns, prop_seg u32,
+                                phase_seg1 u32, phase_seg2 u32, sjw u32,
+                                brp u32; segments in quanta)
++60  data_bit_timing (24 bytes) (the same for the CAN FD data phase)
++84  reserved u8[4]
 
-In a request, fields names what to change and nothing else is touched. In a
+In a request, fields names what to change and nothing else is touched. A
+phase is timed either by its rate (bitrate and sample point) or raw, by tq
+or brp and the segments; a request giving both for one phase is refused
+(status apply failed) before anything is applied, but sjw alone may go with
+a rate. A reply carries the raw timing the kernel settled on, brp included,
+however it was set. In a
 reply it names what the device reports: a vcan has no bit timing, so a reply
 for one carries only link and txqueuelen. The agent applies everything in one
 step: bit timing, data bit timing, control modes and restart-ms need the link
@@ -263,19 +275,19 @@ the same message (entries addressed by the client's channel, advertised_rate = t
 rate the client should pace its writes to) so a client sheds excess at the source
 instead of overrunning the hub. flags is reserved for the reliability toggle.
 
-CONFIGURE (total 192, client or admin -> hub)
+CONFIGURE (total 240, client or admin -> hub)
 @4   agent_name char[128]
 @132 interface_name char[16]
 @148 op u8 (0 apply, 1 query)
 @149 reserved u8[3]
-@152 settings (40 bytes)
+@152 settings (88 bytes)
 
-CONFIGURE_REPLY (total 112, hub -> client or admin)
+CONFIGURE_REPLY (total 160, hub -> client or admin)
 @4   status u8 (0 ok, 1 unknown interface, 2 agent unreachable, 3 apply failed,
                 4 not allowed)
 @5   reserved u8[3]
-@8   settings (40 bytes): what the device holds afterwards
-@48  detail char[64]
+@8   settings (88 bytes): what the device holds afterwards
+@96  detail char[64]
 
 The requester names the interface by its namespaced (agent_name,
 interface_name) pair, with no channel open. The hub resolves it, checks the

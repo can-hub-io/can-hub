@@ -755,6 +755,21 @@ components:
         berrReporting: { type: boolean }
       additionalProperties: false
 
+    BitTiming:
+      type: object
+      description: >
+        Raw bit timing, the alternative to a bitrate: tq in ns, segments in
+        quanta. In a change every member is optional; sjw alone may go with a
+        bitrate. A reply carries every member, as the kernel settled them.
+      additionalProperties: false
+      properties:
+        tq: { type: integer, format: uint32 }
+        propSeg: { type: integer, format: uint32 }
+        phaseSeg1: { type: integer, format: uint32 }
+        phaseSeg2: { type: integer, format: uint32 }
+        sjw: { type: integer, format: uint32 }
+        brp: { type: integer, format: uint32 }
+
     InterfaceSettings:
       type: object
       description: >
@@ -772,6 +787,9 @@ components:
         dataSamplePoint: { type: number, exclusiveMinimum: 0, exclusiveMaximum: 1 }
         restartMs: { type: integer, format: uint32 }
         txqueuelen: { type: integer, format: uint32 }
+        termination: { type: integer, format: uint16, description: 'ohms, 0 = off' }
+        bitTiming: { $ref: '#/components/schemas/BitTiming' }
+        dataBitTiming: { $ref: '#/components/schemas/BitTiming' }
         modes: { $ref: '#/components/schemas/CanModes' }
 
     InterfaceSettingsChange:
@@ -786,6 +804,9 @@ components:
         dataSamplePoint: { type: number, exclusiveMinimum: 0, exclusiveMaximum: 1 }
         restartMs: { type: integer, format: uint32 }
         txqueuelen: { type: integer, format: uint32 }
+        termination: { type: integer, format: uint16, minimum: 0, maximum: 65535 }
+        bitTiming: { $ref: '#/components/schemas/BitTiming' }
+        dataBitTiming: { $ref: '#/components/schemas/BitTiming' }
         modes: { $ref: '#/components/schemas/CanModes' }
 
     ActionResult:

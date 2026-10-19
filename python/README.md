@@ -60,7 +60,9 @@ allows it only with an `rwa` ACL grant (unix and plain tcp clients are trusted).
 
 ```python
 bus.configure(bitrate=500000, sample_point=0.875, fd=True, data_bitrate=2000000)
-bus.configure(restart_ms=100, txqueuelen=1000, listen_only=False, up=True)
+bus.configure(restart_ms=100, txqueuelen=1000, termination=120, listen_only=False, up=True)
+from canhub import BitTiming
+bus.configure(bit_timing=BitTiming(tq=125, prop_seg=6, phase_seg1=7, phase_seg2=2, sjw=1))
 bus.interface_settings()
 # InterfaceSettings(up=True, state='error-active', bitrate=500000, sample_point=0.875, ...)
 ```

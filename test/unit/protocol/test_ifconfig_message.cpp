@@ -44,6 +44,43 @@ describe("ifconfig_message", []() {
         expect(decoded.settings.restart_ms).toBe((uint32_t)100);
         expect(decoded.settings.txqueuelen).toBe((uint32_t)1000);
         expect(decoded.settings.link_up).toBe(true);
+        expect(decoded.settings.termination).toBe((uint16_t)120);
+        expect(decoded.settings.bit_timing.tq).toBe((uint32_t)125);
+        expect(decoded.settings.bit_timing.brp).toBe((uint32_t)5);
+        expect(decoded.settings.data_bit_timing.phase_seg2).toBe((uint32_t)3);
+    });
+
+    it("sees a conflict when a bitrate and a time quantum come together", []() {
+        InterfaceSettings settings;
+
+        memset(&settings, 0, sizeof(settings));
+        settings.fields = INTERFACE_FIELD_BITRATE | INTERFACE_FIELD_BIT_TIMING;
+        settings.bitrate = 500000;
+        settings.bit_timing.tq = 125;
+
+        expect(InterfaceSettings_HasTimingConflict(&settings)).toBe(true);
+    });
+
+    it("sees no conflict in a bitrate with only a jump width", []() {
+        InterfaceSettings settings;
+
+        memset(&settings, 0, sizeof(settings));
+        settings.fields = INTERFACE_FIELD_BITRATE | INTERFACE_FIELD_BIT_TIMING;
+        settings.bitrate = 500000;
+        settings.bit_timing.sjw = 2;
+
+        expect(InterfaceSettings_HasTimingConflict(&settings)).toBe(false);
+    });
+
+    it("sees a conflict in the data phase as well", []() {
+        InterfaceSettings settings;
+
+        memset(&settings, 0, sizeof(settings));
+        settings.fields = INTERFACE_FIELD_DATA_SAMPLE_POINT | INTERFACE_FIELD_DATA_BIT_TIMING;
+        settings.data_sample_point = 750;
+        settings.data_bit_timing.brp = 2;
+
+        expect(InterfaceSettings_HasTimingConflict(&settings)).toBe(true);
     });
 
     it("rejects a sample point past one hundred percent", []() {
@@ -170,6 +207,10 @@ static InterfaceSettings fdSettings(void)
     settings.restart_ms = 100;
     settings.txqueuelen = 1000;
     settings.link_up = true;
+    settings.termination = 120;
+    settings.bit_timing.tq = 125;
+    settings.bit_timing.brp = 5;
+    settings.data_bit_timing.phase_seg2 = 3;
 
     return settings;
 }

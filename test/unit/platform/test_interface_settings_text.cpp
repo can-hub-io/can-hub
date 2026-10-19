@@ -49,6 +49,31 @@ describe("interface_settings_text", []() {
         expect(settings.txqueuelen).toBe((uint32_t)1000);
     });
 
+    it("parses the raw bit timing of both phases into their own fields", []() {
+        parse({ "tq", "125", "prop-seg", "6", "phase-seg1", "7", "phase-seg2", "2", "sjw", "1", "dtq", "25", "dsjw", "3" });
+
+        expect(parsed).toBe(true);
+        expect(settings.fields).toBe((uint32_t)(INTERFACE_FIELD_BIT_TIMING | INTERFACE_FIELD_DATA_BIT_TIMING));
+        expect(settings.bit_timing.tq).toBe((uint32_t)125);
+        expect(settings.bit_timing.phase_seg1).toBe((uint32_t)7);
+        expect(settings.bit_timing.sjw).toBe((uint32_t)1);
+        expect(settings.data_bit_timing.tq).toBe((uint32_t)25);
+        expect(settings.data_bit_timing.sjw).toBe((uint32_t)3);
+    });
+
+    it("parses the termination in ohms", []() {
+        parse({ "termination", "120" });
+
+        expect(settings.fields).toBe((uint32_t)INTERFACE_FIELD_TERMINATION);
+        expect(settings.termination).toBe((uint16_t)120);
+    });
+
+    it("rejects a termination that does not fit in sixteen bits", []() {
+        parse({ "termination", "70000" });
+
+        expect(std::string(error)).toBe(std::string("invalid termination 70000"));
+    });
+
     it("rejects a sample point that is not a fraction below one", []() {
         parse({ "sample-point", "87.5" });
 
@@ -75,9 +100,9 @@ describe("interface_settings_text", []() {
     });
 
     it("rejects an unknown setting", []() {
-        parse({ "termination", "120" });
+        parse({ "presume-ack", "on" });
 
-        expect(std::string(error)).toBe(std::string("unknown setting termination"));
+        expect(std::string(error)).toBe(std::string("unknown setting presume-ack"));
     });
 
     it("prints one line per field the settings carry", []() {
@@ -89,6 +114,22 @@ describe("interface_settings_text", []() {
             "bitrate          500000\n"
             "sample-point     0.875\n"
             "fd               on\n"));
+    });
+
+    it("prints the raw timing the kernel settled on, brp included", []() {
+        memset(&settings, 0, sizeof(settings));
+        settings.fields = INTERFACE_FIELD_BIT_TIMING;
+        settings.bit_timing = { 125, 6, 7, 2, 1, 5 };
+
+        print();
+
+        expect(printed).toBe(std::string(
+            "tq               125\n"
+            "prop-seg         6\n"
+            "phase-seg1       7\n"
+            "phase-seg2       2\n"
+            "sjw              1\n"
+            "brp              5\n"));
     });
 });
 

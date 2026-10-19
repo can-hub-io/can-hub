@@ -6,12 +6,12 @@
 
 #include "protocol/register_message.h"
 
-#define INTERFACE_SETTINGS_SIZE 40
+#define INTERFACE_SETTINGS_SIZE 88
 #define IFCONFIG_DETAIL_SIZE 64
-#define IFCONFIG_BODY_SIZE 64
-#define IFCONFIG_REPLY_BODY_SIZE 112
-#define CONFIGURE_BODY_SIZE 188
-#define CONFIGURE_REPLY_BODY_SIZE 108
+#define IFCONFIG_BODY_SIZE 112
+#define IFCONFIG_REPLY_BODY_SIZE 160
+#define CONFIGURE_BODY_SIZE 236
+#define CONFIGURE_REPLY_BODY_SIZE 156
 
 #define INTERFACE_FIELD_BITRATE (1u << 0)
 #define INTERFACE_FIELD_SAMPLE_POINT (1u << 1)
@@ -22,8 +22,14 @@
 #define INTERFACE_FIELD_TXQUEUELEN (1u << 6)
 #define INTERFACE_FIELD_LINK (1u << 7)
 #define INTERFACE_FIELD_STATE (1u << 8)
-#define INTERFACE_FIELDS_SETTABLE (INTERFACE_FIELD_STATE - 1)
-#define INTERFACE_FIELDS_NEED_LINK_DOWN (INTERFACE_FIELD_TXQUEUELEN - 1)
+#define INTERFACE_FIELD_BIT_TIMING (1u << 9)
+#define INTERFACE_FIELD_DATA_BIT_TIMING (1u << 10)
+#define INTERFACE_FIELD_TERMINATION (1u << 11)
+#define INTERFACE_FIELDS_KNOWN ((INTERFACE_FIELD_TERMINATION << 1) - 1)
+#define INTERFACE_FIELDS_SETTABLE (INTERFACE_FIELDS_KNOWN & ~INTERFACE_FIELD_STATE)
+#define INTERFACE_FIELDS_NOMINAL_RATE (INTERFACE_FIELD_BITRATE | INTERFACE_FIELD_SAMPLE_POINT)
+#define INTERFACE_FIELDS_DATA_RATE (INTERFACE_FIELD_DATA_BITRATE | INTERFACE_FIELD_DATA_SAMPLE_POINT)
+#define INTERFACE_FIELDS_NEED_LINK_DOWN ((INTERFACE_FIELD_TXQUEUELEN - 1) | INTERFACE_FIELD_BIT_TIMING | INTERFACE_FIELD_DATA_BIT_TIMING)
 
 #define INTERFACE_CTRLMODE_LOOPBACK (1u << 0)
 #define INTERFACE_CTRLMODE_LISTEN_ONLY (1u << 1)
@@ -56,11 +62,25 @@
 #define CONFIGURE_STATUS_DENIED 4
 
 /*
+ * Raw bit timing, the alternative to a bitrate: time quantum in ns and the
+ * segment lengths in quanta. A reply carries what the kernel settled on,
+ * whichever way it was set.
+ */
+typedef struct {
+    uint32_t tq;
+    uint32_t prop_seg;
+    uint32_t phase_seg1;
+    uint32_t phase_seg2;
+    uint32_t sjw;
+    uint32_t brp;
+} InterfaceBitTiming;
+
+/*
  * The settings of one CAN interface. fields names the members that carry a
  * value: in a request, what to change; in a reply, what the device reports.
  * sample points are in tenths of a percent (875 = 87.5%). ctrlmode_mask names
- * the modes to change and ctrlmode_flags their new values. can_state is only
- * reported, never set.
+ * the modes to change and ctrlmode_flags their new values. termination is in
+ * ohms, 0 = off. can_state is only reported, never set.
  */
 typedef struct {
     uint32_t fields;
@@ -74,6 +94,9 @@ typedef struct {
     uint32_t txqueuelen;
     bool link_up;
     uint8_t can_state;
+    uint16_t termination;
+    InterfaceBitTiming bit_timing;
+    InterfaceBitTiming data_bit_timing;
 } InterfaceSettings;
 
 typedef struct {
@@ -102,6 +125,8 @@ typedef struct {
     InterfaceSettings settings;
     char detail[IFCONFIG_DETAIL_SIZE];
 } ConfigureReplyMessage;
+
+bool InterfaceSettings_HasTimingConflict(const InterfaceSettings *self);
 
 size_t IfconfigMessage_Encode(const IfconfigMessage *self, uint8_t *buffer, size_t buffer_size);
 bool IfconfigMessage_Decode(IfconfigMessage *self, const uint8_t *payload, size_t payload_length);

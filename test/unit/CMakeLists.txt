@@ -247,6 +247,7 @@ add_unit_test(test_agent
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/register_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
 )
 target_link_libraries(test_agent PRIVATE port_mocks)
 

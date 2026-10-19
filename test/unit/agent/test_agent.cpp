@@ -339,6 +339,19 @@ describe("agent", []() {
             expect(ifconfig_reply.status).toBe(IFCONFIG_STATUS_UNKNOWN_INTERFACE);
         });
 
+        it("refuses a bitrate and a time quantum in one request without reaching the adapter", []() {
+            InterfaceSettings requested = bitrateSettings(250000);
+
+            requested.fields |= INTERFACE_FIELD_BIT_TIMING;
+            requested.bit_timing.tq = 125;
+
+            sendIfconfig("can0", IFCONFIG_OP_APPLY, &requested);
+
+            expect(can.configure_count).toBe(0);
+            expect(ifconfig_reply.status).toBe(IFCONFIG_STATUS_APPLY_FAILED);
+            expect((const char *)ifconfig_reply.detail).toBe("give a bitrate or a time quantum and segments, not both");
+        });
+
         it("replies apply failed with the reason the adapter gives", []() {
             InterfaceSettings requested = bitrateSettings(250000);
 
