@@ -15,16 +15,18 @@ pub enum Permission {
     InterfacesConfig,
     PinsManage,
     AclManage,
+    BridgesManage,
     UsersManage,
 }
 
 impl Permission {
-    pub const ALL: [Permission; 6] = [
+    pub const ALL: [Permission; 7] = [
         Permission::ViewsRead,
         Permission::PeersKick,
         Permission::InterfacesConfig,
         Permission::PinsManage,
         Permission::AclManage,
+        Permission::BridgesManage,
         Permission::UsersManage,
     ];
 
@@ -35,6 +37,7 @@ impl Permission {
             Permission::InterfacesConfig => "interfaces.config",
             Permission::PinsManage => "pins.manage",
             Permission::AclManage => "acl.manage",
+            Permission::BridgesManage => "bridges.manage",
             Permission::UsersManage => "users.manage",
         }
     }

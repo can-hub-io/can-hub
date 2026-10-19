@@ -36,7 +36,7 @@ _can-hub-cli()
     local -a commands values
     local verb sub verb_index i
 
-    commands=(status peers agents clients interfaces pins acl pending interface)
+    commands=(status peers agents clients interfaces pins acl pending interface bridge)
 
     for ((i = 2; i < CURRENT; i++)); do
         case ${words[i]} in
@@ -89,6 +89,14 @@ _can-hub-cli()
                 _describe 'interface' values
             elif [[ $sub == add ]] && (( CURRENT == verb_index + 4 )); then
                 _values 'level' 'none' 'r' 'rw' 'rwa'
+            fi
+            ;;
+        bridge)
+            if (( CURRENT == verb_index + 1 )); then
+                _values 'subcommand' 'add' 'delete'
+            elif (( CURRENT == verb_index + 2 || CURRENT == verb_index + 3 )); then
+                values=(${(f)"$(_can_hub_cli_dynamic interfaces)"})
+                _describe 'interface' values
             fi
             ;;
         interface)

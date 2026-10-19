@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::admin_client::AdminClientError;
 use crate::auth::store::StoreError;
 use crate::protocol::admin::{
-    CONFIGURE_STATUS_AGENT_UNREACHABLE, CONFIGURE_STATUS_DENIED, CONFIGURE_STATUS_UNKNOWN_INTERFACE,
+    BRIDGE_STATUS_FULL, BRIDGE_STATUS_INVALID, BRIDGE_STATUS_UNKNOWN, CONFIGURE_STATUS_AGENT_UNREACHABLE, CONFIGURE_STATUS_DENIED, CONFIGURE_STATUS_UNKNOWN_INTERFACE,
 };
 
 /// API error mapped to an HTTP status. Hub-side failures are 502 (the panel is
@@ -22,6 +22,8 @@ pub enum ApiError {
     HubRejected(u8),
     /// CONFIGURE came back with a non-zero status, with the agent's reason.
     Configure { status: u8, detail: String },
+    /// ADMIN_BRIDGE_SET/DELETE came back with a non-zero status.
+    Bridge(u8),
     /// web.db error (conflict → 409, otherwise 500).
     Store(StoreError),
 }
@@ -42,6 +44,7 @@ impl IntoResponse for ApiError {
                 (StatusCode::CONFLICT, format!("hub rejected the request (status {status})"))
             }
             ApiError::Configure { status, detail } => configure_failure(status, detail),
+            ApiError::Bridge(status) => bridge_failure(status),
             ApiError::Store(StoreError::Conflict(detail)) => (StatusCode::CONFLICT, detail.to_string()),
             ApiError::Store(error) => (StatusCode::INTERNAL_SERVER_ERROR, format!("store error: {error:?}")),
         };
@@ -52,6 +55,16 @@ impl IntoResponse for ApiError {
 #[derive(Serialize)]
 pub(crate) struct ErrorBody {
     pub error: String,
+}
+
+fn bridge_failure(status: u8) -> (StatusCode, String) {
+    let (code, reason) = match status {
+        BRIDGE_STATUS_INVALID => (StatusCode::BAD_REQUEST, "a bridge needs two different interfaces"),
+        BRIDGE_STATUS_FULL => (StatusCode::CONFLICT, "the hub holds no more bridges"),
+        BRIDGE_STATUS_UNKNOWN => (StatusCode::NOT_FOUND, "no such bridge"),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, "could not store the bridge"),
+    };
+    (code, reason.to_string())
 }
 
 fn configure_failure(status: u8, detail: String) -> (StatusCode, String) {

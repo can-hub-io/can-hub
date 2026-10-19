@@ -90,6 +90,26 @@ class BenchKeywords:
         agent.wait_registered(hub, timeout=8)
         return hub
 
+    @keyword("Start CAN HUB On ${hub_server} With Agents ${first} On ${first_server} And ${second} On ${second_server}")
+    def start_can_hub_with_two_agents(self, hub_server, first, first_server, second, second_server,
+                                      interface="vcan0") -> CanHub:
+        first_server.make_vcan(interface)
+        second_server.make_vcan(interface)
+        hub = CanHub.start(hub_server, HubConfig())
+        for name, server in ((first, first_server), (second, second_server)):
+            agent = CanAgent.start(server, AgentConfig(connect="quic://local:7227", name=name, interfaces=[interface]))
+            agent.wait_registered(hub, timeout=8)
+        return hub
+
+    @keyword("Wait Until Hub ${hub} Exports ${count} Interfaces")
+    def wait_until_hub_exports(self, hub, count, timeout=30):
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            if len(hub.interfaces()) >= int(count):
+                return
+            time.sleep(0.2)
+        raise AssertionError(f"hub exports fewer than {count} interfaces")
+
     @keyword("Start CAN HUB On ${server}")
     def start_can_hub(self, server) -> CanHub:
         return CanHub.start(server)
@@ -654,6 +674,15 @@ class BenchKeywords:
         process = server.cangen(interface, 0, int(count))
         process.wait(timeout=30)
         return int(count)
+
+    @keyword("Frames With Id ${can_id} Captured By ${process}")
+    def frames_with_id_captured_by(self, can_id, process):
+        return sum(1 for frame in parse_candump(process.read_log()) if frame.can_id == can_id.upper())
+
+    @keyword("Restart ${hub}")
+    def restart_hub(self, hub) -> CanHub:
+        hub.stop()
+        return CanHub.start(hub.server, hub.config)
 
     @keyword("Frames Captured By ${process}")
     def frames_captured_by(self, process):

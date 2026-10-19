@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  Cable, ChevronRight, Cpu, DoorClosed, Fingerprint, LayoutDashboard, Lock, Menu, Plug, ScrollText, Share2,
+  ArrowRightLeft, Cable, ChevronRight, Cpu, DoorClosed, Fingerprint, LayoutDashboard, Lock, Menu, Plug, ScrollText, Share2,
   Users as UsersIcon, type LucideIcon,
 } from 'lucide-react'
 import { api, PERMISSION, setUnauthorizedHandler, type AuthState } from './api'
@@ -10,6 +10,7 @@ import { Sidebar, type NavItem } from './components/layout/Sidebar'
 import { Acls } from './components/Acls'
 import { Agents } from './components/Agents'
 import { Audit } from './components/Audit'
+import { Bridges } from './components/Bridges'
 import { Bootstrap, Login } from './components/Login'
 import { ChangePassword } from './components/ChangePassword'
 import { Clients } from './components/Clients'
@@ -20,7 +21,7 @@ import { Pending } from './components/Pending'
 import { Pins } from './components/Pins'
 import { Users } from './components/Users'
 
-type Tab = 'dashboard' | 'peers' | 'agents' | 'clients' | 'interfaces' | 'pins' | 'pending' | 'acls' | 'users' | 'audit'
+type Tab = 'dashboard' | 'peers' | 'agents' | 'clients' | 'interfaces' | 'pins' | 'pending' | 'acls' | 'bridges' | 'users' | 'audit'
 
 const NAV: { id: Tab; label: string; icon: LucideIcon; permission: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: PERMISSION.viewsRead },
@@ -31,6 +32,7 @@ const NAV: { id: Tab; label: string; icon: LucideIcon; permission: string }[] = 
   { id: 'pins', label: 'Pins', icon: Fingerprint, permission: PERMISSION.pinsManage },
   { id: 'pending', label: 'Pending', icon: DoorClosed, permission: PERMISSION.pinsManage },
   { id: 'acls', label: 'ACLs', icon: Lock, permission: PERMISSION.aclManage },
+  { id: 'bridges', label: 'Bridges', icon: ArrowRightLeft, permission: PERMISSION.bridgesManage },
   { id: 'users', label: 'Users', icon: UsersIcon, permission: PERMISSION.usersManage },
   { id: 'audit', label: 'Audit', icon: ScrollText, permission: PERMISSION.usersManage },
 ]
@@ -116,6 +118,7 @@ function Console({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) 
               {tab === 'pins' && <Pins />}
               {tab === 'pending' && <Pending permissions={auth.permissions} />}
               {tab === 'acls' && <Acls />}
+              {tab === 'bridges' && <Bridges />}
               {tab === 'users' && <Users currentUser={auth.user} />}
               {tab === 'audit' && <Audit />}
             </>

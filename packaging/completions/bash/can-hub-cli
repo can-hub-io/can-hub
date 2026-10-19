@@ -36,7 +36,7 @@ _can_hub_cli()
     local cur prev words cword
     _init_completion || return
 
-    local commands="status peers agents clients interfaces pins acl pending interface"
+    local commands="status peers agents clients interfaces pins acl pending interface bridge"
 
     if [[ $cur == --* ]]; then
         COMPREPLY=($(compgen -W "--connect" -- "$cur"))
@@ -91,6 +91,13 @@ _can_hub_cli()
                 COMPREPLY=($(compgen -W "* $(_can_hub_cli_dynamic interfaces)" -- "$cur"))
             elif [[ $sub == "add" ]] && (( cword == i + 4 )); then
                 COMPREPLY=($(compgen -W "none r rw rwa" -- "$cur"))
+            fi
+            ;;
+        bridge)
+            if (( cword == i + 1 )); then
+                COMPREPLY=($(compgen -W "add delete" -- "$cur"))
+            elif (( cword == i + 2 || cword == i + 3 )); then
+                COMPREPLY=($(compgen -W "$(_can_hub_cli_dynamic interfaces)" -- "$cur"))
             fi
             ;;
         interface)

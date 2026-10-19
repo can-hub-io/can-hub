@@ -73,8 +73,14 @@ offset  size  field
 0x27  ADMIN_ACL_REVOKE_REPLY
 0x28  ADMIN_ACL_LIST      admin: list client grants (paginated)
 0x29  ADMIN_ACL_LIST_REPLY
+0x2A  ADMIN_BRIDGE_SET    admin: bridge one bus into another (set or replace)
+0x2B  ADMIN_BRIDGE_SET_REPLY
 0x2C  ADMIN_REJECTED      admin: identities the hub turned away (paginated)
 0x2D  ADMIN_REJECTED_REPLY
+0x2E  ADMIN_BRIDGE_DELETE admin: drop a bridge route
+0x2F  ADMIN_BRIDGE_DELETE_REPLY
+0x30  ADMIN_BRIDGE_LIST   admin: bridge routes with counters (paginated)
+0x31  ADMIN_BRIDGE_LIST_REPLY
 0x7F  PING/PONG    liveness (flags bit 0: reply)
 ```
 
@@ -493,6 +499,49 @@ ADMIN_REJECTED_REPLY (total 8 + count * 264)
      +261 reserved u8[3]
 ```
 
+ADMIN_BRIDGE_SET (total 424)
+@4   source agent_name char[128]
+@132 source interface_name char[16]
+@148 destination agent_name char[128]
+@276 destination interface_name char[16]
+@292 filter_count u8   (0-16; 0 bridges every frame)
+@293 reserved u8[3]
+@296 filters, each 8 bytes:
+     +0 can_id u32
+     +4 can_mask u32   (a frame passes when id & mask == can_id & mask)
+
+ADMIN_BRIDGE_SET_REPLY / ADMIN_BRIDGE_DELETE_REPLY (total 8)
+@4   status u8 (0 ok, 1 invalid: source and destination are the same bus,
+                2 the hub holds no more routes, 3 could not be stored,
+                4 no such route)
+@5   reserved u8[3]
+
+ADMIN_BRIDGE_DELETE (total 292)
+@4   source and destination, laid out as in ADMIN_BRIDGE_SET
+
+ADMIN_BRIDGE_LIST (total 8)
+@4   offset u16        (pagination start index)
+@6   reserved u16
+
+ADMIN_BRIDGE_LIST_REPLY (total 8 + count * 440)
+@4   count u8          (0-8 entries in this reply)
+@5   flags u8          (bit 0: more entries beyond offset + count)
+@6   reserved u16
+@8   entries, each 440 bytes:
+     +0   source agent_name char[128], interface_name char[16]
+     +144 destination agent_name char[128], interface_name char[16]
+     +288 filter_count u8
+     +289 state u8      (bit 0: source online, bit 1: destination online)
+     +290 reserved u16
+     +292 filters, 16 slots of 8 bytes as in ADMIN_BRIDGE_SET
+     +420 reserved u32
+     +424 forwarded u64 (frames injected into the destination)
+     +432 dropped u64   (frames for a destination that was offline)
+
+A route is keyed by its two endpoints; setting it again replaces its filters.
+Routes name interfaces, not ids, so they outlive the agents that serve them.
+The hub holds up to 64 and persists them in hub.db.
+
 The hub remembers the last 16 identities it turned away, in memory, one entry
 per fingerprint and role. A retry bumps attempts instead of taking another
 entry; a new identity evicts the entry with the fewest attempts, the least
@@ -511,9 +560,12 @@ FRAME (total 20 + payload)
 @16  channel u8
 @17  payload_length u8 (0-8 classic, 0-64 FD)
 @18  frame_flags u8    (bit 0: FD, bit 1: BRS)
-@19  route_flags u8    (bit 0: bridged — set by the hub when forwarding a
-                        frame across a bus-to-bus bridge rule; bridged frames
-                        are never bridged again.
+@19  route_flags u8    (bit 0: bridged — set by the hub on the bus echo of
+                        a frame it injected along a bridge route, so clients
+                        can tell it from local traffic; the hub never bridges
+                        such a frame again. The hub recognises the echo by a
+                        per-agent origin token of its own, so agents need not
+                        set or keep this bit.
                         bit 1: echo — this frame is the bus echo of an
                         injected TX (set by the agent on kernel TX-confirm).
                         bits 2-7: origin token — hub-assigned opaque tag of

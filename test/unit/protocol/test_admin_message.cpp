@@ -13,6 +13,7 @@ extern "C" {
 describe("admin_status_message", []() {
     it("encodes an empty status request", []() {
         uint8_t buffer[16];
+
         MessageHeader header;
         size_t encoded_size;
 
@@ -423,6 +424,79 @@ describe("admin_acl_message", []() {
         expect((const char *)decoded.entries[0].interface_name).toBe("can0");
         expect((const char *)decoded.entries[0].fingerprint_hex).toBe(FINGERPRINT);
         expect(decoded.entries[0].can_write).toBe(1);
+    });
+
+    it("round-trips a bridge set with its filters", []() {
+        AdminBridgeSetMessage request = { { "truck42", "can0" }, { "bus7", "can0" }, 2, { { 0x100, 0x7FF }, { 0x200, 0x700 } } };
+        AdminBridgeSetMessage decoded;
+        uint8_t buffer[512];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminBridgeSetMessage_Encode(&request, buffer, sizeof(buffer));
+        decoded_ok = AdminBridgeSetMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + ADMIN_BRIDGE_SET_BODY_SIZE));
+        expect(decoded_ok).toBe(true);
+        expect((const char *)decoded.source.agent_name).toBe("truck42");
+        expect((const char *)decoded.destination.interface_name).toBe("can0");
+        expect(decoded.filter_count).toBe(2);
+        expect(decoded.filters[1].can_id).toBe((uint32_t)0x200);
+        expect(decoded.filters[1].can_mask).toBe((uint32_t)0x700);
+    });
+
+    it("rejects decoding a bridge set with more filters than it can hold", []() {
+        AdminBridgeSetMessage request = { { "truck42", "can0" }, { "bus7", "can0" }, 0, { { 0 } } };
+        AdminBridgeSetMessage decoded;
+        uint8_t buffer[512];
+        size_t encoded_size;
+
+        encoded_size = AdminBridgeSetMessage_Encode(&request, buffer, sizeof(buffer));
+        buffer[MESSAGE_HEADER_SIZE + ADMIN_BRIDGE_ENDPOINT_SIZE * 2] = SUBSCRIBE_FILTERS_MAX + 1;
+
+        expect(AdminBridgeSetMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE)).toBe(false);
+    });
+
+    it("round-trips a bridge delete", []() {
+        AdminBridgeDeleteMessage request = { { "truck42", "can0" }, { "bus7", "can1" } };
+        AdminBridgeDeleteMessage decoded;
+        uint8_t buffer[512];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminBridgeDeleteMessage_Encode(&request, buffer, sizeof(buffer));
+        decoded_ok = AdminBridgeDeleteMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(decoded_ok).toBe(true);
+        expect((const char *)decoded.destination.interface_name).toBe("can1");
+    });
+
+    it("round-trips bridge list entries with their counters", []() {
+        static AdminBridgeListReplyMessage reply;
+        static AdminBridgeListReplyMessage decoded;
+        uint8_t buffer[4096];
+        size_t expected_size = MESSAGE_HEADER_SIZE + ADMIN_BRIDGE_LIST_REPLY_FIXED_FIELDS_SIZE + 2 * ADMIN_BRIDGE_LIST_REPLY_ENTRY_SIZE;
+        size_t encoded_size;
+        bool decoded_ok;
+
+        memset(&reply, 0, sizeof(reply));
+        reply.count = 2;
+        reply.flags = ADMIN_REPLY_FLAG_MORE;
+        reply.entries[0] = { { "truck42", "can0" }, { "bus7", "can0" }, 1, ADMIN_BRIDGE_STATE_SOURCE_ONLINE, { { 0x100, 0x7FF } }, 42, 3 };
+        reply.entries[1] = { { "bus7", "can0" }, { "truck42", "can0" }, 0, 0, { { 0 } }, 0, 0 };
+
+        encoded_size = AdminBridgeListReplyMessage_Encode(&reply, buffer, sizeof(buffer));
+        decoded_ok = AdminBridgeListReplyMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe(expected_size);
+        expect(decoded_ok).toBe(true);
+        expect(decoded.count).toBe(2);
+        expect(decoded.flags).toBe((uint8_t)ADMIN_REPLY_FLAG_MORE);
+        expect(decoded.entries[0].forwarded).toBe((uint64_t)42);
+        expect(decoded.entries[0].dropped).toBe((uint64_t)3);
+        expect(decoded.entries[0].state).toBe((uint8_t)ADMIN_BRIDGE_STATE_SOURCE_ONLINE);
+        expect(decoded.entries[0].filters[0].can_mask).toBe((uint32_t)0x7FF);
+        expect((const char *)decoded.entries[1].source.agent_name).toBe("bus7");
     });
 
     it("rejects encoding an acl list entry with an unterminated agent name", []() {

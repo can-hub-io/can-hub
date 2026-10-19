@@ -73,6 +73,16 @@
 #define REJECTED_ENTRY_FINGERPRINT_OFFSET 140
 #define REJECTED_ENTRY_ORIGIN_OFFSET 205
 
+#define BRIDGE_SOURCE_OFFSET 0
+#define BRIDGE_DESTINATION_OFFSET 144
+#define BRIDGE_ENDPOINT_INTERFACE_NAME_OFFSET 128
+#define BRIDGE_FILTER_COUNT_OFFSET 288
+#define BRIDGE_STATE_OFFSET 289
+#define BRIDGE_FILTERS_OFFSET 292
+#define BRIDGE_FILTER_MASK_OFFSET 4
+#define BRIDGE_ENTRY_FORWARDED_OFFSET 424
+#define BRIDGE_ENTRY_DROPPED_OFFSET 432
+
 static size_t encodeFixedBody(uint8_t type, size_t body_size, uint8_t *buffer, size_t buffer_size, uint8_t **body);
 static bool isNameTerminated(const char *agent_name);
 static size_t encodeAgentName(uint8_t type, const char *agent_name, uint8_t *buffer, size_t buffer_size);
@@ -108,6 +118,13 @@ static void readInterfaceEntry(const uint8_t *source, AdminInterfacesReplyEntry 
 static bool isRejectedEntryTerminated(const AdminRejectedReplyEntry *entry);
 static void writeRejectedEntry(uint8_t *destination, const AdminRejectedReplyEntry *entry);
 static void readRejectedEntry(const uint8_t *source, AdminRejectedReplyEntry *entry);
+static bool isBridgeEndpointValid(const AdminBridgeEndpoint *endpoint);
+static void writeBridgeEndpoint(uint8_t *destination, const AdminBridgeEndpoint *endpoint);
+static bool readBridgeEndpoint(const uint8_t *source, AdminBridgeEndpoint *endpoint);
+static void writeBridgeFilters(uint8_t *destination, const CanFilter *filters, uint8_t filter_count);
+static void readBridgeFilters(const uint8_t *source, CanFilter *filters, uint8_t filter_count);
+static void writeBridgeEntry(uint8_t *destination, const AdminBridgeListReplyEntry *entry);
+static bool readBridgeEntry(const uint8_t *source, AdminBridgeListReplyEntry *entry);
 
 /* ---------- public ---------- */
 
@@ -901,6 +918,196 @@ bool AdminRejectedReplyMessage_Decode(AdminRejectedReplyMessage *self, const uin
     return true;
 }
 
+const char *AdminBridgeStatus_Name(uint8_t status)
+{
+    switch (status) {
+        case ADMIN_BRIDGE_STATUS_OK:
+            return "ok";
+        case ADMIN_BRIDGE_STATUS_INVALID:
+            return "a bridge needs two different interfaces";
+        case ADMIN_BRIDGE_STATUS_FULL:
+            return "the hub holds no more bridges";
+        case ADMIN_BRIDGE_STATUS_STORE_FAILED:
+            return "could not store the bridge";
+        case ADMIN_BRIDGE_STATUS_UNKNOWN:
+            return "no such bridge";
+        default:
+            return "unknown status";
+    }
+}
+
+size_t AdminBridgeSetMessage_Encode(const AdminBridgeSetMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t total_size;
+
+    if (!isBridgeEndpointValid(&self->source) || !isBridgeEndpointValid(&self->destination)) {
+        return 0;
+    }
+    if (self->filter_count > SUBSCRIBE_FILTERS_MAX) {
+        return 0;
+    }
+
+    total_size = encodeFixedBody(kMESSAGE_TYPE_ADMIN_BRIDGE_SET, ADMIN_BRIDGE_SET_BODY_SIZE, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    writeBridgeEndpoint(body + BRIDGE_SOURCE_OFFSET, &self->source);
+    writeBridgeEndpoint(body + BRIDGE_DESTINATION_OFFSET, &self->destination);
+    body[BRIDGE_FILTER_COUNT_OFFSET] = self->filter_count;
+    writeBridgeFilters(body + BRIDGE_FILTERS_OFFSET, self->filters, self->filter_count);
+
+    return total_size;
+}
+
+bool AdminBridgeSetMessage_Decode(AdminBridgeSetMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    if (payload_length < ADMIN_BRIDGE_SET_BODY_SIZE) {
+        return false;
+    }
+    if (!readBridgeEndpoint(payload + BRIDGE_SOURCE_OFFSET, &self->source)) {
+        return false;
+    }
+    if (!readBridgeEndpoint(payload + BRIDGE_DESTINATION_OFFSET, &self->destination)) {
+        return false;
+    }
+
+    self->filter_count = payload[BRIDGE_FILTER_COUNT_OFFSET];
+    if (self->filter_count > SUBSCRIBE_FILTERS_MAX) {
+        return false;
+    }
+    readBridgeFilters(payload + BRIDGE_FILTERS_OFFSET, self->filters, self->filter_count);
+
+    return true;
+}
+
+size_t AdminBridgeSetReplyMessage_Encode(const AdminBridgeSetReplyMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    return encodeStatusReply(kMESSAGE_TYPE_ADMIN_BRIDGE_SET_REPLY, self->status, buffer, buffer_size);
+}
+
+bool AdminBridgeSetReplyMessage_Decode(AdminBridgeSetReplyMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    return decodeStatusReply(&self->status, payload, payload_length, ADMIN_BRIDGE_SET_REPLY_BODY_SIZE);
+}
+
+size_t AdminBridgeDeleteMessage_Encode(const AdminBridgeDeleteMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t total_size;
+
+    if (!isBridgeEndpointValid(&self->source) || !isBridgeEndpointValid(&self->destination)) {
+        return 0;
+    }
+
+    total_size = encodeFixedBody(kMESSAGE_TYPE_ADMIN_BRIDGE_DELETE, ADMIN_BRIDGE_DELETE_BODY_SIZE, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    writeBridgeEndpoint(body + BRIDGE_SOURCE_OFFSET, &self->source);
+    writeBridgeEndpoint(body + BRIDGE_DESTINATION_OFFSET, &self->destination);
+
+    return total_size;
+}
+
+bool AdminBridgeDeleteMessage_Decode(AdminBridgeDeleteMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    if (payload_length < ADMIN_BRIDGE_DELETE_BODY_SIZE) {
+        return false;
+    }
+
+    return readBridgeEndpoint(payload + BRIDGE_SOURCE_OFFSET, &self->source)
+        && readBridgeEndpoint(payload + BRIDGE_DESTINATION_OFFSET, &self->destination);
+}
+
+size_t AdminBridgeDeleteReplyMessage_Encode(const AdminBridgeDeleteReplyMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    return encodeStatusReply(kMESSAGE_TYPE_ADMIN_BRIDGE_DELETE_REPLY, self->status, buffer, buffer_size);
+}
+
+bool AdminBridgeDeleteReplyMessage_Decode(AdminBridgeDeleteReplyMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    return decodeStatusReply(&self->status, payload, payload_length, ADMIN_BRIDGE_DELETE_REPLY_BODY_SIZE);
+}
+
+size_t AdminBridgeListMessage_Encode(const AdminBridgeListMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    return encodeOffsetRequest(kMESSAGE_TYPE_ADMIN_BRIDGE_LIST, self->offset, buffer, buffer_size);
+}
+
+bool AdminBridgeListMessage_Decode(AdminBridgeListMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    if (payload_length < ADMIN_BRIDGE_LIST_BODY_SIZE) {
+        return false;
+    }
+
+    self->offset = Wire_ReadU16(payload + OFFSET_OFFSET);
+
+    return true;
+}
+
+size_t AdminBridgeListReplyMessage_Encode(const AdminBridgeListReplyMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t body_size;
+    size_t total_size;
+    uint8_t i;
+
+    if (self->count > ADMIN_BRIDGE_LIST_REPLY_ENTRIES_MAX) {
+        return 0;
+    }
+    for(i=0; i<self->count; i++) {
+        if (!isBridgeEndpointValid(&self->entries[i].source) || !isBridgeEndpointValid(&self->entries[i].destination)) {
+            return 0;
+        }
+        if (self->entries[i].filter_count > SUBSCRIBE_FILTERS_MAX) {
+            return 0;
+        }
+    }
+
+    body_size = ADMIN_BRIDGE_LIST_REPLY_FIXED_FIELDS_SIZE + (size_t)self->count * ADMIN_BRIDGE_LIST_REPLY_ENTRY_SIZE;
+    total_size = encodeFixedBody(kMESSAGE_TYPE_ADMIN_BRIDGE_LIST_REPLY, body_size, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    body[COUNT_OFFSET] = self->count;
+    body[FLAGS_OFFSET] = self->flags;
+    for(i=0; i<self->count; i++) {
+        writeBridgeEntry(body + ENTRIES_OFFSET + i * ADMIN_BRIDGE_LIST_REPLY_ENTRY_SIZE, &self->entries[i]);
+    }
+
+    return total_size;
+}
+
+bool AdminBridgeListReplyMessage_Decode(AdminBridgeListReplyMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    uint8_t i;
+
+    if (payload_length < ADMIN_BRIDGE_LIST_REPLY_FIXED_FIELDS_SIZE) {
+        return false;
+    }
+
+    self->count = payload[COUNT_OFFSET];
+    self->flags = payload[FLAGS_OFFSET];
+    if (self->count > ADMIN_BRIDGE_LIST_REPLY_ENTRIES_MAX) {
+        return false;
+    }
+    if (payload_length < ADMIN_BRIDGE_LIST_REPLY_FIXED_FIELDS_SIZE + (size_t)self->count * ADMIN_BRIDGE_LIST_REPLY_ENTRY_SIZE) {
+        return false;
+    }
+
+    for(i=0; i<self->count; i++) {
+        if (!readBridgeEntry(payload + ENTRIES_OFFSET + i * ADMIN_BRIDGE_LIST_REPLY_ENTRY_SIZE, &self->entries[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 /* ---------- private ---------- */
 
 static size_t encodeFixedBody(uint8_t type, size_t body_size, uint8_t *buffer, size_t buffer_size, uint8_t **body)
@@ -1210,4 +1417,81 @@ static void readRejectedEntry(const uint8_t *source, AdminRejectedReplyEntry *en
     entry->fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] = '\0';
     memcpy(entry->origin, source + REJECTED_ENTRY_ORIGIN_OFFSET, ADMIN_ORIGIN_SIZE);
     entry->origin[ADMIN_ORIGIN_SIZE - 1] = '\0';
+}
+
+static bool isBridgeEndpointValid(const AdminBridgeEndpoint *endpoint)
+{
+    if (!isNameTerminated(endpoint->agent_name) || endpoint->agent_name[0] == '\0') {
+        return false;
+    }
+
+    return endpoint->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] == '\0' && endpoint->interface_name[0] != '\0';
+}
+
+static void writeBridgeEndpoint(uint8_t *destination, const AdminBridgeEndpoint *endpoint)
+{
+    memcpy(destination, endpoint->agent_name, strlen(endpoint->agent_name));
+    memcpy(destination + BRIDGE_ENDPOINT_INTERFACE_NAME_OFFSET, endpoint->interface_name, strlen(endpoint->interface_name));
+}
+
+static bool readBridgeEndpoint(const uint8_t *source, AdminBridgeEndpoint *endpoint)
+{
+    memcpy(endpoint->agent_name, source, REGISTER_AGENT_NAME_SIZE);
+    endpoint->agent_name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';
+    memcpy(endpoint->interface_name, source + BRIDGE_ENDPOINT_INTERFACE_NAME_OFFSET, REGISTER_INTERFACE_NAME_SIZE);
+    endpoint->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] = '\0';
+
+    return endpoint->agent_name[0] != '\0' && endpoint->interface_name[0] != '\0';
+}
+
+static void writeBridgeFilters(uint8_t *destination, const CanFilter *filters, uint8_t filter_count)
+{
+    uint8_t i;
+
+    for(i=0; i<filter_count; i++) {
+        Wire_WriteU32(destination + i * CAN_FILTER_SIZE, filters[i].can_id);
+        Wire_WriteU32(destination + i * CAN_FILTER_SIZE + BRIDGE_FILTER_MASK_OFFSET, filters[i].can_mask);
+    }
+}
+
+static void readBridgeFilters(const uint8_t *source, CanFilter *filters, uint8_t filter_count)
+{
+    uint8_t i;
+
+    for(i=0; i<filter_count; i++) {
+        filters[i].can_id = Wire_ReadU32(source + i * CAN_FILTER_SIZE);
+        filters[i].can_mask = Wire_ReadU32(source + i * CAN_FILTER_SIZE + BRIDGE_FILTER_MASK_OFFSET);
+    }
+}
+
+static void writeBridgeEntry(uint8_t *destination, const AdminBridgeListReplyEntry *entry)
+{
+    writeBridgeEndpoint(destination + BRIDGE_SOURCE_OFFSET, &entry->source);
+    writeBridgeEndpoint(destination + BRIDGE_DESTINATION_OFFSET, &entry->destination);
+    destination[BRIDGE_FILTER_COUNT_OFFSET] = entry->filter_count;
+    destination[BRIDGE_STATE_OFFSET] = entry->state;
+    writeBridgeFilters(destination + BRIDGE_FILTERS_OFFSET, entry->filters, entry->filter_count);
+    Wire_WriteU64(destination + BRIDGE_ENTRY_FORWARDED_OFFSET, entry->forwarded);
+    Wire_WriteU64(destination + BRIDGE_ENTRY_DROPPED_OFFSET, entry->dropped);
+}
+
+static bool readBridgeEntry(const uint8_t *source, AdminBridgeListReplyEntry *entry)
+{
+    if (!readBridgeEndpoint(source + BRIDGE_SOURCE_OFFSET, &entry->source)) {
+        return false;
+    }
+    if (!readBridgeEndpoint(source + BRIDGE_DESTINATION_OFFSET, &entry->destination)) {
+        return false;
+    }
+
+    entry->filter_count = source[BRIDGE_FILTER_COUNT_OFFSET];
+    if (entry->filter_count > SUBSCRIBE_FILTERS_MAX) {
+        return false;
+    }
+    entry->state = source[BRIDGE_STATE_OFFSET];
+    readBridgeFilters(source + BRIDGE_FILTERS_OFFSET, entry->filters, entry->filter_count);
+    entry->forwarded = Wire_ReadU64(source + BRIDGE_ENTRY_FORWARDED_OFFSET);
+    entry->dropped = Wire_ReadU64(source + BRIDGE_ENTRY_DROPPED_OFFSET);
+
+    return true;
 }

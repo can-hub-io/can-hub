@@ -15,6 +15,7 @@
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/hub_defaults.h"
+#include "platform/linux/shared/filter_spec.h"
 #include "platform/linux/shared/interface_settings_text.h"
 #include "platform/linux/shared/log.h"
 #include "platform/linux/shared/tls_identity.h"
@@ -120,7 +121,6 @@ static void handleSocketcandSlotEvent(uint8_t slot, const struct epoll_event *ev
 static void handleHubStreamEvent(const struct epoll_event *event);
 static void resolveDeviceName(char *out, size_t out_size);
 static void buildBeaconUrl(char *out, size_t out_size);
-static bool parseFilterSpec(const char *text, CanFilter *filter);
 static void sendFrameAndQuit(void);
 static void startClientCommand(void);
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *events);
@@ -295,7 +295,7 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
                 return false;
             }
         } else if (command == kCLIENT_COMMAND_DUMP && dump_filter_count < SUBSCRIBE_FILTERS_MAX) {
-            if (!parseFilterSpec(argv[i], &dump_filters[dump_filter_count])) {
+            if (!FilterSpec_Parse(argv[i], &dump_filters[dump_filter_count])) {
                 return false;
             }
             dump_filter_count++;
@@ -327,30 +327,6 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
     }
 
     return ConnectUrl_Parse(connect_url, &connect_scheme, host, port_text);
-}
-
-static bool parseFilterSpec(const char *text, CanFilter *filter)
-{
-    const char *separator = strchr(text, ':');
-    char *id_end = NULL;
-    char *mask_end = NULL;
-
-    memset(filter, 0, sizeof(*filter));
-    filter->can_id = (uint32_t)strtoul(text, &id_end, 16);
-    if (id_end == text) {
-        return false;
-    }
-
-    if (separator == NULL) {
-        filter->can_mask = FRAME_CAN_ID_MASK;
-        return id_end == text + strlen(text);
-    }
-    if (id_end != separator) {
-        return false;
-    }
-
-    filter->can_mask = (uint32_t)strtoul(separator + 1, &mask_end, 16);
-    return mask_end != separator + 1 && mask_end == text + strlen(text);
 }
 
 static void sendFrameAndQuit(void)

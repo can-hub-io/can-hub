@@ -1,8 +1,8 @@
-//! Admin message family (0x10..=0x2D): request encoders and reply decoders.
+//! Admin message family (0x10..=0x31): request encoders and reply decoders.
 //!
 //! The layouts mirror the authoritative C codec in
 //! `src/protocol/admin_message.c`, including the pin/ACL mutations
-//! (0x22, 0x24..=0x29).
+//! (0x22, 0x24..=0x29) and the bus-to-bus bridges (0x2A, 0x2B, 0x2E..=0x31).
 
 use super::{
     read_fixed_str, read_u16, read_u32, read_u64, write_fixed_str, DecodeError, Header,
@@ -13,6 +13,45 @@ const AGENT_NAME_SIZE: usize = 128;
 const INTERFACE_NAME_SIZE: usize = 16;
 const FINGERPRINT_SIZE: usize = 65;
 const ORIGIN_SIZE: usize = 56;
+const BRIDGE_ENDPOINT_SIZE: usize = AGENT_NAME_SIZE + INTERFACE_NAME_SIZE;
+const BRIDGE_FILTER_SIZE: usize = 8;
+const BRIDGE_ENTRY_SIZE: usize = 440;
+const BRIDGE_STATE_SOURCE_ONLINE: u8 = 0x01;
+const BRIDGE_STATE_DESTINATION_ONLINE: u8 = 0x02;
+
+/// Filters a bridge route carries at most, as SUBSCRIBE does.
+pub const BRIDGE_FILTERS_MAX: usize = 16;
+
+/// ADMIN_BRIDGE_SET_REPLY / ADMIN_BRIDGE_DELETE_REPLY status codes.
+pub const BRIDGE_STATUS_INVALID: u8 = 1;
+pub const BRIDGE_STATUS_FULL: u8 = 2;
+pub const BRIDGE_STATUS_STORE_FAILED: u8 = 3;
+pub const BRIDGE_STATUS_UNKNOWN: u8 = 4;
+
+/// An id/mask pair: a frame passes when `id & mask == can_id & mask`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CanFilter {
+    pub can_id: u32,
+    pub can_mask: u32,
+}
+
+/// One end of a bridge route: a namespaced interface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeEndpoint {
+    pub agent_name: String,
+    pub interface_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeEntry {
+    pub source: BridgeEndpoint,
+    pub destination: BridgeEndpoint,
+    pub filters: Vec<CanFilter>,
+    pub source_online: bool,
+    pub destination_online: bool,
+    pub forwarded: u64,
+    pub dropped: u64,
+}
 
 /// A page of a paginated admin reply, plus whether more entries exist beyond
 /// `offset + entries.len()` (header flags bit 0).
@@ -436,6 +475,48 @@ pub fn encode_acl_list(offset: u16) -> [u8; 8] {
     encode_paginated(MessageType::AdminAclList, offset)
 }
 
+/// ADMIN_BRIDGE_SET (total 424): source @4 and destination @148, each
+/// agent_name[128] + interface_name[16]; filter_count @292; filters[16] @296,
+/// each can_id u32 + can_mask u32. Filters past the 16th are not sent.
+pub fn encode_bridge_set(source: &BridgeEndpoint, destination: &BridgeEndpoint, filters: &[CanFilter]) -> [u8; 424] {
+    let mut out = [0u8; 424];
+    let sent = &filters[..filters.len().min(BRIDGE_FILTERS_MAX)];
+    Header::write(&mut out, MessageType::AdminBridgeSet, 0, 420);
+    write_bridge_endpoints(&mut out, source, destination);
+    out[HEADER_SIZE + 2 * BRIDGE_ENDPOINT_SIZE] = sent.len() as u8;
+    for (index, filter) in sent.iter().enumerate() {
+        let base = HEADER_SIZE + 292 + index * BRIDGE_FILTER_SIZE;
+        out[base..base + 4].copy_from_slice(&filter.can_id.to_le_bytes());
+        out[base + 4..base + 8].copy_from_slice(&filter.can_mask.to_le_bytes());
+    }
+    out
+}
+
+/// ADMIN_BRIDGE_DELETE (total 292): source @4, destination @148.
+pub fn encode_bridge_delete(source: &BridgeEndpoint, destination: &BridgeEndpoint) -> [u8; 292] {
+    let mut out = [0u8; 292];
+    Header::write(&mut out, MessageType::AdminBridgeDelete, 0, 288);
+    write_bridge_endpoints(&mut out, source, destination);
+    out
+}
+
+/// ADMIN_BRIDGE_LIST (total 8): a pagination offset.
+pub fn encode_bridge_list(offset: u16) -> [u8; 8] {
+    encode_paginated(MessageType::AdminBridgeList, offset)
+}
+
+fn write_bridge_endpoints(out: &mut [u8], source: &BridgeEndpoint, destination: &BridgeEndpoint) {
+    write_fixed_str(out, HEADER_SIZE, AGENT_NAME_SIZE, &source.agent_name);
+    write_fixed_str(out, HEADER_SIZE + AGENT_NAME_SIZE, INTERFACE_NAME_SIZE, &source.interface_name);
+    write_fixed_str(out, HEADER_SIZE + BRIDGE_ENDPOINT_SIZE, AGENT_NAME_SIZE, &destination.agent_name);
+    write_fixed_str(
+        out,
+        HEADER_SIZE + BRIDGE_ENDPOINT_SIZE + AGENT_NAME_SIZE,
+        INTERFACE_NAME_SIZE,
+        &destination.interface_name,
+    );
+}
+
 // ---------------------------------------------------------------- replies
 
 fn expect(buffer: &[u8], message_type: MessageType, min_len: usize) -> Result<Header, DecodeError> {
@@ -578,6 +659,37 @@ pub fn decode_rejected_reply(buffer: &[u8]) -> Result<Page<RejectedEntry>, Decod
         fingerprint_hex: read_fixed_str(entry, 140, FINGERPRINT_SIZE),
         origin: read_fixed_str(entry, 205, ORIGIN_SIZE),
     })
+}
+
+/// ADMIN_BRIDGE_LIST_REPLY (8 + count * 440). Entry layout (entry-relative):
+/// source @0, destination @144, filter_count @288, state @289 (bit 0 source
+/// online, bit 1 destination online), filters[16] @292, forwarded u64 @424,
+/// dropped u64 @432.
+pub fn decode_bridge_list_reply(buffer: &[u8]) -> Result<Page<BridgeEntry>, DecodeError> {
+    decode_page(buffer, MessageType::AdminBridgeListReply, BRIDGE_ENTRY_SIZE, |entry| {
+        let filter_count = (entry[288] as usize).min(BRIDGE_FILTERS_MAX);
+        BridgeEntry {
+            source: read_bridge_endpoint(entry, 0),
+            destination: read_bridge_endpoint(entry, BRIDGE_ENDPOINT_SIZE),
+            filters: (0..filter_count)
+                .map(|index| CanFilter {
+                    can_id: read_u32(entry, 292 + index * BRIDGE_FILTER_SIZE),
+                    can_mask: read_u32(entry, 296 + index * BRIDGE_FILTER_SIZE),
+                })
+                .collect(),
+            source_online: entry[289] & BRIDGE_STATE_SOURCE_ONLINE != 0,
+            destination_online: entry[289] & BRIDGE_STATE_DESTINATION_ONLINE != 0,
+            forwarded: read_u64(entry, 424),
+            dropped: read_u64(entry, 432),
+        }
+    })
+}
+
+fn read_bridge_endpoint(entry: &[u8], offset: usize) -> BridgeEndpoint {
+    BridgeEndpoint {
+        agent_name: read_fixed_str(entry, offset, AGENT_NAME_SIZE),
+        interface_name: read_fixed_str(entry, offset + AGENT_NAME_SIZE, INTERFACE_NAME_SIZE),
+    }
 }
 
 /// CONFIGURE_REPLY (total 160): status @4, settings[88] @8, detail[64] @96.
@@ -804,6 +916,42 @@ mod tests {
         assert_eq!(request[0], MessageType::AdminAclRevoke as u8);
         assert_eq!(request[213], 0);
         assert_eq!(request[214], 0);
+    }
+
+    #[test]
+    fn bridge_set_request_layout() {
+        let source = BridgeEndpoint { agent_name: "truck42".into(), interface_name: "can0".into() };
+        let destination = BridgeEndpoint { agent_name: "bus7".into(), interface_name: "can1".into() };
+        let request = encode_bridge_set(&source, &destination, &[CanFilter { can_id: 0x100, can_mask: 0x700 }]);
+        assert_eq!(request[0], MessageType::AdminBridgeSet as u8);
+        assert_eq!(read_u16(&request, 2), 420);
+        assert_eq!(read_fixed_str(&request, 4, AGENT_NAME_SIZE), "truck42");
+        assert_eq!(read_fixed_str(&request, 148 + AGENT_NAME_SIZE, INTERFACE_NAME_SIZE), "can1");
+        assert_eq!(request[292], 1);
+        assert_eq!(read_u32(&request, 296), 0x100);
+        assert_eq!(read_u32(&request, 300), 0x700);
+    }
+
+    #[test]
+    fn bridge_list_reply_decodes_entry() {
+        let mut buffer = vec![0u8; 8 + BRIDGE_ENTRY_SIZE];
+        Header::write(&mut buffer, MessageType::AdminBridgeListReply, 0, (4 + BRIDGE_ENTRY_SIZE) as u16);
+        buffer[4] = 1;
+        write_fixed_str(&mut buffer, 8, AGENT_NAME_SIZE, "truck42");
+        write_fixed_str(&mut buffer, 8 + AGENT_NAME_SIZE, INTERFACE_NAME_SIZE, "can0");
+        write_fixed_str(&mut buffer, 8 + 144, AGENT_NAME_SIZE, "bus7");
+        buffer[8 + 288] = 1;
+        buffer[8 + 289] = BRIDGE_STATE_SOURCE_ONLINE;
+        buffer[8 + 292..8 + 296].copy_from_slice(&0x123u32.to_le_bytes());
+        buffer[8 + 424..8 + 432].copy_from_slice(&42u64.to_le_bytes());
+        let page = decode_bridge_list_reply(&buffer).unwrap();
+        let entry = &page.entries[0];
+        assert_eq!(entry.source.agent_name, "truck42");
+        assert_eq!(entry.destination.agent_name, "bus7");
+        assert_eq!(entry.filters, vec![CanFilter { can_id: 0x123, can_mask: 0 }]);
+        assert!(entry.source_online);
+        assert!(!entry.destination_online);
+        assert_eq!(entry.forwarded, 42);
     }
 
     #[test]

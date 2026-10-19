@@ -8,6 +8,7 @@ one privileged container, with a Linux network namespace per **Server** and
 
 ```sh
 make e2e        # builds release binaries + image, runs the suite
+make e2e E2E_SUITE=tests/bridge.robot   # one suite
 ```
 
 Needs Docker and the host `vcan` module (`/lib/modules` is mounted read-only so

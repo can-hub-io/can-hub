@@ -49,8 +49,14 @@ pub enum MessageType {
     AdminAclRevokeReply = 0x27,
     AdminAclList = 0x28,
     AdminAclListReply = 0x29,
+    AdminBridgeSet = 0x2A,
+    AdminBridgeSetReply = 0x2B,
     AdminRejected = 0x2C,
     AdminRejectedReply = 0x2D,
+    AdminBridgeDelete = 0x2E,
+    AdminBridgeDeleteReply = 0x2F,
+    AdminBridgeList = 0x30,
+    AdminBridgeListReply = 0x31,
 }
 
 impl MessageType {
@@ -87,8 +93,14 @@ impl MessageType {
             0x27 => AdminAclRevokeReply,
             0x28 => AdminAclList,
             0x29 => AdminAclListReply,
+            0x2A => AdminBridgeSet,
+            0x2B => AdminBridgeSetReply,
             0x2C => AdminRejected,
             0x2D => AdminRejectedReply,
+            0x2E => AdminBridgeDelete,
+            0x2F => AdminBridgeDeleteReply,
+            0x30 => AdminBridgeList,
+            0x31 => AdminBridgeListReply,
             _ => return None,
         };
         Some(kind)

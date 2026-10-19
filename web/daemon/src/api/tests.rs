@@ -126,6 +126,21 @@ async fn pins_permission_maps_to_pins_routes() {
 }
 
 #[tokio::test]
+async fn bridges_permission_maps_to_bridge_routes() {
+    let state = make_state();
+    let bridger = seed_session(&state, "bridger", &[Permission::BridgesManage]);
+    let viewer = seed_session(&state, "viewer", &[Permission::ViewsRead]);
+    assert_eq!(
+        status_of(state.clone(), request(Method::GET, "/api/bridges", Some(&bridger), false)).await,
+        StatusCode::BAD_GATEWAY
+    );
+    assert_eq!(
+        status_of(state, request(Method::GET, "/api/bridges", Some(&viewer), false)).await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
 async fn rejected_list_needs_the_pins_permission() {
     let state = make_state();
     let pinner = seed_session(&state, "pinner", &[Permission::PinsManage]);

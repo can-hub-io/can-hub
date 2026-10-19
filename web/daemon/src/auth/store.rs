@@ -87,6 +87,9 @@ pub struct AuditEntry {
     pub status: u16,
 }
 
+const BRIDGES_PERMISSION_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = BRIDGES_PERMISSION_VERSION;
+
 pub struct AuthStore {
     connection: Connection,
 }
@@ -145,6 +148,22 @@ impl AuthStore {
                  status INTEGER NOT NULL
              );",
         )?;
+        self.migrate()
+    }
+
+    /// Permissions added after an admins group was seeded with every
+    /// permission of its day reach that group once, on the first open by a
+    /// daemon that knows them; a later removal by an operator sticks.
+    fn migrate(&self) -> Result<(), StoreError> {
+        let version: i64 = self.connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if version < BRIDGES_PERMISSION_VERSION {
+            self.connection.execute(
+                "INSERT OR IGNORE INTO group_permissions (group_id, permission)
+                 SELECT id, ?1 FROM groups WHERE name = 'admins'",
+                params![Permission::BridgesManage.as_str()],
+            )?;
+        }
+        self.connection.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;
         Ok(())
     }
 
@@ -608,6 +627,27 @@ fn random_token() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn admins_seeded_before_bridges_gain_the_bridges_permission() {
+        let path = std::env::temp_dir().join(format!("can-hub-web-migrate-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let admin = {
+            let store = AuthStore::open(&path).unwrap();
+            let admin = store.bootstrap_admin("admin", "s3cret99", true).unwrap();
+            store
+                .connection
+                .execute("DELETE FROM group_permissions WHERE permission = ?1", params![Permission::BridgesManage.as_str()])
+                .unwrap();
+            store.connection.execute_batch("PRAGMA user_version = 0").unwrap();
+            admin
+        };
+
+        let reopened = AuthStore::open(&path).unwrap();
+
+        assert!(reopened.effective_permissions(admin).unwrap().contains(&Permission::BridgesManage));
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn create_and_verify_user() {

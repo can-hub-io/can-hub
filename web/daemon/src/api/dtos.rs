@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::admin::{
-    AclEntry, AclLevel, AgentEntry, BitTiming, ClientEntry, InterfaceEntry, InterfaceSettings, PeerEntry, PinEntry,
+    AclEntry, AclLevel, AgentEntry, BridgeEndpoint, BridgeEntry, CanFilter, BitTiming, ClientEntry, InterfaceEntry, InterfaceSettings, PeerEntry, PinEntry,
     RejectedEntry, RejectionReason, Status, CTRLMODE_BERR_REPORTING, CTRLMODE_FD, CTRLMODE_LISTEN_ONLY,
     CTRLMODE_LOOPBACK, CTRLMODE_ONE_SHOT, CTRLMODE_TRIPLE_SAMPLING, SETTING_BITRATE, SETTING_CTRLMODE,
     SETTING_DATA_BITRATE, SETTING_DATA_SAMPLE_POINT, SETTING_LINK, SETTING_RESTART_MS, SETTING_SAMPLE_POINT,
@@ -49,6 +49,85 @@ pub(crate) struct AclBody {
     /// "none" | "r" | "rw" | "rwa"; ignored by revoke.
     #[serde(default)]
     pub level: String,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BridgeEndpointDto {
+    pub agent_name: String,
+    pub interface_name: String,
+}
+
+#[derive(Deserialize, Serialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CanFilterDto {
+    pub can_id: u32,
+    pub can_mask: u32,
+}
+
+/// A bus-to-bus route; no filters bridges every frame.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BridgeBody {
+    pub source: BridgeEndpointDto,
+    pub destination: BridgeEndpointDto,
+    #[serde(default)]
+    pub filters: Vec<CanFilterDto>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BridgeDeleteBody {
+    pub source: BridgeEndpointDto,
+    pub destination: BridgeEndpointDto,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BridgeDto {
+    pub source: BridgeEndpointDto,
+    pub destination: BridgeEndpointDto,
+    pub filters: Vec<CanFilterDto>,
+    pub source_online: bool,
+    pub destination_online: bool,
+    pub forwarded: u64,
+    pub dropped: u64,
+}
+
+impl From<BridgeEndpointDto> for BridgeEndpoint {
+    fn from(endpoint: BridgeEndpointDto) -> Self {
+        BridgeEndpoint { agent_name: endpoint.agent_name, interface_name: endpoint.interface_name }
+    }
+}
+
+impl From<BridgeEndpoint> for BridgeEndpointDto {
+    fn from(endpoint: BridgeEndpoint) -> Self {
+        BridgeEndpointDto { agent_name: endpoint.agent_name, interface_name: endpoint.interface_name }
+    }
+}
+
+impl From<CanFilterDto> for CanFilter {
+    fn from(filter: CanFilterDto) -> Self {
+        CanFilter { can_id: filter.can_id, can_mask: filter.can_mask }
+    }
+}
+
+impl From<BridgeEntry> for BridgeDto {
+    fn from(entry: BridgeEntry) -> Self {
+        BridgeDto {
+            source: entry.source.into(),
+            destination: entry.destination.into(),
+            filters: entry
+                .filters
+                .into_iter()
+                .map(|filter| CanFilterDto { can_id: filter.can_id, can_mask: filter.can_mask })
+                .collect(),
+            source_online: entry.source_online,
+            destination_online: entry.destination_online,
+            forwarded: entry.forwarded,
+            dropped: entry.dropped,
+        }
+    }
 }
 
 #[derive(Deserialize)]
