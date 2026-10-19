@@ -28,6 +28,7 @@ PRODUCE_SCRIPT = "/work/test/e2e/scripts/produce.py"
 ECHO_PROBE_SCRIPT = "/work/test/e2e/scripts/echo_probe.py"
 LATENCY_SEND_SCRIPT = "/work/test/e2e/scripts/latency_send.py"
 BENCH_SEND_SCRIPT = "/work/test/e2e/scripts/bench_send.py"
+AGENT_LOST_HUB = "connection lost, reconnecting in"
 SOCKETCAND_COMMANDS_SCRIPT = "/work/test/e2e/scripts/socketcand_commands.py"
 
 
@@ -279,6 +280,15 @@ class BenchKeywords:
     @keyword("Wait Until Hub ${hub} Logged ${text} ${count} Times")
     def wait_until_hub_logged(self, hub, text, count: int, timeout: float = 10):
         hub.wait_logged(text, count, timeout)
+
+    @keyword("Wait Until Agent ${agent} Lost Its Hub ${count} Times")
+    def wait_until_agent_lost_hub(self, agent, count, timeout=60):
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            if agent.process.read_log().count(AGENT_LOST_HUB) >= int(count):
+                return
+            time.sleep(0.1)
+        raise AssertionError(f"agent lost its hub fewer than {count} times\n{agent.process.read_log()}")
 
     @keyword("Wait Until Agent ${agent} Registered On ${hub}")
     def wait_until_agent_registered(self, agent, hub, timeout=5):

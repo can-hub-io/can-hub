@@ -15,6 +15,8 @@ import time
 
 import can
 
+from socketcand_bus import open_socketcand_bus
+
 RECEIVE_TIMEOUT_SECONDS = 0.2
 PAYLOAD_SIZE = 8
 
@@ -39,7 +41,7 @@ def receive_until(bus: can.BusABC, deadline: float, own_id: int) -> dict[str, in
 def main() -> None:
     host, port, channel = sys.argv[1], int(sys.argv[2]), sys.argv[3]
     count, own_id, seconds = int(sys.argv[4]), int(sys.argv[5], 16), float(sys.argv[6])
-    bus = can.Bus(interface="socketcand", host=host, port=port, channel=channel)
+    bus = open_socketcand_bus(host, port, channel)
     deadline = time.monotonic() + seconds
     try:
         sent = write_burst(bus, count, own_id)

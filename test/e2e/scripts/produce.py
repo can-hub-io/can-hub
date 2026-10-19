@@ -14,11 +14,13 @@ import time
 
 import can
 
+from socketcand_bus import open_socketcand_bus
+
 
 def main() -> None:
     host, port, channel, count = sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4])
     hold_seconds = float(sys.argv[5]) if len(sys.argv) > 5 else 0.0
-    bus = can.Bus(interface="socketcand", host=host, port=port, channel=channel)
+    bus = open_socketcand_bus(host, port, channel)
     sent = 0
     try:
         for index in range(count):

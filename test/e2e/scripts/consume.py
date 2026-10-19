@@ -19,9 +19,11 @@ import time
 
 import can
 
+from socketcand_bus import open_socketcand_bus
+
 
 def drain(host: str, port: int, channel: str, key: str, deadline: float, counts: dict):
-    bus = can.Bus(interface="socketcand", host=host, port=port, channel=channel)
+    bus = open_socketcand_bus(host, port, channel)
     received = 0
     try:
         while time.monotonic() < deadline:

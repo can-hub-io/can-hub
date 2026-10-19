@@ -26,7 +26,6 @@ Two Socketcand Connections To The Same Bus Both Receive Every Frame
 
     ${bridge_cfg}=    Client Configuration    socketcand    connect=quic://local:7227    extra=--no-beacon
     ${bridge}=    Start CAN Client On ${LAN_SERVER} With ${bridge_cfg}
-    Sleep    2s    reason=let the bridge connect to the hub and cache the interface list
 
     ${connections}=    Create List    truck42/bus0    truck42/bus0
     ${consumer}=    Start Draining ${connections} On ${LAN_SERVER}    seconds=10

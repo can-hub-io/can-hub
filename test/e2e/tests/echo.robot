@@ -35,7 +35,6 @@ What A Bridge Writes Reaches The Bus And Not Itself
 
     ${bridge_cfg}=    Client Configuration    socketcand    connect=quic://local:7227    extra=--no-beacon
     ${bridge}=    Start CAN Client On ${LOCAL_SERVER} With ${bridge_cfg}
-    Sleep    3s    reason=let the bridge connect and cache the interface list
 
     ${capture}=    Start Candump On ${LOCAL_SERVER}    vcan0
     ${probe}=    Start Echo Probe Of ${WRITES} Frames Through Socketcand On ${LOCAL_SERVER} edge/vcan0

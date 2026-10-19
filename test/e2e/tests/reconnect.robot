@@ -25,7 +25,7 @@ Agent Reconnects After WAN Uplink Drop
     Client ${client} Should Receive 123#DEADBEEF
 
     Set Link Loss On ${WAN_SERVER} To 100
-    Sleep    40s
+    Wait Until Agent ${agent} Lost Its Hub 2 Times
     Set Link Loss On ${WAN_SERVER} To 0
 
     Log Of ${agent.process} Should Contain reconnected to hub    120
@@ -46,7 +46,7 @@ Agent Reconnects After Uplink Drop With Datagrams Queued
 
     Set Link Loss On ${WAN_SERVER} To 100
     Burst 500 Frames On ${WAN_SERVER} vcan0
-    Sleep    40s
+    Wait Until Agent ${agent} Lost Its Hub 2 Times
     Set Link Loss On ${WAN_SERVER} To 0
 
     Log Of ${agent.process} Should Contain reconnected to hub    120
@@ -65,7 +65,7 @@ Agent Reconnects After WAN Uplink Drop And IP Change
     Client ${client} Should Receive 123#DEADBEEF
 
     Bring Link Down On ${WAN_SERVER}
-    Sleep    15s
+    Wait Until Agent ${agent} Lost Its Hub 1 Times
     Bring Link Up On ${WAN_SERVER} With Octet 40
 
     Log Of ${agent.process} Should Contain reconnected to hub    150

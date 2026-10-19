@@ -31,7 +31,6 @@ Socketcand Write Burst Reaches The Bus In Full
     Run CLI On Hub ${hub}    acl    add    *    */*    rw
     ${bridge_cfg}=    Client Configuration    socketcand    connect=quic://local:7227    extra=--no-beacon
     ${bridge}=    Start CAN Client On ${LOCAL_SERVER} With ${bridge_cfg}
-    Sleep    3s    reason=let the bridge connect and cache the interface list
     ${capture}=    Start Candump On ${LOCAL_SERVER}    vcan0
 
     ${sent}=    Burst ${BURST} Frames Through Socketcand On ${LOCAL_SERVER} edge/vcan0    hold=5

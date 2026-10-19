@@ -71,6 +71,7 @@ static TcpClientTransport transport;
 static TlsClientTransport tls_transport;
 static QuicClientTransport quic_transport;
 static TransportPort *active_port;
+static volatile sig_atomic_t stop_requested;
 static Client client;
 static uint8_t command;
 static uint8_t connect_scheme;
@@ -142,6 +143,9 @@ static void printListReply(const ListReplyMessage *reply);
 static void printFrame(const FrameMessage *frame);
 static uint32_t printedCanId(const FrameMessage *frame);
 static int32_t runEventLoop(void);
+static void installStopHandler(void);
+static void requestStop(int signal_number);
+static int32_t stopCleanly(void);
 static const char *pinnedHubFingerprint(void);
 
 int main(int argc, char **argv)
@@ -161,6 +165,7 @@ int main(int argc, char **argv)
     };
 
     signal(SIGPIPE, SIG_IGN);
+    installStopHandler();
 
     if (CliMeta_HandleVersionAndHelp(argc, argv, "can-hub-client", printUsage)) {
         return 0;
@@ -634,7 +639,7 @@ static int32_t runEventLoop(void)
         return 1;
     }
 
-    while (exit_code < 0) {
+    while (exit_code < 0 && !stop_requested) {
         if (connect_scheme == kCONNECT_SCHEME_TLS) {
             current_fd = TlsClientTransport_Fd(&tls_transport);
             wanted_mask = EPOLLIN;
@@ -670,6 +675,10 @@ static int32_t runEventLoop(void)
         }
     }
 
+    if (stop_requested) {
+        return stopCleanly();
+    }
+
     return exit_code;
 }
 
@@ -692,7 +701,7 @@ static int32_t runQuicEventLoop(void)
         return 1;
     }
 
-    while (exit_code < 0) {
+    while (exit_code < 0 && !stop_requested) {
         event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
         for(i=0; i<event_count; i++) {
             if ((int32_t)events[i].data.u32 == udp_fd) {
@@ -702,6 +711,10 @@ static int32_t runQuicEventLoop(void)
                 QuicClientTransport_OnTimer(&quic_transport);
             }
         }
+    }
+
+    if (stop_requested) {
+        return stopCleanly();
     }
 
     return exit_code;
@@ -873,7 +886,7 @@ static int32_t runSocketcandLoop(void)
         EpollRegistry_AddStatic(&poll_registry, QuicClientTransport_TimerFd(&quic_transport), SC_TAG_HUB_QUIC_TIMER);
     }
 
-    for (;;) {
+    while (!stop_requested) {
         syncHubStream(&poll_registry);
         for(slot=0; slot<SOCKETCAND_SERVER_SLOTS_MAX; slot++) {
             EpollRegistry_SyncSlot(
@@ -891,6 +904,8 @@ static int32_t runSocketcandLoop(void)
         }
         SocketcandApp_Tick(&socketcand_app, Clock_MonotonicUs());
     }
+
+    return stopCleanly();
 }
 
 static int32_t runAttach(const char *host, const char *port_text)
@@ -975,7 +990,7 @@ static int32_t runAttachLoop(void)
     }
     EpollRegistry_AddStatic(&poll_registry, SocketCanAdapter_Fd(&mirror_can_adapter, 0), ATTACH_TAG_CAN);
 
-    while (MirrorApp_State(&mirror_app) != kMIRROR_FAILED) {
+    while (MirrorApp_State(&mirror_app) != kMIRROR_FAILED && !stop_requested) {
         syncHubStream(&poll_registry);
         event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
         for(i=0; i<event_count; i++) {
@@ -983,6 +998,9 @@ static int32_t runAttachLoop(void)
         }
     }
 
+    if (stop_requested) {
+        return stopCleanly();
+    }
     LOG_WARN("connection lost");
 
     return 1;
@@ -1041,4 +1059,32 @@ static const char *pinnedHubFingerprint(void)
     }
 
     return hub_fingerprint;
+}
+
+static void installStopHandler(void)
+{
+    struct sigaction action;
+
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = requestStop;
+    sigemptyset(&action.sa_mask);
+    sigaction(SIGINT, &action, NULL);
+    sigaction(SIGTERM, &action, NULL);
+}
+
+static void requestStop(int signal_number)
+{
+    (void)signal_number;
+    stop_requested = 1;
+}
+
+/*
+ * Closing the hub connection on purpose lets the hub release this client at
+ * once instead of waiting for the transport to time out.
+ */
+static int32_t stopCleanly(void)
+{
+    active_port->disconnect(active_port->context);
+
+    return 0;
 }
