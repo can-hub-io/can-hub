@@ -6,13 +6,16 @@ python fingerprint helper) must work without libcanhub present.
 
 from .fingerprint import identity_fingerprint
 
-__all__ = ["BitTiming", "CanHubBus", "InterfaceSettings", "identity_fingerprint"]
+__all__ = ["BitTiming", "CanHubBus", "CanHubMessage", "InterfaceSettings", "identity_fingerprint"]
 
 
 def __getattr__(name):
     if name == "CanHubBus":
         from .bus import CanHubBus
         return CanHubBus
+    if name == "CanHubMessage":
+        from .bus import CanHubMessage
+        return CanHubMessage
     if name == "InterfaceSettings":
         from .settings import InterfaceSettings
         return InterfaceSettings

@@ -17,6 +17,18 @@ FINGERPRINT_HEX_LENGTH = 64
 RECEIVE_SLICE_MS = 10
 
 
+class CanHubMessage(Message):
+    """A received frame. ``bridged`` is true when the hub injected it into
+    this bus along a bridge route or group, rather than a node on the bus
+    sending it."""
+
+    __slots__ = ("bridged",)
+
+    def __init__(self, *args, bridged: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.bridged = bridged
+
+
 def _is_fingerprint(text: str) -> bool:
     if len(text) != FINGERPRINT_HEX_LENGTH:
         return False
@@ -294,8 +306,8 @@ class CanHubBus(BusABC):
         return {"interface": "canhub", "channel": f"{agent}/{name}", **connection}
 
     @staticmethod
-    def _to_message(frame: native.CanHubFrame) -> Message:
-        return Message(
+    def _to_message(frame: native.CanHubFrame) -> CanHubMessage:
+        return CanHubMessage(
             timestamp=frame.timestamp_us / 1_000_000,
             arbitration_id=frame.can_id & native.CAN_ID_MASK,
             is_extended_id=bool(frame.can_id & native.CAN_ID_FLAG_EFF),
@@ -305,6 +317,7 @@ class CanHubBus(BusABC):
             bitrate_switch=bool(frame.flags & native.FRAME_FLAG_BRS),
             dlc=frame.length,
             data=bytes(frame.payload[: frame.length]),
+            bridged=bool(frame.flags & native.FRAME_FLAG_BRIDGED),
         )
 
 

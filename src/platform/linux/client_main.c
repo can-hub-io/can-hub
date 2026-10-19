@@ -36,6 +36,7 @@
 #include "protocol/subscribe_message.h"
 #include "socketcand/socketcand_app.h"
 
+#define BRIDGED_MARK "(bridged)"
 #define MAX_EPOLL_EVENTS 8
 #define POLL_PERIOD_MS 100
 #define TCP_SLOT 0
@@ -603,7 +604,7 @@ static void printFrame(const FrameMessage *frame)
     for(i=0; i<frame->payload_length; i++) {
         printf("%02X ", frame->payload[i]);
     }
-    printf("\n");
+    printf("%s\n", (frame->route_flags & FRAME_ROUTE_FLAG_BRIDGED) ? BRIDGED_MARK : "");
     fflush(stdout);
 }
 

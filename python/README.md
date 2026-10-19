@@ -31,6 +31,10 @@ for message in bus:
   (`is_error_frame`), received by default as on python-can's socketcan
   interface.
 
+Received messages are `canhub.CanHubMessage`, a `can.Message` with one more
+attribute: `bridged` is true when the hub injected the frame into this bus
+along a [bridge](../doc/hub.md#bridging-buses) route or group.
+
 Write access follows the hub client ACLs: if the ACL grants read-only, the
 bus opens read-only and `send()` raises.
 

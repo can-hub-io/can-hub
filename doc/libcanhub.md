@@ -43,7 +43,7 @@ canhub_close(session);
 | `canhub_list(session, out, max, timeout_ms)` | catalogue; returns the count |
 | `canhub_open(session, name, flags, timeout_ms)` | by namespaced name (`agent/iface`) or numeric id; flags `CANHUB_OPEN_FLAG_WRITE`, `CANHUB_OPEN_FLAG_NO_ECHO`, `CANHUB_OPEN_FLAG_RELIABLE` (lossless ordered QUIC stream, `quic://` only; `CANHUB_ERR_RELIABLE_UNSUPPORTED` if the hub lacks the capability), `CANHUB_OPEN_FLAG_ERROR_FRAMES` (also receive the bus error frames, `CANHUB_CAN_ID_FLAG_ERR` set) |
 | `canhub_set_filters(session, filters, count)` | hub-side CAN id mask filters, replace semantics, max 16 |
-| `canhub_recv(session, frame, timeout_ms)` | `CANHUB_RECEIVED`, `CANHUB_ERR_TIMEOUT`, or a failure |
+| `canhub_recv(session, frame, timeout_ms)` | `CANHUB_RECEIVED`, `CANHUB_ERR_TIMEOUT`, or a failure; `frame.flags` carries `CANHUB_FRAME_FLAG_FD`, `CANHUB_FRAME_FLAG_BRS` and `CANHUB_FRAME_FLAG_BRIDGED` (the hub injected the frame along a [bridge](hub.md#bridging-buses); ignored on send) |
 | `canhub_send(session, frame)` | needs an open writable channel; `CANHUB_ERR_RATE_LIMITED` when the local pacer drops the frame |
 | `canhub_stats(session, stats)` | local drop counters: `frames_rate_limited` (pacer), `frames_ring_dropped` (receive ring overrun) |
 | `canhub_configure(session, name, requested, effective, timeout_ms)` | reconfigure `agent/iface` in one step (needs an `rwa` grant; [settings](#interface-settings)); `effective` may be NULL |

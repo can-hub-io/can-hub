@@ -105,7 +105,8 @@ def duplex(bus, arguments):
 
 
 def print_message(message):
-    print(f"{message.arbitration_id:03X}#{message.data.hex().upper()}", flush=True)
+    mark = " bridged" if getattr(message, "bridged", False) else ""
+    print(f"{message.arbitration_id:03X}#{message.data.hex().upper()}{mark}", flush=True)
 
 
 def list_interfaces(arguments):

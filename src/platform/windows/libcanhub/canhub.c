@@ -372,7 +372,7 @@ int32_t canhub_send(CanHubSession *session, const CanHubFrame *frame)
     message.can_id = frame->can_id;
     message.timestamp_us = (frame->timestamp_us != 0) ? frame->timestamp_us : Clock_RealtimeUs();
     message.payload_length = frame->length;
-    message.frame_flags = frame->flags;
+    message.frame_flags = frame->flags & (uint8_t)~CANHUB_FRAME_FLAG_BRIDGED;
     memcpy(message.payload, frame->payload, frame->length);
 
     result = Client_SendFrame(&session->client, &message, Clock_MonotonicUs());
@@ -734,6 +734,9 @@ static void pushFrame(CanHubSession *self, const FrameMessage *message)
     slot->timestamp_us = message->timestamp_us;
     slot->can_id = message->can_id;
     slot->flags = message->frame_flags;
+    if (message->route_flags & FRAME_ROUTE_FLAG_BRIDGED) {
+        slot->flags |= CANHUB_FRAME_FLAG_BRIDGED;
+    }
     slot->length = message->payload_length;
     memcpy(slot->payload, message->payload, message->payload_length);
     self->ring_count++;

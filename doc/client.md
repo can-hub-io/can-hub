@@ -47,6 +47,8 @@ can-hub-client dump truck42/can0 123 700:7F0
   print with the full SocketCAN id, `20000004 [8] ...` for a controller
   problem, the error class in the low bits and the detail in the data bytes
   (`linux/can/error.h`). Id filters do not apply to them.
+- A frame the hub injected into this bus along a [bridge](hub.md#bridging-buses)
+  ends with `(bridged)`, so it can be told from what the nodes on the bus send.
 
 ## send
 

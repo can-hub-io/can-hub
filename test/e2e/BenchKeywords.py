@@ -687,6 +687,20 @@ class BenchKeywords:
     def frames_with_id_captured_by(self, can_id, process):
         return sum(1 for frame in parse_candump(process.read_log()) if frame.can_id == can_id.upper())
 
+    @keyword("Setup Bench ${bench} With The Python Package On ${server}")
+    def setup_bench_with_python_package(self, bench, server):
+        self.setup_bench(bench)
+        self.install_python_package_on(server, "/work/python")
+
+    @keyword("Frames With Id ${can_id} Dumped By ${client}")
+    def frames_dumped_with_id(self, can_id, client, bridged):
+        wanted = str(bridged).lower() == "true"
+        return sum(1 for frame in client.dumped_frames() if frame.can_id == can_id.upper() and frame.bridged == wanted)
+
+    @keyword("Lines Of ${process} Containing ${text}")
+    def lines_containing(self, process, text):
+        return sum(1 for line in process.read_log().splitlines() if text in line)
+
     @keyword("Restart ${hub}")
     def restart_hub(self, hub) -> CanHub:
         hub.stop()

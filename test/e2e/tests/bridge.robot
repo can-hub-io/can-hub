@@ -34,7 +34,7 @@ A Route Passes Only The Ids It Names
 
     Send ${FRAMES} Frames On ${LAN_SERVER} vcan0    can_id=200
     Send ${FRAMES} Frames On ${LAN_SERVER} vcan0    can_id=100
-    ${passed}=    Wait Until Capture ${lab_capture} Settles    can_id=100
+    ${passed}=    Wait Until Capture ${lab_capture} Settles    can_id=100    quiet=1
     ${filtered}=    Frames With Id 200 Captured By ${lab_capture}
 
     Should Be Equal As Integers    ${passed}    ${FRAMES}
@@ -49,8 +49,8 @@ Routes Both Ways Join Two Buses Without A Loop
 
     Send ${FRAMES} Frames On ${LAN_SERVER} vcan0    can_id=123
     Send ${FRAMES} Frames On ${LOCAL_SERVER} vcan0    can_id=456
-    ${on_lab}=    Wait Until Capture ${lab_capture} Settles    can_id=123
-    ${on_truck}=    Wait Until Capture ${truck_capture} Settles    can_id=456
+    ${on_lab}=    Wait Until Capture ${lab_capture} Settles    can_id=123    quiet=1
+    ${on_truck}=    Wait Until Capture ${truck_capture} Settles    can_id=456    quiet=1
     ${truck_echoes}=    Frames With Id 123 Captured By ${truck_capture}
     ${lab_echoes}=    Frames With Id 456 Captured By ${lab_capture}
 
@@ -92,6 +92,6 @@ Deleting A Route Stops The Bridge
 
     Send ${FRAMES} Frames On ${LAN_SERVER} vcan0
     Wait Until Frames Captured By ${truck_capture} Reaches ${FRAMES}
-    ${delivered}=    Wait Until Capture ${lab_capture} Settles
+    ${delivered}=    Wait Until Capture ${lab_capture} Settles    quiet=1
 
     Should Be Equal As Integers    ${delivered}    0

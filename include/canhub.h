@@ -30,6 +30,8 @@ extern "C" {
 
 #define CANHUB_FRAME_FLAG_FD (1u << 0)
 #define CANHUB_FRAME_FLAG_BRS (1u << 1)
+/* Received only: the hub injected this frame along a bridge route or group. */
+#define CANHUB_FRAME_FLAG_BRIDGED (1u << 7)
 
 #define CANHUB_OPEN_FLAG_NO_ECHO (1u << 0)
 #define CANHUB_OPEN_FLAG_WRITE (1u << 1)
