@@ -14,13 +14,42 @@ require client certificates (mTLS).
 
 | Who verifies whom | Mechanism |
 |---|---|
-| agent → hub | pins the hub fingerprint per host:port on first contact (`known_hubs`); a changed hub fingerprint refuses the handshake |
-| client → hub | same TOFU pin store, written on first `tls://`/`quic://` dial |
+| agent → hub | pins the hub fingerprint on first contact (`known_hubs`); a changed hub fingerprint refuses the handshake; trusts one hub, so a new fingerprint under a new address is refused too; `--hub-fingerprint` replaces first contact |
+| client → hub | same TOFU pin store, written on first `tls://`/`quic://` dial; may pin several hubs; `--hub-fingerprint` as on the agent |
 | hub → agent | requires a client certificate; pins `agent_name → fingerprint` at first REGISTER (`hub.db`); a known name with a new fingerprint is rejected |
 | hub → client | requires a client certificate; the fingerprint is the ACL subject |
 
 One pin covers both `quic://` and `tls://` on the same host:port — the
 listeners share the certificate.
+
+## Pinning the hub
+
+TOFU is a convenience: the first connection is trusted blindly, and an
+attacker on the path at that moment becomes "the hub". The guarantee is to
+give the fingerprint up front:
+
+```sh
+can-hub --show-identity                                  # on the hub
+can-hub-agent --hub-fingerprint <hex> --connect quic://hub.example.com:7227 ...
+can-hub-client --hub-fingerprint <hex> --connect quic://hub.example.com:7227 list
+```
+
+With `--hub-fingerprint` the agent or client accepts that hub and no other and
+never reads or writes `known_hubs`. libcanhub (`hub_fingerprint`) and
+python-can-hub (`hub_fingerprint=`) take the same.
+
+Without it, `known_hubs` holds one line per hub, listing every address it was
+reached under:
+
+```
+hub.example.com:7227,203.0.113.5:7227 ab12cd34...
+```
+
+Addresses are compared lowercased and without a trailing dot. A hub that
+presents a pinned fingerprint under a new address is the same hub: the address
+is added to its line, and no new first contact happens. A new fingerprint
+under a new address is a new hub: the client pins it, while the agent, which
+serves one hub, refuses it once any hub is pinned.
 
 ## What the handshake negotiates
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include <picotls.h>
 
@@ -19,6 +20,7 @@ typedef struct {
     const char *key_path;
     const char *pin_store_path;
     const char *pin_key;
+    uint8_t pin_policy;
     const char *pinned_fingerprint;
 } TlsClientSecurityConfig;
 

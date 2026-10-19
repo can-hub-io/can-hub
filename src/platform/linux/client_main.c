@@ -91,6 +91,7 @@ static char identity_certificate_path[TLS_IDENTITY_PATH_MAX];
 static char identity_key_path[TLS_IDENTITY_PATH_MAX];
 static char known_hubs_path[KNOWN_HUBS_PATH_MAX];
 static char pin_key[PIN_KEY_MAX];
+static char hub_fingerprint[PIN_STORE_FINGERPRINT_HEX_SIZE];
 static char socketcand_bind_address[CONNECT_URL_HOST_MAX] = HUB_LOCAL_ADDRESS;
 static char socketcand_port_text[CONNECT_URL_PORT_TEXT_MAX] = SOCKETCAND_DEFAULT_PORT_TEXT;
 static bool beacon_enabled = true;
@@ -140,6 +141,7 @@ static void printListReply(const ListReplyMessage *reply);
 static void printFrame(const FrameMessage *frame);
 static uint32_t printedCanId(const FrameMessage *frame);
 static int32_t runEventLoop(void);
+static const char *pinnedHubFingerprint(void);
 
 int main(int argc, char **argv)
 {
@@ -208,7 +210,7 @@ int main(int argc, char **argv)
 static void printUsage(FILE *stream, const char *program)
 {
     fprintf(stream, "usage: %s [--connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>|unix://<path>]\n", program);
-    fprintf(stream, "       [--state-dir <path>] [--name <label>] list | dump [--no-echo] [--reliable] [--error-frames] <interface> [<id>[:<mask>] ...]\n");
+    fprintf(stream, "       [--state-dir <path>] [--hub-fingerprint <hex>] [--name <label>] list | dump [--no-echo] [--reliable] [--error-frames] <interface> [<id>[:<mask>] ...]\n");
     fprintf(stream, "       | send <interface> <frame>   (cansend syntax: 123#DEADBEEF, 123##1DEADBEEF, 123#R)\n");
     fprintf(stream, "       | socketcand [--listen [<bind-ip>:]<port>] [--no-beacon]\n");
     fprintf(stream, "                                           local socketcand server (default 127.0.0.1:" SOCKETCAND_DEFAULT_PORT_TEXT ")\n");
@@ -236,6 +238,10 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
             connect_url = argv[++i];
         } else if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
             state_directory_override = argv[++i];
+        } else if (strcmp(argv[i], "--hub-fingerprint") == 0 && i + 1 < argc) {
+            if (!PinStore_ParseFingerprint(argv[++i], hub_fingerprint)) {
+                return false;
+            }
         } else if (strcmp(argv[i], "--name") == 0 && i + 1 < argc) {
             client_name = argv[++i];
         } else if (strcmp(argv[i], "--log-level") == 0 && i + 1 < argc) {
@@ -424,7 +430,7 @@ static bool prepareSecurityMaterial(const char *host, const char *port_text)
     }
 
     snprintf(known_hubs_path, sizeof(known_hubs_path), "%s/%s", state_directory, KNOWN_HUBS_FILE);
-    snprintf(pin_key, sizeof(pin_key), "%s:%s", host, port_text);
+    PinStore_HubKey(host, port_text, pin_key, sizeof(pin_key));
 
     return true;
 }
@@ -459,7 +465,8 @@ static bool initTlsTransport(const char *host, const char *port_text, const Tran
     security_config.key_path = identity_key_path;
     security_config.pin_store_path = known_hubs_path;
     security_config.pin_key = pin_key;
-    security_config.pinned_fingerprint = NULL;
+    security_config.pin_policy = kPIN_POLICY_ANY_HUB;
+    security_config.pinned_fingerprint = pinnedHubFingerprint();
 
     return TlsClientTransport_Init(&tls_transport, host, port_text, events, &security_config);
 }
@@ -476,7 +483,8 @@ static bool initQuicTransport(const char *host, const char *port_text, const Tra
     security_config.key_path = identity_key_path;
     security_config.pin_store_path = known_hubs_path;
     security_config.pin_key = pin_key;
-    security_config.pinned_fingerprint = NULL;
+    security_config.pin_policy = kPIN_POLICY_ANY_HUB;
+    security_config.pinned_fingerprint = pinnedHubFingerprint();
 
     return QuicClientTransport_Init(&quic_transport, host, port_text, events, &security_config);
 }
@@ -1047,4 +1055,13 @@ static void dispatchAttachEvent(const struct epoll_event *event)
     if (tag == SC_TAG_HUB_STREAM) {
         handleHubStreamEvent(event);
     }
+}
+
+static const char *pinnedHubFingerprint(void)
+{
+    if (hub_fingerprint[0] == '\0') {
+        return NULL;
+    }
+
+    return hub_fingerprint;
 }

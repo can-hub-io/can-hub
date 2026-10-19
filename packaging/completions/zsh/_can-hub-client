@@ -40,6 +40,7 @@ _can-hub-client()
     flags=(
         '--connect[hub URL: quic/tls/tcp/unix]:url:'
         '--state-dir[identity and pin store directory]:dir:_files -/'
+        '--hub-fingerprint[trust this hub fingerprint only]:fingerprint:'
         '--no-echo[suppress own echo on dump]'
         '--no-beacon[disable socketcand beacon]'
         '--listen[socketcand bind address]:addr:'
@@ -48,7 +49,7 @@ _can-hub-client()
 
     for ((i = 2; i < CURRENT; i++)); do
         case ${words[i]} in
-            --connect | --state-dir | --listen) ((i++)) ;;
+            --connect | --state-dir | --hub-fingerprint | --listen) ((i++)) ;;
             -*) ;;
             *) verb=${words[i]}; verb_index=i; break ;;
         esac

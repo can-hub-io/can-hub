@@ -10,10 +10,10 @@ _can_hub_agent()
     local cur prev words cword
     _init_completion || return
 
-    local flags="--connect --name --state-dir --show-identity"
+    local flags="--connect --name --state-dir --hub-fingerprint --show-identity"
 
     case $prev in
-        --connect | --name | --state-dir)
+        --connect | --name | --state-dir | --hub-fingerprint)
             return
             ;;
     esac

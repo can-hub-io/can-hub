@@ -13,6 +13,7 @@ _can-hub-agent()
         '--connect[hub URL: quic/tls/tcp/unix]:url:'
         '--name[agent name advertised to the hub]:name:'
         '--state-dir[identity directory]:dir:_files -/'
+        '--hub-fingerprint[trust this hub fingerprint only]:fingerprint:'
         '--show-identity[print this agent TLS fingerprint]'
     )
 

@@ -5,7 +5,8 @@ inbound port on the device) and exports local SocketCAN interfaces.
 
 ```
 can-hub-agent --connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>
-              --name <agent-name> [--state-dir <path>] <can-if> [...]
+              --name <agent-name> [--state-dir <path>]
+              [--hub-fingerprint <hex>] <can-if> [...]
 can-hub-agent --show-identity [--state-dir <path>]
 ```
 
@@ -28,8 +29,18 @@ agent.
 
 On the encrypted transports the agent has a stable ED25519 identity
 (`agent.crt`/`agent.key` in the state dir), generated on first start. It
-pins the hub's fingerprint per host:port (`known_hubs`) on first contact and
-refuses a hub whose fingerprint changed.
+pins the hub's fingerprint on first contact (`known_hubs`) and refuses a hub
+whose fingerprint changed.
+
+An agent trusts **one hub**. Dialing that hub under another address (its IP
+instead of its name, a new DNS name) is accepted and the address is recorded
+on the same pin. A different fingerprint under a new address is refused once
+any hub is pinned: to move the agent to another hub, pass `--hub-fingerprint`
+or remove `known_hubs`.
+
+`--hub-fingerprint <hex>` (the hub's `can-hub --show-identity`) skips first
+contact altogether: the agent accepts that hub and no other, and `known_hubs`
+is not used. In the Debian package, put it in `AGENT_ARGS`.
 
 `--show-identity` prints the agent's fingerprint for the hub allowlist —
 public, safe to share; the private key never leaves the device. Use the same

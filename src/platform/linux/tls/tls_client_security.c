@@ -95,7 +95,8 @@ static bool attachVerifier(TlsClientSecurity *self, const TlsClientSecurityConfi
             &self->profile.context,
             TlsPeerCertificate_FromDataPointer,
             config->pin_store_path,
-            config->pin_key
+            config->pin_key,
+            config->pin_policy
         );
         return true;
     }

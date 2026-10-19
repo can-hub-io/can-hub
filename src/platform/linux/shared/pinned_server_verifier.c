@@ -18,6 +18,9 @@ static int verifyPinnedServer(
     size_t count
 );
 static bool fingerprintIsPinned(PinnedServerVerifier *self, const char *fingerprint);
+static bool fingerprintIsExpected(PinnedServerVerifier *self, const char *fingerprint);
+static bool fingerprintMatchesStore(PinnedServerVerifier *self, const char *fingerprint);
+static bool keyMayBePinned(PinnedServerVerifier *self, const char *fingerprint);
 
 /* ---------- public ---------- */
 
@@ -26,12 +29,14 @@ void PinnedServerVerifier_Attach(
     ptls_context_t *context,
     TlsPeerResolver resolve_peer,
     const char *pin_store_path,
-    const char *pin_key
+    const char *pin_key,
+    uint8_t policy
 )
 {
     memset(self, 0, sizeof(*self));
     snprintf(self->pin_store_path, sizeof(self->pin_store_path), "%s", pin_store_path);
     snprintf(self->pin_key, sizeof(self->pin_key), "%s", pin_key);
+    self->policy = policy;
     attachVerifier(self, context, resolve_peer);
 }
 
@@ -54,7 +59,7 @@ void PinnedServerVerifier_CommitPin(PinnedServerVerifier *self)
     }
 
     fprintf(stderr, "pinning hub %s fingerprint %s\n", self->pin_key, self->pending_fingerprint);
-    PinStore_Append(self->pin_store_path, self->pin_key, self->pending_fingerprint);
+    PinStore_Pin(self->pin_store_path, self->pin_key, self->pending_fingerprint);
     self->pending_fingerprint[0] = '\0';
 }
 
@@ -101,22 +106,59 @@ static int verifyPinnedServer(
 
 static bool fingerprintIsPinned(PinnedServerVerifier *self, const char *fingerprint)
 {
+    if (self->expected_fingerprint[0] != '\0') {
+        return fingerprintIsExpected(self, fingerprint);
+    }
+
+    return fingerprintMatchesStore(self, fingerprint);
+}
+
+static bool fingerprintIsExpected(PinnedServerVerifier *self, const char *fingerprint)
+{
+    if (strcmp(self->expected_fingerprint, fingerprint) != 0) {
+        fprintf(stderr, "hub fingerprint %s does not match the expected one, rejecting connection\n", fingerprint);
+        return false;
+    }
+
+    return true;
+}
+
+static bool fingerprintMatchesStore(PinnedServerVerifier *self, const char *fingerprint)
+{
     char pinned[PIN_STORE_FINGERPRINT_HEX_SIZE];
 
-    if (self->expected_fingerprint[0] != '\0') {
-        if (strcmp(self->expected_fingerprint, fingerprint) != 0) {
-            fprintf(stderr, "hub fingerprint %s does not match the expected one, rejecting connection\n", fingerprint);
+    if (PinStore_Lookup(self->pin_store_path, self->pin_key, pinned)) {
+        if (strcmp(pinned, fingerprint) != 0) {
+            fprintf(stderr, "hub %s fingerprint changed, rejecting connection\n", self->pin_key);
             return false;
         }
         return true;
     }
 
-    if (!PinStore_Lookup(self->pin_store_path, self->pin_key, pinned)) {
-        snprintf(self->pending_fingerprint, sizeof(self->pending_fingerprint), "%s", fingerprint);
+    if (!keyMayBePinned(self, fingerprint)) {
+        return false;
+    }
+
+    snprintf(self->pending_fingerprint, sizeof(self->pending_fingerprint), "%s", fingerprint);
+
+    return true;
+}
+
+static bool keyMayBePinned(PinnedServerVerifier *self, const char *fingerprint)
+{
+    if (PinStore_KnowsFingerprint(self->pin_store_path, fingerprint)) {
+        fprintf(stderr, "hub %s is a known hub under a new address\n", self->pin_key);
         return true;
     }
-    if (strcmp(pinned, fingerprint) != 0) {
-        fprintf(stderr, "hub %s fingerprint changed, rejecting connection\n", self->pin_key);
+    if (self->policy == kPIN_POLICY_ONE_HUB && !PinStore_IsEmpty(self->pin_store_path)) {
+        fprintf(
+            stderr,
+            "hub %s presents fingerprint %s, not the hub this agent trusts, rejecting connection"
+            " (pass --hub-fingerprint or remove %s to trust a new hub)\n",
+            self->pin_key,
+            fingerprint,
+            self->pin_store_path
+        );
         return false;
     }
 

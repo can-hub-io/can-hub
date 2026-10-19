@@ -17,6 +17,7 @@ extern "C" {
 #define STATE_DIRECTORY "/tmp/can_hub_test_tls"
 #define PIN_STORE_PATH STATE_DIRECTORY "/known_hubs"
 #define PIN_KEY "localhost:7227"
+#define OTHER_ADDRESS_KEY "127.0.0.1:7227"
 #define WRONG_FINGERPRINT "0000000000000000000000000000000000000000000000000000000000000000"
 #define PUMP_ROUNDS_MAX 64
 #define SHUTTLE_BUFFER_SIZE 32768
@@ -29,6 +30,9 @@ static char hub_certificate[TLS_IDENTITY_PATH_MAX];
 static char hub_key[TLS_IDENTITY_PATH_MAX];
 static char client_certificate[TLS_IDENTITY_PATH_MAX];
 static char client_key[TLS_IDENTITY_PATH_MAX];
+static char hub_fingerprint[TLS_IDENTITY_FINGERPRINT_HEX_SIZE];
+static uint8_t pin_policy;
+static const char *expected_fingerprint;
 
 static bool startChannelPair(void);
 static bool pumpUntilEstablished(bool *client_failed);
@@ -46,7 +50,10 @@ describe("tls_channel", []() {
         mkdir(STATE_DIRECTORY, 0755);
         TlsIdentity_LoadOrCreate(STATE_DIRECTORY, "hub", hub_certificate, hub_key);
         TlsIdentity_LoadOrCreate(STATE_DIRECTORY, "client", client_certificate, client_key);
+        TlsIdentity_FingerprintOfFile(hub_certificate, hub_fingerprint);
         std::remove(PIN_STORE_PATH);
+        pin_policy = kPIN_POLICY_ANY_HUB;
+        expected_fingerprint = NULL;
     });
 
     afterEach([]() {
@@ -161,7 +168,86 @@ describe("tls_channel", []() {
     it("rejects the handshake when the pinned fingerprint differs", []() {
         bool client_failed = false;
 
-        PinStore_Append(PIN_STORE_PATH, PIN_KEY, WRONG_FINGERPRINT);
+        PinStore_Pin(PIN_STORE_PATH, PIN_KEY, WRONG_FINGERPRINT);
+        startChannelPair();
+
+        pumpUntilEstablished(&client_failed);
+
+        expect(client_failed).toBe(true);
+        expect(TlsChannel_IsEstablished(&client_channel)).toBe(false);
+    });
+
+    it("accepts a pinned hub under a new address and records the address", []() {
+        char pinned_under_new_address[PIN_STORE_FINGERPRINT_HEX_SIZE];
+        char pinned_under_old_address[PIN_STORE_FINGERPRINT_HEX_SIZE];
+        bool client_failed = false;
+
+        PinStore_Pin(PIN_STORE_PATH, OTHER_ADDRESS_KEY, hub_fingerprint);
+        pin_policy = kPIN_POLICY_ONE_HUB;
+        startChannelPair();
+
+        pumpUntilEstablished(&client_failed);
+        TlsClientSecurity_CommitPin(&client_security);
+        PinStore_Lookup(PIN_STORE_PATH, PIN_KEY, pinned_under_new_address);
+        PinStore_Lookup(PIN_STORE_PATH, OTHER_ADDRESS_KEY, pinned_under_old_address);
+
+        expect(TlsChannel_IsEstablished(&client_channel)).toBe(true);
+        expect((const char *)pinned_under_new_address).toBe((const char *)hub_fingerprint);
+        expect((const char *)pinned_under_old_address).toBe((const char *)hub_fingerprint);
+    });
+
+    it("refuses a new hub under a new address when the agent trusts one hub", []() {
+        bool client_failed = false;
+
+        PinStore_Pin(PIN_STORE_PATH, OTHER_ADDRESS_KEY, WRONG_FINGERPRINT);
+        pin_policy = kPIN_POLICY_ONE_HUB;
+        startChannelPair();
+
+        pumpUntilEstablished(&client_failed);
+
+        expect(client_failed).toBe(true);
+        expect(TlsChannel_IsEstablished(&client_channel)).toBe(false);
+    });
+
+    it("pins a new hub under a new address when any hub may be trusted", []() {
+        bool client_failed = false;
+
+        PinStore_Pin(PIN_STORE_PATH, OTHER_ADDRESS_KEY, WRONG_FINGERPRINT);
+        startChannelPair();
+
+        pumpUntilEstablished(&client_failed);
+
+        expect(TlsChannel_IsEstablished(&client_channel)).toBe(true);
+    });
+
+    it("pins the first hub when the agent trusts one hub", []() {
+        bool client_failed = false;
+
+        pin_policy = kPIN_POLICY_ONE_HUB;
+        startChannelPair();
+
+        pumpUntilEstablished(&client_failed);
+
+        expect(TlsChannel_IsEstablished(&client_channel)).toBe(true);
+    });
+
+    it("accepts the expected fingerprint without writing a pin", []() {
+        bool client_failed = false;
+
+        expected_fingerprint = hub_fingerprint;
+        startChannelPair();
+
+        pumpUntilEstablished(&client_failed);
+        TlsClientSecurity_CommitPin(&client_security);
+
+        expect(TlsChannel_IsEstablished(&client_channel)).toBe(true);
+        expect(PinStore_IsEmpty(PIN_STORE_PATH)).toBe(true);
+    });
+
+    it("rejects a hub whose fingerprint is not the expected one", []() {
+        bool client_failed = false;
+
+        expected_fingerprint = WRONG_FINGERPRINT;
         startChannelPair();
 
         pumpUntilEstablished(&client_failed);
@@ -184,6 +270,8 @@ static bool startChannelPair(void)
     config.key_path = client_key;
     config.pin_store_path = PIN_STORE_PATH;
     config.pin_key = PIN_KEY;
+    config.pin_policy = pin_policy;
+    config.pinned_fingerprint = expected_fingerprint;
 
     if (!TlsServerSecurity_Init(&server_security, hub_certificate, hub_key)) {
         return false;
