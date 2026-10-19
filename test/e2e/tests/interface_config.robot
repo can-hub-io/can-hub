@@ -27,8 +27,8 @@ One Set Changes The TX Queue And Takes The Link Down
     ${hub}=    Start CAN HUB With Agent bench On ${LOCAL_SERVER}
 
     Run CLI On Hub ${hub}    interface    set    bench/vcan0    txqueuelen    1000    down
-
     ${queue}=    TX Queue Length Of vcan0 On ${LOCAL_SERVER}
+
     Should Be Equal As Integers    ${queue}    1000
     Link vcan0 On ${LOCAL_SERVER} Should Be Down
 
@@ -71,9 +71,9 @@ A Client With An Admin Grant Configures The Bus
     Run CLI On Hub ${hub}    acl    add    ${fingerprint}    bench/vcan0    rwa
 
     ${configured}=    Configure bench/vcan0 From A Client On ${LOCAL_SERVER}    ${TLS}    ${state}    txqueuelen    700
+    ${queue}=    TX Queue Length Of vcan0 On ${LOCAL_SERVER}
 
     Should Be True    ${configured.ok}
-    ${queue}=    TX Queue Length Of vcan0 On ${LOCAL_SERVER}
     Should Be Equal As Integers    ${queue}    700
 
 A Client That May Only Write Cannot Configure
