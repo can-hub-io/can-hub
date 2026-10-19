@@ -33,7 +33,8 @@ export function BridgeGroups({ interfaces }: { interfaces: Interface[] | null })
       {action.error && <p className="text-sm text-red-600">{action.error}</p>}
       <p className="text-sm text-gray-600">
         The buses of a group behave as one: a frame captured on any member is injected into every other member, never
-        back into the one it came from. Saving an existing group replaces its ids and keeps its members.
+        back into the one it came from. Saving an existing group replaces its ids and keeps its members. Clients
+        also open a group as the interface group/&lt;name&gt; to read every member and write into all of them.
       </p>
       <form className="flex flex-wrap items-center gap-2" onSubmit={create}>
         <Input className="w-48" placeholder="group name" value={name} onChange={(e) => setName(e.target.value)} />

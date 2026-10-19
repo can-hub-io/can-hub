@@ -110,7 +110,7 @@ A Group Applies Again After A Hub Restart
     Run CLI On Hub ${hub}    group    join    fleet    truck/vcan0
     Run CLI On Hub ${hub}    group    join    fleet    lab/vcan0
     ${restarted}=    Restart ${hub}
-    Wait Until Hub ${restarted} Exports 2 Interfaces
+    Wait Until Hub ${restarted} Exports 3 Interfaces
     ${lab_capture}=    Start Candump On ${LOCAL_SERVER}    vcan0
 
     Send ${FRAMES} Frames On ${LAN_SERVER} vcan0

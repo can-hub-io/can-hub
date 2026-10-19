@@ -72,7 +72,7 @@ fn bridge_failure(status: u8) -> (StatusCode, String) {
 
 fn group_failure(status: u8) -> (StatusCode, String) {
     let (code, reason) = match status {
-        BRIDGE_STATUS_INVALID => (StatusCode::BAD_REQUEST, "a group name is 1-31 of A-Z a-z 0-9 . _ -"),
+        BRIDGE_STATUS_INVALID => (StatusCode::BAD_REQUEST, "a group name is 1-15 of A-Z a-z 0-9 . _ -"),
         BRIDGE_STATUS_FULL => (StatusCode::CONFLICT, "the hub holds no more groups, or the group already has 16 members"),
         BRIDGE_STATUS_UNKNOWN => (StatusCode::NOT_FOUND, "no such group or member"),
         _ => (StatusCode::INTERNAL_SERVER_ERROR, "could not store the group"),

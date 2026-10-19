@@ -1370,7 +1370,7 @@ static const char *groupStatusText(uint8_t status)
 {
     switch (status) {
         case ADMIN_BRIDGE_STATUS_INVALID:
-            return "a group name is 1-31 of A-Z a-z 0-9 . _ -";
+            return "a group name is 1-15 of A-Z a-z 0-9 . _ -";
         case ADMIN_BRIDGE_STATUS_FULL:
             return "the hub holds no more groups, or the group already has 16 members";
         case ADMIN_BRIDGE_STATUS_UNKNOWN:

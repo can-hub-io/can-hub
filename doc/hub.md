@@ -134,7 +134,14 @@ fleet  forwarded 2210  dropped 0  ids 7DF 7E0:7F0
   is one line per bus. A frame from truck42 reaches lab directly, not
   through another member: one hop, as for routes.
 - A bus reached by several routes and groups is injected once.
-- Up to 16 groups of up to 16 members; names are 1-31 of
+- A group is also an interface, `group/<name>`, listed with the others:
+  clients open it like any bus. They see what every member captures (not
+  what the hub injected), and what they write is injected into every
+  member. One attach mirrors a whole group into a local vcan:
+  `can-hub-client attach group/fleet fleet0`. Client ACLs apply to
+  `group/<name>`; it cannot be opened reliable, configured, or used as a
+  route end or a member. The agent name `group` is reserved.
+- Up to 16 groups of up to 16 members; names are 1-15 of
   `A-Z a-z 0-9 . _ -`. Members may be offline and apply when they connect.
   Groups live in `hub.db` with the routes.
 

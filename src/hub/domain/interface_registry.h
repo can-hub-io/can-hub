@@ -8,12 +8,15 @@
 #include "protocol/register_message.h"
 
 #define INTERFACE_REGISTRY_MAX 256
+#define INTERFACE_REGISTRY_HUB_PEER 0
 
 /*
  * Catalogue of every interface exported by the live agents. Global
  * interface ids are hub-assigned and never reused within a run. The
  * (agent name, interface name) pair is unique across live registrations;
- * a colliding registration is rejected whole.
+ * a colliding registration is rejected whole. A virtual entry is an
+ * interface the hub itself serves (a bridge group): it belongs to no agent,
+ * its agent peer id is INTERFACE_REGISTRY_HUB_PEER, which no peer ever has.
  */
 typedef struct {
     bool in_use;
@@ -41,6 +44,13 @@ bool InterfaceRegistry_RegisterAgent(
     RegisterAckMessage *ack
 );
 void InterfaceRegistry_RemovePeer(InterfaceRegistry *self, uint32_t agent_peer_id);
+const InterfaceEntry *InterfaceRegistry_AddVirtual(
+    InterfaceRegistry *self,
+    const char *agent_name,
+    const char *interface_name
+);
+void InterfaceRegistry_RemoveVirtual(InterfaceRegistry *self, uint32_t interface_id);
+bool InterfaceEntry_IsVirtual(const InterfaceEntry *entry);
 bool InterfaceRegistry_CollidingPeer(
     const InterfaceRegistry *self,
     const RegisterMessage *registration,

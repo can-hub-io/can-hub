@@ -7,15 +7,17 @@
 
 #define BRIDGE_GROUPS_MAX 16
 #define BRIDGE_GROUP_MEMBERS_MAX 16
-#define BRIDGE_GROUP_NAME_SIZE 32
+#define BRIDGE_GROUP_NAME_SIZE REGISTER_INTERFACE_NAME_SIZE
+#define BRIDGE_GROUP_AGENT_NAME "group"
 
 /*
  * Bridge groups: buses that behave as one. A frame captured on a member that
  * passes the group filters is injected into every other member, never back
  * into the one it came from. Members are named interfaces, like route
  * endpoints, so a group outlives the agents that serve it. Setting a group
- * again replaces its filters and keeps its members. A name is 1-31 of
- * [A-Za-z0-9._-].
+ * again replaces its filters and keeps its members. A name is 1-15 of
+ * [A-Za-z0-9._-], so that the group is also an interface clients open as
+ * group/<name> under the reserved agent name "group".
  */
 typedef enum tbridge_group_join_e {
     kBRIDGE_GROUP_JOIN_OK = 0,
