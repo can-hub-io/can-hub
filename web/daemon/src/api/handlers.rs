@@ -15,7 +15,9 @@ use tokio::sync::broadcast;
 use crate::auth::password::verify_password;
 use crate::auth::store::Credential;
 use crate::auth::Permission;
-use crate::protocol::admin::{AclLevel, IfconfigOp};
+use crate::protocol::admin::{
+    AclLevel, ConfigureOp, ConfigureReply, InterfaceSettings, CONFIGURE_STATUS_OK, SETTING_BITRATE,
+};
 use crate::telemetry::TelemetryFrame;
 
 use super::dtos::*;
@@ -111,25 +113,44 @@ pub(crate) async fn acl_revoke(State(state): State<AppState>, Json(body): Json<A
 /// wedge the interface, and 0 would silently mean "leave it unset".
 const MAX_CLASSIC_CAN_BITRATE: u32 = 1_000_000;
 
-fn checked_bitrate(op: IfconfigOp, bitrate: u32) -> Result<u32, ApiError> {
-    if op == IfconfigOp::SetBitrate && (bitrate == 0 || bitrate > MAX_CLASSIC_CAN_BITRATE) {
+fn checked_settings(settings: InterfaceSettings) -> Result<InterfaceSettings, ApiError> {
+    let bitrate = settings.bitrate;
+    if settings.fields & SETTING_BITRATE != 0 && (bitrate == 0 || bitrate > MAX_CLASSIC_CAN_BITRATE) {
         return Err(ApiError::BadRequest(format!("bitrate must be 1..={MAX_CLASSIC_CAN_BITRATE}, got {bitrate}")));
     }
-    Ok(bitrate)
+    Ok(settings)
 }
 
 pub(crate) async fn interface_config(
     State(state): State<AppState>,
     Json(body): Json<InterfaceConfigBody>,
-) -> ActionResponse {
-    let op = parse_ifconfig_op(&body.op)?;
-    let bitrate = checked_bitrate(op, body.bitrate)?;
-    action(
+) -> Result<Json<InterfaceSettingsDto>, ApiError> {
+    let settings = checked_settings(body.settings.to_settings().map_err(ApiError::BadRequest)?)?;
+    configured(
         with_admin(&state, move |client| {
-            client.ifconfig(&body.agent_name, &body.interface_name, op, bitrate)
+            client.configure(&body.agent_name, &body.interface_name, ConfigureOp::Apply, &settings)
         })
         .await?,
     )
+}
+
+pub(crate) async fn interface_settings(
+    State(state): State<AppState>,
+    Path((agent_name, interface_name)): Path<(String, String)>,
+) -> Result<Json<InterfaceSettingsDto>, ApiError> {
+    configured(
+        with_admin(&state, move |client| {
+            client.configure(&agent_name, &interface_name, ConfigureOp::Query, &InterfaceSettings::default())
+        })
+        .await?,
+    )
+}
+
+fn configured(reply: ConfigureReply) -> Result<Json<InterfaceSettingsDto>, ApiError> {
+    if reply.status != CONFIGURE_STATUS_OK {
+        return Err(ApiError::Configure { status: reply.status, detail: reply.detail });
+    }
+    Ok(Json(InterfaceSettingsDto::from(reply.settings)))
 }
 
 pub(crate) type ActionResponse = Result<Json<ActionResult>, ApiError>;
@@ -155,18 +176,10 @@ fn parse_peer_id(raw: &str) -> Result<u32, ApiError> {
 fn parse_level(raw: &str) -> Result<AclLevel, ApiError> {
     match raw {
         "none" => Ok(AclLevel::None),
-        "ro" => Ok(AclLevel::ReadOnly),
+        "r" => Ok(AclLevel::Read),
         "rw" => Ok(AclLevel::ReadWrite),
-        other => Err(ApiError::BadRequest(format!("invalid level: {other} (none|ro|rw)"))),
-    }
-}
-
-fn parse_ifconfig_op(raw: &str) -> Result<IfconfigOp, ApiError> {
-    match raw {
-        "bitrate" => Ok(IfconfigOp::SetBitrate),
-        "up" => Ok(IfconfigOp::LinkUp),
-        "down" => Ok(IfconfigOp::LinkDown),
-        other => Err(ApiError::BadRequest(format!("invalid op: {other} (bitrate|up|down)"))),
+        "rwa" => Ok(AclLevel::ReadWriteAdmin),
+        other => Err(ApiError::BadRequest(format!("invalid level: {other} (none|r|rw|rwa)"))),
     }
 }
 
@@ -502,12 +515,51 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bitrate_zero_or_huge_rejected_only_for_set_bitrate() {
-        assert!(checked_bitrate(IfconfigOp::SetBitrate, 0).is_err());
-        assert!(checked_bitrate(IfconfigOp::SetBitrate, 2_000_000).is_err());
-        assert!(checked_bitrate(IfconfigOp::SetBitrate, 250_000).is_ok());
-        // bitrate is ignored for link up/down, so 0 is fine there.
-        assert!(checked_bitrate(IfconfigOp::LinkUp, 0).is_ok());
-        assert!(checked_bitrate(IfconfigOp::LinkDown, 0).is_ok());
+    fn bitrate_zero_or_huge_rejected_only_when_set() {
+        let with_bitrate = |bitrate| InterfaceSettings { fields: SETTING_BITRATE, bitrate, ..Default::default() };
+
+        assert!(checked_settings(with_bitrate(0)).is_err());
+        assert!(checked_settings(with_bitrate(2_000_000)).is_err());
+        assert!(checked_settings(with_bitrate(250_000)).is_ok());
+        assert!(checked_settings(InterfaceSettings { fields: crate::protocol::admin::SETTING_LINK, ..Default::default() }).is_ok());
+    }
+
+    #[test]
+    fn settings_body_names_only_the_fields_it_carries() {
+        let body: InterfaceSettingsBody =
+            serde_json::from_str(r#"{"bitrate":500000,"samplePoint":0.875,"modes":{"fd":true,"listenOnly":false}}"#).unwrap();
+
+        let settings = body.to_settings().unwrap();
+
+        assert_eq!(settings.bitrate, 500_000);
+        assert_eq!(settings.sample_point, 875);
+        assert_eq!(settings.ctrlmode_mask, crate::protocol::admin::CTRLMODE_FD | crate::protocol::admin::CTRLMODE_LISTEN_ONLY);
+        assert_eq!(settings.ctrlmode_flags, crate::protocol::admin::CTRLMODE_FD);
+    }
+
+    #[test]
+    fn settings_body_rejects_an_unknown_mode_and_an_empty_request() {
+        let unknown: InterfaceSettingsBody = serde_json::from_str(r#"{"modes":{"termination":true}}"#).unwrap();
+        let empty = InterfaceSettingsBody::default();
+
+        assert!(unknown.to_settings().is_err());
+        assert!(empty.to_settings().is_err());
+    }
+
+    #[test]
+    fn settings_dto_reports_only_what_the_device_reports() {
+        let reported = InterfaceSettings {
+            fields: crate::protocol::admin::SETTING_LINK | crate::protocol::admin::SETTING_TXQUEUELEN,
+            link_up: true,
+            txqueuelen: 10,
+            ..Default::default()
+        };
+
+        let dto = InterfaceSettingsDto::from(reported);
+
+        assert_eq!(dto.up, Some(true));
+        assert_eq!(dto.txqueuelen, Some(10));
+        assert_eq!(dto.bitrate, None);
+        assert!(dto.modes.is_empty());
     }
 }

@@ -52,6 +52,14 @@ Python Can Discovery Finds The Hub Interfaces From The Environment
     Should Be True    ${result.ok}
     Should Contain    ${result.stdout}    canhub truck42/vcan0
 
+Python Bus Configures Its Interface
+    ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${CONNECT}    truck42/vcan0    configure    txqueuelen=600
+
+    Should Be True    ${result.ok}
+    Should Contain    ${result.stdout}    txqueuelen=600
+    ${queue}=    TX Queue Length Of vcan0 On ${LOCAL_SERVER}
+    Should Be Equal As Integers    ${queue}    600
+
 Python Bus Refuses Unknown Interfaces
     ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${CONNECT}    truck42/nope    dump
     Should Not Be True    ${result.ok}

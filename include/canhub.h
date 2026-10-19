@@ -50,6 +50,33 @@ extern "C" {
 #define CANHUB_ERR_HUB (-10)
 #define CANHUB_ERR_RELIABLE_UNSUPPORTED (-11)
 #define CANHUB_ERR_RATE_LIMITED (-12)
+#define CANHUB_ERR_CONFIGURE_DENIED (-13)
+#define CANHUB_ERR_APPLY_FAILED (-14)
+#define CANHUB_ERR_AGENT_UNREACHABLE (-15)
+
+#define CANHUB_SETTING_BITRATE (1u << 0)
+#define CANHUB_SETTING_SAMPLE_POINT (1u << 1)
+#define CANHUB_SETTING_DATA_BITRATE (1u << 2)
+#define CANHUB_SETTING_DATA_SAMPLE_POINT (1u << 3)
+#define CANHUB_SETTING_CTRLMODE (1u << 4)
+#define CANHUB_SETTING_RESTART_MS (1u << 5)
+#define CANHUB_SETTING_TXQUEUELEN (1u << 6)
+#define CANHUB_SETTING_LINK (1u << 7)
+#define CANHUB_SETTING_STATE (1u << 8)
+
+#define CANHUB_CTRLMODE_LOOPBACK (1u << 0)
+#define CANHUB_CTRLMODE_LISTEN_ONLY (1u << 1)
+#define CANHUB_CTRLMODE_TRIPLE_SAMPLING (1u << 2)
+#define CANHUB_CTRLMODE_ONE_SHOT (1u << 3)
+#define CANHUB_CTRLMODE_BERR_REPORTING (1u << 4)
+#define CANHUB_CTRLMODE_FD (1u << 5)
+
+#define CANHUB_STATE_ERROR_ACTIVE 0
+#define CANHUB_STATE_ERROR_WARNING 1
+#define CANHUB_STATE_ERROR_PASSIVE 2
+#define CANHUB_STATE_BUS_OFF 3
+#define CANHUB_STATE_STOPPED 4
+#define CANHUB_STATE_SLEEPING 5
 
 typedef struct CanHubSession CanHubSession;
 
@@ -89,6 +116,29 @@ typedef struct {
     int32_t connect_timeout_ms;
 } CanHubConnectConfig;
 
+/*
+ * The settings of one CAN interface. fields names the members that carry a
+ * value (CANHUB_SETTING_*): in a request, what to change, all applied in one
+ * step; in a reply, what the device reports. Sample points are in tenths of a
+ * percent (875 = 87.5%). ctrlmode_mask names the CANHUB_CTRLMODE_* modes to
+ * change and ctrlmode_flags their new values. can_state is only reported.
+ */
+typedef struct {
+    uint32_t struct_size;
+    uint32_t fields;
+    uint32_t bitrate;
+    uint32_t data_bitrate;
+    uint16_t sample_point;
+    uint16_t data_sample_point;
+    uint32_t ctrlmode_mask;
+    uint32_t ctrlmode_flags;
+    uint32_t restart_ms;
+    uint32_t txqueuelen;
+    uint8_t link_up;
+    uint8_t can_state;
+    uint8_t reserved[2];
+} CanHubInterfaceSettings;
+
 CANHUB_API uint32_t canhub_api_version(void);
 
 CANHUB_API CanHubSession *canhub_connect(const CanHubConnectConfig *config);
@@ -106,6 +156,26 @@ CANHUB_API int32_t canhub_set_filters(CanHubSession *session, const CanHubFilter
 CANHUB_API int32_t canhub_recv(CanHubSession *session, CanHubFrame *frame, int32_t timeout_ms);
 CANHUB_API int32_t canhub_send(CanHubSession *session, const CanHubFrame *frame);
 CANHUB_API int32_t canhub_stats(CanHubSession *session, CanHubStats *stats);
+
+/*
+ * Reconfigure the interface named agent/iface (the hub needs an rwa grant for
+ * this client) and read back the settings the device holds afterwards into
+ * effective, which may be NULL. canhub_query only reads them. Both work with
+ * or without an open interface. On failure canhub_last_error carries why.
+ */
+CANHUB_API int32_t canhub_configure(
+    CanHubSession *session,
+    const char *interface_name,
+    const CanHubInterfaceSettings *requested,
+    CanHubInterfaceSettings *effective,
+    int32_t timeout_ms
+);
+CANHUB_API int32_t canhub_query(
+    CanHubSession *session,
+    const char *interface_name,
+    CanHubInterfaceSettings *effective,
+    int32_t timeout_ms
+);
 
 #ifdef __cplusplus
 }

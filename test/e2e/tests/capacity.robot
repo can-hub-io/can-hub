@@ -10,11 +10,7 @@ Test Teardown     Reset Bench    ${BENCH}
 
 *** Test Cases ***
 A Hundred Clients Each Get The Bus Traffic
-    Create VCAN On ${LOCAL_SERVER}    vcan0
-    ${hub}=    Start CAN HUB On ${LOCAL_SERVER}
-    ${agent_cfg}=    Agent Configuration    quic://local:7227    crowd    vcan0
-    ${agent}=    Start CAN Agent On ${LOCAL_SERVER} With ${agent_cfg}
-    Wait Until Agent ${agent} Registered On ${hub}    8
+    ${hub}=    Start CAN HUB With Agent crowd On ${LOCAL_SERVER}
     ${clients}=    Dump crowd/vcan0 From 100 Clients On ${hub}
 
     Inject CAN Frame On ${LOCAL_SERVER}    vcan0    123#C0FFEE

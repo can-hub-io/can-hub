@@ -9,7 +9,8 @@
 use std::io::{self, Read, Write};
 
 use crate::protocol::admin::{
-    self, AclEntry, AclLevel, AgentEntry, ClientEntry, IfconfigOp, InterfaceEntry, Page, PeerEntry,
+    self, AclEntry, AclLevel, AgentEntry, ClientEntry, ConfigureOp, ConfigureReply, InterfaceEntry,
+    InterfaceSettings, Page, PeerEntry,
     PinEntry, RejectedEntry, Status,
 };
 use crate::protocol::{DecodeError, Header, MessageType, Role, HEADER_SIZE};
@@ -142,15 +143,15 @@ impl<T: Read + Write> AdminClient<T> {
         Ok(admin::decode_status_byte(&reply, MessageType::AdminAclRevokeReply)?)
     }
 
-    pub fn ifconfig(
+    pub fn configure(
         &mut self,
         agent_name: &str,
         interface_name: &str,
-        op: IfconfigOp,
-        bitrate: u32,
-    ) -> Result<u8> {
-        let reply = self.exchange(&admin::encode_ifconfig(agent_name, interface_name, op, bitrate))?;
-        Ok(admin::decode_status_byte(&reply, MessageType::AdminIfconfigReply)?)
+        op: ConfigureOp,
+        settings: &InterfaceSettings,
+    ) -> Result<ConfigureReply> {
+        let reply = self.exchange(&admin::encode_configure(agent_name, interface_name, op, settings))?;
+        Ok(admin::decode_configure_reply(&reply)?)
     }
 
     /// Send a pre-encoded request and read one framed reply.
@@ -344,16 +345,22 @@ mod tests {
         assert_eq!(request[0], MessageType::AdminAclSet as u8);
         assert_eq!(request[213], 1); // can_read
         assert_eq!(request[214], 1); // can_write
+        assert_eq!(request[215], 0); // can_admin
     }
 
     #[test]
-    fn ifconfig_sends_op_and_bitrate() {
-        let transport = MockTransport::with_replies(&[status_byte_reply(MessageType::AdminIfconfigReply, 0)]);
+    fn configure_sends_the_query_and_returns_the_reply() {
+        let mut reply = vec![0u8; 112];
+        Header::write(&mut reply, MessageType::ConfigureReply, 0, 108);
+        let transport = MockTransport::with_replies(&[reply]);
         let mut client = AdminClient::connect(transport).unwrap();
-        assert_eq!(client.ifconfig("truck42", "can0", IfconfigOp::SetBitrate, 250_000).unwrap(), 0);
-        let request = &client.transport.outbound[76..76 + 156];
-        assert_eq!(request[0], MessageType::AdminIfconfig as u8);
-        assert_eq!(request[148], IfconfigOp::SetBitrate as u8);
+
+        let answered = client.configure("truck42", "can0", ConfigureOp::Query, &InterfaceSettings::default()).unwrap();
+
+        let request = &client.transport.outbound[76..76 + 192];
+        assert_eq!(request[0], MessageType::Configure as u8);
+        assert_eq!(request[148], ConfigureOp::Query as u8);
+        assert_eq!(answered.status, 0);
     }
 
     #[test]

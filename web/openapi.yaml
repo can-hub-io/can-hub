@@ -284,23 +284,50 @@ paths:
         '409': { $ref: '#/components/responses/HubRejected' }
         '502': { $ref: '#/components/responses/HubUnreachable' }
 
+  /api/interfaces/{agent}/{interface}/settings:
+    get:
+      tags: [views]
+      summary: The settings an interface holds now, read from its agent
+      description: 'Permission: views.read'
+      parameters:
+        - { name: agent, in: path, required: true, schema: { type: string } }
+        - { name: interface, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Settings the device reports
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InterfaceSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/HubUnreachable' }
+
   /api/interfaces/config:
     post:
       tags: [actions]
-      summary: Reconfigure an interface (bitrate / link up / link down)
+      summary: Reconfigure an interface, every given setting in one step
       description: >
-        Permission: interfaces.config. For op=bitrate, bitrate must be
-        1..=1000000 (classic CAN); 0 or out of range is rejected with 400.
+        Permission: interfaces.config. Only the settings present change. A
+        bitrate must be 1..=1000000 (classic CAN nominal rate); 0 or out of
+        range is rejected with 400. Bit timing, modes and restart-ms take the
+        bus down while they are applied. A refusal from the agent comes back
+        as 409 with the kernel's reason in the error text.
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/InterfaceConfigBody' }
       responses:
-        '200': { $ref: '#/components/responses/Action' }
+        '200':
+          description: Settings the device holds afterwards
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InterfaceSettings' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/HubRejected' }
         '502': { $ref: '#/components/responses/HubUnreachable' }
 
@@ -689,6 +716,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorBody' }
+    NotFound:
+      description: The hub knows no such interface
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
     HubUnreachable:
       description: The hub admin socket is unreachable or timed out
       content:
@@ -708,11 +740,53 @@ components:
 
     AclLevel:
       type: string
-      enum: [none, ro, rw]
+      description: rwa adds configuring the interface to read and write.
+      enum: [none, r, rw, rwa]
 
-    IfconfigOp:
-      type: string
-      enum: [bitrate, up, down]
+    CanModes:
+      type: object
+      description: Control modes by name; in a change, only the modes to set.
+      properties:
+        fd: { type: boolean }
+        listenOnly: { type: boolean }
+        loopback: { type: boolean }
+        oneShot: { type: boolean }
+        tripleSampling: { type: boolean }
+        berrReporting: { type: boolean }
+      additionalProperties: false
+
+    InterfaceSettings:
+      type: object
+      description: >
+        What the device reports. A key is absent when the device reports
+        nothing for it (a vcan has no bit timing). Sample points are fractions.
+      required: [modes]
+      properties:
+        up: { type: boolean }
+        state:
+          type: string
+          enum: [error-active, error-warning, error-passive, bus-off, stopped, sleeping, unknown]
+        bitrate: { type: integer, format: uint32 }
+        samplePoint: { type: number, exclusiveMinimum: 0, exclusiveMaximum: 1 }
+        dataBitrate: { type: integer, format: uint32 }
+        dataSamplePoint: { type: number, exclusiveMinimum: 0, exclusiveMaximum: 1 }
+        restartMs: { type: integer, format: uint32 }
+        txqueuelen: { type: integer, format: uint32 }
+        modes: { $ref: '#/components/schemas/CanModes' }
+
+    InterfaceSettingsChange:
+      type: object
+      description: What to change; at least one key. Absent keys are left as they are.
+      additionalProperties: false
+      properties:
+        up: { type: boolean }
+        bitrate: { type: integer, format: uint32, minimum: 1, maximum: 1000000 }
+        samplePoint: { type: number, exclusiveMinimum: 0, exclusiveMaximum: 1 }
+        dataBitrate: { type: integer, format: uint32 }
+        dataSamplePoint: { type: number, exclusiveMinimum: 0, exclusiveMaximum: 1 }
+        restartMs: { type: integer, format: uint32 }
+        txqueuelen: { type: integer, format: uint32 }
+        modes: { $ref: '#/components/schemas/CanModes' }
 
     ActionResult:
       type: object
@@ -891,17 +965,11 @@ components:
 
     InterfaceConfigBody:
       type: object
-      required: [agentName, interfaceName, op]
+      required: [agentName, interfaceName, settings]
       properties:
         agentName: { type: string }
         interfaceName: { type: string }
-        op: { $ref: '#/components/schemas/IfconfigOp' }
-        bitrate:
-          type: integer
-          format: uint32
-          description: Required for op=bitrate; 1..=1000000 (classic CAN).
-          minimum: 1
-          maximum: 1000000
+        settings: { $ref: '#/components/schemas/InterfaceSettingsChange' }
 
     CreateUserBody:
       type: object

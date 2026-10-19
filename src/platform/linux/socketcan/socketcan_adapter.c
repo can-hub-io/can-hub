@@ -3,8 +3,6 @@
 #include "platform/linux/clock/clock.h"
 #include "platform/linux/socketcan/can_netlink.h"
 
-#include "protocol/ifconfig_message.h"
-
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -19,7 +17,8 @@
 #define RECEIVE_BUFFER_BYTES (1024 * 1024)
 
 static bool portWriteFrame(void *context, uint8_t interface_index, const FrameMessage *frame);
-static bool portConfigure(void *context, uint8_t interface_index, uint8_t op, uint32_t bitrate);
+static bool portConfigure(void *context, uint8_t interface_index, const InterfaceSettings *requested, char *detail);
+static bool portQuery(void *context, uint8_t interface_index, InterfaceSettings *effective);
 static uint32_t portBitrate(void *context, uint8_t interface_index);
 static bool writeClassicFrame(int32_t can_fd, const FrameMessage *frame);
 static bool writeFdFrame(int32_t can_fd, const FrameMessage *frame);
@@ -37,6 +36,7 @@ bool SocketCanAdapter_Open(SocketCanAdapter *self, const RegisterMessage *regist
     self->port.context = self;
     self->port.write_frame = portWriteFrame;
     self->port.configure = portConfigure;
+    self->port.query = portQuery;
     self->port.bitrate = portBitrate;
     self->interface_count = registration->interface_count;
 
@@ -136,35 +136,26 @@ static bool portWriteFrame(void *context, uint8_t interface_index, const FrameMe
     return writeClassicFrame(self->can_fds[interface_index], frame);
 }
 
-static bool portConfigure(void *context, uint8_t interface_index, uint8_t op, uint32_t bitrate)
+static bool portConfigure(void *context, uint8_t interface_index, const InterfaceSettings *requested, char *detail)
 {
     SocketCanAdapter *self = context;
-    const char *interface_name;
 
     if (interface_index >= self->interface_count) {
         return false;
     }
 
-    interface_name = self->interface_names[interface_index];
+    return CanNetlink_Apply(self->interface_names[interface_index], requested, detail);
+}
 
-    if (op == IFCONFIG_OP_UP) {
-        return CanNetlink_SetLink(interface_name, true);
-    }
-    if (op == IFCONFIG_OP_DOWN) {
-        return CanNetlink_SetLink(interface_name, false);
-    }
-    if (op != IFCONFIG_OP_SET_BITRATE) {
+static bool portQuery(void *context, uint8_t interface_index, InterfaceSettings *effective)
+{
+    SocketCanAdapter *self = context;
+
+    if (interface_index >= self->interface_count) {
         return false;
     }
 
-    if (!CanNetlink_SetLink(interface_name, false)) {
-        return false;
-    }
-    if (!CanNetlink_SetBitrate(interface_name, bitrate)) {
-        return false;
-    }
-
-    return CanNetlink_SetLink(interface_name, true);
+    return CanNetlink_Query(self->interface_names[interface_index], effective);
 }
 
 static uint32_t portBitrate(void *context, uint8_t interface_index)

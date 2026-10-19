@@ -7,7 +7,7 @@ variable, the copy bundled inside this package, the system library path.
 import ctypes
 import os
 import sys
-from ctypes import POINTER, Structure, c_char, c_char_p, c_int32, c_size_t, c_uint8, c_uint32, c_uint64, c_void_p
+from ctypes import POINTER, Structure, c_char, c_char_p, c_int32, c_size_t, c_uint8, c_uint16, c_uint32, c_uint64, c_void_p
 
 FRAME_PAYLOAD_MAX = 64
 AGENT_NAME_MAX = 128
@@ -41,6 +41,26 @@ ERR_TRANSPORT = -9
 ERR_HUB = -10
 ERR_RELIABLE_UNSUPPORTED = -11
 ERR_RATE_LIMITED = -12
+ERR_CONFIGURE_DENIED = -13
+ERR_APPLY_FAILED = -14
+ERR_AGENT_UNREACHABLE = -15
+
+SETTING_BITRATE = 1 << 0
+SETTING_SAMPLE_POINT = 1 << 1
+SETTING_DATA_BITRATE = 1 << 2
+SETTING_DATA_SAMPLE_POINT = 1 << 3
+SETTING_CTRLMODE = 1 << 4
+SETTING_RESTART_MS = 1 << 5
+SETTING_TXQUEUELEN = 1 << 6
+SETTING_LINK = 1 << 7
+SETTING_STATE = 1 << 8
+
+CTRLMODE_LOOPBACK = 1 << 0
+CTRLMODE_LISTEN_ONLY = 1 << 1
+CTRLMODE_TRIPLE_SAMPLING = 1 << 2
+CTRLMODE_ONE_SHOT = 1 << 3
+CTRLMODE_BERR_REPORTING = 1 << 4
+CTRLMODE_FD = 1 << 5
 
 
 class CanHubFrame(Structure):
@@ -74,6 +94,24 @@ class CanHubStats(Structure):
         ("struct_size", c_uint32),
         ("frames_rate_limited", c_uint64),
         ("frames_ring_dropped", c_uint64),
+    ]
+
+
+class CanHubInterfaceSettings(Structure):
+    _fields_ = [
+        ("struct_size", c_uint32),
+        ("fields", c_uint32),
+        ("bitrate", c_uint32),
+        ("data_bitrate", c_uint32),
+        ("sample_point", c_uint16),
+        ("data_sample_point", c_uint16),
+        ("ctrlmode_mask", c_uint32),
+        ("ctrlmode_flags", c_uint32),
+        ("restart_ms", c_uint32),
+        ("txqueuelen", c_uint32),
+        ("link_up", c_uint8),
+        ("can_state", c_uint8),
+        ("reserved", c_uint8 * 2),
     ]
 
 
@@ -137,6 +175,14 @@ lib.canhub_send.argtypes = [c_void_p, POINTER(CanHubFrame)]
 lib.canhub_stats.restype = c_int32
 lib.canhub_stats.argtypes = [c_void_p, POINTER(CanHubStats)]
 
+lib.canhub_configure.restype = c_int32
+lib.canhub_configure.argtypes = [
+    c_void_p, c_char_p, POINTER(CanHubInterfaceSettings), POINTER(CanHubInterfaceSettings), c_int32
+]
+
+lib.canhub_query.restype = c_int32
+lib.canhub_query.argtypes = [c_void_p, c_char_p, POINTER(CanHubInterfaceSettings), c_int32]
+
 
 def last_error(session):
     detail = lib.canhub_last_error(session)
@@ -160,3 +206,26 @@ def list_interfaces(session, timeout_ms, capacity=64):
         if count < capacity:
             return [buffer[index] for index in range(count)]
         capacity *= 2
+
+
+def new_settings():
+    settings = CanHubInterfaceSettings()
+    settings.struct_size = ctypes.sizeof(settings)
+    return settings
+
+
+def configure(session, interface_name, requested, timeout_ms):
+    effective = new_settings()
+    result = lib.canhub_configure(
+        session, interface_name.encode(), ctypes.byref(requested), ctypes.byref(effective), timeout_ms
+    )
+    if result != OK:
+        raise OSError(last_error(session))
+    return effective
+
+
+def query(session, interface_name, timeout_ms):
+    effective = new_settings()
+    if lib.canhub_query(session, interface_name.encode(), ctypes.byref(effective), timeout_ms) != OK:
+        raise OSError(last_error(session))
+    return effective

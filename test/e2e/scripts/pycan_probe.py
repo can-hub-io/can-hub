@@ -5,6 +5,7 @@ usage: pycan_probe.py <url> <channel> dump [options]
        pycan_probe.py <url> <channel> duplex <can-id-hex> <count> [options]
        pycan_probe.py <url> <channel> list [options]
        pycan_probe.py <url> <channel> detect [options]
+       pycan_probe.py <url> <channel> configure <key>=<value> ... [options]
 
 options: --state-dir PATH --cert PATH --key PATH --hub-fingerprint HEX
 """
@@ -18,13 +19,14 @@ import can
 from canhub import CanHubBus
 
 DUPLEX_SEND_GAP_S = 0.02
+SETTING_VALUES = {"on": True, "off": False}
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("url")
     parser.add_argument("channel")
-    parser.add_argument("action", choices=["dump", "send", "duplex", "list", "detect"])
+    parser.add_argument("action", choices=["dump", "send", "duplex", "list", "detect", "configure"])
     parser.add_argument("frame_arguments", nargs="*")
     parser.add_argument("--state-dir")
     parser.add_argument("--cert")
@@ -66,11 +68,26 @@ def main():
         duplex(bus, arguments)
         return
 
+    if arguments.action == "configure":
+        print(bus.configure(**settings_from(arguments.frame_arguments)), flush=True)
+        bus.shutdown()
+        return
+
     print(f"dumping {arguments.channel}", flush=True)
     while True:
         message = bus.recv(timeout=1.0)
         if message is not None:
             print_message(message)
+
+
+def settings_from(pairs):
+    return {key: setting_value(value) for key, value in (pair.split("=", 1) for pair in pairs)}
+
+
+def setting_value(text):
+    if text in SETTING_VALUES:
+        return SETTING_VALUES[text]
+    return float(text) if "." in text else int(text)
 
 
 def duplex(bus, arguments):

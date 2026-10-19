@@ -7,6 +7,7 @@ the product on top.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from .process import Process
@@ -47,6 +48,9 @@ class Server:
         self.exec("ip", "link", "add", "dev", name, "type", "vcan", check=False)
         self.exec("ip", "link", "set", name, "up")
         return name
+
+    def link(self, name: str) -> dict:
+        return json.loads(self.exec("ip", "-j", "link", "show", "dev", name).stdout)[0]
 
     def enable_can_fd(self, name: str) -> None:
         self.exec("ip", "link", "set", name, "down")

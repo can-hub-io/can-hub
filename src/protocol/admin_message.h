@@ -188,6 +188,7 @@ typedef struct {
     char fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE];
     uint8_t can_read;
     uint8_t can_write;
+    uint8_t can_admin;
 } AdminAclSetMessage;
 
 typedef struct {
@@ -214,6 +215,7 @@ typedef struct {
     char fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE];
     uint8_t can_read;
     uint8_t can_write;
+    uint8_t can_admin;
 } AdminAclListReplyEntry;
 
 typedef struct {

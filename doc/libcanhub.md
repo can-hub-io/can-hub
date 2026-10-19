@@ -46,6 +46,8 @@ canhub_close(session);
 | `canhub_recv(session, frame, timeout_ms)` | `CANHUB_RECEIVED`, `CANHUB_ERR_TIMEOUT`, or a failure |
 | `canhub_send(session, frame)` | needs an open writable channel; `CANHUB_ERR_RATE_LIMITED` when the local pacer drops the frame |
 | `canhub_stats(session, stats)` | local drop counters: `frames_rate_limited` (pacer), `frames_ring_dropped` (receive ring overrun) |
+| `canhub_configure(session, name, requested, effective, timeout_ms)` | reconfigure `agent/iface` in one step (needs an `rwa` grant; [settings](#interface-settings)); `effective` may be NULL |
+| `canhub_query(session, name, effective, timeout_ms)` | the settings the bus holds now |
 | `canhub_last_error(session)` | human-readable detail for the last failure; pass `NULL` for why the last `canhub_connect` on this thread failed |
 | `canhub_api_version()` | `CANHUB_API_VERSION` of the linked library |
 
@@ -72,6 +74,33 @@ printf("paced out %llu, ring lost %llu\n",
        (unsigned long long)stats.frames_rate_limited,
        (unsigned long long)stats.frames_ring_dropped);
 ```
+
+## Interface settings
+
+`CanHubInterfaceSettings` carries what to change: set `struct_size`, then the
+`CANHUB_SETTING_*` bit in `fields` for each member you fill. Everything is
+applied at once and `effective` comes back with what the device holds
+afterwards, the fields it reports set in `fields`.
+
+```c
+CanHubInterfaceSettings requested = { 0 };
+CanHubInterfaceSettings effective = { 0 };
+requested.struct_size = sizeof(requested);
+effective.struct_size = sizeof(effective);
+requested.fields = CANHUB_SETTING_BITRATE | CANHUB_SETTING_CTRLMODE;
+requested.bitrate = 500000;
+requested.ctrlmode_mask = CANHUB_CTRLMODE_FD;   // change FD...
+requested.ctrlmode_flags = CANHUB_CTRLMODE_FD;  // ...to on
+
+if (canhub_configure(session, "truck42/can0", &requested, &effective, 5000) != CANHUB_OK) {
+    fprintf(stderr, "%s\n", canhub_last_error(session));   // e.g. the kernel's reason
+}
+```
+
+Sample points are in tenths of a percent (875 = 87.5%). It works with or
+without an open interface. `CANHUB_ERR_CONFIGURE_DENIED` without an `rwa`
+grant, `CANHUB_ERR_APPLY_FAILED` when the agent could not apply it,
+`CANHUB_ERR_AGENT_UNREACHABLE` when the agent dropped mid-request.
 
 A session is not thread-safe: `canhub_recv`, `canhub_send` and the rest all
 drive the same connection and receive ring, so calls on one session must not

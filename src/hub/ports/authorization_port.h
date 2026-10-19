@@ -17,6 +17,8 @@
  * fingerprint beats any "*" rule), then object specificity (exact >
  * agent-wide > global). With no matching rule the baseline is read-open,
  * no-write. The "*" subject is therefore the default for unmatched clients.
+ * Levels are none, r, rw and rwa: admin (reconfigure the interface) always
+ * comes with read and write.
  * A client is known when at least one grant names its fingerprint, whatever
  * the level: that is what admits it to a hub locked to known clients.
  * The platform decides where the grants live (SQLite on the hub).
@@ -30,6 +32,7 @@ typedef struct {
     char interface_name[REGISTER_INTERFACE_NAME_SIZE];
     bool can_read;
     bool can_write;
+    bool can_admin;
 } AclEntry;
 
 typedef struct {
@@ -46,14 +49,13 @@ typedef struct {
         const char *agent_name,
         const char *interface_name
     );
-    bool (*grant)(
+    bool (*admin_allowed)(
         void *context,
         const char *fingerprint_hex,
         const char *agent_name,
-        const char *interface_name,
-        bool can_read,
-        bool can_write
+        const char *interface_name
     );
+    bool (*grant)(void *context, const AclEntry *entry);
     bool (*revoke)(
         void *context,
         const char *fingerprint_hex,

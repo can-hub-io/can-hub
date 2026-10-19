@@ -11,8 +11,11 @@ typedef struct {
     bool configure_result;
     int configure_count;
     uint8_t last_configure_interface_index;
-    uint8_t last_configure_op;
-    uint32_t last_configure_bitrate;
+    InterfaceSettings last_configure_settings;
+    char configure_detail[IFCONFIG_DETAIL_SIZE];
+    bool query_result;
+    int query_count;
+    InterfaceSettings query_settings;
     uint32_t bitrate_value;
 } CanPortMock;
 

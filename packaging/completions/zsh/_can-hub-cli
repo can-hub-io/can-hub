@@ -22,6 +22,15 @@ _can_hub_cli_dynamic()
     fi
 }
 
+_can_hub_setting_words()
+{
+    case $1 in
+        fd | listen-only | loopback | one-shot | triple-sampling | berr-reporting) _values 'state' 'on' 'off' ;;
+        bitrate | dbitrate | sample-point | dsample-point | restart-ms | txqueuelen) _message 'value' ;;
+        *) _values 'setting' bitrate sample-point dbitrate dsample-point fd listen-only loopback one-shot triple-sampling berr-reporting restart-ms txqueuelen up down ;;
+    esac
+}
+
 _can-hub-cli()
 {
     local -a commands values
@@ -79,17 +88,17 @@ _can-hub-cli()
                 values=('*' ${(f)"$(_can_hub_cli_dynamic interfaces)"})
                 _describe 'interface' values
             elif [[ $sub == add ]] && (( CURRENT == verb_index + 4 )); then
-                _values 'level' 'none' 'ro' 'rw'
+                _values 'level' 'none' 'r' 'rw' 'rwa'
             fi
             ;;
         interface)
             if (( CURRENT == verb_index + 1 )); then
-                _values 'subcommand' 'set' 'up' 'down'
+                _values 'subcommand' 'show' 'set' 'up' 'down'
             elif (( CURRENT == verb_index + 2 )); then
                 values=(${(f)"$(_can_hub_cli_dynamic interfaces)"})
                 _describe 'interface' values
-            elif [[ $sub == set ]] && (( CURRENT == verb_index + 3 )); then
-                _values 'keyword' 'bitrate'
+            elif [[ $sub == set ]] && (( CURRENT >= verb_index + 3 )); then
+                _can_hub_setting_words "${words[CURRENT - 1]}"
             fi
             ;;
     esac

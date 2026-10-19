@@ -22,12 +22,21 @@ _can_hub_client_interfaces()
     fi
 }
 
+_can_hub_setting_words()
+{
+    case $1 in
+        fd | listen-only | loopback | one-shot | triple-sampling | berr-reporting) echo "on off" ;;
+        bitrate | dbitrate | sample-point | dsample-point | restart-ms | txqueuelen) ;;
+        *) echo "bitrate sample-point dbitrate dsample-point fd listen-only loopback one-shot triple-sampling berr-reporting restart-ms txqueuelen up down" ;;
+    esac
+}
+
 _can_hub_client()
 {
     local cur prev words cword
     _init_completion || return
 
-    local commands="list dump send attach socketcand"
+    local commands="list dump send attach socketcand show configure"
     local flags="--connect --state-dir --no-echo --no-beacon --listen --show-identity"
 
     case $prev in
@@ -55,11 +64,13 @@ _can_hub_client()
     fi
 
     case $verb in
-        dump | send | attach)
+        dump | send | attach | show | configure)
             if (( cword == verb_index + 1 )); then
                 COMPREPLY=($(compgen -W "$(_can_hub_client_interfaces)" -- "$cur"))
             elif [[ $verb == "attach" ]] && (( cword == verb_index + 2 )); then
                 _available_interfaces 2>/dev/null
+            elif [[ $verb == "configure" ]]; then
+                COMPREPLY=($(compgen -W "$(_can_hub_setting_words "$prev")" -- "$cur"))
             fi
             ;;
     esac

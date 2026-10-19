@@ -10,10 +10,11 @@ import { Input } from './ui/input'
 import { Table, Tbody, Td, Th, Thead, Tr } from './ui/table'
 import { AgentOptions, InterfaceOptions, SubjectOptions } from './ui/acl-fields'
 
-const levelVariant: Record<string, 'secondary' | 'primary' | 'warning'> = {
+const levelVariant: Record<string, 'secondary' | 'primary' | 'warning' | 'destructive'> = {
   none: 'secondary',
-  ro: 'primary',
+  r: 'primary',
   rw: 'warning',
+  rwa: 'destructive',
 }
 
 export function Acls() {
@@ -24,7 +25,7 @@ export function Acls() {
   const [fingerprint, setFingerprint] = useState('*')
   const [agent, setAgent] = useState('*')
   const [iface, setIface] = useState('*')
-  const [level, setLevel] = useState<AclLevel>('ro')
+  const [level, setLevel] = useState<AclLevel>('r')
 
   const grant = (event: React.FormEvent) => {
     event.preventDefault()
@@ -65,8 +66,9 @@ export function Acls() {
         <InterfaceOptions id="acl-interfaces" interfaces={interfaces.data} agent={agent} />
         <select className={selectClass} value={level} onChange={(e) => setLevel(e.target.value as AclLevel)}>
           <option value="none">none</option>
-          <option value="ro">ro</option>
+          <option value="r">r</option>
           <option value="rw">rw</option>
+          <option value="rwa">rwa</option>
         </select>
         <Button type="submit" disabled={action.pending}>{action.pending ? 'Granting…' : 'Grant'}</Button>
       </form>

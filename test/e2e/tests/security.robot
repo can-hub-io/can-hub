@@ -107,7 +107,7 @@ A Client An ACL Names Is Accepted
     Run CLI On Hub ${hub}    pins    add    granted    ${agent_fingerprint}
     Register Agent granted On ${hub} From ${AGENT_STATE}
     ${client_fingerprint}=    Identity Of Client On ${LOCAL_SERVER} In ${CLIENT_STATE}
-    Run CLI On Hub ${hub}    acl    add    ${client_fingerprint}    granted/*    ro
+    Run CLI On Hub ${hub}    acl    add    ${client_fingerprint}    granted/*    r
 
     ${client}=    Dump Over ${TLS} As granted From ${CLIENT_STATE}
     Wait Until Client ${client} Has Open Channel    ${hub}

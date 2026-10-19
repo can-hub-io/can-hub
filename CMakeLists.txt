@@ -79,6 +79,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/protocol/subscribe_message.c
         src/protocol/interface_name.c
         src/protocol/interface_status_message.c
+        src/protocol/ifconfig_message.c
         src/shared/egress_shaper.c
         src/shared/bounded_string.c
         src/client/client.c
@@ -115,6 +116,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/platform/linux/shared/tls_identity_ed25519.c
         src/platform/windows/shared/tls_identity.c
         src/platform/windows/libcanhub/canhub.c
+        src/platform/linux/libcanhub/canhub_settings.c
     )
     set(CAN_HUB_WINDOWS_LIBRARIES ws2_32 crypt32 bcrypt)
 
@@ -257,6 +259,7 @@ set(CLIENT_SOURCES
     src/platform/linux/clock/clock.c
     src/platform/linux/shared/connect_url.c
     src/platform/linux/shared/epoll_registry.c
+    src/platform/linux/shared/interface_settings_text.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/shared/tcp_keepalive.c
     src/platform/linux/tcp/tcp_channel.c
@@ -311,6 +314,7 @@ add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES} ${CLI
 
 set(LIBCANHUB_SOURCES
     src/platform/linux/libcanhub/canhub.c
+    src/platform/linux/libcanhub/canhub_settings.c
     ${CLIENT_SOURCES}
     ${CLIENT_TLS_SOURCES}
 )

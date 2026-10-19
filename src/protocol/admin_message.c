@@ -56,6 +56,7 @@
 #define ACL_FINGERPRINT_OFFSET 144
 #define ACL_CAN_READ_OFFSET 209
 #define ACL_CAN_WRITE_OFFSET 210
+#define ACL_CAN_ADMIN_OFFSET 211
 
 #define INTERFACE_ENTRY_ID_OFFSET 0
 #define INTERFACE_ENTRY_SUBSCRIBERS_OFFSET 4
@@ -591,6 +592,7 @@ size_t AdminAclSetMessage_Encode(const AdminAclSetMessage *self, uint8_t *buffer
     memcpy(body + ACL_FINGERPRINT_OFFSET, self->fingerprint_hex, strlen(self->fingerprint_hex));
     body[ACL_CAN_READ_OFFSET] = self->can_read;
     body[ACL_CAN_WRITE_OFFSET] = self->can_write;
+    body[ACL_CAN_ADMIN_OFFSET] = self->can_admin;
 
     return total_size;
 }
@@ -609,6 +611,7 @@ bool AdminAclSetMessage_Decode(AdminAclSetMessage *self, const uint8_t *payload,
     self->fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] = '\0';
     self->can_read = payload[ACL_CAN_READ_OFFSET];
     self->can_write = payload[ACL_CAN_WRITE_OFFSET];
+    self->can_admin = payload[ACL_CAN_ADMIN_OFFSET];
 
     return self->agent_name[0] != '\0' && self->interface_name[0] != '\0' && self->fingerprint_hex[0] != '\0';
 }
@@ -1134,6 +1137,7 @@ static void writeAclEntry(uint8_t *destination, const AdminAclListReplyEntry *en
     memcpy(destination + ACL_FINGERPRINT_OFFSET, entry->fingerprint_hex, strlen(entry->fingerprint_hex));
     destination[ACL_CAN_READ_OFFSET] = entry->can_read;
     destination[ACL_CAN_WRITE_OFFSET] = entry->can_write;
+    destination[ACL_CAN_ADMIN_OFFSET] = entry->can_admin;
 }
 
 static void readAclEntry(const uint8_t *source, AdminAclListReplyEntry *entry)
@@ -1146,6 +1150,7 @@ static void readAclEntry(const uint8_t *source, AdminAclListReplyEntry *entry)
     entry->fingerprint_hex[ADMIN_FINGERPRINT_HEX_SIZE - 1] = '\0';
     entry->can_read = source[ACL_CAN_READ_OFFSET];
     entry->can_write = source[ACL_CAN_WRITE_OFFSET];
+    entry->can_admin = source[ACL_CAN_ADMIN_OFFSET];
 }
 
 static void writeInterfaceEntry(uint8_t *destination, const AdminInterfacesReplyEntry *entry)

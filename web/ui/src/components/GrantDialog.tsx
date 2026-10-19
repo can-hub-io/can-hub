@@ -22,7 +22,7 @@ export function GrantDialog({ agentName, interfaceName, fingerprintHex, onClose 
   const [fingerprint, setFingerprint] = useState(fingerprintHex || '*')
   const [agent, setAgent] = useState(agentName || '*')
   const [iface, setIface] = useState(interfaceName || '*')
-  const [level, setLevel] = useState<AclLevel>('ro')
+  const [level, setLevel] = useState<AclLevel>('r')
   const objectFixed = agentName !== undefined && interfaceName !== undefined
 
   const object = `${agent || '*'}/${iface || '*'}`
@@ -65,8 +65,9 @@ export function GrantDialog({ agentName, interfaceName, fingerprintHex, onClose 
             <label className="block text-sm font-medium text-gray-800" htmlFor="grant-level">Level</label>
             <select id="grant-level" className={cn(selectClass, 'w-full')} value={level} onChange={(e) => setLevel(e.target.value as AclLevel)}>
               <option value="none">none — deny read and write</option>
-              <option value="ro">ro — read only</option>
+              <option value="r">r — read only</option>
               <option value="rw">rw — read and write</option>
+              <option value="rwa">rwa — read, write and configure the bus</option>
             </select>
           </div>
           <DialogFooter>

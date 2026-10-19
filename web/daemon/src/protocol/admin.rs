@@ -111,27 +111,33 @@ pub struct RejectedEntry {
     pub origin: String,
 }
 
-/// ACL permission level on the wire as a `can_read`/`can_write` byte pair.
+/// ACL permission level on the wire as a `can_read`/`can_write`/`can_admin`
+/// byte triple. Admin (reconfigure the interface) always comes with rw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AclLevel {
     None,
-    ReadOnly,
+    Read,
     ReadWrite,
+    ReadWriteAdmin,
 }
 
 impl AclLevel {
-    pub fn to_bytes(self) -> (u8, u8) {
+    pub fn to_bytes(self) -> (u8, u8, u8) {
         match self {
-            AclLevel::None => (0, 0),
-            AclLevel::ReadOnly => (1, 0),
-            AclLevel::ReadWrite => (1, 1),
+            AclLevel::None => (0, 0, 0),
+            AclLevel::Read => (1, 0, 0),
+            AclLevel::ReadWrite => (1, 1, 0),
+            AclLevel::ReadWriteAdmin => (1, 1, 1),
         }
     }
 
-    pub fn from_bytes(can_read: u8, can_write: u8) -> AclLevel {
+    pub fn from_bytes(can_read: u8, can_write: u8, can_admin: u8) -> AclLevel {
+        if can_admin != 0 {
+            return AclLevel::ReadWriteAdmin;
+        }
         match (can_read != 0, can_write != 0) {
             (_, true) => AclLevel::ReadWrite,
-            (true, false) => AclLevel::ReadOnly,
+            (true, false) => AclLevel::Read,
             (false, false) => AclLevel::None,
         }
     }
@@ -145,13 +151,95 @@ pub struct AclEntry {
     pub level: AclLevel,
 }
 
-/// Interface reconfiguration op (ADMIN_IFCONFIG @148).
+pub const SETTING_BITRATE: u32 = 1 << 0;
+pub const SETTING_SAMPLE_POINT: u32 = 1 << 1;
+pub const SETTING_DATA_BITRATE: u32 = 1 << 2;
+pub const SETTING_DATA_SAMPLE_POINT: u32 = 1 << 3;
+pub const SETTING_CTRLMODE: u32 = 1 << 4;
+pub const SETTING_RESTART_MS: u32 = 1 << 5;
+pub const SETTING_TXQUEUELEN: u32 = 1 << 6;
+pub const SETTING_LINK: u32 = 1 << 7;
+pub const SETTING_STATE: u32 = 1 << 8;
+
+pub const CTRLMODE_LOOPBACK: u32 = 1 << 0;
+pub const CTRLMODE_LISTEN_ONLY: u32 = 1 << 1;
+pub const CTRLMODE_TRIPLE_SAMPLING: u32 = 1 << 2;
+pub const CTRLMODE_ONE_SHOT: u32 = 1 << 3;
+pub const CTRLMODE_BERR_REPORTING: u32 = 1 << 4;
+pub const CTRLMODE_FD: u32 = 1 << 5;
+
+const SETTINGS_SIZE: usize = 40;
+pub const CONFIGURE_DETAIL_SIZE: usize = 64;
+
+/// The settings block of CONFIGURE / CONFIGURE_REPLY. `fields` names the
+/// members that carry a value: what to change in a request, what the device
+/// reports in a reply. Sample points are in tenths of a percent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct InterfaceSettings {
+    pub fields: u32,
+    pub bitrate: u32,
+    pub data_bitrate: u32,
+    pub sample_point: u16,
+    pub data_sample_point: u16,
+    pub ctrlmode_mask: u32,
+    pub ctrlmode_flags: u32,
+    pub restart_ms: u32,
+    pub txqueuelen: u32,
+    pub link_up: bool,
+    pub can_state: u8,
+}
+
+impl InterfaceSettings {
+    fn write(&self, out: &mut [u8], offset: usize) {
+        out[offset..offset + 4].copy_from_slice(&self.fields.to_le_bytes());
+        out[offset + 4..offset + 8].copy_from_slice(&self.bitrate.to_le_bytes());
+        out[offset + 8..offset + 12].copy_from_slice(&self.data_bitrate.to_le_bytes());
+        out[offset + 12..offset + 14].copy_from_slice(&self.sample_point.to_le_bytes());
+        out[offset + 14..offset + 16].copy_from_slice(&self.data_sample_point.to_le_bytes());
+        out[offset + 16..offset + 20].copy_from_slice(&self.ctrlmode_mask.to_le_bytes());
+        out[offset + 20..offset + 24].copy_from_slice(&self.ctrlmode_flags.to_le_bytes());
+        out[offset + 24..offset + 28].copy_from_slice(&self.restart_ms.to_le_bytes());
+        out[offset + 28..offset + 32].copy_from_slice(&self.txqueuelen.to_le_bytes());
+        out[offset + 32] = u8::from(self.link_up);
+        out[offset + 33] = self.can_state;
+    }
+
+    fn read(buffer: &[u8], offset: usize) -> InterfaceSettings {
+        InterfaceSettings {
+            fields: read_u32(buffer, offset),
+            bitrate: read_u32(buffer, offset + 4),
+            data_bitrate: read_u32(buffer, offset + 8),
+            sample_point: read_u16(buffer, offset + 12),
+            data_sample_point: read_u16(buffer, offset + 14),
+            ctrlmode_mask: read_u32(buffer, offset + 16),
+            ctrlmode_flags: read_u32(buffer, offset + 20),
+            restart_ms: read_u32(buffer, offset + 24),
+            txqueuelen: read_u32(buffer, offset + 28),
+            link_up: buffer[offset + 32] != 0,
+            can_state: buffer[offset + 33],
+        }
+    }
+}
+
+/// CONFIGURE op @148: apply the settings or only read them back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub enum IfconfigOp {
-    SetBitrate = 0,
-    LinkUp = 1,
-    LinkDown = 2,
+pub enum ConfigureOp {
+    Apply = 0,
+    Query = 1,
+}
+
+/// CONFIGURE_REPLY status codes.
+pub const CONFIGURE_STATUS_OK: u8 = 0;
+pub const CONFIGURE_STATUS_UNKNOWN_INTERFACE: u8 = 1;
+pub const CONFIGURE_STATUS_AGENT_UNREACHABLE: u8 = 2;
+pub const CONFIGURE_STATUS_DENIED: u8 = 4;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigureReply {
+    pub status: u8,
+    pub settings: InterfaceSettings,
+    pub detail: String,
 }
 
 // ---------------------------------------------------------------- requests
@@ -229,20 +317,21 @@ pub fn encode_kick_peer(peer_id: u32) -> [u8; 8] {
     out
 }
 
-/// ADMIN_IFCONFIG (total 156): reconfigure one interface by namespaced pair.
-/// `bitrate` is only read for `IfconfigOp::SetBitrate`.
-pub fn encode_ifconfig(
+/// CONFIGURE (total 192): apply or read back one interface's settings by
+/// namespaced pair. Body: agent_name[128] @4, interface_name[16] @132,
+/// op @148, 3 reserved, settings[40] @152.
+pub fn encode_configure(
     agent_name: &str,
     interface_name: &str,
-    op: IfconfigOp,
-    bitrate: u32,
-) -> [u8; 156] {
-    let mut out = [0u8; 156];
-    Header::write(&mut out, MessageType::AdminIfconfig, 0, 152);
+    op: ConfigureOp,
+    settings: &InterfaceSettings,
+) -> [u8; 192] {
+    let mut out = [0u8; 192];
+    Header::write(&mut out, MessageType::Configure, 0, 188);
     write_fixed_str(&mut out, 4, AGENT_NAME_SIZE, agent_name);
     write_fixed_str(&mut out, 132, INTERFACE_NAME_SIZE, interface_name);
     out[148] = op as u8;
-    out[152..156].copy_from_slice(&bitrate.to_le_bytes());
+    settings.write(&mut out, 152);
     out
 }
 
@@ -260,7 +349,7 @@ pub fn encode_pin_add(agent_name: &str, fingerprint_hex: &str) -> [u8; 200] {
 /// ADMIN_ACL_SET (total 216): grant a client read/write on an interface.
 /// Body layout from `src/protocol/admin_message.c`: agent_name[128] @4,
 /// interface_name[16] @132, fingerprint_hex[65] @148, can_read @213,
-/// can_write @214, 1 reserved.
+/// can_write @214, can_admin @215.
 pub fn encode_acl_set(
     fingerprint_hex: &str,
     agent_name: &str,
@@ -268,9 +357,10 @@ pub fn encode_acl_set(
     level: AclLevel,
 ) -> [u8; 216] {
     let mut out = encode_acl_target(MessageType::AdminAclSet, agent_name, interface_name, fingerprint_hex);
-    let (can_read, can_write) = level.to_bytes();
+    let (can_read, can_write, can_admin) = level.to_bytes();
     out[213] = can_read;
     out[214] = can_write;
+    out[215] = can_admin;
     out
 }
 
@@ -422,13 +512,13 @@ pub fn decode_interfaces_reply(buffer: &[u8]) -> Result<Page<InterfaceEntry>, De
 
 /// ADMIN_ACL_LIST_REPLY (8 + count * 212). Entry layout (entry-relative):
 /// agent_name[128] @0, interface_name[16] @128, fingerprint_hex[65] @144,
-/// can_read @209, can_write @210.
+/// can_read @209, can_write @210, can_admin @211.
 pub fn decode_acl_list_reply(buffer: &[u8]) -> Result<Page<AclEntry>, DecodeError> {
     decode_page(buffer, MessageType::AdminAclListReply, 212, |entry| AclEntry {
         agent_name: read_fixed_str(entry, 0, AGENT_NAME_SIZE),
         interface_name: read_fixed_str(entry, 128, INTERFACE_NAME_SIZE),
         fingerprint_hex: read_fixed_str(entry, 144, FINGERPRINT_SIZE),
-        level: AclLevel::from_bytes(entry[209], entry[210]),
+        level: AclLevel::from_bytes(entry[209], entry[210], entry[211]),
     })
 }
 
@@ -447,7 +537,17 @@ pub fn decode_rejected_reply(buffer: &[u8]) -> Result<Page<RejectedEntry>, Decod
     })
 }
 
-/// Status-only reply (KICK/FORGET/KICK_PEER/IFCONFIG/PIN_ADD/ACL_SET/
+/// CONFIGURE_REPLY (total 112): status @4, settings[40] @8, detail[64] @48.
+pub fn decode_configure_reply(buffer: &[u8]) -> Result<ConfigureReply, DecodeError> {
+    expect(buffer, MessageType::ConfigureReply, HEADER_SIZE + 4 + SETTINGS_SIZE + CONFIGURE_DETAIL_SIZE)?;
+    Ok(ConfigureReply {
+        status: buffer[4],
+        settings: InterfaceSettings::read(buffer, 8),
+        detail: read_fixed_str(buffer, 8 + SETTINGS_SIZE, CONFIGURE_DETAIL_SIZE),
+    })
+}
+
+/// Status-only reply (KICK/FORGET/KICK_PEER/PIN_ADD/ACL_SET/
 /// ACL_REVOKE replies): a single status byte at @4. Returns the raw code.
 pub fn decode_status_byte(buffer: &[u8], message_type: MessageType) -> Result<u8, DecodeError> {
     expect(buffer, message_type, HEADER_SIZE + 1)?;
@@ -484,16 +584,6 @@ mod tests {
         let request = encode_kick_peer(0x80000001);
         assert_eq!(request[0], MessageType::AdminKickPeer as u8);
         assert_eq!(read_u32(&request, 4), 0x80000001);
-    }
-
-    #[test]
-    fn ifconfig_request_layout() {
-        let request = encode_ifconfig("truck42", "can0", IfconfigOp::SetBitrate, 500_000);
-        assert_eq!(request.len(), 156);
-        assert_eq!(read_fixed_str(&request, 4, AGENT_NAME_SIZE), "truck42");
-        assert_eq!(read_fixed_str(&request, 132, INTERFACE_NAME_SIZE), "can0");
-        assert_eq!(request[148], IfconfigOp::SetBitrate as u8);
-        assert_eq!(read_u32(&request, 152), 500_000);
     }
 
     #[test]
@@ -674,13 +764,15 @@ mod tests {
     }
 
     #[test]
-    fn acl_level_byte_pairs() {
-        assert_eq!(AclLevel::None.to_bytes(), (0, 0));
-        assert_eq!(AclLevel::ReadOnly.to_bytes(), (1, 0));
-        assert_eq!(AclLevel::ReadWrite.to_bytes(), (1, 1));
-        assert_eq!(AclLevel::from_bytes(0, 0), AclLevel::None);
-        assert_eq!(AclLevel::from_bytes(1, 0), AclLevel::ReadOnly);
-        assert_eq!(AclLevel::from_bytes(1, 1), AclLevel::ReadWrite);
+    fn acl_level_byte_triples() {
+        assert_eq!(AclLevel::None.to_bytes(), (0, 0, 0));
+        assert_eq!(AclLevel::Read.to_bytes(), (1, 0, 0));
+        assert_eq!(AclLevel::ReadWrite.to_bytes(), (1, 1, 0));
+        assert_eq!(AclLevel::ReadWriteAdmin.to_bytes(), (1, 1, 1));
+        assert_eq!(AclLevel::from_bytes(0, 0, 0), AclLevel::None);
+        assert_eq!(AclLevel::from_bytes(1, 0, 0), AclLevel::Read);
+        assert_eq!(AclLevel::from_bytes(1, 1, 0), AclLevel::ReadWrite);
+        assert_eq!(AclLevel::from_bytes(1, 1, 1), AclLevel::ReadWriteAdmin);
     }
 
     #[test]
@@ -700,7 +792,57 @@ mod tests {
         assert_eq!(acl.agent_name, "truck42");
         assert_eq!(acl.interface_name, "can0");
         assert_eq!(acl.fingerprint_hex, "ab12cd");
-        assert_eq!(acl.level, AclLevel::ReadOnly);
+        assert_eq!(acl.level, AclLevel::Read);
+    }
+
+    #[test]
+    fn acl_list_reply_decodes_the_admin_level() {
+        let mut buffer = vec![0u8; 8 + 212];
+        Header::write(&mut buffer, MessageType::AdminAclListReply, 0, (4 + 212) as u16);
+        buffer[4] = 1;
+        buffer[8 + 209] = 1;
+        buffer[8 + 210] = 1;
+        buffer[8 + 211] = 1;
+
+        let page = decode_acl_list_reply(&buffer).unwrap();
+        assert_eq!(page.entries[0].level, AclLevel::ReadWriteAdmin);
+    }
+
+    #[test]
+    fn configure_request_carries_op_and_settings() {
+        let settings = InterfaceSettings {
+            fields: SETTING_BITRATE | SETTING_SAMPLE_POINT,
+            bitrate: 500_000,
+            sample_point: 875,
+            ..Default::default()
+        };
+
+        let request = encode_configure("truck42", "can0", ConfigureOp::Apply, &settings);
+
+        assert_eq!(request[0], MessageType::Configure as u8);
+        assert_eq!(read_u16(&request, 2), 188);
+        assert_eq!(read_fixed_str(&request, 4, AGENT_NAME_SIZE), "truck42");
+        assert_eq!(read_fixed_str(&request, 132, INTERFACE_NAME_SIZE), "can0");
+        assert_eq!(request[148], ConfigureOp::Apply as u8);
+        assert_eq!(read_u32(&request, 152), SETTING_BITRATE | SETTING_SAMPLE_POINT);
+        assert_eq!(read_u32(&request, 156), 500_000);
+        assert_eq!(read_u16(&request, 164), 875);
+    }
+
+    #[test]
+    fn configure_reply_decodes_settings_and_detail() {
+        let mut buffer = vec![0u8; 112];
+        let reported = InterfaceSettings { fields: SETTING_LINK | SETTING_STATE, link_up: true, can_state: 3, ..Default::default() };
+        Header::write(&mut buffer, MessageType::ConfigureReply, 0, 108);
+        buffer[4] = 3;
+        reported.write(&mut buffer, 8);
+        write_fixed_str(&mut buffer, 48, CONFIGURE_DETAIL_SIZE, "Device or resource busy");
+
+        let reply = decode_configure_reply(&buffer).unwrap();
+
+        assert_eq!(reply.status, 3);
+        assert_eq!(reply.settings, reported);
+        assert_eq!(reply.detail, "Device or resource busy");
     }
 
     #[test]

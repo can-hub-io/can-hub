@@ -187,8 +187,27 @@ async function sendJson<T extends { csrfToken?: string | null }>(
   return result
 }
 
-export type AclLevel = 'none' | 'ro' | 'rw'
-export type IfconfigOp = 'bitrate' | 'up' | 'down'
+export type AclLevel = 'none' | 'r' | 'rw' | 'rwa'
+
+export const CAN_MODES = ['fd', 'listenOnly', 'loopback', 'oneShot', 'tripleSampling', 'berrReporting'] as const
+export type CanMode = (typeof CAN_MODES)[number]
+
+// What the device reports: a key is absent when it reports nothing (a vcan has
+// no bit timing). Sample points are fractions (0.875).
+export interface InterfaceSettings {
+  up?: boolean
+  state?: string
+  bitrate?: number
+  samplePoint?: number
+  dataBitrate?: number
+  dataSamplePoint?: number
+  restartMs?: number
+  txqueuelen?: number
+  modes: Partial<Record<CanMode, boolean>>
+}
+
+// What to change, all applied in one step; absent keys are left as they are.
+export type InterfaceSettingsChange = Partial<Omit<InterfaceSettings, 'state'>>
 
 export const api = {
   status: () => getJson<Status>('/api/status'),
@@ -209,8 +228,12 @@ export const api = {
     send('/api/acls', 'POST', { fingerprintHex, agentName, interfaceName, level }),
   aclRevoke: (fingerprintHex: string, agentName: string, interfaceName: string) =>
     send('/api/acls/revoke', 'POST', { fingerprintHex, agentName, interfaceName }),
-  interfaceConfig: (agentName: string, interfaceName: string, op: IfconfigOp, bitrate: number) =>
-    send('/api/interfaces/config', 'POST', { agentName, interfaceName, op, bitrate }),
+  interfaceSettings: (agentName: string, interfaceName: string) =>
+    getJson<InterfaceSettings>(
+      `/api/interfaces/${encodeURIComponent(agentName)}/${encodeURIComponent(interfaceName)}/settings`,
+    ),
+  interfaceConfig: (agentName: string, interfaceName: string, settings: InterfaceSettingsChange) =>
+    send('/api/interfaces/config', 'POST', { agentName, interfaceName, settings }),
 
   // auth
   authState: async () => {

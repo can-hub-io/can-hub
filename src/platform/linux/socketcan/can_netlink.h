@@ -3,19 +3,29 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/*
- * rtnetlink helpers to reconfigure a CAN interface from the agent: bring the
- * link up/down and set the nominal bitrate (the kernel derives the bit timing
- * from the controller clock). Both need CAP_NET_ADMIN. A bitrate change
- * requires the link down first — the caller sequences down/set/up.
- */
-bool CanNetlink_SetLink(const char *interface_name, bool up);
-bool CanNetlink_SetBitrate(const char *interface_name, uint32_t bitrate);
+#include "protocol/ifconfig_message.h"
 
 /*
- * Read the configured nominal bitrate (bits/s) the kernel derived for the link,
- * so the agent can advertise it for rate-matched pacing. Returns 0 when the
- * interface is unknown, is not a CAN device, or has no bit timing set.
+ * rtnetlink helpers to reconfigure a CAN interface from the agent. Apply sets
+ * every requested field in one RTM_NEWLINK; bit timing, control modes and
+ * restart-ms need the link down, so it is brought down around them and left
+ * as requested (or as it was) afterwards. On failure the kernel's reason is
+ * written into detail (IFCONFIG_DETAIL_SIZE bytes) and the link is restored.
+ * Changing anything needs CAP_NET_ADMIN.
+ */
+bool CanNetlink_Apply(const char *interface_name, const InterfaceSettings *requested, char *detail);
+
+/*
+ * Read the settings the kernel holds for the link. Fields the device does not
+ * report (a vcan has no bit timing) are left out of fields. Returns false when
+ * the interface is unknown.
+ */
+bool CanNetlink_Query(const char *interface_name, InterfaceSettings *effective);
+
+/*
+ * The configured nominal bitrate (bits/s), so the agent can advertise it for
+ * rate-matched pacing. Returns 0 when the interface is unknown, is not a CAN
+ * device, or has no bit timing set.
  */
 uint32_t CanNetlink_GetBitrate(const char *interface_name);
 bool CanNetlink_InterfaceExists(const char *interface_name);

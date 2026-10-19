@@ -15,6 +15,7 @@
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/hub_defaults.h"
+#include "platform/linux/shared/interface_settings_text.h"
 #include "platform/linux/shared/log.h"
 #include "platform/linux/shared/tls_identity.h"
 #include "platform/linux/socketcan/can_netlink.h"
@@ -51,6 +52,7 @@
 #define SC_TAG_SC_LISTEN 0xE0000003u
 #define SC_TAG_SC_SLOT_BASE 0xE0000010u
 #define ATTACH_TAG_CAN 0xE0000020u
+#define CONFIGURE_WORDS_MAX 32
 
 typedef enum tclient_command_e {
     kCLIENT_COMMAND_LIST = 0,
@@ -58,6 +60,8 @@ typedef enum tclient_command_e {
     kCLIENT_COMMAND_SEND,
     kCLIENT_COMMAND_SOCKETCAND,
     kCLIENT_COMMAND_ATTACH,
+    kCLIENT_COMMAND_CONFIGURE,
+    kCLIENT_COMMAND_SHOW,
     kCLIENT_COMMAND_MAX,
 } TCLIENT_COMMAND;
 
@@ -76,6 +80,9 @@ static bool target_is_namespaced;
 static FrameMessage frame_to_send;
 static CanFilter dump_filters[SUBSCRIBE_FILTERS_MAX];
 static uint8_t dump_filter_count;
+static const char *configure_words[CONFIGURE_WORDS_MAX];
+static uint8_t configure_word_count;
+static InterfaceSettings configure_settings;
 static int32_t exit_code = -1;
 static const char *state_directory_override;
 static const char *client_name = "";
@@ -126,6 +133,9 @@ static void clientOnOpenResult(void *context, uint8_t status, uint8_t channel, u
 static void clientOnFrame(void *context, const FrameMessage *frame);
 static void clientOnError(void *context, uint16_t code, const char *detail);
 static void clientOnDisconnected(void *context);
+static void clientOnConfigureReply(void *context, const ConfigureReplyMessage *reply);
+static bool parseConfigureWords(void);
+static void startConfigure(void);
 static void printListReply(const ListReplyMessage *reply);
 static void printFrame(const FrameMessage *frame);
 static uint32_t printedCanId(const FrameMessage *frame);
@@ -144,6 +154,7 @@ int main(int argc, char **argv)
         .on_frame = clientOnFrame,
         .on_error = clientOnError,
         .on_disconnected = clientOnDisconnected,
+        .on_configure_reply = clientOnConfigureReply,
     };
 
     signal(SIGPIPE, SIG_IGN);
@@ -202,6 +213,11 @@ static void printUsage(FILE *stream, const char *program)
     fprintf(stream, "       | socketcand [--listen [<bind-ip>:]<port>] [--no-beacon]\n");
     fprintf(stream, "                                           local socketcand server (default 127.0.0.1:" SOCKETCAND_DEFAULT_PORT_TEXT ")\n");
     fprintf(stream, "       | attach <interface> <vcan>   mirror a remote bus into a local vcan, created if missing (bidirectional)\n");
+    fprintf(stream, "       | show <agent>/<iface>        the settings the bus holds now\n");
+    fprintf(stream, "       | configure <agent>/<iface> <setting>...   reconfigure the bus (needs an rwa grant):\n");
+    fprintf(stream, "           bitrate <bps> sample-point <0.xxx> dbitrate <bps> dsample-point <0.xxx>\n");
+    fprintf(stream, "           fd|listen-only|loopback|one-shot|triple-sampling|berr-reporting on|off\n");
+    fprintf(stream, "           restart-ms <ms> txqueuelen <n> up|down\n");
     fprintf(stream, "       <interface> is the numeric id (from list) or the namespaced name agent/iface\n");
     fprintf(stream, "       %s --show-identity [--state-dir <path>]   print this client's TLS fingerprint\n", program);
     fprintf(stream, "       [--log-level error|warn|info|debug]\n");
@@ -258,6 +274,12 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
                 if (!FrameSpec_Parse(argv[++i], &frame_to_send)) {
                     return false;
                 }
+            } else if (strcmp(command_name, "show") == 0 && i + 1 < argc) {
+                command = kCLIENT_COMMAND_SHOW;
+                snprintf(target_interface_text, sizeof(target_interface_text), "%s", argv[++i]);
+            } else if (strcmp(command_name, "configure") == 0 && i + 1 < argc) {
+                command = kCLIENT_COMMAND_CONFIGURE;
+                snprintf(target_interface_text, sizeof(target_interface_text), "%s", argv[++i]);
             } else if (strcmp(command_name, "attach") == 0 && i + 2 < argc) {
                 command = kCLIENT_COMMAND_ATTACH;
                 snprintf(target_interface_text, sizeof(target_interface_text), "%s", argv[++i]);
@@ -270,10 +292,15 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
                 return false;
             }
             dump_filter_count++;
+        } else if (command == kCLIENT_COMMAND_CONFIGURE && configure_word_count < CONFIGURE_WORDS_MAX) {
+            configure_words[configure_word_count++] = argv[i];
         }
     }
 
     if (command_name == NULL) {
+        return false;
+    }
+    if (command == kCLIENT_COMMAND_CONFIGURE && !parseConfigureWords()) {
         return false;
     }
 
@@ -343,6 +370,10 @@ static void startClientCommand(void)
 {
     if (command == kCLIENT_COMMAND_LIST) {
         Client_RequestList(&client, 0);
+        return;
+    }
+    if (command == kCLIENT_COMMAND_CONFIGURE || command == kCLIENT_COMMAND_SHOW) {
+        startConfigure();
         return;
     }
 
@@ -512,6 +543,50 @@ static void clientOnDisconnected(void *context)
 
     LOG_WARN("connection lost");
     exit_code = 1;
+}
+
+static void clientOnConfigureReply(void *context, const ConfigureReplyMessage *reply)
+{
+    (void)context;
+
+    if (reply->status != CONFIGURE_STATUS_OK) {
+        LOG_ERROR(
+            "%s: %s%s%s",
+            target_interface_text,
+            InterfaceSettingsText_ConfigureStatusName(reply->status),
+            reply->detail[0] != '\0' ? ": " : "",
+            reply->detail
+        );
+        exit_code = 1;
+        return;
+    }
+
+    printf("%s\n", target_interface_text);
+    InterfaceSettingsText_Print(stdout, &reply->settings);
+    exit_code = 0;
+}
+
+static bool parseConfigureWords(void)
+{
+    char error[INTERFACE_SETTINGS_TEXT_ERROR_SIZE];
+
+    if (InterfaceSettingsText_Parse(&configure_settings, configure_words, configure_word_count, error)) {
+        return true;
+    }
+
+    LOG_ERROR("%s", error);
+
+    return false;
+}
+
+static void startConfigure(void)
+{
+    uint8_t op = command == kCLIENT_COMMAND_SHOW ? IFCONFIG_OP_QUERY : IFCONFIG_OP_APPLY;
+
+    if (!Client_Configure(&client, target_interface_text, op, &configure_settings)) {
+        LOG_ERROR("%s is not an agent/iface name", target_interface_text);
+        exit_code = 1;
+    }
 }
 
 static void printListReply(const ListReplyMessage *reply)

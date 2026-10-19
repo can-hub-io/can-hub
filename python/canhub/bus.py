@@ -9,6 +9,8 @@ from typing import List, Optional, Tuple
 from can import BusABC, CanInitializationError, CanOperationError, Message
 
 from . import _native as native
+from . import settings as interface_settings
+from .settings import InterfaceSettings
 
 DEFAULT_TIMEOUT_MS = 5000
 FINGERPRINT_HEX_LENGTH = 64
@@ -57,6 +59,7 @@ class CanHubBus(BusABC):
         self._lock = _FairLock()
         self._session = None
         self._writable = False
+        self._channel_name = str(channel)
 
         config = self._build_connect_config(
             url, identity_cert, identity_key, hub_fingerprint, state_dir, DEFAULT_TIMEOUT_MS
@@ -169,6 +172,35 @@ class CanHubBus(BusABC):
         if result != native.OK:
             raise CanOperationError(native.last_error(self._session))
 
+    def configure(self, **settings) -> InterfaceSettings:
+        """Reconfigure this bus's interface on its agent, all in one step.
+
+        Takes the keywords of :mod:`canhub.settings` (``bitrate=500000,
+        sample_point=0.875, fd=True, data_bitrate=2000000`` ...). The hub
+        allows it only with an ``rwa`` ACL grant (unix and plain tcp clients
+        are trusted). Returns the settings the device holds afterwards.
+        """
+        try:
+            requested = interface_settings.to_native(**settings)
+        except ValueError as error:
+            raise CanOperationError(str(error)) from error
+
+        try:
+            with self._lock:
+                effective = native.configure(self._session, self._configurable_name(), requested, DEFAULT_TIMEOUT_MS)
+        except OSError as error:
+            raise CanOperationError(str(error)) from error
+        return interface_settings.from_native(effective)
+
+    def interface_settings(self) -> InterfaceSettings:
+        """The settings this bus's interface holds now on its agent."""
+        try:
+            with self._lock:
+                effective = native.query(self._session, self._configurable_name(), DEFAULT_TIMEOUT_MS)
+        except OSError as error:
+            raise CanOperationError(str(error)) from error
+        return interface_settings.from_native(effective)
+
     def drop_counters(self) -> dict:
         with self._lock:
             return native.drop_counters(self._session)
@@ -198,6 +230,11 @@ class CanHubBus(BusABC):
         with self._lock:
             result = native.lib.canhub_set_filters(self._session, native_filters, len(filters))
         self._hardware_filtered = result == native.OK
+
+    def _configurable_name(self) -> str:
+        if "/" not in self._channel_name:
+            raise CanOperationError("configuring needs the bus opened by its agent/iface name")
+        return self._channel_name
 
     def _open(self, channel: str, flags: int) -> None:
         result = native.lib.canhub_open(self._session, channel.encode(), flags, DEFAULT_TIMEOUT_MS)

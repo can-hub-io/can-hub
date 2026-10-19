@@ -9,6 +9,7 @@ extern "C" {
 #include "protocol/interface_status_message.h"
 #include "protocol/list_message.h"
 #include "protocol/hello_message.h"
+#include "protocol/ifconfig_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
 #include "protocol/subscribe_message.h"
@@ -32,6 +33,8 @@ static uint16_t last_error_code;
 static char last_error_detail[ERROR_DETAIL_SIZE];
 static int error_count;
 static int disconnect_count;
+static ConfigureReplyMessage last_configure_reply;
+static int configure_reply_count;
 
 static ClientEvents clientEvents();
 static void resetCallbackLog();
@@ -52,6 +55,10 @@ static void onOpenResult(void *context, uint8_t status, uint8_t channel, uint32_
 static void onFrame(void *context, const FrameMessage *frame);
 static void onError(void *context, uint16_t code, const char *detail);
 static void onDisconnected(void *context);
+static void onConfigureReply(void *context, const ConfigureReplyMessage *reply);
+static void decodeSentConfigure(uint8_t slot, ConfigureMessage *configure);
+static void feedConfigureReply(uint8_t status);
+static InterfaceSettings bitrateSettings(void);
 
 describe("client", []() {
     beforeEach([]() {
@@ -309,6 +316,45 @@ describe("client", []() {
         expect(strcmp(last_error_detail, "role rejected") == 0).toBe(true);
     });
 
+    it("sends a configure requested before connect after HELLO", []() {
+        InterfaceSettings settings = bitrateSettings();
+        ConfigureMessage configure;
+
+        Client_Configure(&client, "truck42/can0", IFCONFIG_OP_APPLY, &settings);
+
+        connect();
+        decodeSentConfigure(1, &configure);
+
+        expect(sentMessageType(1)).toBe((uint8_t)kMESSAGE_TYPE_CONFIGURE);
+        expect((const char *)configure.agent_name).toBe("truck42");
+        expect((const char *)configure.interface_name).toBe("can0");
+        expect(configure.settings.bitrate).toBe((uint32_t)500000);
+    });
+
+    it("emits the configure reply to the consumer", []() {
+        InterfaceSettings settings = bitrateSettings();
+
+        connect();
+        Client_Configure(&client, "truck42/can0", IFCONFIG_OP_QUERY, &settings);
+
+        feedConfigureReply(CONFIGURE_STATUS_DENIED);
+
+        expect(configure_reply_count).toBe(1);
+        expect(last_configure_reply.status).toBe((uint8_t)CONFIGURE_STATUS_DENIED);
+    });
+
+    it("refuses to configure a target that is not agent/iface", []() {
+        InterfaceSettings settings = bitrateSettings();
+        bool configured;
+
+        connect();
+
+        configured = Client_Configure(&client, "7", IFCONFIG_OP_APPLY, &settings);
+
+        expect(configured).toBe(false);
+        expect(hub.control_count).toBe(1);
+    });
+
     it("emits disconnect and returns to disconnected", []() {
         connect();
         hub_events.on_disconnected(hub_events.context, 2000);
@@ -327,6 +373,7 @@ static ClientEvents clientEvents()
         onFrame,
         onError,
         onDisconnected,
+        onConfigureReply,
     };
 
     return events;
@@ -346,6 +393,8 @@ static void resetCallbackLog()
     memset(last_error_detail, 0, sizeof(last_error_detail));
     error_count = 0;
     disconnect_count = 0;
+    memset(&last_configure_reply, 0, sizeof(last_configure_reply));
+    configure_reply_count = 0;
 }
 
 static void connect()
@@ -512,3 +561,41 @@ static void decodeSentHello(uint8_t slot, HelloMessage *hello)
     HelloMessage_Decode(hello, hub.control_log[slot] + MESSAGE_HEADER_SIZE, header.length);
 }
 
+static void onConfigureReply(void *context, const ConfigureReplyMessage *reply)
+{
+    (void)context;
+
+    last_configure_reply = *reply;
+    configure_reply_count++;
+}
+
+static void decodeSentConfigure(uint8_t slot, ConfigureMessage *configure)
+{
+    MessageHeader header;
+
+    MessageHeader_Decode(&header, hub.control_log[slot], hub.control_sizes[slot]);
+    ConfigureMessage_Decode(configure, hub.control_log[slot] + MESSAGE_HEADER_SIZE, header.length);
+}
+
+static void feedConfigureReply(uint8_t status)
+{
+    ConfigureReplyMessage reply;
+    uint8_t encoded[MESSAGE_HEADER_SIZE + CONFIGURE_REPLY_BODY_SIZE];
+    size_t encoded_size;
+
+    memset(&reply, 0, sizeof(reply));
+    reply.status = status;
+    encoded_size = ConfigureReplyMessage_Encode(&reply, encoded, sizeof(encoded));
+    hub_events.on_control(hub_events.context, encoded, encoded_size, 0);
+}
+
+static InterfaceSettings bitrateSettings(void)
+{
+    InterfaceSettings settings;
+
+    memset(&settings, 0, sizeof(settings));
+    settings.fields = INTERFACE_FIELD_BITRATE;
+    settings.bitrate = 500000;
+
+    return settings;
+}

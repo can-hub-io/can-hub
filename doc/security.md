@@ -160,14 +160,17 @@ override that per client and per interface:
 can-hub-client --show-identity                # the subject fingerprint
 
 can-hub-cli acl add * */* rw                  # everyone read+write everywhere
-can-hub-cli acl add <fp> truck42/* ro         # this client: truck42 read-only
+can-hub-cli acl add <fp> truck42/* r          # this client: truck42 read-only
+can-hub-cli acl add <fp> truck42/can1 rwa     # ...and may reconfigure can1
 can-hub-cli acl add <fp> truck42/can0 none    # ...except can0, fully denied
 can-hub-cli acl delete <fp> truck42/can0
 can-hub-cli acl
 ```
 
 - Subject: a client fingerprint or `*`. Object: `agent/iface` with `*` on
-  either side. Level: `none` (no read, no write), `ro`, `rw`.
+  either side. Level: `none` (no read, no write), `r`, `rw`, or `rwa`, which
+  adds reconfiguring the interface (bit rate, modes, link): that disrupts
+  every client on the bus, so it is a separate grant.
 - Resolution is most-specific-wins with the subject dominating: a rule
   naming the fingerprint always beats a `*` rule; within the same subject
   rank the narrower object wins (`agent/can0` > `agent/*` > `*/*`). No

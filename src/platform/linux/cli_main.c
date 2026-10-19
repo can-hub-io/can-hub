@@ -11,6 +11,7 @@
 #include "platform/linux/shared/connect_url.h"
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/hub_defaults.h"
+#include "platform/linux/shared/interface_settings_text.h"
 #include "platform/linux/shared/log.h"
 #include "platform/linux/tcp/tcp_client_transport.h"
 #include "hub/ports/hub_transport_events.h"
@@ -25,7 +26,8 @@
 #define MAX_EPOLL_EVENTS 8
 #define POLL_PERIOD_MS 100
 #define TCP_SLOT 0
-#define COMMAND_WORDS_MAX 5
+#define COMMAND_WORDS_MAX 32
+#define INTERFACE_COMMAND_TARGET_WORDS 3
 
 typedef enum tcli_command_e {
     kCLI_COMMAND_STATUS = 0,
@@ -44,8 +46,7 @@ typedef enum tcli_command_e {
     kCLI_COMMAND_ACL_REVOKE,
     kCLI_COMMAND_PENDING,
     kCLI_COMMAND_INTERFACE_SET,
-    kCLI_COMMAND_INTERFACE_UP,
-    kCLI_COMMAND_INTERFACE_DOWN,
+    kCLI_COMMAND_INTERFACE_SHOW,
     kCLI_COMMAND_MAX,
 } TCLI_COMMAND;
 
@@ -65,8 +66,9 @@ static char target_interface[REGISTER_INTERFACE_NAME_SIZE];
 static char target_fingerprint[ADMIN_FINGERPRINT_HEX_SIZE];
 static bool target_can_read;
 static bool target_can_write;
+static bool target_can_admin;
+static InterfaceSettings target_settings;
 static uint32_t target_peer_id;
-static uint32_t target_bitrate;
 static uint16_t page_offset;
 static bool page_header_printed;
 static bool complete_mode;
@@ -77,7 +79,8 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text);
 static bool mapCommand(const char *words[], uint8_t word_count);
 static bool mapCompleteKind(const char *kind);
 static bool parsePeerId(const char *text);
-static bool parseBitrate(const char *text);
+static bool mapInterfaceCommand(const char *words[], uint8_t word_count);
+static bool parseAclLevel(const char *text);
 static bool parseInterfaceRef(const char *text);
 static bool parseNamespacedInterface(const char *text);
 static bool initTransport(const char *host, const char *port_text, const TransportEvents *events);
@@ -86,8 +89,6 @@ static void onDisconnected(void *context, uint64_t now_us);
 static void onControl(void *context, const uint8_t *data, size_t size, uint64_t now_us);
 static void onFrame(void *context, const uint8_t *data, size_t size);
 static void sendRequest(void);
-static bool isInterfaceCommand(void);
-static uint8_t ifconfigOp(void);
 static void sendShowStage(uint8_t stage);
 static void handleStatusReply(const uint8_t *payload, uint16_t payload_length);
 static void handlePeersReply(const uint8_t *payload, uint16_t payload_length);
@@ -101,7 +102,8 @@ static void handleRejectedReply(const uint8_t *payload, uint16_t payload_length)
 static const char *rejectionReasonName(uint8_t reason);
 static void printClientRow(const AdminClientsReplyEntry *entry, const char *indent);
 static void printActionReply(uint8_t status, const char *action, const char *target_kind, const char *target);
-static void printIfconfigReply(uint8_t status);
+static void printConfigureReply(const ConfigureReplyMessage *reply);
+static const char *aclLevelName(bool can_read, bool can_write, bool can_admin);
 static const char *roleName(uint8_t role);
 static const char *transportName(uint8_t transport_kind);
 static void formatUptime(uint32_t seconds, char *out, size_t size);
@@ -160,13 +162,17 @@ static void printUsage(FILE *stream, const char *program)
     fprintf(stream, "  agents kick <name>     disconnect an agent\n");
     fprintf(stream, "  clients                open client channels\n");
     fprintf(stream, "  interfaces             interface catalogue\n");
-    fprintf(stream, "  interface set <agent>/<iface> bitrate <bps>   reconfigure a bus bitrate\n");
+    fprintf(stream, "  interface show <agent>/<iface>                the settings the bus holds now\n");
+    fprintf(stream, "  interface set <agent>/<iface> <setting>...    reconfigure a bus in one step:\n");
+    fprintf(stream, "      bitrate <bps> sample-point <0.xxx> dbitrate <bps> dsample-point <0.xxx>\n");
+    fprintf(stream, "      fd|listen-only|loopback|one-shot|triple-sampling|berr-reporting on|off\n");
+    fprintf(stream, "      restart-ms <ms> txqueuelen <n> up|down\n");
     fprintf(stream, "  interface up|down <agent>/<iface>             bring a bus up or down\n");
     fprintf(stream, "  pins                   pinned TOFU identities\n");
     fprintf(stream, "  pins add <name> <fp>   allow an agent (its --show-identity fingerprint)\n");
     fprintf(stream, "  pins delete <name>     drop a pin so the agent can re-pin\n");
     fprintf(stream, "  acl                    client read/write grants\n");
-    fprintf(stream, "  acl add <fp|*> <agent|*>/<iface|*> none|ro|rw   grant (* = baseline)\n");
+    fprintf(stream, "  acl add <fp|*> <agent|*>/<iface|*> none|r|rw|rwa  grant (* = baseline, a = configure)\n");
     fprintf(stream, "  acl delete <fp|*> <agent|*>/<iface|*>          drop a grant\n");
     fprintf(stream, "  pending                identities the hub turned away, to authorize\n");
     fprintf(stream, "default: --connect unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n");
@@ -216,6 +222,10 @@ static bool parseArguments(int argc, char **argv, char *host, char *port_text)
 
 static bool mapCommand(const char *words[], uint8_t word_count)
 {
+    if (word_count >= INTERFACE_COMMAND_TARGET_WORDS && strcmp(words[0], "interface") == 0) {
+        return mapInterfaceCommand(words, word_count);
+    }
+
     if (word_count == 1) {
         if (strcmp(words[0], "status") == 0) {
             command = kCLI_COMMAND_STATUS;
@@ -240,28 +250,12 @@ static bool mapCommand(const char *words[], uint8_t word_count)
     }
 
     if (word_count == 5) {
-        if (strcmp(words[0], "interface") == 0 && strcmp(words[1], "set") == 0 && strcmp(words[3], "bitrate") == 0) {
-            command = kCLI_COMMAND_INTERFACE_SET;
-            return parseBitrate(words[4]) && parseNamespacedInterface(words[2]);
-        }
         if (strcmp(words[0], "acl") != 0 || strcmp(words[1], "add") != 0) {
             return false;
         }
         command = kCLI_COMMAND_ACL_ADD;
-        if (strcmp(words[4], "rw") == 0) {
-            target_can_read = true;
-            target_can_write = true;
-        } else if (strcmp(words[4], "ro") == 0) {
-            target_can_read = true;
-            target_can_write = false;
-        } else if (strcmp(words[4], "none") == 0) {
-            target_can_read = false;
-            target_can_write = false;
-        } else {
-            return false;
-        }
         snprintf(target_fingerprint, sizeof(target_fingerprint), "%s", words[2]);
-        return parseInterfaceRef(words[3]);
+        return parseAclLevel(words[4]) && parseInterfaceRef(words[3]);
     }
 
     if (word_count == 4) {
@@ -286,14 +280,6 @@ static bool mapCommand(const char *words[], uint8_t word_count)
     if (strcmp(words[0], "peers") == 0 && strcmp(words[1], "kick") == 0) {
         command = kCLI_COMMAND_PEERS_KICK;
         return parsePeerId(words[2]);
-    }
-    if (strcmp(words[0], "interface") == 0 && strcmp(words[1], "up") == 0) {
-        command = kCLI_COMMAND_INTERFACE_UP;
-        return parseNamespacedInterface(words[2]);
-    }
-    if (strcmp(words[0], "interface") == 0 && strcmp(words[1], "down") == 0) {
-        command = kCLI_COMMAND_INTERFACE_DOWN;
-        return parseNamespacedInterface(words[2]);
     }
     if (strcmp(words[0], "agents") == 0 && strcmp(words[1], "show") == 0) {
         command = kCLI_COMMAND_AGENTS_SHOW;
@@ -337,13 +323,52 @@ static bool parsePeerId(const char *text)
     return end != NULL && end != text && *end == '\0';
 }
 
-static bool parseBitrate(const char *text)
+static bool mapInterfaceCommand(const char *words[], uint8_t word_count)
 {
-    char *end = NULL;
+    char error[INTERFACE_SETTINGS_TEXT_ERROR_SIZE];
 
-    target_bitrate = (uint32_t)strtoul(text, &end, 10);
+    command = kCLI_COMMAND_INTERFACE_SET;
+    memset(&target_settings, 0, sizeof(target_settings));
 
-    return end != text && *end == '\0' && target_bitrate > 0;
+    if (strcmp(words[1], "show") == 0 && word_count == INTERFACE_COMMAND_TARGET_WORDS) {
+        command = kCLI_COMMAND_INTERFACE_SHOW;
+    } else if (strcmp(words[1], "up") == 0 && word_count == INTERFACE_COMMAND_TARGET_WORDS) {
+        target_settings.fields = INTERFACE_FIELD_LINK;
+        target_settings.link_up = true;
+    } else if (strcmp(words[1], "down") == 0 && word_count == INTERFACE_COMMAND_TARGET_WORDS) {
+        target_settings.fields = INTERFACE_FIELD_LINK;
+    } else if (strcmp(words[1], "set") != 0) {
+        return false;
+    } else if (!InterfaceSettingsText_Parse(
+                   &target_settings,
+                   words + INTERFACE_COMMAND_TARGET_WORDS,
+                   (uint8_t)(word_count - INTERFACE_COMMAND_TARGET_WORDS),
+                   error
+               )) {
+        LOG_ERROR("%s", error);
+        return false;
+    }
+
+    return parseNamespacedInterface(words[2]);
+}
+
+static bool parseAclLevel(const char *text)
+{
+    target_can_read = false;
+    target_can_write = false;
+    target_can_admin = false;
+
+    if (strcmp(text, "rwa") == 0) {
+        target_can_admin = true;
+    }
+    if (target_can_admin || strcmp(text, "rw") == 0) {
+        target_can_write = true;
+    }
+    if (target_can_write || strcmp(text, "r") == 0) {
+        target_can_read = true;
+    }
+
+    return target_can_read || strcmp(text, "none") == 0;
 }
 
 static bool parseNamespacedInterface(const char *text)
@@ -438,7 +463,7 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
     AdminPinAddReplyMessage pin_add_reply;
     AdminAclSetReplyMessage acl_set_reply;
     AdminAclRevokeReplyMessage acl_revoke_reply;
-    AdminIfconfigReplyMessage ifconfig_reply;
+    ConfigureReplyMessage configure_reply;
     ErrorMessage error;
     char peer_id_text[16];
 
@@ -531,7 +556,7 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
             target_fingerprint,
             target_agent,
             target_interface,
-            target_can_write ? "rw" : (target_can_read ? "ro" : "none")
+            aclLevelName(target_can_read, target_can_write, target_can_admin)
         );
         exit_code = 0;
         return;
@@ -547,9 +572,12 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
         exit_code = 0;
         return;
     }
-    if (header.type == kMESSAGE_TYPE_ADMIN_IFCONFIG_REPLY) {
-        AdminIfconfigReplyMessage_Decode(&ifconfig_reply, data + MESSAGE_HEADER_SIZE, header.length);
-        printIfconfigReply(ifconfig_reply.status);
+    if (header.type == kMESSAGE_TYPE_CONFIGURE_REPLY) {
+        if (!ConfigureReplyMessage_Decode(&configure_reply, data + MESSAGE_HEADER_SIZE, header.length)) {
+            exit_code = 1;
+            return;
+        }
+        printConfigureReply(&configure_reply);
         return;
     }
 }
@@ -578,7 +606,7 @@ static void sendRequest(void)
     AdminAclRevokeMessage acl_revoke;
     AdminAclListMessage acl_list = { page_offset };
     AdminRejectedMessage rejected = { page_offset };
-    AdminIfconfigMessage ifconfig;
+    ConfigureMessage configure;
     uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size = 0;
 
@@ -628,6 +656,7 @@ static void sendRequest(void)
         snprintf(acl_set.fingerprint_hex, sizeof(acl_set.fingerprint_hex), "%s", target_fingerprint);
         acl_set.can_read = target_can_read ? 1 : 0;
         acl_set.can_write = target_can_write ? 1 : 0;
+        acl_set.can_admin = target_can_admin ? 1 : 0;
         encoded_size = AdminAclSetMessage_Encode(&acl_set, encoded, sizeof(encoded));
     } else if (command == kCLI_COMMAND_ACL_REVOKE) {
         memset(&acl_revoke, 0, sizeof(acl_revoke));
@@ -635,13 +664,13 @@ static void sendRequest(void)
         snprintf(acl_revoke.interface_name, sizeof(acl_revoke.interface_name), "%s", target_interface);
         snprintf(acl_revoke.fingerprint_hex, sizeof(acl_revoke.fingerprint_hex), "%s", target_fingerprint);
         encoded_size = AdminAclRevokeMessage_Encode(&acl_revoke, encoded, sizeof(encoded));
-    } else if (isInterfaceCommand()) {
-        memset(&ifconfig, 0, sizeof(ifconfig));
-        snprintf(ifconfig.agent_name, sizeof(ifconfig.agent_name), "%s", target_agent);
-        snprintf(ifconfig.interface_name, sizeof(ifconfig.interface_name), "%s", target_interface);
-        ifconfig.op = ifconfigOp();
-        ifconfig.bitrate = target_bitrate;
-        encoded_size = AdminIfconfigMessage_Encode(&ifconfig, encoded, sizeof(encoded));
+    } else if (command == kCLI_COMMAND_INTERFACE_SET || command == kCLI_COMMAND_INTERFACE_SHOW) {
+        memset(&configure, 0, sizeof(configure));
+        snprintf(configure.agent_name, sizeof(configure.agent_name), "%s", target_agent);
+        snprintf(configure.interface_name, sizeof(configure.interface_name), "%s", target_interface);
+        configure.op = command == kCLI_COMMAND_INTERFACE_SHOW ? IFCONFIG_OP_QUERY : IFCONFIG_OP_APPLY;
+        configure.settings = target_settings;
+        encoded_size = ConfigureMessage_Encode(&configure, encoded, sizeof(encoded));
     }
 
     if (encoded_size == 0) {
@@ -650,30 +679,6 @@ static void sendRequest(void)
     }
 
     transport.port.send_control(transport.port.context, encoded, encoded_size);
-}
-
-static bool isInterfaceCommand(void)
-{
-    if (command == kCLI_COMMAND_INTERFACE_SET) {
-        return true;
-    }
-    if (command == kCLI_COMMAND_INTERFACE_UP) {
-        return true;
-    }
-
-    return command == kCLI_COMMAND_INTERFACE_DOWN;
-}
-
-static uint8_t ifconfigOp(void)
-{
-    if (command == kCLI_COMMAND_INTERFACE_UP) {
-        return IFCONFIG_OP_UP;
-    }
-    if (command == kCLI_COMMAND_INTERFACE_DOWN) {
-        return IFCONFIG_OP_DOWN;
-    }
-
-    return IFCONFIG_OP_SET_BITRATE;
 }
 
 static void sendShowStage(uint8_t stage)
@@ -982,7 +987,7 @@ static void handleAclListReply(const uint8_t *payload, uint16_t payload_length)
             reply.entries[i].agent_name,
             REGISTER_INTERFACE_NAME_SIZE,
             reply.entries[i].interface_name,
-            reply.entries[i].can_write ? "rw" : (reply.entries[i].can_read ? "ro" : "none"),
+            aclLevelName(reply.entries[i].can_read != 0, reply.entries[i].can_write != 0, reply.entries[i].can_admin != 0),
             reply.entries[i].fingerprint_hex
         );
     }
@@ -1078,32 +1083,36 @@ static void printActionReply(uint8_t status, const char *action, const char *tar
     exit_code = 0;
 }
 
-static void printIfconfigReply(uint8_t status)
+static void printConfigureReply(const ConfigureReplyMessage *reply)
 {
-    if (status == ADMIN_IFCONFIG_STATUS_UNKNOWN_INTERFACE) {
-        LOG_ERROR("unknown interface %s/%s", target_agent, target_interface);
-        exit_code = 1;
-        return;
-    }
-    if (status == ADMIN_IFCONFIG_STATUS_AGENT_UNREACHABLE) {
-        LOG_ERROR("agent for %s/%s is not connected", target_agent, target_interface);
-        exit_code = 1;
-        return;
-    }
-    if (status == ADMIN_IFCONFIG_STATUS_APPLY_FAILED) {
-        LOG_ERROR("agent could not apply the change to %s/%s (needs CAP_NET_ADMIN)", target_agent, target_interface);
+    if (reply->status != CONFIGURE_STATUS_OK) {
+        LOG_ERROR(
+            "%s/%s: %s%s%s",
+            target_agent,
+            target_interface,
+            InterfaceSettingsText_ConfigureStatusName(reply->status),
+            reply->detail[0] != '\0' ? ": " : "",
+            reply->detail
+        );
         exit_code = 1;
         return;
     }
 
-    if (command == kCLI_COMMAND_INTERFACE_SET) {
-        printf("%s/%s bitrate %u\n", target_agent, target_interface, target_bitrate);
-    } else if (command == kCLI_COMMAND_INTERFACE_UP) {
-        printf("%s/%s up\n", target_agent, target_interface);
-    } else {
-        printf("%s/%s down\n", target_agent, target_interface);
-    }
+    printf("%s/%s\n", target_agent, target_interface);
+    InterfaceSettingsText_Print(stdout, &reply->settings);
     exit_code = 0;
+}
+
+static const char *aclLevelName(bool can_read, bool can_write, bool can_admin)
+{
+    if (can_admin) {
+        return "rwa";
+    }
+    if (can_write) {
+        return "rw";
+    }
+
+    return can_read ? "r" : "none";
 }
 
 static const char *roleName(uint8_t role)
