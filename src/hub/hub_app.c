@@ -7,10 +7,10 @@ void HubApp_Init(
     HubTransportPort *transport,
     IdentityStorePort *identity_store,
     AuthorizationPort *authorization,
-    bool require_known_agents
+    bool require_known_peers
 )
 {
-    Broker_Init(&self->broker, transport, identity_store, authorization, require_known_agents);
+    Broker_Init(&self->broker, transport, identity_store, authorization, require_known_peers);
 }
 
 HubTransportEvents HubApp_Events(HubApp *self)

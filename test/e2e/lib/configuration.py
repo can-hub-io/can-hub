@@ -14,7 +14,7 @@ class HubConfig:
     listen: list[str] = field(default_factory=list)
     state_dir: str | None = None
     unix_socket: str | None = None
-    require_known_agents: bool = False
+    require_known_peers: bool = False
     cert: str | None = None
     key: str | None = None
     extra: list[str] = field(default_factory=list)
@@ -27,8 +27,8 @@ class HubConfig:
             argv += ["--listen", f"unix://{self.unix_socket}"]
         for address in self.listen:
             argv += ["--listen", address]
-        if self.require_known_agents:
-            argv += ["--require-known-agents"]
+        if self.require_known_peers:
+            argv += ["--require-known-peers"]
         if self.cert:
             argv += ["--cert", self.cert]
         if self.key:
@@ -42,15 +42,12 @@ class AgentConfig:
     name: str
     interfaces: list[str] = field(default_factory=list)
     state_dir: str | None = None
-    require_known_agents: bool = False
     extra: list[str] = field(default_factory=list)
 
     def to_args(self) -> list[str]:
         argv = ["--connect", self.connect, "--name", self.name]
         if self.state_dir:
             argv += ["--state-dir", self.state_dir]
-        if self.require_known_agents:
-            argv += ["--require-known-agents"]
         return argv + list(self.extra) + list(self.interfaces)
 
 

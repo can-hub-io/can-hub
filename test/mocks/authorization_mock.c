@@ -15,6 +15,7 @@ static bool mockGrant(
 );
 static bool mockRevoke(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name);
 static uint8_t mockList(void *context, uint16_t offset, AclEntry *entries, uint8_t max_entries, bool *more);
+static bool mockKnows(void *context, const char *fingerprint_hex);
 static AclEntry *findEntry(
     AuthorizationMock *self,
     const char *fingerprint_hex,
@@ -39,6 +40,7 @@ void AuthorizationMock_Reset(AuthorizationMock *self)
     self->port.grant = mockGrant;
     self->port.revoke = mockRevoke;
     self->port.list = mockList;
+    self->port.knows = mockKnows;
 }
 
 void AuthorizationMock_Grant(
@@ -126,6 +128,20 @@ static uint8_t mockList(void *context, uint16_t offset, AclEntry *entries, uint8
     }
 
     return count;
+}
+
+static bool mockKnows(void *context, const char *fingerprint_hex)
+{
+    AuthorizationMock *self = context;
+    int i;
+
+    for(i=0; i<self->entry_count; i++) {
+        if (strcmp(self->entries[i].fingerprint_hex, fingerprint_hex) == 0) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static AclEntry *findEntry(

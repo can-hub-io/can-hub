@@ -6,7 +6,7 @@ clients open them, the hub routes frames and serves the admin plane.
 ```
 can-hub [--listen <scheme>://[<bind-ip>:]<port>] ...
         [--cert <pem> --key <pem>] [--state-dir <path>]
-        [--require-known-agents]
+        [--require-known-peers]
 ```
 
 ## Listeners
@@ -56,9 +56,10 @@ via `--cert`/`--key`. Both encrypted listeners require client certificates
 (mTLS): the peer's certificate fingerprint **is** its identity. Details in
 [security](security.md).
 
-`--require-known-agents` rejects agents whose fingerprint is not already
-pinned, instead of auto-pinning on first contact. Enrollment flow in
-[security — locking down agents](security.md#locking-down-agents).
+`--require-known-peers` rejects agents whose fingerprint is not already
+pinned, instead of auto-pinning on first contact, and clients no ACL rule
+names. `can-hub-cli pending` lists what was turned away. Enrollment flow in
+[security — locking down agents and clients](security.md#locking-down-agents-and-clients).
 
 ## State
 

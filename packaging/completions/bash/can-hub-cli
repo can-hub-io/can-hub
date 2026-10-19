@@ -27,7 +27,7 @@ _can_hub_cli()
     local cur prev words cword
     _init_completion || return
 
-    local commands="status peers agents clients interfaces pins acl interface"
+    local commands="status peers agents clients interfaces pins acl pending interface"
 
     if [[ $cur == --* ]]; then
         COMPREPLY=($(compgen -W "--connect" -- "$cur"))

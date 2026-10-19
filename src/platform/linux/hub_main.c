@@ -60,7 +60,7 @@ static TlsServerTransport tls_transport;
 static ListenAddress tcp_listen;
 static ListenAddress quic_listen;
 static ListenAddress tls_listen;
-static bool require_known_agents;
+static bool require_known_peers;
 static HubTransportPort mux_port;
 static bool tcp_enabled;
 static bool unix_enabled;
@@ -127,11 +127,11 @@ int main(int argc, char **argv)
         quic_enabled ? "on" : "off",
         tcp_enabled ? "on" : "off",
         unix_enabled ? "on" : "off",
-        require_known_agents ? " [locked: known agents only]" : ""
+        require_known_peers ? " [locked: known peers only]" : ""
     );
-    if (require_known_agents && tcp_enabled && strcmp(tcp_listen.bind_address, "127.0.0.1") != 0) {
+    if (require_known_peers && tcp_enabled && strcmp(tcp_listen.bind_address, "127.0.0.1") != 0) {
         LOG_WARN(
-            "plain tcp on %s carries no identity and bypasses the agent allowlist;"
+            "plain tcp on %s carries no identity and bypasses the allowlist;"
             " bind it to a trusted interface or disable it",
             tcp_listen.bind_address
         );
@@ -172,13 +172,13 @@ static void printUsage(FILE *stream, const char *program)
         stream,
         "usage: %s [--listen tls://[<bind-ip>:]<port>] [--listen quic://[<bind-ip>:]<port>]\n"
         "       [--listen tcp://[<bind-ip>:]<port>] [--listen unix://<path>]\n"
-        "       [--cert <pem> --key <pem>] [--state-dir <path>] [--require-known-agents]"
+        "       [--cert <pem> --key <pem>] [--state-dir <path>] [--require-known-peers]"
         " [--log-level error|warn|info|debug]\n"
         "       defaults: tls://0.0.0.0:" HUB_DEFAULT_PORT_TEXT ", quic://0.0.0.0:" HUB_DEFAULT_PORT_TEXT
         ", tcp://127.0.0.1:" HUB_DEFAULT_PLAIN_TCP_PORT_TEXT ", unix://" HUB_DEFAULT_UNIX_SOCKET_PATH "\n"
         "       bind-ip defaults to 0.0.0.0 (tcp: 127.0.0.1); explicit --listen replaces the network\n"
-        "       defaults; --require-known-agents rejects agents whose fingerprint is not pinned;"
-        " TLS identity auto-generated\n",
+        "       defaults; --require-known-peers rejects agents whose fingerprint is not pinned"
+        " and clients no ACL names; TLS identity auto-generated\n",
         program
     );
 }
@@ -226,8 +226,8 @@ static bool parseArguments(int argc, char **argv)
             key = argv[++i];
         } else if (strcmp(argv[i], "--state-dir") == 0 && i + 1 < argc) {
             state_directory_override = argv[++i];
-        } else if (strcmp(argv[i], "--require-known-agents") == 0) {
-            require_known_agents = true;
+        } else if (strcmp(argv[i], "--require-known-peers") == 0) {
+            require_known_peers = true;
         }
     }
 
@@ -367,7 +367,7 @@ static bool startListeners(const char *unix_path, const char *certificate, const
     }
 
     identity_store = identityStore();
-    HubApp_Init(&app, &mux_port, identity_store, authorizationStore(), require_known_agents);
+    HubApp_Init(&app, &mux_port, identity_store, authorizationStore(), require_known_peers);
 
     return true;
 }

@@ -73,6 +73,8 @@ offset  size  field
 0x29  ADMIN_ACL_LIST_REPLY
 0x2A  ADMIN_IFCONFIG      admin: reconfigure an interface (bitrate, up, down)
 0x2B  ADMIN_IFCONFIG_REPLY
+0x2C  ADMIN_REJECTED      admin: identities the hub turned away (paginated)
+0x2D  ADMIN_REJECTED_REPLY
 0x7F  PING/PONG    liveness (flags bit 0: reply)
 ```
 
@@ -124,7 +126,7 @@ REGISTER (total 392)
 REGISTER_ACK (total 24)
 @4   status u8 (0 ok, 1 rejected, 2 identity mismatch: name pinned to another
               fingerprint, 3 unknown agent: fingerprint not in the hub allowlist,
-              only sent by a hub started with --require-known-agents)
+              only sent by a hub started with --require-known-peers)
 @5   interface_count u8
 @6   reserved u16
 @8   channels u8[16]   (same order as the REGISTER names)
@@ -265,7 +267,7 @@ ADMIN_PEERS (total 8)
 @6   reserved u16
 
 ADMIN_PEERS_REPLY (total 8 + count * 272)
-@4   count u8          (0-16 entries in this reply)
+@4   count u8          (0-15 entries in this reply)
 @5   flags u8          (bit 0: more entries beyond offset + count)
 @6   reserved u16
 @8   entries, each 272 bytes:
@@ -416,7 +418,36 @@ ADMIN_ACL_LIST_REPLY (total 8 + count * 212)
      +209 can_read u8 (0/1)
      +210 can_write u8 (0/1)
      +211 reserved u8[1]
+
+ADMIN_REJECTED (total 8)
+@4   offset u16        (pagination start index)
+@6   reserved u16
+
+ADMIN_REJECTED_REPLY (total 8 + count * 264)
+@4   count u8          (0-15 entries in this reply)
+@5   flags u8          (bit 0: more entries beyond offset + count)
+@6   reserved u16
+@8   entries, each 264 bytes:
+     +0   role u8 (1 agent, 2 client)
+     +1   reason u8 (0 not allowed: the hub runs --require-known-peers and
+                    does not know this fingerprint; 1 fingerprint mismatch:
+                    the agent name is pinned to another fingerprint)
+     +2   reserved u8[2]
+     +4   attempts u32              (rejections of this identity so far)
+     +8   last_seen_seconds u32     (seconds since the latest one)
+     +12  name char[128]            (agent name claimed at REGISTER, or the
+                                     client's HELLO label)
+     +140 fingerprint_hex char[65]
+     +205 origin char[56]           (remote ip:port of the latest attempt)
+     +261 reserved u8[3]
 ```
+
+The hub remembers the last 16 identities it turned away, in memory, one entry
+per fingerprint and role. A retry bumps attempts instead of taking another
+entry; a new identity evicts the entry with the fewest attempts, the least
+recently seen among equals, so a device retrying on its backoff outlives a
+flood of one-shot certificates. An identity that is then admitted leaves the
+list. Peers without a fingerprint (plaintext, unix) are never listed.
 
 Limits: agent name <= 127 chars, interface name 1-15 chars (Linux IFNAMSIZ), <= 16 interfaces per agent, error detail <= 63 chars.
 

@@ -1,7 +1,7 @@
 *** Settings ***
 Documentation     The security model end to end: what each transport negotiates,
 ...               that an identity survives a restart, and that pinning and the
-...               agent allowlist reject what they are supposed to reject.
+...               allowlist of known peers reject what they are supposed to reject.
 Library           BenchKeywords
 Variables         bench_variables.py
 Suite Setup       Setup Bench    ${BENCH}
@@ -85,6 +85,33 @@ An Allowlisted Agent Is Accepted
     Register Agent allowed On ${hub} From ${AGENT_STATE}
     Hub ${hub} Should Export 1 Interfaces
 
+The Hub Lists An Agent It Turned Away
+    ${hub}=    Start Hub With Allowlist
+    ${fingerprint}=    Identity Of Agent On ${LOCAL_SERVER} In ${AGENT_STATE}
+    ${agent}=    Start Agent unlisted On ${hub} From ${AGENT_STATE}
+    Log Of ${agent} Should Contain rejected    timeout=10
+
+    ${pending}=    Run CLI On Hub ${hub}    pending
+    Should Contain    ${pending.stdout}    unlisted
+    Should Contain    ${pending.stdout}    ${fingerprint}
+
+An Unknown Client Is Rejected When The Allowlist Is On
+    ${hub}=    Start Hub With Allowlist
+    ${client}=    Dump Over ${TLS} As locked-out From ${CLIENT_STATE}
+
+    Log Of ${client} Should Contain client fingerprint not in the hub allowlist    timeout=10
+
+A Client An ACL Names Is Accepted
+    ${hub}=    Start Hub With Allowlist
+    ${agent_fingerprint}=    Identity Of Agent On ${LOCAL_SERVER} In ${AGENT_STATE}
+    Run CLI On Hub ${hub}    pins    add    granted    ${agent_fingerprint}
+    Register Agent granted On ${hub} From ${AGENT_STATE}
+    ${client_fingerprint}=    Identity Of Client On ${LOCAL_SERVER} In ${CLIENT_STATE}
+    Run CLI On Hub ${hub}    acl    add    ${client_fingerprint}    granted/*    ro
+
+    ${client}=    Dump Over ${TLS} As granted From ${CLIENT_STATE}
+    Wait Until Client ${client} Has Open Channel    ${hub}
+
 *** Keywords ***
 Start Hub Listening On Both Encrypted Transports
     ${hub}=    Start Hub With Allowlist ${False}
@@ -96,7 +123,7 @@ Start Hub With Allowlist
 
 Start Hub With Allowlist ${required}
     ${config}=    Hub Configuration    listen=${{ ["${TLS}", "${QUIC}"] }}
-    ...    require_known_agents=${required}
+    ...    require_known_peers=${required}
     ${hub}=    Start CAN HUB On ${LOCAL_SERVER} With ${config}
     RETURN    ${hub}
 
@@ -122,6 +149,11 @@ Dump Over ${connect} As ${name} Against ${hub}
     ${client_config}=    Client Configuration    dump    ${name}/vcan0    connect=${connect}    state_dir=${client_state}
     ${client}=    Start CAN Client On ${LOCAL_SERVER} With ${client_config}
     Wait Until Client ${client} Has Open Channel    ${hub}
+    RETURN    ${client}
+
+Dump Over ${connect} As ${agent_name} From ${state_dir}
+    ${config}=    Client Configuration    dump    ${agent_name}/vcan0    connect=${connect}    state_dir=${state_dir}
+    ${client}=    Start CAN Client On ${LOCAL_SERVER} With ${config}
     RETURN    ${client}
 
 Hub ${hub} Should Export ${count} Interfaces

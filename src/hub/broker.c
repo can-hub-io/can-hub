@@ -1,5 +1,6 @@
 #include "hub/broker.h"
 
+#include <assert.h>
 #include <string.h>
 
 #include "hub/domain/admin_views.h"
@@ -17,6 +18,16 @@
 #include "shared/bounded_string.h"
 
 #define CONTROL_BUFFER_SIZE 4096
+#define ADMIN_PAGE_WIRE_SIZE(fixed, entries, entry) (MESSAGE_HEADER_SIZE + (fixed) + (entries) * (entry))
+
+static_assert(
+    CONTROL_BUFFER_SIZE >= ADMIN_PAGE_WIRE_SIZE(ADMIN_PEERS_REPLY_FIXED_FIELDS_SIZE, ADMIN_PEERS_REPLY_ENTRIES_MAX, ADMIN_PEERS_REPLY_ENTRY_SIZE),
+    "a full ADMIN_PEERS_REPLY page exceeds the control buffer"
+);
+static_assert(
+    CONTROL_BUFFER_SIZE >= ADMIN_PAGE_WIRE_SIZE(ADMIN_REJECTED_REPLY_FIXED_FIELDS_SIZE, ADMIN_REJECTED_REPLY_ENTRIES_MAX, ADMIN_REJECTED_REPLY_ENTRY_SIZE),
+    "a full ADMIN_REJECTED_REPLY page exceeds the control buffer"
+);
 #define PING_REPLY_FLAG 0x01
 #define HELLO_TIMEOUT_US 5000000
 #define AWAITING_HELLO_MAX (PEER_DIRECTORY_MAX / 2)
@@ -61,6 +72,7 @@ static void handleAdminAclSet(Broker *self, HubPeer *peer, const MessageHeader *
 static void handleAdminAclRevoke(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminAclList(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminIfconfig(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleAdminRejected(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleIfconfigReply(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleInterfaceStatus(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void relayPaceToClients(Broker *self, uint32_t interface_id, uint32_t pace_rate);
@@ -77,6 +89,10 @@ static void releaseReliableBindings(Broker *self, HubPeer *client);
 static void revertAgentChannelIfUnused(Broker *self, uint32_t interface_id);
 static bool displaceGhostPeer(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
 static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
+static bool clientIsAdmitted(Broker *self, const HubPeer *peer);
+static void rejectClient(Broker *self, HubPeer *peer);
+static void rejectAgent(Broker *self, HubPeer *peer, const RegisterMessage *registration, uint8_t identity_status);
+static void recordRejection(Broker *self, const HubPeer *peer, const char *name, uint8_t reason);
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
 static void reattachClientsToAgent(Broker *self, uint32_t agent_peer_id);
 static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size);
@@ -133,6 +149,7 @@ static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
     [kMESSAGE_TYPE_ADMIN_ACL_REVOKE] = handleAdminAclRevoke,
     [kMESSAGE_TYPE_ADMIN_ACL_LIST] = handleAdminAclList,
     [kMESSAGE_TYPE_ADMIN_IFCONFIG] = handleAdminIfconfig,
+    [kMESSAGE_TYPE_ADMIN_REJECTED] = handleAdminRejected,
     [kMESSAGE_TYPE_IFCONFIG_REPLY] = handleIfconfigReply,
     [kMESSAGE_TYPE_INTERFACE_STATUS] = handleInterfaceStatus,
 };
@@ -144,17 +161,18 @@ void Broker_Init(
     HubTransportPort *transport,
     IdentityStorePort *identity_store,
     AuthorizationPort *authorization,
-    bool require_known_agents
+    bool require_known_peers
 )
 {
     memset(self, 0, sizeof(*self));
     self->transport = transport;
     self->identity_store = identity_store;
     self->authorization = authorization;
-    self->require_known_agents = require_known_agents;
+    self->require_known_peers = require_known_peers;
     InterfaceRegistry_Reset(&self->registry);
     PeerDirectory_Reset(&self->directory);
     EchoTokens_Reset(&self->echo_tokens);
+    RejectedPeers_Reset(&self->rejected_peers);
 }
 
 HubTransportEvents Broker_Events(Broker *self)
@@ -438,9 +456,18 @@ static void handleHello(Broker *self, HubPeer *peer, const MessageHeader *header
 
     peer->capabilities = hello.capabilities;
 
-    if (peer->role == kHUB_PEER_ROLE_CLIENT && hello.name[0] != '\0') {
+    if (peer->role != kHUB_PEER_ROLE_CLIENT) {
+        return;
+    }
+    if (hello.name[0] != '\0') {
         HubPeer_SetAgentName(peer, hello.name);
     }
+    if (!clientIsAdmitted(self, peer)) {
+        rejectClient(self, peer);
+        return;
+    }
+
+    RejectedPeers_Forget(&self->rejected_peers, peer);
 }
 
 static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
@@ -462,18 +489,7 @@ static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *hea
 
     identity_status = agentIdentityStatus(self, peer, &registration);
     if (identity_status != REGISTER_STATUS_OK) {
-        memset(&ack, 0, sizeof(ack));
-        ack.status = identity_status;
-        sendControl(self, peer, encoded, RegisterAckMessage_Encode(&ack, encoded, sizeof(encoded)));
-        sendError(
-            self,
-            peer->peer_id,
-            kERROR_CODE_ROLE_REJECTED,
-            identity_status == REGISTER_STATUS_UNKNOWN_AGENT
-                ? "agent fingerprint not in the hub allowlist"
-                : "agent name pinned to a different fingerprint"
-        );
-        disconnectPeer(self, peer->peer_id);
+        rejectAgent(self, peer, &registration, identity_status);
         return;
     }
 
@@ -489,6 +505,7 @@ static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *hea
     }
 
     HubPeer_SetAgentName(peer, registration.agent_name);
+    RejectedPeers_Forget(&self->rejected_peers, peer);
     reattachClientsToAgent(self, peer->peer_id);
 }
 
@@ -988,6 +1005,23 @@ static void handleAdminIfconfig(Broker *self, HubPeer *peer, const MessageHeader
     sendControl(self, agent, encoded, IfconfigMessage_Encode(&forward, encoded, sizeof(encoded)));
 }
 
+static void handleAdminRejected(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    AdminRejectedMessage request;
+    AdminRejectedReplyMessage reply;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN) {
+        return;
+    }
+    if (!AdminRejectedMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    RejectedPeers_List(&self->rejected_peers, request.offset, &reply, self->now_us);
+    sendControl(self, peer, encoded, AdminRejectedReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+}
+
 static void handleIfconfigReply(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
 {
     IfconfigReplyMessage reply;
@@ -1085,7 +1119,7 @@ static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const Regi
     }
 
     if (!self->identity_store->lookup(self->identity_store->context, registration->agent_name, pinned)) {
-        if (self->require_known_agents) {
+        if (self->require_known_peers) {
             return REGISTER_STATUS_UNKNOWN_AGENT;
         }
         if (!self->identity_store->pin(
@@ -1099,6 +1133,54 @@ static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const Regi
     }
 
     return strcmp(pinned, peer->fingerprint_hex) == 0 ? REGISTER_STATUS_OK : REGISTER_STATUS_IDENTITY_MISMATCH;
+}
+
+static bool clientIsAdmitted(Broker *self, const HubPeer *peer)
+{
+    if (!self->require_known_peers || peer->fingerprint_hex[0] == '\0') {
+        return true;
+    }
+    if (self->authorization == NULL) {
+        return false;
+    }
+
+    return self->authorization->knows(self->authorization->context, peer->fingerprint_hex);
+}
+
+static void rejectClient(Broker *self, HubPeer *peer)
+{
+    recordRejection(self, peer, peer->agent_name, ADMIN_REJECTED_REASON_NOT_ALLOWED);
+    sendError(self, peer->peer_id, kERROR_CODE_ROLE_REJECTED, "client fingerprint not in the hub allowlist");
+    disconnectPeer(self, peer->peer_id);
+}
+
+static void rejectAgent(Broker *self, HubPeer *peer, const RegisterMessage *registration, uint8_t identity_status)
+{
+    RegisterAckMessage ack;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+
+    memset(&ack, 0, sizeof(ack));
+    ack.status = identity_status;
+    sendControl(self, peer, encoded, RegisterAckMessage_Encode(&ack, encoded, sizeof(encoded)));
+
+    if (identity_status == REGISTER_STATUS_UNKNOWN_AGENT) {
+        recordRejection(self, peer, registration->agent_name, ADMIN_REJECTED_REASON_NOT_ALLOWED);
+        sendError(self, peer->peer_id, kERROR_CODE_ROLE_REJECTED, "agent fingerprint not in the hub allowlist");
+    } else if (identity_status == REGISTER_STATUS_IDENTITY_MISMATCH) {
+        recordRejection(self, peer, registration->agent_name, ADMIN_REJECTED_REASON_FINGERPRINT_MISMATCH);
+        sendError(self, peer->peer_id, kERROR_CODE_ROLE_REJECTED, "agent name pinned to a different fingerprint");
+    } else {
+        sendError(self, peer->peer_id, kERROR_CODE_ROLE_REJECTED, "agent identity could not be pinned");
+    }
+
+    disconnectPeer(self, peer->peer_id);
+}
+
+static void recordRejection(Broker *self, const HubPeer *peer, const char *name, uint8_t reason)
+{
+    Rejection rejection = { peer, name, reason, self->now_us };
+
+    RejectedPeers_Record(&self->rejected_peers, &rejection);
 }
 
 static bool rememberPendingIfconfig(Broker *self, uint32_t admin_peer_id, uint32_t agent_peer_id, const char *interface_name)

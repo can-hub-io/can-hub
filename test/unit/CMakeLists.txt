@@ -293,6 +293,13 @@ add_unit_test(test_echo_tokens
         ${ROOT_SRC_DIR}/hub/domain/echo_tokens.c
 )
 
+add_unit_test(test_rejected_peers
+    SOURCES
+        hub/domain/test_rejected_peers.cpp
+        ${ROOT_SRC_DIR}/hub/domain/rejected_peers.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
+)
+
 add_unit_test(test_egress_queue
     SOURCES
         hub/domain/test_egress_queue.cpp
@@ -336,6 +343,7 @@ add_unit_test(test_broker
         ${ROOT_SRC_DIR}/shared/egress_shaper.c
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
         ${ROOT_SRC_DIR}/hub/domain/peer_directory.c
+        ${ROOT_SRC_DIR}/hub/domain/rejected_peers.c
         ${ROOT_SRC_DIR}/protocol/admin_message.c
         ${ROOT_SRC_DIR}/protocol/frame_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c

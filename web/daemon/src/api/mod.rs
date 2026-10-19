@@ -95,7 +95,8 @@ pub fn router(state: AppState, assets_dir: Option<PathBuf>) -> Router {
 
     let pins_manage = guarded(&state, Some(Permission::PinsManage), Router::new()
         .route("/api/pins", get(handlers::pins).post(handlers::pin_add))
-        .route("/api/pins/{name}", delete(handlers::pin_delete)));
+        .route("/api/pins/{name}", delete(handlers::pin_delete))
+        .route("/api/rejected", get(handlers::rejected)));
 
     let acl_manage = guarded(&state, Some(Permission::AclManage), Router::new()
         .route("/api/acls", get(handlers::acls).post(handlers::acl_set))

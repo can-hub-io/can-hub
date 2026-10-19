@@ -64,6 +64,11 @@ pub(crate) async fn pins(State(state): State<AppState>) -> Result<Json<Vec<PinDt
     Ok(Json(entries.into_iter().map(PinDto::from).collect()))
 }
 
+pub(crate) async fn rejected(State(state): State<AppState>) -> Result<Json<Vec<RejectedDto>>, ApiError> {
+    let entries = with_admin(&state, |client| client.rejected()).await?;
+    Ok(Json(entries.into_iter().map(RejectedDto::from).collect()))
+}
+
 // --------------------------------------------------------------- actions
 
 pub(crate) async fn kick_peer(State(state): State<AppState>, Path(id): Path<String>) -> ActionResponse {

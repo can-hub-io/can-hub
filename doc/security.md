@@ -75,10 +75,11 @@ the hub bounds that phase on every transport:
   ngtcp2 has validated for the connection, not to the source of whichever packet
   arrived last, so a rewritten source address cannot redirect a live session.
 
-These bounds only cover the phase before HELLO. A peer that completes the
-handshake with a self-signed certificate and says HELLO holds its slot like any
-other: in TOFU mode a connection that finished the handshake is not a trusted
-one.
+These bounds only cover the phase before HELLO. In TOFU mode a peer that
+completes the handshake with a self-signed certificate and says HELLO holds its
+slot like any other: a connection that finished the handshake is not a trusted
+one. With `--require-known-peers` an unknown client is turned away at HELLO and
+an unknown agent at REGISTER.
 
 ## Plaintext transports are network-trusted
 
@@ -92,11 +93,18 @@ allowlist, no ACLs — peers there are trusted with full read and write.
   the only place the admin role is accepted (an admin HELLO over TCP or QUIC
   is disconnected).
 
-## Locking down agents
+## Locking down agents and clients
 
-Default is TOFU: the first agent to claim a name pins it. To accept only
-pre-authorized devices, run the hub with `--require-known-agents` and enroll
-each one `authorized_keys`-style:
+Default is TOFU: the first agent to claim a name pins it, and any client
+connects. To accept only peers you authorized, run the hub with
+`--require-known-peers`. It covers both roles at once:
+
+| Role | Known when |
+|---|---|
+| agent | its name is pinned to its fingerprint (`can-hub-cli pins add`) |
+| client | at least one ACL rule names its fingerprint, at any level, `none` included (`can-hub-cli acl add <fp> …`) |
+
+A `*` rule does not make a client known. Agents enroll `authorized_keys`-style:
 
 ```sh
 # on the device — public, safe to share; the private key never leaves it
@@ -112,8 +120,36 @@ An unknown fingerprint is rejected with **no server state created**
 backoff, so authorizing it while it retries is enough. A re-keyed device
 needs `can-hub-cli pins delete <name>` before it can pin again.
 
+A client is enrolled the same way: `can-hub-client --show-identity` on its
+side, `can-hub-cli acl add <fingerprint> <agent>/<iface> ro` on the hub. An
+unknown client is disconnected right after its HELLO with
+`client fingerprint not in the hub allowlist`.
+
 The allowlist applies to quic/tls only — plain tcp carries no fingerprint
 and bypasses it (see above).
+
+### Enrolling what knocked
+
+Rather than fetching a fingerprint from the device, let it try and authorize
+what the hub turned away:
+
+```sh
+can-hub-cli pending
+role     name        origin             reason               attempts last-seen fingerprint
+agent    truck42     203.0.113.5:40000  not-allowed          12       8s        9abfc913…
+client   laptop      198.51.100.7:51234 not-allowed          3        1m0s      51c2…
+```
+
+The web console shows the same list under **Pending**, with Authorize (agent)
+and Grant (client) buttons. Agents whose name is pinned to another
+fingerprint are listed too, in TOFU mode as well: a re-keyed device, or an
+impostor, which the list cannot tell apart. Check the fingerprint with the
+device before you trust it.
+
+The list holds the last 16 identities, in memory, one per fingerprint and
+role; it never touches the database and costs nothing per rejection beyond
+the handshake the peer already paid for. A flood of fresh certificates evicts
+other one-shot entries first, not a device that keeps retrying.
 
 ## Client ACLs
 

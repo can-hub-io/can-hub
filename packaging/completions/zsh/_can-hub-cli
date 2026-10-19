@@ -27,7 +27,7 @@ _can-hub-cli()
     local -a commands values
     local verb sub verb_index i
 
-    commands=(status peers agents clients interfaces pins acl interface)
+    commands=(status peers agents clients interfaces pins acl pending interface)
 
     for ((i = 2; i < CURRENT; i++)); do
         case ${words[i]} in

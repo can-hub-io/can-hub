@@ -70,6 +70,16 @@ describe("identity_database", []() {
         expect(acl->write_allowed(acl->context, TRUCK_FINGERPRINT, "truck42", "can0")).toBe(false);
     });
 
+    it("knows a client once a rule names its fingerprint, even a deny", []() {
+        AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
+
+        acl->grant(acl->context, "*", "*", "*", true, true);
+        acl->grant(acl->context, TRUCK_FINGERPRINT, "truck42", "can0", false, false);
+
+        expect(acl->knows(acl->context, TRUCK_FINGERPRINT)).toBe(true);
+        expect(acl->knows(acl->context, OTHER_FINGERPRINT)).toBe(false);
+    });
+
     it("grants a specific write and scopes it to that fingerprint and interface", []() {
         AuthorizationPort *acl = IdentityDatabase_AuthorizationPort(&database);
 

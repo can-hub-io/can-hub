@@ -61,6 +61,7 @@ static bool aclGrant(
 );
 static bool aclRevoke(void *context, const char *fingerprint_hex, const char *agent_name, const char *interface_name);
 static uint8_t aclList(void *context, uint16_t offset, AclEntry *entries, uint8_t max_entries, bool *more);
+static bool aclKnows(void *context, const char *fingerprint_hex);
 
 /* ---------- public ---------- */
 
@@ -78,6 +79,7 @@ bool IdentityDatabase_Open(IdentityDatabase *self, const char *path)
     self->authorization_port.grant = aclGrant;
     self->authorization_port.revoke = aclRevoke;
     self->authorization_port.list = aclList;
+    self->authorization_port.knows = aclKnows;
 
     if (sqlite3_open(path, &self->database) != SQLITE_OK) {
         IdentityDatabase_Close(self);
@@ -484,4 +486,27 @@ static uint8_t aclList(void *context, uint16_t offset, AclEntry *entries, uint8_
     sqlite3_finalize(statement);
 
     return count;
+}
+
+static bool aclKnows(void *context, const char *fingerprint_hex)
+{
+    IdentityDatabase *self = context;
+    sqlite3_stmt *statement = NULL;
+    bool known;
+
+    if (sqlite3_prepare_v2(
+            self->database,
+            "SELECT 1 FROM client_acls WHERE fingerprint = ?1 LIMIT 1",
+            -1,
+            &statement,
+            NULL
+        ) != SQLITE_OK) {
+        return false;
+    }
+
+    sqlite3_bind_text(statement, 1, fingerprint_hex, -1, SQLITE_STATIC);
+    known = sqlite3_step(statement) == SQLITE_ROW;
+    sqlite3_finalize(statement);
+
+    return known;
 }

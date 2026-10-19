@@ -126,6 +126,21 @@ async fn pins_permission_maps_to_pins_routes() {
 }
 
 #[tokio::test]
+async fn rejected_list_needs_the_pins_permission() {
+    let state = make_state();
+    let pinner = seed_session(&state, "pinner", &[Permission::PinsManage]);
+    let viewer = seed_session(&state, "viewer", &[Permission::ViewsRead]);
+    assert_eq!(
+        status_of(state.clone(), request(Method::GET, "/api/rejected", Some(&pinner), false)).await,
+        StatusCode::BAD_GATEWAY
+    );
+    assert_eq!(
+        status_of(state, request(Method::GET, "/api/rejected", Some(&viewer), false)).await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
 async fn mutation_requires_csrf_token() {
     let state = make_state();
     let session = seed_session(&state, "kicker", &[Permission::PeersKick]);
