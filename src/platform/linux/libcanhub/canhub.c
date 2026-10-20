@@ -109,6 +109,7 @@ static void onConfigureReply(void *context, const ConfigureReplyMessage *reply);
 static const TransactionSender *transactionOf(const CanHubSession *self);
 static bool transactionFinished(const CanHubSession *self);
 static int32_t offerSteps(CanHubSession *self, const CanHubTxnStep *steps, uint32_t count, uint32_t *taken);
+static int32_t handOverRecords(CanHubSession *self, const TxnStep *records, uint8_t count);
 static int32_t transactionEndedResult(CanHubSession *self);
 
 static _Thread_local char connect_error[LAST_ERROR_SIZE] = NO_CONNECT_ERROR;
@@ -571,6 +572,38 @@ int32_t canhub_txn_send(CanHubSession *session, const CanHubTxnStep *steps, uint
         pumpOnce(session, (timeout_ms < 0) ? PUMP_SLICE_MS : remainingMs(deadline));
         Client_FlushTransaction(&session->client);
     }
+}
+
+int32_t canhub_txn_send_message(CanHubSession *session, const CanHubTxnMessage *message, int32_t timeout_ms)
+{
+    TxnStep records[CANHUB_TRANSACTIONS_MESSAGE_RECORDS_MAX];
+    uint64_t deadline = deadlineFrom(timeout_ms);
+    uint8_t count;
+
+    count = (message == NULL) ? 0 : CanHubTransactions_MessageToWire(message, records);
+    if (count == 0) {
+        setError(session, "message needs struct_size set, 1-4095 bytes of data and a template id below 16");
+        return CANHUB_ERR_ARGUMENT;
+    }
+    if (transactionOf(session)->state != kTRANSACTION_SENDER_RUNNING) {
+        return transactionFinished(session) ? transactionEndedResult(session) : CANHUB_ERR_STATE;
+    }
+
+    while (!CanHubTransactions_HasCreditFor(transactionOf(session), records, count)) {
+        if (transactionFinished(session)) {
+            return transactionEndedResult(session);
+        }
+        if (session->disconnected) {
+            return CANHUB_ERR_DISCONNECTED;
+        }
+        if (timeout_ms >= 0 && remainingMs(deadline) == 0) {
+            return CANHUB_ERR_TIMEOUT;
+        }
+        pumpOnce(session, (timeout_ms < 0) ? PUMP_SLICE_MS : remainingMs(deadline));
+        Client_FlushTransaction(&session->client);
+    }
+
+    return handOverRecords(session, records, count);
 }
 
 int32_t canhub_txn_end(CanHubSession *session, int32_t timeout_ms)
@@ -1153,6 +1186,34 @@ static int32_t offerSteps(CanHubSession *self, const CanHubTxnStep *steps, uint3
         return CANHUB_OK;
     }
 
+    return CANHUB_OK;
+}
+
+static int32_t handOverRecords(CanHubSession *self, const TxnStep *records, uint8_t count)
+{
+    TTRANSACTION_OFFER stopped_by;
+    uint32_t taken = 0;
+
+    while (taken < count) {
+        taken += Client_SendSteps(&self->client, records + taken, count - taken, &stopped_by);
+        if (taken == count) {
+            break;
+        }
+        if (transactionFinished(self)) {
+            return transactionEndedResult(self);
+        }
+        if (stopped_by == kTRANSACTION_OFFER_REJECTED) {
+            setError(self, "invalid step or no transaction running");
+            return CANHUB_ERR_ARGUMENT;
+        }
+        if (self->disconnected) {
+            return CANHUB_ERR_DISCONNECTED;
+        }
+        pumpOnce(self, PUMP_SLICE_MS);
+        Client_FlushTransaction(&self->client);
+    }
+
+    pumpOnce(self, 0);
     return CANHUB_OK;
 }
 

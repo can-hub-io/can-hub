@@ -8,6 +8,7 @@ from canhub.bus import CanHubBus, _FairLock
 from canhub.transaction import (
     SEND_CHUNK_STEPS,
     Advance,
+    Isotp,
     Origin,
     Pattern,
     ScriptError,
@@ -16,6 +17,7 @@ from canhub.transaction import (
     TransactionAborted,
     from_native_result,
     to_native_begin,
+    to_native_message,
     to_native_step,
     to_native_template,
 )
@@ -62,6 +64,58 @@ class TestToNativeTemplate:
             to_native_template(native.TXN_TEMPLATES_MAX, Template())
 
 
+class TestToNativeIsotp:
+    def test_it_carries_the_isotp_parameters_of_a_template(self):
+        template = Template(
+            mode=Advance.COUNT,
+            isotp=Isotp(0x7E8, tx_address=0x10, rx_address=0xF1, fd=True, bitrate_switch=True, block_size=8, st_min=2),
+        )
+
+        definition = to_native_template(1, template)
+
+        assert definition.type == native.TXN_TYPE_ISOTP
+        assert definition.isotp.response_id == 0x7E8
+        assert definition.isotp.flags == (
+            native.ISOTP_FLAG_PADDING
+            | native.ISOTP_FLAG_ADDRESS_BYTE
+            | native.ISOTP_FLAG_FD
+            | native.ISOTP_FLAG_BIT_RATE_SWITCH
+        )
+        assert (definition.isotp.tx_address, definition.isotp.rx_address) == (0x10, 0xF1)
+        assert definition.isotp.tx_data_length == native.FRAME_PAYLOAD_MAX
+        assert (definition.isotp.block_size, definition.isotp.st_min) == (8, 2)
+
+    def test_it_uses_one_address_both_ways_for_mixed_addressing(self):
+        definition = to_native_template(1, Template(isotp=Isotp(0x7E8, tx_address=0x22)))
+
+        assert (definition.isotp.tx_address, definition.isotp.rx_address) == (0x22, 0x22)
+
+    def test_it_sends_classic_frames_unless_told_otherwise(self):
+        definition = to_native_template(1, Template(isotp=Isotp(0x7E8, padding=None)))
+
+        assert definition.isotp.flags == 0
+        assert definition.isotp.tx_data_length == native.FRAME_PAYLOAD_MAX_CLASSIC
+
+    def test_it_packs_a_message_with_the_value_the_answer_must_carry(self):
+        message, data = to_native_message(Step(template=1, arbitration_id=0x7E0, data=b"\x36\x01" + bytes(500), expect=b"\x76\x01"))
+
+        assert message.length == 502
+        assert message.can_id == 0x7E0
+        assert message.flags == native.TXN_STEP_EXPECT_VALUE
+        assert message.expect_value == 0x0176
+        assert bytes(data)[:2] == b"\x36\x01"
+
+    def test_it_refuses_a_message_over_4095_bytes(self):
+        with pytest.raises(ValueError):
+            to_native_message(Step(template=1, arbitration_id=0x7E0, data=bytes(native.ISOTP_MESSAGE_MAX + 1)))
+
+    def test_it_waits_for_a_message_keeping_the_request_id_for_flow_control(self):
+        native_step = to_native_step(Step(template=1, arbitration_id=0x7E0), isotp=True)
+
+        assert native_step.flags == native.TXN_STEP_EXPECT_ONLY
+        assert native_step.can_id == 0x7E0
+
+
 class TestToNativeStep:
     def test_it_sends_a_frame_with_its_payload(self):
         native_step = to_native_step(Step(template=1, arbitration_id=0x18DA10F1, data=b"\x02\x36\x01", is_extended_id=True))
@@ -80,6 +134,11 @@ class TestToNativeStep:
 
 
 class TestToNativeBegin:
+    def test_it_declares_isotp_steps(self):
+        request = to_native_begin((), None, exclusive=False, isotp=True)
+
+        assert request.flags == native.TXN_FLAG_ISOTP
+
     def test_it_reads_origins_from_the_payload_when_an_offset_is_given(self):
         request = to_native_begin((1, 2), Origin(mask=0xFF, payload_offset=2), True)
 
@@ -160,6 +219,34 @@ class TestTransaction:
                 raise KeyboardInterrupt
 
         assert hub.aborted
+
+    def test_it_hands_each_isotp_message_over_whole_between_frame_steps(self, monkeypatch):
+        bus, hub = given_bus_on_transaction_hub(monkeypatch)
+        transaction = given_transaction(bus)
+        transaction.template(1, Template(mode=Advance.COUNT, isotp=Isotp(0x7E8)))
+
+        sent = transaction.send(
+            [
+                Step(arbitration_id=0x100),
+                Step(template=1, arbitration_id=0x7E0, data=bytes(500)),
+                Step(arbitration_id=0x101),
+            ]
+        )
+
+        assert sent == 3
+        assert hub.message_lengths == [500]
+        assert hub.sent_ids == [0x100, 0x101]
+
+    def test_it_waits_for_credit_before_handing_a_message_over(self, monkeypatch):
+        bus, hub = given_bus_on_transaction_hub(monkeypatch)
+        transaction = given_transaction(bus)
+        transaction.template(1, Template(mode=Advance.COUNT, isotp=Isotp(0x7E8)))
+        hub.message_timeouts = 2
+
+        transaction.send([Step(template=1, arbitration_id=0x7E0, data=bytes(20))])
+
+        assert hub.message_calls == 3
+        assert hub.message_lengths == [20]
 
     def test_it_refuses_to_start_on_a_read_only_bus(self, monkeypatch):
         bus, _ = given_bus_on_transaction_hub(monkeypatch)
@@ -274,6 +361,9 @@ class TransactionHub:
         self.abort_at_send = False
         self.ended = False
         self.aborted = False
+        self.message_lengths = []
+        self.message_calls = 0
+        self.message_timeouts = 0
 
     def begin(self, session, request, timeout_ms):
         return native.OK
@@ -284,6 +374,17 @@ class TransactionHub:
         taken = count if self.steps_per_call is None else min(count, self.steps_per_call)
         self.sent_ids.extend(steps[index].can_id for index in range(taken))
         return taken
+
+    def template(self, session, definition, timeout_ms):
+        return native.OK
+
+    def send_message(self, session, message, timeout_ms):
+        self.message_calls += 1
+        if self.message_timeouts > 0:
+            self.message_timeouts -= 1
+            return native.ERR_TIMEOUT
+        self.message_lengths.append(ctypes.cast(message, ctypes.POINTER(native.CanHubTxnMessage)).contents.length)
+        return native.OK
 
     def end(self, session, timeout_ms):
         self.ended = True
@@ -304,6 +405,8 @@ def given_bus_on_transaction_hub(monkeypatch):
     hub = TransactionHub()
     monkeypatch.setattr(native.lib, "canhub_txn_begin", hub.begin)
     monkeypatch.setattr(native.lib, "canhub_txn_send", hub.send)
+    monkeypatch.setattr(native.lib, "canhub_txn_template", hub.template)
+    monkeypatch.setattr(native.lib, "canhub_txn_send_message", hub.send_message)
     monkeypatch.setattr(native.lib, "canhub_txn_end", hub.end)
     monkeypatch.setattr(native.lib, "canhub_txn_wait", hub.wait)
     monkeypatch.setattr(native.lib, "canhub_txn_abort", hub.abort)

@@ -129,6 +129,40 @@ except TransactionAborted as aborted:
 cancels the transaction, and an exception raised in it (Ctrl-C included)
 cancels it and propagates. It must not use the bus.
 
+### ISO-TP steps
+
+A template with `isotp=Isotp(...)` makes each of its steps one ISO-TP message
+(up to 4095 bytes in `data`) that the agent segments, honouring the ECU's flow
+control, and whose reassembled answer the patterns match. Begin with
+`isotp=True`; `extend_timeout` is the wait after a response pending (UDS P2*):
+
+```python
+from canhub import Advance, Isotp, Pattern, Step, Template
+
+transfer = Template(
+    advance_on=Pattern(0x7E8, data=b"\x76\x00"),
+    abort_on=Pattern(0x7E8, data=b"\x7f"),
+    extend_on=Pattern(0x7E8, data=b"\x7f\x00\x78", data_mask=b"\xff\x00\xff"),
+    mode=Advance.COUNT,
+    timeout=0.05,
+    extend_timeout=5.0,
+    abort_on_mismatch=True,
+    isotp=Isotp(0x7E8),                 # padding 0xCC, normal addressing, classic CAN
+)
+with bus.transaction(exclusive=True, isotp=True) as transaction:
+    transaction.template(1, transfer)
+    transaction.send(
+        Step(template=1, arbitration_id=0x7E0, data=bytes([0x36, counter]) + block, expect=bytes([0x76, counter]))
+        for counter, block in blocks
+    )
+    transaction.wait()
+```
+
+`Isotp(response_id, tx_address=0x10, rx_address=0xF1)` is extended addressing
+(one address for mixed), `fd=True` sends CAN FD frames of `data_length` bytes,
+and `block_size`/`st_min` are the flow control the agent answers with. Each
+message is handed over whole, as the agent's window takes it.
+
 ## Listing interfaces
 
 `CanHubBus.list_interfaces()` asks a hub for the interfaces it exports. Each

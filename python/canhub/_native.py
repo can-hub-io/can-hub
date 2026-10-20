@@ -10,6 +10,7 @@ import sys
 from ctypes import POINTER, Structure, c_char, c_char_p, c_int32, c_size_t, c_uint8, c_uint16, c_uint32, c_uint64, c_void_p
 
 FRAME_PAYLOAD_MAX = 64
+FRAME_PAYLOAD_MAX_CLASSIC = 8
 AGENT_NAME_MAX = 128
 INTERFACE_NAME_MAX = 16
 FILTERS_MAX = 16
@@ -54,6 +55,13 @@ TXN_ROSTER_MAX = 64
 TXN_TEMPLATES_MAX = 16
 TXN_PATTERNS = 3
 TXN_FLAG_EXCLUSIVE = 1 << 0
+TXN_FLAG_ISOTP = 1 << 1
+TXN_TYPE_ISOTP = 1
+ISOTP_FLAG_PADDING = 1 << 0
+ISOTP_FLAG_ADDRESS_BYTE = 1 << 1
+ISOTP_FLAG_FD = 1 << 2
+ISOTP_FLAG_BIT_RATE_SWITCH = 1 << 3
+ISOTP_MESSAGE_MAX = 4095
 TXN_ORIGIN_NONE = 0
 TXN_ORIGIN_CAN_ID = 1
 TXN_ORIGIN_PAYLOAD = 2
@@ -175,6 +183,20 @@ class CanHubTxnPattern(Structure):
     ]
 
 
+class CanHubTxnIsotp(Structure):
+    _fields_ = [
+        ("response_id", c_uint32),
+        ("flags", c_uint8),
+        ("tx_address", c_uint8),
+        ("rx_address", c_uint8),
+        ("padding", c_uint8),
+        ("tx_data_length", c_uint8),
+        ("block_size", c_uint8),
+        ("st_min", c_uint8),
+        ("reserved", c_uint8),
+    ]
+
+
 class CanHubTxnTemplate(Structure):
     _fields_ = [
         ("struct_size", c_uint32),
@@ -183,10 +205,25 @@ class CanHubTxnTemplate(Structure):
         ("flags", c_uint8),
         ("count_k", c_uint8),
         ("patterns_present", c_uint8),
-        ("reserved", c_uint8 * 3),
+        ("type", c_uint8),
+        ("reserved", c_uint8 * 2),
         ("timeout_ms", c_uint32),
         ("gap_us", c_uint32),
+        ("extend_timeout_ms", c_uint32),
         ("patterns", CanHubTxnPattern * TXN_PATTERNS),
+        ("isotp", CanHubTxnIsotp),
+    ]
+
+
+class CanHubTxnMessage(Structure):
+    _fields_ = [
+        ("struct_size", c_uint32),
+        ("can_id", c_uint32),
+        ("template_id", c_uint8),
+        ("flags", c_uint8),
+        ("length", c_uint16),
+        ("expect_value", c_uint64),
+        ("data", c_void_p),
     ]
 
 
@@ -320,6 +357,9 @@ lib.canhub_txn_template.argtypes = [c_void_p, POINTER(CanHubTxnTemplate), c_int3
 
 lib.canhub_txn_send.restype = c_int32
 lib.canhub_txn_send.argtypes = [c_void_p, POINTER(CanHubTxnStep), c_uint32, c_int32]
+
+lib.canhub_txn_send_message.restype = c_int32
+lib.canhub_txn_send_message.argtypes = [c_void_p, POINTER(CanHubTxnMessage), c_int32]
 
 lib.canhub_txn_end.restype = c_int32
 lib.canhub_txn_end.argtypes = [c_void_p, c_int32]

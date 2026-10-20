@@ -63,6 +63,14 @@ extern "C" {
 #define CANHUB_TXN_ROSTER_MAX 64
 #define CANHUB_TXN_TEMPLATES_MAX 16
 #define CANHUB_TXN_FLAG_EXCLUSIVE (1u << 0)
+#define CANHUB_TXN_FLAG_ISOTP (1u << 1)
+#define CANHUB_TXN_TYPE_GENERIC 0
+#define CANHUB_TXN_TYPE_ISOTP 1
+#define CANHUB_ISOTP_FLAG_PADDING (1u << 0)
+#define CANHUB_ISOTP_FLAG_ADDRESS_BYTE (1u << 1)
+#define CANHUB_ISOTP_FLAG_FD (1u << 2)
+#define CANHUB_ISOTP_FLAG_BIT_RATE_SWITCH (1u << 3)
+#define CANHUB_ISOTP_MESSAGE_MAX 4095
 #define CANHUB_TXN_ORIGIN_NONE 0
 #define CANHUB_TXN_ORIGIN_CAN_ID 1
 #define CANHUB_TXN_ORIGIN_PAYLOAD 2
@@ -231,6 +239,25 @@ typedef struct {
     uint64_t payload_value;
 } CanHubTxnPattern;
 
+/*
+ * ISO-TP parameters of a template of type CANHUB_TXN_TYPE_ISOTP: each of its
+ * steps is one ISO 15765-2 message the agent segments, and the patterns match
+ * the reassembled answer arriving on response_id (doc/protocol.md "ISO-TP
+ * steps"). With the address byte flag every frame starts with tx_address and
+ * answers must start with rx_address (extended or mixed addressing).
+ */
+typedef struct {
+    uint32_t response_id;
+    uint8_t flags;
+    uint8_t tx_address;
+    uint8_t rx_address;
+    uint8_t padding;
+    uint8_t tx_data_length;
+    uint8_t block_size;
+    uint8_t st_min;
+    uint8_t reserved;
+} CanHubTxnIsotp;
+
 typedef struct {
     uint32_t struct_size;
     uint8_t template_id;
@@ -238,10 +265,13 @@ typedef struct {
     uint8_t flags;
     uint8_t count_k;
     uint8_t patterns_present;
-    uint8_t reserved[3];
+    uint8_t type;
+    uint8_t reserved[2];
     uint32_t timeout_ms;
     uint32_t gap_us;
+    uint32_t extend_timeout_ms;
     CanHubTxnPattern patterns[CANHUB_TXN_PATTERNS];
+    CanHubTxnIsotp isotp;
 } CanHubTxnTemplate;
 
 typedef struct {
@@ -253,6 +283,20 @@ typedef struct {
     uint64_t expect_value;
     uint8_t payload[CANHUB_FRAME_PAYLOAD_MAX];
 } CanHubTxnStep;
+
+/*
+ * One step of an ISO-TP template: the message (1-4095 bytes) the agent sends to
+ * can_id, which is also where it sends flow control for a multi-frame answer.
+ */
+typedef struct {
+    uint32_t struct_size;
+    uint32_t can_id;
+    uint8_t template_id;
+    uint8_t flags;
+    uint16_t length;
+    uint64_t expect_value;
+    const uint8_t *data;
+} CanHubTxnMessage;
 
 typedef struct {
     uint32_t struct_size;
@@ -340,13 +384,18 @@ CANHUB_API int32_t canhub_query(
  * it hands the steps over as the agent's window allows, waiting for credit,
  * and returns how many it took (fewer than count on timeout); frames received
  * meanwhile stay queued for canhub_recv. The last step handed over is held
- * back until canhub_txn_end, which marks it the last one. canhub_txn_wait
- * returns CANHUB_OK once the transaction is done, CANHUB_ERR_TXN_ABORTED with
- * the report in result otherwise. canhub_txn_abort cancels it.
+ * back until canhub_txn_end, which marks it the last one. Steps of an ISO-TP
+ * template go through canhub_txn_send_message instead (begin with
+ * CANHUB_TXN_FLAG_ISOTP): it waits until the agent's window takes the whole
+ * message, then hands it over, so a timeout leaves nothing half sent.
+ * canhub_txn_wait returns CANHUB_OK once the transaction is done,
+ * CANHUB_ERR_TXN_ABORTED with the report in result otherwise.
+ * canhub_txn_abort cancels it.
  */
 CANHUB_API int32_t canhub_txn_begin(CanHubSession *session, const CanHubTxnBegin *begin, int32_t timeout_ms);
 CANHUB_API int32_t canhub_txn_template(CanHubSession *session, const CanHubTxnTemplate *template_definition, int32_t timeout_ms);
 CANHUB_API int32_t canhub_txn_send(CanHubSession *session, const CanHubTxnStep *steps, uint32_t count, int32_t timeout_ms);
+CANHUB_API int32_t canhub_txn_send_message(CanHubSession *session, const CanHubTxnMessage *message, int32_t timeout_ms);
 CANHUB_API int32_t canhub_txn_end(CanHubSession *session, int32_t timeout_ms);
 CANHUB_API int32_t canhub_txn_wait(CanHubSession *session, CanHubTxnResult *result, int32_t timeout_ms);
 CANHUB_API int32_t canhub_txn_progress(CanHubSession *session, CanHubTxnProgress *progress);

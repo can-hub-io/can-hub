@@ -220,19 +220,22 @@ class CanHubBus(BusABC):
         roster: Iterable[int] = (),
         origin: Optional[Origin] = None,
         exclusive: bool = False,
+        isotp: bool = False,
         timeout: float = DEFAULT_TIMEOUT_MS / 1000,
     ) -> Transaction:
         """Start a transaction on this bus (open it with ``reliable=True``).
 
         ``roster`` lists the origins expected to answer roster steps, told
         apart by ``origin``; ``exclusive`` drops other clients' frames to this
-        interface until the transaction ends. Waits for the agent's grant.
+        interface until the transaction ends; ``isotp`` declares templates of
+        :class:`Isotp` steps, refused by an agent that cannot run them. Waits
+        for the agent's grant.
         See :mod:`canhub.transaction`.
         """
         if not self._writable:
             raise CanOperationError("bus is read-only (write denied by the hub ACL)")
         try:
-            return transactions.begin(self, roster, origin, exclusive, timeout)
+            return transactions.begin(self, roster, origin, exclusive, isotp, timeout)
         except ValueError as error:
             raise CanOperationError(str(error)) from error
 

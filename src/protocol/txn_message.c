@@ -44,6 +44,7 @@
 #define TEMPLATE_ISOTP_TX_DATA_LENGTH_OFFSET 100
 #define TEMPLATE_ISOTP_BLOCK_SIZE_OFFSET 101
 #define TEMPLATE_ISOTP_ST_MIN_OFFSET 102
+#define TEMPLATE_EXTEND_TIMEOUT_MS_OFFSET 104
 
 #define PROGRESS_CHANNEL_OFFSET 0
 #define PROGRESS_TXN_ID_OFFSET 2
@@ -201,6 +202,7 @@ size_t TxnTemplateMessage_Encode(const TxnTemplateMessage *self, uint8_t *buffer
         writePattern(body + TEMPLATE_PATTERNS_OFFSET + i * PATTERN_SIZE, &self->patterns[i]);
     }
     writeIsotpParameters(body, &self->isotp);
+    Wire_WriteU32(body + TEMPLATE_EXTEND_TIMEOUT_MS_OFFSET, self->extend_timeout_ms);
 
     return total_size;
 }
@@ -230,6 +232,7 @@ bool TxnTemplateMessage_Decode(TxnTemplateMessage *self, const uint8_t *payload,
         readPattern(payload + TEMPLATE_PATTERNS_OFFSET + i * PATTERN_SIZE, &self->patterns[i]);
     }
     readIsotpParameters(payload, &self->isotp);
+    self->extend_timeout_ms = Wire_ReadU32(payload + TEMPLATE_EXTEND_TIMEOUT_MS_OFFSET);
 
     return true;
 }
