@@ -83,6 +83,10 @@ void TransactionRunner_Begin(
         ack->status = kTXN_BEGIN_STATUS_BUSY;
         return;
     }
+    if (begin->flags & TXN_BEGIN_FLAG_ISOTP) {
+        ack->status = kTXN_BEGIN_STATUS_UNSUPPORTED;
+        return;
+    }
     if (!isBeginValid(begin)) {
         ack->status = kTXN_BEGIN_STATUS_INVALID;
         return;
@@ -262,7 +266,7 @@ static bool isTemplateValid(const TransactionRunner *self, const TxnTemplateMess
     if (isTemplateDefined(self, template_message->template_id)) {
         return false;
     }
-    if (mode >= kTXN_ADVANCE_MODE_MAX || template_message->type != 0) {
+    if (mode >= kTXN_ADVANCE_MODE_MAX || template_message->type != kTXN_TEMPLATE_TYPE_GENERIC) {
         return false;
     }
     if (isWaitingMode(mode) && template_message->timeout_ms == 0) {
@@ -298,7 +302,7 @@ static bool pushRecord(TransactionRunner *self, const uint8_t *record, size_t av
     uint32_t in_flight;
 
     *record_size = TxnStep_Decode(&step, record, available);
-    if (*record_size == 0 || !isTemplateDefined(self, step.template_id)) {
+    if (*record_size == 0 || !isTemplateDefined(self, step.template_id) || (step.flags & TXN_STEP_FLAG_MESSAGE)) {
         abortWith(self, kTXN_REASON_INVALID_STEP, seq);
         return false;
     }

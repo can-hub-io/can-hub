@@ -36,6 +36,14 @@
 #define PATTERN_CAN_MASK_OFFSET 4
 #define PATTERN_PAYLOAD_MASK_OFFSET 8
 #define PATTERN_PAYLOAD_VALUE_OFFSET 16
+#define TEMPLATE_ISOTP_RESPONSE_ID_OFFSET 92
+#define TEMPLATE_ISOTP_FLAGS_OFFSET 96
+#define TEMPLATE_ISOTP_TX_ADDRESS_OFFSET 97
+#define TEMPLATE_ISOTP_RX_ADDRESS_OFFSET 98
+#define TEMPLATE_ISOTP_PADDING_OFFSET 99
+#define TEMPLATE_ISOTP_TX_DATA_LENGTH_OFFSET 100
+#define TEMPLATE_ISOTP_BLOCK_SIZE_OFFSET 101
+#define TEMPLATE_ISOTP_ST_MIN_OFFSET 102
 
 #define PROGRESS_CHANNEL_OFFSET 0
 #define PROGRESS_TXN_ID_OFFSET 2
@@ -64,6 +72,8 @@
 static size_t encodeFixedBody(uint8_t type, size_t body_size, uint8_t *buffer, size_t buffer_size, uint8_t **body);
 static void writePattern(uint8_t *destination, const TxnPattern *pattern);
 static void readPattern(const uint8_t *source, TxnPattern *pattern);
+static void writeIsotpParameters(uint8_t *body, const TxnIsotpParameters *isotp);
+static void readIsotpParameters(const uint8_t *body, TxnIsotpParameters *isotp);
 
 /* ---------- public ---------- */
 
@@ -190,6 +200,7 @@ size_t TxnTemplateMessage_Encode(const TxnTemplateMessage *self, uint8_t *buffer
     for(i=0; i<kTXN_PATTERN_MAX; i++) {
         writePattern(body + TEMPLATE_PATTERNS_OFFSET + i * PATTERN_SIZE, &self->patterns[i]);
     }
+    writeIsotpParameters(body, &self->isotp);
 
     return total_size;
 }
@@ -218,6 +229,7 @@ bool TxnTemplateMessage_Decode(TxnTemplateMessage *self, const uint8_t *payload,
     for(i=0; i<kTXN_PATTERN_MAX; i++) {
         readPattern(payload + TEMPLATE_PATTERNS_OFFSET + i * PATTERN_SIZE, &self->patterns[i]);
     }
+    readIsotpParameters(payload, &self->isotp);
 
     return true;
 }
@@ -384,4 +396,28 @@ static void readPattern(const uint8_t *source, TxnPattern *pattern)
     pattern->can_mask = Wire_ReadU32(source + PATTERN_CAN_MASK_OFFSET);
     pattern->payload_mask = Wire_ReadU64(source + PATTERN_PAYLOAD_MASK_OFFSET);
     pattern->payload_value = Wire_ReadU64(source + PATTERN_PAYLOAD_VALUE_OFFSET);
+}
+
+static void writeIsotpParameters(uint8_t *body, const TxnIsotpParameters *isotp)
+{
+    Wire_WriteU32(body + TEMPLATE_ISOTP_RESPONSE_ID_OFFSET, isotp->response_id);
+    body[TEMPLATE_ISOTP_FLAGS_OFFSET] = isotp->flags;
+    body[TEMPLATE_ISOTP_TX_ADDRESS_OFFSET] = isotp->tx_address;
+    body[TEMPLATE_ISOTP_RX_ADDRESS_OFFSET] = isotp->rx_address;
+    body[TEMPLATE_ISOTP_PADDING_OFFSET] = isotp->padding;
+    body[TEMPLATE_ISOTP_TX_DATA_LENGTH_OFFSET] = isotp->tx_data_length;
+    body[TEMPLATE_ISOTP_BLOCK_SIZE_OFFSET] = isotp->block_size;
+    body[TEMPLATE_ISOTP_ST_MIN_OFFSET] = isotp->st_min;
+}
+
+static void readIsotpParameters(const uint8_t *body, TxnIsotpParameters *isotp)
+{
+    isotp->response_id = Wire_ReadU32(body + TEMPLATE_ISOTP_RESPONSE_ID_OFFSET);
+    isotp->flags = body[TEMPLATE_ISOTP_FLAGS_OFFSET];
+    isotp->tx_address = body[TEMPLATE_ISOTP_TX_ADDRESS_OFFSET];
+    isotp->rx_address = body[TEMPLATE_ISOTP_RX_ADDRESS_OFFSET];
+    isotp->padding = body[TEMPLATE_ISOTP_PADDING_OFFSET];
+    isotp->tx_data_length = body[TEMPLATE_ISOTP_TX_DATA_LENGTH_OFFSET];
+    isotp->block_size = body[TEMPLATE_ISOTP_BLOCK_SIZE_OFFSET];
+    isotp->st_min = body[TEMPLATE_ISOTP_ST_MIN_OFFSET];
 }

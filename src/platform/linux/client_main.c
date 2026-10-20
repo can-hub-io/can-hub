@@ -87,6 +87,11 @@ static const char *const TRANSACTION_REASON_NAMES[] = {
     "overrun",
     "agent_disconnected",
     "invalid_step",
+    "flow_control_timeout",
+    "consecutive_frame_timeout",
+    "overflow",
+    "sequence_error",
+    "wait_limit",
 };
 
 static TcpClientTransport transport;

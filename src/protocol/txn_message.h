@@ -8,7 +8,7 @@
 
 #define TXN_BEGIN_BODY_SIZE 268
 #define TXN_BEGIN_ACK_BODY_SIZE 8
-#define TXN_TEMPLATE_BODY_SIZE 92
+#define TXN_TEMPLATE_BODY_SIZE 104
 #define TXN_PROGRESS_BODY_SIZE 12
 #define TXN_STATUS_BODY_SIZE 112
 #define TXN_ABORT_BODY_SIZE 4
@@ -19,9 +19,15 @@
 #define TXN_CHANNEL_OFFSET 0
 
 #define TXN_BEGIN_FLAG_EXCLUSIVE (1u << 0)
+#define TXN_BEGIN_FLAG_ISOTP (1u << 1)
 #define TXN_TEMPLATE_FLAG_SOFT (1u << 0)
 #define TXN_TEMPLATE_FLAG_MISMATCH_ABORT (1u << 1)
 #define TXN_STATUS_FLAG_HAS_RX_FRAME (1u << 0)
+#define TXN_ISOTP_FLAG_PADDING (1u << 0)
+#define TXN_ISOTP_FLAG_ADDRESS_BYTE (1u << 1)
+#define TXN_ISOTP_FLAG_FD (1u << 2)
+#define TXN_ISOTP_FLAG_BIT_RATE_SWITCH (1u << 3)
+#define TXN_ISOTP_MESSAGE_SIZE_MAX 4095
 
 typedef enum ttxn_origin_source_e {
     kTXN_ORIGIN_SOURCE_NONE = 0,
@@ -39,6 +45,12 @@ typedef enum ttxn_begin_status_e {
     kTXN_BEGIN_STATUS_INVALID = 5,
     kTXN_BEGIN_STATUS_MAX,
 } TTXN_BEGIN_STATUS;
+
+typedef enum ttxn_template_type_e {
+    kTXN_TEMPLATE_TYPE_GENERIC = 0,
+    kTXN_TEMPLATE_TYPE_ISOTP = 1,
+    kTXN_TEMPLATE_TYPE_MAX,
+} TTXN_TEMPLATE_TYPE;
 
 typedef enum ttxn_advance_mode_e {
     kTXN_ADVANCE_MODE_NONE = 0,
@@ -72,6 +84,11 @@ typedef enum ttxn_reason_e {
     kTXN_REASON_OVERRUN = 7,
     kTXN_REASON_AGENT_DISCONNECTED = 8,
     kTXN_REASON_INVALID_STEP = 9,
+    kTXN_REASON_FLOW_CONTROL_TIMEOUT = 10,
+    kTXN_REASON_CONSECUTIVE_FRAME_TIMEOUT = 11,
+    kTXN_REASON_OVERFLOW = 12,
+    kTXN_REASON_SEQUENCE_ERROR = 13,
+    kTXN_REASON_WAIT_LIMIT = 14,
     kTXN_REASON_MAX,
 } TTXN_REASON;
 
@@ -105,6 +122,17 @@ typedef struct {
 } TxnPattern;
 
 typedef struct {
+    uint32_t response_id;
+    uint8_t flags;
+    uint8_t tx_address;
+    uint8_t rx_address;
+    uint8_t padding;
+    uint8_t tx_data_length;
+    uint8_t block_size;
+    uint8_t st_min;
+} TxnIsotpParameters;
+
+typedef struct {
     uint8_t channel;
     uint8_t template_id;
     uint16_t txn_id;
@@ -116,6 +144,7 @@ typedef struct {
     uint32_t gap_us;
     uint8_t type;
     TxnPattern patterns[kTXN_PATTERN_MAX];
+    TxnIsotpParameters isotp;
 } TxnTemplateMessage;
 
 typedef struct {

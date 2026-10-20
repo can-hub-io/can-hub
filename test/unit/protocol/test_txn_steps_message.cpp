@@ -16,6 +16,7 @@ extern "C" {
 
 static TxnStep classicTxStep(uint32_t can_id, uint8_t payload_length);
 static TxnStep expectOnlyStep(void);
+static TxnStep messageRecord(uint8_t payload_length, uint8_t flags);
 static size_t encodeSteps(const TxnStep *steps, uint8_t step_count, uint8_t *buffer, size_t buffer_size);
 static uint8_t decodeRecords(const TxnStepsMessage *message, TxnStep *steps);
 static uint8_t appendUntilRefused(TxnStepsWriter *writer, const TxnStep *step);
@@ -107,6 +108,90 @@ describe("txn_step", []() {
         encoded_size = TxnStep_Encode(&step, record, sizeof(record));
 
         expect(encoded_size).toBe((size_t)0);
+    });
+
+    it("carries up to 255 bytes of an ISO-TP message in one record", []() {
+        TxnStep step;
+        TxnStep decoded;
+        uint8_t record[TEST_BUFFER_SIZE];
+        size_t encoded_size;
+        size_t decoded_size;
+
+        step = messageRecord(TXN_STEP_PAYLOAD_SIZE_MAX, TXN_STEP_FLAG_MESSAGE);
+
+        encoded_size = TxnStep_Encode(&step, record, sizeof(record));
+        decoded_size = TxnStep_Decode(&decoded, record, encoded_size);
+
+        expect(encoded_size).toBe((size_t)(TXN_STEP_RECORD_HEADER_SIZE + TXN_STEP_PADDED_PAYLOAD_SIZE_MAX));
+        expect(decoded_size).toBe(encoded_size);
+        expect(decoded.payload_length).toBe(TXN_STEP_PAYLOAD_SIZE_MAX);
+        expect(decoded.payload[TXN_STEP_PAYLOAD_SIZE_MAX - 1]).toBe(step.payload[TXN_STEP_PAYLOAD_SIZE_MAX - 1]);
+    });
+
+    it("chains a message across records, the expected value on the last one", []() {
+        TxnStep steps[2];
+        TxnStep decoded[2];
+        TxnStepsMessage message;
+        uint8_t buffer[TEST_BUFFER_SIZE];
+        size_t encoded_size;
+        uint8_t decoded_count;
+
+        steps[0] = messageRecord(248, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_CONTINUED);
+        steps[1] = messageRecord(100, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_EXPECT_VALUE | TXN_STEP_FLAG_LAST);
+        steps[1].expect_value = 0x0176;
+
+        encoded_size = encodeSteps(steps, 2, buffer, sizeof(buffer));
+        TxnStepsMessage_Decode(&message, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+        decoded_count = decodeRecords(&message, decoded);
+
+        expect(decoded_count).toBe(2);
+        expect(decoded[0].flags).toBe((uint8_t)(TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_CONTINUED));
+        expect(decoded[0].payload_length).toBe(248);
+        expect(decoded[1].payload_length).toBe(100);
+        expect(decoded[1].expect_value).toBe((uint64_t)0x0176);
+    });
+
+    it("refuses a continued record that carries the expected value", []() {
+        TxnStep step;
+        uint8_t record[TEST_BUFFER_SIZE];
+        size_t encoded_size;
+
+        step = messageRecord(8, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_CONTINUED | TXN_STEP_FLAG_EXPECT_VALUE);
+
+        encoded_size = TxnStep_Encode(&step, record, sizeof(record));
+
+        expect(encoded_size).toBe((size_t)0);
+    });
+
+    it("refuses a continued record that is not part of a message", []() {
+        TxnStep step;
+        uint8_t record[TEST_BUFFER_SIZE];
+        size_t encoded_size;
+
+        step = classicTxStep(0x7E0, FRAME_PAYLOAD_MAX_CLASSIC);
+        step.flags = TXN_STEP_FLAG_CONTINUED;
+
+        encoded_size = TxnStep_Encode(&step, record, sizeof(record));
+
+        expect(encoded_size).toBe((size_t)0);
+    });
+
+    it("refuses a message record with frame flags or no bytes", []() {
+        TxnStep with_frame_flags;
+        TxnStep empty;
+        uint8_t record[TEST_BUFFER_SIZE];
+        size_t with_frame_flags_size;
+        size_t empty_size;
+
+        with_frame_flags = messageRecord(8, TXN_STEP_FLAG_MESSAGE);
+        with_frame_flags.frame_flags = FRAME_FLAG_FD;
+        empty = messageRecord(0, TXN_STEP_FLAG_MESSAGE);
+
+        with_frame_flags_size = TxnStep_Encode(&with_frame_flags, record, sizeof(record));
+        empty_size = TxnStep_Encode(&empty, record, sizeof(record));
+
+        expect(with_frame_flags_size).toBe((size_t)0);
+        expect(empty_size).toBe((size_t)0);
     });
 
     it("rejects a record naming a template beyond the table", []() {
@@ -291,6 +376,21 @@ static TxnStep classicTxStep(uint32_t can_id, uint8_t payload_length)
     step.payload_length = payload_length;
     for(i=0; i<payload_length && i<FRAME_PAYLOAD_MAX_FD; i++) {
         step.payload[i] = (uint8_t)(0x10 + i);
+    }
+    return step;
+}
+
+static TxnStep messageRecord(uint8_t payload_length, uint8_t flags)
+{
+    TxnStep step = { 0 };
+    uint16_t i;
+
+    step.template_id = 2;
+    step.flags = flags;
+    step.can_id = 0x7E0;
+    step.payload_length = payload_length;
+    for(i=0; i<payload_length; i++) {
+        step.payload[i] = (uint8_t)(0x30 + i);
     }
     return step;
 }

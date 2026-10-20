@@ -23,6 +23,7 @@
 #define STEPS_FIRST_RECORD_OFFSET (MESSAGE_HEADER_SIZE + STEPS_RECORDS_OFFSET)
 
 static bool isStepValid(const TxnStep *step);
+static bool isMessageRecordValid(const TxnStep *step);
 static size_t recordSize(uint8_t payload_length, uint8_t flags);
 static size_t paddedPayloadSize(uint8_t payload_length);
 static size_t writerRoom(const TxnStepsWriter *self);
@@ -180,10 +181,30 @@ static bool isStepValid(const TxnStep *step)
     if (step->template_id >= TXN_TEMPLATES_MAX) {
         return false;
     }
+    if (step->flags & TXN_STEP_FLAG_MESSAGE) {
+        return isMessageRecordValid(step);
+    }
+    if (step->flags & TXN_STEP_FLAG_CONTINUED) {
+        return false;
+    }
     if ((step->flags & TXN_STEP_FLAG_EXPECT_ONLY) && step->payload_length != 0) {
         return false;
     }
     return FrameMessage_IsPayloadLengthValid(step->payload_length, step->frame_flags);
+}
+
+static bool isMessageRecordValid(const TxnStep *step)
+{
+    if (step->payload_length == 0 || step->frame_flags != 0) {
+        return false;
+    }
+    if (step->flags & TXN_STEP_FLAG_EXPECT_ONLY) {
+        return false;
+    }
+    if (step->flags & TXN_STEP_FLAG_CONTINUED) {
+        return (step->flags & (TXN_STEP_FLAG_EXPECT_VALUE | TXN_STEP_FLAG_LAST)) == 0;
+    }
+    return true;
 }
 
 static size_t recordSize(uint8_t payload_length, uint8_t flags)
