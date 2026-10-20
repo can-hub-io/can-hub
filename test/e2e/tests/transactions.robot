@@ -229,3 +229,48 @@ The Hub Lists A Transaction In Flight
     Should Be Equal    ${rows[0].state}    active
     Should Be Equal    ${rows[0].lease}    yes
 
+
+A Node Acknowledging Another CRC Is Named With The Values
+    ${hub}=    Start CAN HUB Open To Writers On ${LOCAL_SERVER}
+    ${client_state}=    Fresh State Directory For client
+    Start CAN Agent truck42 On ${LOCAL_SERVER} Exporting vcan0 Into ${hub}
+    ${ecu}=    Start Python ${ECU} On ${LOCAL_SERVER}    vcan0    nodes    32    --wrong-crc    21
+    Log Of ${ecu} Should Contain ready
+
+    ${result}=    Run Python ${TXN} On ${LOCAL_SERVER}    ${QUIC}    truck42/vcan0    batch    4    32    --state-dir    ${client_state}
+
+    Should Be Equal As Integers    ${result.returncode}    2
+    Should Contain    ${result.stdout}    aborted reason=value_mismatch step=16
+    Should Contain    ${result.stdout}    origin=21
+
+A Client That Stops Handing Steps Over Starves Its Transaction
+    [Documentation]    The client keeps reading but holds its steps back past the
+    ...                agent's 5 s starvation deadline.
+    ${hub}=    Start CAN HUB Open To Writers On ${LOCAL_SERVER}
+    ${client_state}=    Fresh State Directory For client
+    Start CAN Agent truck42 On ${LOCAL_SERVER} Exporting vcan0 Into ${hub}
+    ${ecu}=    Start Python ${ECU} On ${LOCAL_SERVER}    vcan0    nodes    1
+    Log Of ${ecu} Should Contain ready
+
+    ${result}=    Run Python ${TXN} On ${LOCAL_SERVER}    ${QUIC}    truck42/vcan0    batch    50    1    --hold-ms    6500    --state-dir    ${client_state}
+
+    Should Be Equal As Integers    ${result.returncode}    2
+    Should Contain    ${result.stdout}    aborted reason=starved
+
+A Released Lease Lets The Other Clients Write Again
+    ${hub}=    Start CAN HUB Open To Writers On ${LOCAL_SERVER}
+    ${client_state}=    Fresh State Directory For client
+    Start CAN Agent truck42 On ${LOCAL_SERVER} Exporting vcan0 Into ${hub}
+    ${ecu}=    Start Python ${ECU} On ${LOCAL_SERVER}    vcan0    uds    --delay-ms    10
+    Log Of ${ecu} Should Contain ready
+    ${transaction}=    Start Python ${TXN} On ${LOCAL_SERVER}    ${QUIC}    truck42/vcan0    uds    100    --exclusive    --state-dir    ${client_state}
+    Log Of ${transaction} Should Contain granted
+    ${refused}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${QUIC}    truck42/vcan0    send    1A0    CAFE    --state-dir    ${client_state}
+    Log Of ${transaction} Should Contain done steps=100    timeout=20
+    ${bus}=    Start Candump On ${LOCAL_SERVER}    vcan0
+
+    ${accepted}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${QUIC}    truck42/vcan0    send    1A0    CAFE    --state-dir    ${client_state}
+
+    Should Not Be True    ${refused.ok}
+    Should Be True    ${accepted.ok}    ${accepted.stdout}${accepted.stderr}
+    Candump ${bus} Should Capture 1A0#CAFE

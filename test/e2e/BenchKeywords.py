@@ -31,6 +31,9 @@ LATENCY_SEND_SCRIPT = "/work/test/e2e/scripts/latency_send.py"
 BENCH_SEND_SCRIPT = "/work/test/e2e/scripts/bench_send.py"
 AGENT_LOST_HUB = "connection lost, reconnecting in"
 SOCKETCAND_COMMANDS_SCRIPT = "/work/test/e2e/scripts/socketcand_commands.py"
+TXN_BENCH_SCRIPT = "/work/test/e2e/scripts/txn_bench.py"
+ECU_SIM_SCRIPT = "/work/test/e2e/scripts/ecu_sim.py"
+TXN_BENCH_URL = "quic://127.0.0.1:7227"
 FD_FLAGS_DIGITS = 1
 
 
@@ -462,6 +465,35 @@ class BenchKeywords:
     def set_link_loss_keeping_latency(self, server, percent):
         server.exec("tc", "qdisc", "replace", "dev", "eth0", "root", "netem",
                     "delay", f"{server.latency_ms}ms", "loss", f"{percent}%", "limit", "200000")
+
+    @keyword("Time Requests Against The ECU")
+    def time_requests_against_ecu(self, mode, round_trip_ms, near, wan, requests=50):
+        """Hub and client on near; agent and ECU on wan, behind a link of the
+        given round trip (netem on its egress)."""
+        hub = self.start_can_hub_open_to_writers(near)
+        client_state = self.fresh_state_directory("client")
+        self.set_link_round_trip(wan, round_trip_ms)
+        try:
+            self.start_agent_exporting("truck42", wan, "vcan0", hub)
+            ecu = self.start_python_on(ECU_SIM_SCRIPT, wan, "vcan0", "uds")
+            self.log_should_contain(ecu, "ready")
+            result = self.run_python_on(TXN_BENCH_SCRIPT, near, TXN_BENCH_URL, "truck42/vcan0",
+                                        mode, str(requests), "--state-dir", client_state)
+        finally:
+            self.restore_link_latency(wan)
+        if not result.ok:
+            raise AssertionError(result.stdout + result.stderr)
+        logger.console(f"txn-bench rtt={round_trip_ms}ms {result.stdout.strip()}")
+
+    @keyword("Set Link Round Trip On ${server} To ${milliseconds}")
+    def set_link_round_trip(self, server, milliseconds):
+        server.exec("tc", "qdisc", "replace", "dev", "eth0", "root", "netem",
+                    "delay", f"{milliseconds}ms", "limit", "200000")
+
+    @keyword("Restore Link Latency On ${server}")
+    def restore_link_latency(self, server):
+        server.exec("tc", "qdisc", "replace", "dev", "eth0", "root", "netem",
+                    "delay", f"{server.latency_ms}ms", "limit", "200000")
 
     @keyword("Kill ${process}")
     def kill(self, process):

@@ -2,20 +2,23 @@
 
 usage: txn_run.py <url> <channel> uds <count> [--exclusive] [--timeout-ms T] [--within S] [--abort-after-ms T]
                    [--lossy] [--state-dir PATH]
-       txn_run.py <url> <channel> batch <batches> <nodes> [--state-dir PATH]
+       txn_run.py <url> <channel> batch <batches> <nodes> [--hold-ms T] [--state-dir PATH]
 
 uds: <count> requests [02 36 n] to 0x7E0, each waiting for [.. 76 n] on 0x7E8,
 aborting on a negative response and extended by a response pending.
 batch: <batches> batches of 16 frames on 0x123, each acknowledged with its
 crc by every node of a <nodes>-strong roster (ids 0x700 | node).
 --abort-after-ms cancels the transaction that long after handing the steps
-over; --lossy opens the bus without the reliable channel a transaction needs.
+over; --lossy opens the bus without the reliable channel a transaction needs;
+--hold-ms hands the first batch over, then keeps reading for T ms without
+handing over another step.
 Prints "granted", then "done steps=N seconds=S" (exit 0), or "aborted
 reason=R step=S missing=[...]" (exit 2); --within S fails with exit 3 when
 the transaction took longer.
 """
 
 import argparse
+import itertools
 import sys
 import time
 
@@ -60,6 +63,7 @@ def main():
     parser.add_argument("--state-dir")
     parser.add_argument("--abort-after-ms", type=int)
     parser.add_argument("--lossy", action="store_true")
+    parser.add_argument("--hold-ms", type=int)
     arguments = parser.parse_args()
 
     bus = can.Bus(
@@ -79,6 +83,7 @@ def main():
         report = aborted.result
         print(
             f"aborted reason={report.reason} step={report.failing_step} missing={sorted(report.missing)}"
+            f" origin={report.offending_origin}"
             f" expected={report.expected.hex()} got={report.got.hex()}",
             flush=True,
         )
@@ -138,8 +143,22 @@ def run_batches(bus, arguments):
         print("granted", flush=True)
         transaction.template(WRITE_TEMPLATE, Template())
         transaction.template(ACK_TEMPLATE, acknowledgement)
-        transaction.send(step for batch in range(batches) for step in batch_steps(batch))
+        steps = (step for batch in range(batches) for step in batch_steps(batch))
+        if arguments.hold_ms is not None:
+            transaction.send(itertools.islice(steps, BATCH_FRAMES + 2))
+            hold_back(bus, arguments.hold_ms)
+        transaction.send(steps)
         return transaction.wait()
+
+
+def hold_back(bus, hold_ms):
+    """Keep reading, as a live application does, without handing over steps.
+    The library holds the last step handed over back; it is the next batch's
+    first frame, so the acknowledgement before it is already at the agent."""
+    print("holding", flush=True)
+    deadline = time.monotonic() + hold_ms / MILLISECONDS_PER_SECOND
+    while time.monotonic() < deadline:
+        bus.recv(timeout=deadline - time.monotonic())
 
 
 def batch_steps(batch):
