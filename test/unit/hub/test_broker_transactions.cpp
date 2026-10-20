@@ -19,6 +19,7 @@ extern "C" {
 #define AGENT_PEER 100
 #define CLIENT_PEER 200
 #define OTHER_CLIENT_PEER 201
+#define LATE_CLIENT_PEER 202
 #define ADMIN_PEER 300
 #define AGENT_CHANNEL 0
 #define TXN_ID 7
@@ -41,6 +42,7 @@ static uint8_t other_client_channel;
 static void startHub(AuthorizationPort *authorization_port, uint32_t agent_capabilities);
 static void connectClientWithFingerprint(uint32_t peer_id, const char *fingerprint);
 static uint8_t openCan0(uint32_t peer_id, uint8_t open_flags);
+static void openCan0KeepingReplies(uint32_t peer_id, uint8_t open_flags);
 static void beginFrom(uint32_t peer_id, uint8_t channel, uint8_t flags);
 static void agentAnswersBegin(uint8_t status, uint16_t txn_id, uint32_t window_bytes);
 static void agentReportsProgress(uint16_t txn_id, uint32_t completed_steps, uint32_t consumed_bytes);
@@ -292,6 +294,18 @@ describe("broker transactions", []() {
             expect(lastLeasedFlagTo(CLIENT_PEER)).toBe(0);
         });
 
+        it("tells a client that opens the interface during the lease", []() {
+            uint8_t late_flag;
+
+            agentAnswersBegin(kTXN_BEGIN_STATUS_OK, TXN_ID, AGENT_WINDOW);
+            HubTransportPortMock_Reset(&transport);
+
+            openCan0KeepingReplies(LATE_CLIENT_PEER, OPEN_FLAG_WANT_WRITE);
+            late_flag = lastLeasedFlagTo(LATE_CLIENT_PEER);
+
+            expect(late_flag).toBe((uint8_t)INTERFACE_STATUS_FLAG_LEASED);
+        });
+
         it("drops and counts the other clients' frames", []() {
             TransactionCounters counters;
 
@@ -411,6 +425,17 @@ static uint8_t openCan0(uint32_t peer_id, uint8_t open_flags)
 {
     BrokerDriver_ConnectClientWithCapabilities(&events, peer_id, HELLO_CAP_RELIABLE_CHANNELS);
     return BrokerDriver_OpenInterface(&events, &transport, peer_id, can0_interface_id, open_flags);
+}
+
+static void openCan0KeepingReplies(uint32_t peer_id, uint8_t open_flags)
+{
+    OpenMessage open = { can0_interface_id, open_flags };
+    uint8_t encoded[MESSAGE_BUFFER_SIZE];
+    size_t encoded_size;
+
+    BrokerDriver_ConnectClientWithCapabilities(&events, peer_id, HELLO_CAP_RELIABLE_CHANNELS);
+    encoded_size = OpenMessage_Encode(&open, encoded, sizeof(encoded));
+    events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
 }
 
 static void beginFrom(uint32_t peer_id, uint8_t channel, uint8_t flags)

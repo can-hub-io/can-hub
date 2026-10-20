@@ -75,6 +75,42 @@ Both return an `InterfaceSettings` with `None` where the device reports
 nothing (a vcan has no bit timing). A refusal raises `CanOperationError` with
 the reason.
 
+## Transactions
+
+A transaction hands a request/response sequence to the agent, which runs it at
+its bus: each exchange costs a bus round trip instead of a network one (UDS
+flashing, broadcast upgrades; see the protocol's Transactions section). Open
+the bus with `reliable=True`:
+
+```python
+from canhub import Advance, Pattern, Step, Template, TransactionAborted
+
+response = Template(
+    advance_on=Pattern(0x7E8, data=b"\x00\x76", data_mask=b"\x00\xff"),
+    abort_on=Pattern(0x7E8, data=b"\x00\x7f", data_mask=b"\x00\xff"),
+    extend_on=Pattern(0x7E8, data=b"\x00\x7f\x00\x78", data_mask=b"\x00\xff\x00\xff"),
+    mode=Advance.COUNT,
+    timeout=0.05,
+)
+try:
+    with bus.transaction(exclusive=True) as transaction:
+        transaction.template(0, response)
+        transaction.send(Step(arbitration_id=0x7E0, data=block) for block in blocks)
+        result = transaction.wait()
+except TransactionAborted as aborted:
+    print(aborted.result.reason, aborted.result.failing_step, aborted.result.frame)
+```
+
+`send()` takes any iterable, a generator included, and hands it over as the
+agent's window allows. `wait()` returns a `TransactionResult` or raises
+`TransactionAborted` with it. Leaving the `with` block on an exception
+(Ctrl-C included) cancels the transaction at the agent. A roster step waits for
+a set of nodes: `bus.transaction(roster=range(32), origin=Origin(mask=0x1F))`
+tells the nodes apart by `(id & mask) >> shift` (or by payload bytes), and the
+result names who answered (`answered`) and who did not (`missing`).
+`exclusive=True` keeps other clients' frames off the bus meanwhile; their
+`send()` raises `CanOperationError`.
+
 ## Listing interfaces
 
 `CanHubBus.list_interfaces()` asks a hub for the interfaces it exports. Each

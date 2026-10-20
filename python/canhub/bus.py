@@ -4,13 +4,15 @@ import ctypes
 import os
 import threading
 import time
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 from can import BusABC, CanInitializationError, CanOperationError, Message
 
 from . import _native as native
 from . import settings as interface_settings
 from .settings import InterfaceSettings
+from .transaction import Origin, Transaction
+from . import transaction as transactions
 
 DEFAULT_TIMEOUT_MS = 5000
 FINGERPRINT_HEX_LENGTH = 64
@@ -212,6 +214,27 @@ class CanHubBus(BusABC):
         except OSError as error:
             raise CanOperationError(str(error)) from error
         return interface_settings.from_native(effective)
+
+    def transaction(
+        self,
+        roster: Iterable[int] = (),
+        origin: Optional[Origin] = None,
+        exclusive: bool = False,
+        timeout: float = DEFAULT_TIMEOUT_MS / 1000,
+    ) -> Transaction:
+        """Start a transaction on this bus (open it with ``reliable=True``).
+
+        ``roster`` lists the origins expected to answer roster steps, told
+        apart by ``origin``; ``exclusive`` drops other clients' frames to this
+        interface until the transaction ends. Waits for the agent's grant.
+        See :mod:`canhub.transaction`.
+        """
+        if not self._writable:
+            raise CanOperationError("bus is read-only (write denied by the hub ACL)")
+        try:
+            return transactions.begin(self, roster, origin, exclusive, timeout)
+        except ValueError as error:
+            raise CanOperationError(str(error)) from error
 
     def drop_counters(self) -> dict:
         with self._lock:

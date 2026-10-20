@@ -778,6 +778,9 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
     }
 
     sendControl(self, peer, encoded, OpenAckMessage_Encode(&ack, encoded, sizeof(encoded)));
+    if (ack.status == OPEN_STATUS_OK && leasedToAnother(self, entry->interface_id, peer->peer_id)) {
+        announceLease(self, entry->interface_id);
+    }
 }
 
 static void handleClose(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)

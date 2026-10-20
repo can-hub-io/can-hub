@@ -6,7 +6,23 @@ python fingerprint helper) must work without libcanhub present.
 
 from .fingerprint import identity_fingerprint
 
-__all__ = ["BitTiming", "CanHubBus", "CanHubMessage", "InterfaceSettings", "identity_fingerprint"]
+__all__ = [
+    "Advance",
+    "BitTiming",
+    "CanHubBus",
+    "CanHubMessage",
+    "InterfaceSettings",
+    "Origin",
+    "Pattern",
+    "Step",
+    "Template",
+    "Transaction",
+    "TransactionAborted",
+    "TransactionResult",
+    "identity_fingerprint",
+]
+
+TRANSACTION_NAMES = {"Advance", "Origin", "Pattern", "Step", "Template", "Transaction", "TransactionAborted", "TransactionResult"}
 
 
 def __getattr__(name):
@@ -22,4 +38,7 @@ def __getattr__(name):
     if name == "BitTiming":
         from .settings import BitTiming
         return BitTiming
+    if name in TRANSACTION_NAMES:
+        from . import transaction
+        return getattr(transaction, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

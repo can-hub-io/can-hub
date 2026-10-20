@@ -167,6 +167,7 @@ bool Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *
     uint8_t encoded[MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD];
     size_t encoded_size;
     uint8_t token;
+    bool accepted;
 
     if (self->state != kAGENT_STATE_RUNNING) {
         return true;
@@ -174,8 +175,6 @@ bool Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *
     if (!ChannelMap_ChannelForInterface(&self->channel_map, interface_index, &outgoing.channel)) {
         return true;
     }
-
-    TransactionRunner_OnFrame(&self->transactions, interface_index, frame);
 
     if (frame->route_flags & FRAME_ROUTE_FLAG_ECHO) {
         outgoing.route_flags = FRAME_ROUTE_FLAG_ECHO;
@@ -191,7 +190,12 @@ bool Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *
         return true;
     }
 
-    return self->transport->send_frame(self->transport->context, outgoing.channel, encoded, encoded_size);
+    accepted = self->transport->send_frame(self->transport->context, outgoing.channel, encoded, encoded_size);
+    if (accepted) {
+        TransactionRunner_OnFrame(&self->transactions, interface_index, frame);
+    }
+
+    return accepted;
 }
 
 void Agent_OnTransportFrame(Agent *self, const uint8_t *data, size_t size)

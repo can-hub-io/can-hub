@@ -488,7 +488,7 @@ int32_t canhub_txn_begin(CanHubSession *session, const CanHubTxnBegin *begin, in
         return CANHUB_OK;
     }
     if (transactionOf(session)->begin_status != kTXN_BEGIN_STATUS_OK) {
-        setError(session, "the hub or the agent refused the transaction");
+        setError(session, CanHubTransactions_BeginDetail(transactionOf(session)->begin_status));
         return CanHubTransactions_BeginResult(transactionOf(session)->begin_status);
     }
 

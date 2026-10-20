@@ -30,6 +30,7 @@ static uint8_t ifconfig_reply_type;
 #define RESPONSE_ID 0x7E8
 #define ID_MASK 0x7FF
 #define TXN_TIMEOUT_MS 50
+#define TXN_TEMPLATE_COUNT_K_BODY_OFFSET 6
 
 static InterfaceSettings bitrateSettings(uint32_t bitrate);
 static void sendIfconfig(const char *interface_name, uint8_t op, const InterfaceSettings *settings);
@@ -531,6 +532,32 @@ describe("agent", []() {
             expect(status.state).toBe((uint8_t)kTXN_STATE_DONE);
             expect(status.channel).toBe(TXN_CHANNEL);
             expect(status.txn_id).toBe(ack.txn_id);
+        });
+
+        it("matches a bus frame once even when the uplink refuses it first", []() {
+            FrameMessage response = { RESPONSE_ID, 0, 0, 2, 0, 0, { 0x01, 0x76 } };
+            TxnBeginAckMessage ack;
+            uint8_t encoded[MESSAGE_HEADER_SIZE + TXN_STEPS_BODY_SIZE_MAX];
+            size_t encoded_size;
+            bool refused_first;
+
+            ack = sendTxnBegin(TXN_CHANNEL);
+            encoded_size = encodeResponseTemplate(ack.txn_id, encoded, sizeof(encoded));
+            encoded[MESSAGE_HEADER_SIZE + TXN_TEMPLATE_COUNT_K_BODY_OFFSET] = 2;
+            Agent_OnTransportFrame(&agent, encoded, encoded_size);
+            encoded_size = encodeLastRequestStep(ack.txn_id, encoded, sizeof(encoded));
+            Agent_OnTransportFrame(&agent, encoded, encoded_size);
+            Agent_Tick(&agent, 10);
+            transport.frame_result = false;
+            refused_first = !Agent_OnCanFrame(&agent, 0, &response);
+            transport.frame_result = true;
+
+            Agent_OnCanFrame(&agent, 0, &response);
+            Agent_Tick(&agent, 20);
+
+            expect(refused_first).toBe(true);
+            expect(agent.transactions.current.match_count).toBe(1);
+            expect(TransactionRunner_IsActive(&agent.transactions)).toBe(true);
         });
 
         it("drops the transaction when the hub connection is lost", []() {
