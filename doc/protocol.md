@@ -919,15 +919,18 @@ Then:
   the flow control for a multi-frame answer goes;
 - the frames themselves travel the normal paths: subscribers see the segments
   and the flow control on the bus as they see any traffic;
-- `isotp_flags` bit 0 (padding): every frame the agent sends is filled to its
-  data length with `isotp_padding`; without it each frame is as short as its
-  data allows. Bit 1 (address byte): every frame the agent sends starts with
+- `isotp_flags` bit 0 (padding): every frame of up to 8 bytes the agent sends
+  is filled to 8 with `isotp_padding`; without it each such frame is as short
+  as its data allows. A longer CAN FD frame is always filled with
+  `isotp_padding` up to the next valid data length. Bit 1 (address byte): every frame the agent sends starts with
   `isotp_tx_address`, and only frames on `isotp_response_id` starting with
   `isotp_rx_address` belong to the answer (extended addressing: target and
   source address; mixed addressing: the address extension, the same byte both
   ways). Bit 2 (CAN FD): the agent sends CAN FD frames with the data length
   `isotp_tx_data_length` (8, 12, 16, 20, 24, 32, 48 or 64), bit 3 with bit rate
-  switch; it accepts answers in classic or FD frames either way;
+  switch, and a message that fits one such frame goes as a single frame with
+  the escaped length (first byte 0, length in the second); it accepts answers
+  in classic or FD frames either way;
 - a message is 1-4095 bytes: the escape for longer first frames is not
   supported, and an answer announcing more is refused with an FC overflow;
 - the agent bounds the transfer with the standard timers: 1000 ms for the

@@ -8,10 +8,12 @@
 #define BITS_PER_BYTE 8
 #define ORIGIN_SHIFT_MAX 32
 #define NO_TXN_ID 0
+#define ISOTP_FLAGS_KNOWN (TXN_ISOTP_FLAG_PADDING | TXN_ISOTP_FLAG_ADDRESS_BYTE | TXN_ISOTP_FLAG_FD | TXN_ISOTP_FLAG_BIT_RATE_SWITCH)
 
 static bool isBeginValid(const TxnBeginMessage *begin);
 static bool isTemplateValid(const TransactionRunner *self, const TxnTemplateMessage *template_message);
 static bool isTypeValid(const TxnTemplateMessage *template_message);
+static bool isIsotpDataLengthValid(const TxnIsotpParameters *isotp);
 static bool fitsTemplate(const TxnStep *step, const TxnTemplateMessage *template_message);
 static bool isWaitingMode(uint8_t advance_mode);
 static bool isTemplateDefined(const TransactionRunner *self, uint8_t template_id);
@@ -307,10 +309,18 @@ static bool isTypeValid(const TxnTemplateMessage *template_message)
     if (template_message->type != kTXN_TEMPLATE_TYPE_ISOTP) {
         return false;
     }
-    if ((isotp->flags & ~TXN_ISOTP_FLAG_PADDING) != 0 || isotp->tx_data_length != FRAME_PAYLOAD_MAX_CLASSIC) {
+    if ((isotp->flags & ~ISOTP_FLAGS_KNOWN) != 0 || !isIsotpDataLengthValid(isotp)) {
         return false;
     }
     return mode == kTXN_ADVANCE_MODE_NONE || mode == kTXN_ADVANCE_MODE_COUNT;
+}
+
+static bool isIsotpDataLengthValid(const TxnIsotpParameters *isotp)
+{
+    if ((isotp->flags & TXN_ISOTP_FLAG_FD) == 0) {
+        return isotp->tx_data_length == FRAME_PAYLOAD_MAX_CLASSIC && (isotp->flags & TXN_ISOTP_FLAG_BIT_RATE_SWITCH) == 0;
+    }
+    return isotp->tx_data_length >= FRAME_PAYLOAD_MAX_CLASSIC && FrameMessage_IsPayloadLengthValid(isotp->tx_data_length, FRAME_FLAG_FD);
 }
 
 static bool fitsTemplate(const TxnStep *step, const TxnTemplateMessage *template_message)
