@@ -7,11 +7,13 @@
 #include "hub/domain/frame_routes.h"
 #include "hub/domain/peer_directory.h"
 #include "hub/domain/rejected_peers.h"
+#include "hub/domain/transaction_table.h"
 #include "hub/ports/authorization_port.h"
 #include "hub/ports/bridge_store_port.h"
 #include "hub/ports/hub_transport_events.h"
 #include "hub/ports/identity_store_port.h"
 #include "hub/ports/hub_transport_port.h"
+#include "protocol/admin_message.h"
 #include "protocol/register_message.h"
 
 #define BROKER_PENDING_IFCONFIG_MAX 16
@@ -27,6 +29,7 @@ typedef struct {
     uint64_t frames_forwarded;
     uint64_t frames_dropped;
     uint64_t frames_unroutable;
+    TransactionCounters transactions;
 } HubMetrics;
 
 typedef struct {
@@ -49,6 +52,7 @@ typedef struct {
     PeerDirectory directory;
     HubMetrics metrics;
     PendingIfconfig pending_ifconfig[BROKER_PENDING_IFCONFIG_MAX];
+    TransactionTable transactions;
     uint32_t next_ifconfig_request_id;
     /* 128 KB, so not on the stack of onPeerFrame. Shared safely only while
        nothing reachable from a send re-enters that function. */

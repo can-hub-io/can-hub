@@ -15,6 +15,8 @@
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
 #include "protocol/subscribe_message.h"
+#include "protocol/txn_message.h"
+#include "protocol/txn_steps_message.h"
 #include "shared/bounded_string.h"
 
 #define CONTROL_BUFFER_SIZE 4096
@@ -190,6 +192,33 @@ static bool peerCanConfigure(Broker *self, const HubPeer *peer, const InterfaceE
 }
 
 static bool reliableEndpointsSupport(Broker *self, const HubPeer *client, const InterfaceEntry *entry);
+static void handleTxnBegin(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleTxnBeginAck(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleTxnContent(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleTxnProgress(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleTxnStatus(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleTxnAbort(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static uint8_t admitTransaction(Broker *self, const HubPeer *client, const TxnBeginMessage *begin, RelayedTransaction *request);
+static void replyTxnBegin(Broker *self, HubPeer *client, uint8_t channel, uint8_t status);
+static bool isTransactionContent(uint8_t type);
+static bool relayTransactionContent(Broker *self, HubPeer *client, const MessageHeader *header, const uint8_t *payload);
+static RelayedTransaction *activeTransactionOfAgent(Broker *self, const HubPeer *agent, uint16_t txn_id);
+static void relayTransactionMessage(
+    Broker *self,
+    HubPeer *destination,
+    const MessageHeader *header,
+    const uint8_t *payload,
+    uint8_t channel
+);
+static void sendTxnAbort(Broker *self, HubPeer *agent, uint8_t channel, uint16_t txn_id);
+static void finishTransaction(Broker *self, RelayedTransaction *transaction);
+static void abandonTransaction(Broker *self, RelayedTransaction *transaction);
+static void abandonClientTransactions(Broker *self, uint32_t client_peer_id);
+static void failAgentTransaction(Broker *self, uint32_t agent_peer_id);
+static void announceLease(Broker *self, uint32_t interface_id);
+static bool leasedToAnother(const Broker *self, uint32_t interface_id, uint32_t client_peer_id);
+static bool channelLeasedToAnother(const Broker *self, const HubPeer *client, uint8_t channel);
+static bool endpointLeasedToAnother(const Broker *self, const BridgeEndpoint *endpoint, uint32_t client_peer_id);
 static void tickHelloDeadline(Broker *self, HubPeer *peer, uint64_t now_us);
 
 static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
@@ -225,6 +254,13 @@ static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
     [kMESSAGE_TYPE_ADMIN_GROUP_LIST] = handleAdminGroupList,
     [kMESSAGE_TYPE_IFCONFIG_REPLY] = handleIfconfigReply,
     [kMESSAGE_TYPE_INTERFACE_STATUS] = handleInterfaceStatus,
+    [kMESSAGE_TYPE_TXN_BEGIN] = handleTxnBegin,
+    [kMESSAGE_TYPE_TXN_BEGIN_ACK] = handleTxnBeginAck,
+    [kMESSAGE_TYPE_TXN_TEMPLATE] = handleTxnContent,
+    [kMESSAGE_TYPE_TXN_STEPS] = handleTxnContent,
+    [kMESSAGE_TYPE_TXN_PROGRESS] = handleTxnProgress,
+    [kMESSAGE_TYPE_TXN_STATUS] = handleTxnStatus,
+    [kMESSAGE_TYPE_TXN_ABORT] = handleTxnAbort,
 };
 
 /* ---------- public ---------- */
@@ -249,6 +285,7 @@ void Broker_Init(
     RejectedPeers_Reset(&self->rejected_peers);
     BridgeRoutes_Reset(&self->bridges);
     BridgeGroups_Reset(&self->groups);
+    TransactionTable_Reset(&self->transactions);
     loadBridgeRoutes(self);
     loadBridgeGroups(self);
 }
@@ -451,6 +488,7 @@ static bool onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
     HubPeer *peer = PeerDirectory_Find(&self->directory, peer_id);
     FrameStream stream;
     FrameMessage frame;
+    MessageHeader header;
     bool accepted = true;
 
     if (peer == NULL) {
@@ -458,6 +496,12 @@ static bool onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, si
     }
     if (peer->role != kHUB_PEER_ROLE_AGENT && peer->role != kHUB_PEER_ROLE_CLIENT) {
         return true;
+    }
+    if (MessageHeader_Decode(&header, data, size) && isTransactionContent(header.type)) {
+        if (size < (size_t)MESSAGE_HEADER_SIZE + header.length) {
+            return true;
+        }
+        return relayTransactionContent(self, peer, &header, data + MESSAGE_HEADER_SIZE);
     }
 
     FrameStream_Init(&stream, data, size);
@@ -507,6 +551,10 @@ static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame)
     } else {
         if (!ClientSession_CanWrite(&peer->session, frame->channel) || (frame->can_id & FRAME_CAN_ID_FLAG_ERR)) {
             self->metrics.frames_dropped++;
+            return true;
+        }
+        if (channelLeasedToAnother(self, peer, frame->channel)) {
+            self->metrics.transactions.lease_frame_drops++;
             return true;
         }
         group = groupOfChannel(self, peer, frame->channel, &group_entry);
@@ -797,6 +845,7 @@ static void handleAdminStatus(Broker *self, HubPeer *peer, const MessageHeader *
     reply.frames_forwarded = self->metrics.frames_forwarded;
     reply.frames_dropped = self->metrics.frames_dropped;
     reply.frames_unroutable = self->metrics.frames_unroutable;
+    reply.transactions = self->metrics.transactions;
     sendControl(self, peer, encoded, AdminStatusReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 
@@ -1590,10 +1639,15 @@ static void writeIntoGroup(Broker *self, const HubPeer *writer, BridgeGroupSlot 
     target.forwarded = &slot->forwarded;
     target.dropped = &slot->dropped;
     for(i=0; i<slot->group.member_count; i++) {
-        if (BridgeGroupMember_Receives(&slot->group.members[i])) {
-            target.destination = &slot->group.members[i].endpoint;
-            bridgeInto(self, &target, frame);
+        if (!BridgeGroupMember_Receives(&slot->group.members[i])) {
+            continue;
         }
+        if (endpointLeasedToAnother(self, &slot->group.members[i].endpoint, writer->peer_id)) {
+            self->metrics.transactions.lease_frame_drops++;
+            continue;
+        }
+        target.destination = &slot->group.members[i].endpoint;
+        bridgeInto(self, &target, frame);
     }
 
     showToGroup(self, entry, frame, writer->peer_id, 0);
@@ -1783,6 +1837,9 @@ static void relayPaceToClients(Broker *self, uint32_t interface_id, uint32_t pac
         status.interface_count = 1;
         status.entries[0].channel = channel;
         status.entries[0].advertised_rate = pace_rate;
+        if (leasedToAnother(self, interface_id, peer->peer_id)) {
+            status.entries[0].flags = INTERFACE_STATUS_FLAG_LEASED;
+        }
         sendControl(self, peer, encoded, InterfaceStatusMessage_Encode(&status, encoded, sizeof(encoded)));
     }
 }
@@ -2032,9 +2089,11 @@ static void releasePeer(Broker *self, HubPeer *peer)
     uint32_t peer_id = peer->peer_id;
 
     if (peer->role == kHUB_PEER_ROLE_AGENT) {
+        failAgentTransaction(self, peer_id);
         detachAgent(self, peer_id);
     }
     if (peer->role == kHUB_PEER_ROLE_CLIENT) {
+        abandonClientTransactions(self, peer_id);
         releaseReliableBindings(self, peer);
         releaseEchoTokens(self, peer_id);
     }
@@ -2046,11 +2105,17 @@ static void releasePeer(Broker *self, HubPeer *peer)
 static void closeClientChannel(Broker *self, HubPeer *client, uint8_t channel)
 {
     ChannelBinding *binding = ClientSession_BindingForChannel(&client->session, channel);
+    RelayedTransaction *transaction;
     uint32_t interface_id;
     bool reliable;
 
     if (binding == NULL) {
         return;
+    }
+
+    transaction = TransactionTable_ForClientChannel(&self->transactions, client->peer_id, channel);
+    if (transaction != NULL) {
+        abandonTransaction(self, transaction);
     }
 
     interface_id = binding->interface_id;
@@ -2533,4 +2598,421 @@ static void tickHelloDeadline(Broker *self, HubPeer *peer, uint64_t now_us)
         sendError(self, peer->peer_id, kERROR_CODE_HELLO_TIMEOUT, "no hello within the deadline");
         disconnectPeer(self, peer->peer_id);
     }
+}
+
+/* ---------- private: transactions ---------- */
+
+static void handleTxnBegin(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    TxnBeginMessage begin;
+    RelayedTransaction request;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    uint8_t client_channel;
+    uint8_t status;
+
+    if (peer->role != kHUB_PEER_ROLE_CLIENT) {
+        return;
+    }
+    if (!TxnBeginMessage_Decode(&begin, payload, header->length)) {
+        return;
+    }
+
+    client_channel = begin.channel;
+    status = admitTransaction(self, peer, &begin, &request);
+    if (status == kTXN_BEGIN_STATUS_OK && TransactionTable_Open(&self->transactions, &request) == NULL) {
+        status = kTXN_BEGIN_STATUS_BUSY;
+    }
+    if (status != kTXN_BEGIN_STATUS_OK) {
+        self->metrics.transactions.rejected++;
+        replyTxnBegin(self, peer, client_channel, status);
+        return;
+    }
+
+    begin.channel = request.agent_channel;
+    sendControl(
+        self,
+        PeerDirectory_Find(&self->directory, request.agent_peer_id),
+        encoded,
+        TxnBeginMessage_Encode(&begin, encoded, sizeof(encoded))
+    );
+}
+
+static void handleTxnBeginAck(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    TxnBeginAckMessage ack;
+    RelayedTransaction *transaction;
+    HubPeer *client;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    uint8_t client_channel;
+
+    if (peer->role != kHUB_PEER_ROLE_AGENT) {
+        return;
+    }
+    if (!TxnBeginAckMessage_Decode(&ack, payload, header->length)) {
+        return;
+    }
+    transaction = TransactionTable_ForAgent(&self->transactions, peer->peer_id);
+    if (transaction == NULL || transaction->state != kTRANSACTION_RELAY_STATE_PENDING) {
+        return;
+    }
+
+    client = PeerDirectory_Find(&self->directory, transaction->client_peer_id);
+    client_channel = transaction->client_channel;
+    if (ack.status != kTXN_BEGIN_STATUS_OK) {
+        self->metrics.transactions.rejected++;
+        TransactionTable_Close(&self->transactions, transaction);
+        if (client != NULL) {
+            replyTxnBegin(self, client, client_channel, ack.status);
+        }
+        return;
+    }
+    if (client == NULL) {
+        self->metrics.transactions.aborted++;
+        sendTxnAbort(self, peer, transaction->agent_channel, ack.txn_id);
+        TransactionTable_Close(&self->transactions, transaction);
+        return;
+    }
+
+    TransactionTable_Activate(&self->transactions, transaction, ack.txn_id);
+    self->metrics.transactions.started++;
+    if (transaction->exclusive) {
+        announceLease(self, transaction->interface_id);
+    }
+
+    ack.channel = client_channel;
+    if (ack.window_bytes > TRANSACTION_RELAY_WINDOW_MAX) {
+        ack.window_bytes = TRANSACTION_RELAY_WINDOW_MAX;
+    }
+    sendControl(self, client, encoded, TxnBeginAckMessage_Encode(&ack, encoded, sizeof(encoded)));
+}
+
+static void handleTxnContent(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    relayTransactionContent(self, peer, header, payload);
+}
+
+static void handleTxnProgress(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    TxnProgressMessage progress;
+    RelayedTransaction *transaction;
+
+    if (!TxnProgressMessage_Decode(&progress, payload, header->length)) {
+        return;
+    }
+    transaction = activeTransactionOfAgent(self, peer, progress.txn_id);
+    if (transaction == NULL) {
+        return;
+    }
+
+    transaction->completed_steps = progress.completed_steps;
+    transaction->consumed_bytes = progress.consumed_bytes;
+    transaction->last_progress_us = self->now_us;
+    relayTransactionMessage(
+        self,
+        PeerDirectory_Find(&self->directory, transaction->client_peer_id),
+        header,
+        payload,
+        transaction->client_channel
+    );
+}
+
+static void handleTxnStatus(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    TxnStatusMessage status;
+    RelayedTransaction *transaction;
+
+    if (!TxnStatusMessage_Decode(&status, payload, header->length)) {
+        return;
+    }
+    transaction = activeTransactionOfAgent(self, peer, status.txn_id);
+    if (transaction == NULL) {
+        return;
+    }
+
+    if (status.state == kTXN_STATE_DONE) {
+        self->metrics.transactions.completed++;
+    } else {
+        self->metrics.transactions.aborted++;
+    }
+    self->metrics.transactions.steps_completed += status.completed_steps;
+    relayTransactionMessage(
+        self,
+        PeerDirectory_Find(&self->directory, transaction->client_peer_id),
+        header,
+        payload,
+        transaction->client_channel
+    );
+    finishTransaction(self, transaction);
+}
+
+static void handleTxnAbort(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    RelayedTransaction *transaction;
+
+    if (peer->role != kHUB_PEER_ROLE_CLIENT || header->length < TXN_ABORT_BODY_SIZE) {
+        return;
+    }
+    transaction = TransactionTable_ForClientChannel(&self->transactions, peer->peer_id, TxnMessage_Channel(payload));
+    if (transaction == NULL || transaction->state != kTRANSACTION_RELAY_STATE_ACTIVE) {
+        return;
+    }
+
+    relayTransactionMessage(
+        self,
+        PeerDirectory_Find(&self->directory, transaction->agent_peer_id),
+        header,
+        payload,
+        transaction->agent_channel
+    );
+}
+
+static uint8_t admitTransaction(Broker *self, const HubPeer *client, const TxnBeginMessage *begin, RelayedTransaction *request)
+{
+    const InterfaceEntry *entry;
+    const HubPeer *agent;
+    uint32_t interface_id;
+
+    if (!ClientSession_InterfaceForChannel(&client->session, begin->channel, &interface_id)) {
+        return kTXN_BEGIN_STATUS_INVALID;
+    }
+    entry = InterfaceRegistry_FindById(&self->registry, interface_id);
+    if (entry == NULL || InterfaceEntry_IsVirtual(entry)) {
+        return kTXN_BEGIN_STATUS_INVALID;
+    }
+    agent = PeerDirectory_Find(&self->directory, entry->agent_peer_id);
+    if (agent == NULL) {
+        return kTXN_BEGIN_STATUS_INVALID;
+    }
+    if ((agent->capabilities & HELLO_CAP_TRANSACTIONS) == 0) {
+        return kTXN_BEGIN_STATUS_UNSUPPORTED;
+    }
+    if (!ClientSession_ChannelReliable(&client->session, begin->channel)) {
+        return kTXN_BEGIN_STATUS_RELIABLE_CHANNEL_REQUIRED;
+    }
+    if (!ClientSession_CanWrite(&client->session, begin->channel)) {
+        return kTXN_BEGIN_STATUS_WRITE_DENIED;
+    }
+    if (TransactionTable_ForAgent(&self->transactions, agent->peer_id) != NULL) {
+        return kTXN_BEGIN_STATUS_BUSY;
+    }
+
+    memset(request, 0, sizeof(*request));
+    request->exclusive = (begin->flags & TXN_BEGIN_FLAG_EXCLUSIVE) != 0;
+    request->interface_id = interface_id;
+    request->agent_peer_id = agent->peer_id;
+    request->agent_channel = entry->agent_channel;
+    request->client_peer_id = client->peer_id;
+    request->client_channel = begin->channel;
+    request->started_at_us = self->now_us;
+
+    return kTXN_BEGIN_STATUS_OK;
+}
+
+static void replyTxnBegin(Broker *self, HubPeer *client, uint8_t channel, uint8_t status)
+{
+    TxnBeginAckMessage ack;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+
+    memset(&ack, 0, sizeof(ack));
+    ack.channel = channel;
+    ack.status = status;
+    sendControl(self, client, encoded, TxnBeginAckMessage_Encode(&ack, encoded, sizeof(encoded)));
+}
+
+static bool isTransactionContent(uint8_t type)
+{
+    return type == kMESSAGE_TYPE_TXN_TEMPLATE || type == kMESSAGE_TYPE_TXN_STEPS;
+}
+
+static bool relayTransactionContent(Broker *self, HubPeer *client, const MessageHeader *header, const uint8_t *payload)
+{
+    RelayedTransaction *transaction;
+    HubPeer *agent;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    size_t size = (size_t)MESSAGE_HEADER_SIZE + header->length;
+
+    if (client->role != kHUB_PEER_ROLE_CLIENT || header->length == 0 || size > sizeof(encoded)) {
+        return true;
+    }
+    transaction = TransactionTable_ForClientChannel(&self->transactions, client->peer_id, TxnMessage_Channel(payload));
+    if (transaction == NULL || transaction->state != kTRANSACTION_RELAY_STATE_ACTIVE) {
+        return true;
+    }
+    agent = PeerDirectory_Find(&self->directory, transaction->agent_peer_id);
+    if (agent == NULL) {
+        return true;
+    }
+    if (!self->transport->frame_fits(self->transport->context, agent->peer_id, transaction->agent_channel, size)) {
+        return false;
+    }
+
+    MessageHeader_Encode(header, encoded, sizeof(encoded));
+    memcpy(encoded + MESSAGE_HEADER_SIZE, payload, header->length);
+    TxnMessage_SetChannel(encoded, transaction->agent_channel);
+    if (header->type == kMESSAGE_TYPE_TXN_STEPS && header->length >= TXN_STEPS_FIXED_FIELDS_SIZE) {
+        transaction->relayed_bytes += (uint32_t)(header->length - TXN_STEPS_FIXED_FIELDS_SIZE);
+    }
+    self->transport->send_frame(self->transport->context, agent->peer_id, transaction->agent_channel, encoded, size);
+
+    return true;
+}
+
+static RelayedTransaction *activeTransactionOfAgent(Broker *self, const HubPeer *agent, uint16_t txn_id)
+{
+    RelayedTransaction *transaction;
+
+    if (agent->role != kHUB_PEER_ROLE_AGENT) {
+        return NULL;
+    }
+    transaction = TransactionTable_ForAgent(&self->transactions, agent->peer_id);
+    if (transaction == NULL || transaction->state != kTRANSACTION_RELAY_STATE_ACTIVE || transaction->txn_id != txn_id) {
+        return NULL;
+    }
+
+    return transaction;
+}
+
+static void relayTransactionMessage(
+    Broker *self,
+    HubPeer *destination,
+    const MessageHeader *header,
+    const uint8_t *payload,
+    uint8_t channel
+)
+{
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+    size_t size = (size_t)MESSAGE_HEADER_SIZE + header->length;
+
+    if (destination == NULL || size > sizeof(encoded)) {
+        return;
+    }
+
+    MessageHeader_Encode(header, encoded, sizeof(encoded));
+    memcpy(encoded + MESSAGE_HEADER_SIZE, payload, header->length);
+    TxnMessage_SetChannel(encoded, channel);
+    sendControl(self, destination, encoded, size);
+}
+
+static void sendTxnAbort(Broker *self, HubPeer *agent, uint8_t channel, uint16_t txn_id)
+{
+    TxnAbortMessage abort_message;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+
+    abort_message.channel = channel;
+    abort_message.txn_id = txn_id;
+    sendControl(self, agent, encoded, TxnAbortMessage_Encode(&abort_message, encoded, sizeof(encoded)));
+}
+
+static void finishTransaction(Broker *self, RelayedTransaction *transaction)
+{
+    uint32_t interface_id = transaction->interface_id;
+    bool leased = transaction->exclusive && transaction->state == kTRANSACTION_RELAY_STATE_ACTIVE;
+
+    TransactionTable_Close(&self->transactions, transaction);
+    if (leased) {
+        announceLease(self, interface_id);
+    }
+}
+
+static void abandonTransaction(Broker *self, RelayedTransaction *transaction)
+{
+    HubPeer *agent;
+
+    if (transaction->state == kTRANSACTION_RELAY_STATE_PENDING) {
+        transaction->client_peer_id = TRANSACTION_NO_CLIENT;
+        return;
+    }
+
+    agent = PeerDirectory_Find(&self->directory, transaction->agent_peer_id);
+    if (agent != NULL) {
+        sendTxnAbort(self, agent, transaction->agent_channel, transaction->txn_id);
+    }
+    self->metrics.transactions.aborted++;
+    finishTransaction(self, transaction);
+}
+
+static void abandonClientTransactions(Broker *self, uint32_t client_peer_id)
+{
+    RelayedTransaction *transaction;
+    uint16_t iterator = 0;
+
+    while ((transaction = TransactionTable_NextForClient(&self->transactions, client_peer_id, &iterator)) != NULL) {
+        abandonTransaction(self, transaction);
+    }
+}
+
+static void failAgentTransaction(Broker *self, uint32_t agent_peer_id)
+{
+    RelayedTransaction *transaction = TransactionTable_ForAgent(&self->transactions, agent_peer_id);
+    TxnStatusMessage status;
+    HubPeer *client;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+
+    if (transaction == NULL) {
+        return;
+    }
+
+    client = PeerDirectory_Find(&self->directory, transaction->client_peer_id);
+    if (client != NULL) {
+        memset(&status, 0, sizeof(status));
+        status.channel = transaction->client_channel;
+        status.state = kTXN_STATE_ABORTED;
+        status.txn_id = transaction->txn_id;
+        status.reason = kTXN_REASON_AGENT_DISCONNECTED;
+        status.failing_seq = transaction->completed_steps;
+        status.completed_steps = transaction->completed_steps;
+        sendControl(self, client, encoded, TxnStatusMessage_Encode(&status, encoded, sizeof(encoded)));
+    }
+    if (transaction->state == kTRANSACTION_RELAY_STATE_ACTIVE) {
+        self->metrics.transactions.aborted++;
+    } else {
+        self->metrics.transactions.rejected++;
+    }
+    finishTransaction(self, transaction);
+}
+
+static void announceLease(Broker *self, uint32_t interface_id)
+{
+    const InterfaceEntry *entry = InterfaceRegistry_FindById(&self->registry, interface_id);
+
+    if (entry != NULL) {
+        relayPaceToClients(self, interface_id, entry->shaper.rate_bits_per_s);
+    }
+}
+
+static bool leasedToAnother(const Broker *self, uint32_t interface_id, uint32_t client_peer_id)
+{
+    uint32_t holder_peer_id;
+
+    if (!TransactionTable_LeaseHolder(&self->transactions, interface_id, &holder_peer_id)) {
+        return false;
+    }
+    return holder_peer_id != client_peer_id;
+}
+
+static bool channelLeasedToAnother(const Broker *self, const HubPeer *client, uint8_t channel)
+{
+    uint32_t interface_id;
+
+    if (!TransactionTable_AnyLease(&self->transactions)) {
+        return false;
+    }
+    if (!ClientSession_InterfaceForChannel(&client->session, channel, &interface_id)) {
+        return false;
+    }
+    return leasedToAnother(self, interface_id, client->peer_id);
+}
+
+static bool endpointLeasedToAnother(const Broker *self, const BridgeEndpoint *endpoint, uint32_t client_peer_id)
+{
+    const InterfaceEntry *entry;
+
+    if (!TransactionTable_AnyLease(&self->transactions)) {
+        return false;
+    }
+    entry = InterfaceRegistry_FindByName(&self->registry, endpoint->agent_name, endpoint->interface_name);
+    if (entry == NULL) {
+        return false;
+    }
+    return leasedToAnother(self, entry->interface_id, client_peer_id);
 }

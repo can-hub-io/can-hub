@@ -1,3 +1,4 @@
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -247,10 +248,10 @@ static void logRegistered(const RegisterAckMessage *ack)
         written = snprintf(
             interfaces + offset,
             sizeof(interfaces) - offset,
-            "%s%s=ch%u",
+            "%s%s=ch%" PRIu8,
             (i == 0) ? "" : " ",
             registration.interface_names[i],
-            (unsigned)ack->channels[i]
+            ack->channels[i]
         );
         if (written < 0 || (size_t)written >= sizeof(interfaces) - offset) {
             break;

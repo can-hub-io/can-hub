@@ -1,3 +1,4 @@
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -970,13 +971,23 @@ static void handleStatusReply(const uint8_t *payload, uint16_t payload_length)
     printf("peers: %u (agents %u, clients %u)\n", reply.peer_count, reply.agent_count, reply.client_count);
     printf("interfaces: %u\n", reply.interface_count);
     printf(
-        "frames: received %llu, forwarded %llu, dropped %llu, unroutable %llu\n",
-        (unsigned long long)reply.frames_received,
-        (unsigned long long)reply.frames_forwarded,
-        (unsigned long long)reply.frames_dropped,
-        (unsigned long long)reply.frames_unroutable
+        "frames: received %" PRIu64 ", forwarded %" PRIu64 ", dropped %" PRIu64 ", unroutable %" PRIu64 "\n",
+        reply.frames_received,
+        reply.frames_forwarded,
+        reply.frames_dropped,
+        reply.frames_unroutable
     );
     printf("receive overflows: %u\n", reply.receive_overflows);
+    printf(
+        "transactions: started %" PRIu64 ", completed %" PRIu64 ", aborted %" PRIu64
+        ", rejected %" PRIu64 ", steps %" PRIu64 ", lease drops %" PRIu64 "\n",
+        reply.transactions.started,
+        reply.transactions.completed,
+        reply.transactions.aborted,
+        reply.transactions.rejected,
+        reply.transactions.steps_completed,
+        reply.transactions.lease_frame_drops
+    );
     exit_code = 0;
 }
 
@@ -1145,13 +1156,13 @@ static void handleInterfacesReply(const uint8_t *payload, uint16_t payload_lengt
     }
     for(i=0; i<reply.count; i++) {
         printf(
-            "%-10u %-32s %-16s %-12u %-12llu %-12llu %s\n",
+            "%-10u %-32s %-16s %-12u %-12" PRIu64 " %-12" PRIu64 " %s\n",
             reply.entries[i].interface_id,
             reply.entries[i].agent_name,
             reply.entries[i].interface_name,
             reply.entries[i].subscriber_count,
-            (unsigned long long)reply.entries[i].frames_received,
-            (unsigned long long)reply.entries[i].tx_dropped,
+            reply.entries[i].frames_received,
+            reply.entries[i].tx_dropped,
             interfaceModeName(reply.entries[i].mode)
         );
     }
@@ -1341,12 +1352,12 @@ static void handleBridgeListReply(const uint8_t *payload, uint16_t payload_lengt
         formatEndpoint(&entry->destination, destination, sizeof(destination));
         formatBridgeFilters(entry->filters, entry->filter_count, filters, sizeof(filters));
         printf(
-            "%-24s %-24s %-8s %-12llu %-12llu %s\n",
+            "%-24s %-24s %-8s %-12" PRIu64 " %-12" PRIu64 " %s\n",
             source,
             destination,
             entry->state == (ADMIN_BRIDGE_STATE_SOURCE_ONLINE | ADMIN_BRIDGE_STATE_DESTINATION_ONLINE) ? "active" : "waiting",
-            (unsigned long long)entry->forwarded,
-            (unsigned long long)entry->dropped,
+            entry->forwarded,
+            entry->dropped,
             filters
         );
     }
@@ -1374,10 +1385,10 @@ static void handleGroupListReply(const uint8_t *payload, uint16_t payload_length
         entry = &reply.entries[i];
         formatBridgeFilters(entry->filters, entry->filter_count, filters, sizeof(filters));
         printf(
-            "%s  forwarded %llu  dropped %llu  ids %s\n",
+            "%s  forwarded %" PRIu64 "  dropped %" PRIu64 "  ids %s\n",
             entry->name,
-            (unsigned long long)entry->forwarded,
-            (unsigned long long)entry->dropped,
+            entry->forwarded,
+            entry->dropped,
             filters
         );
         for(m=0; m<entry->member_count; m++) {

@@ -20,6 +20,25 @@ static TxnBeginMessage fullRosterBegin(void);
 static TxnTemplateMessage udsTemplate(void);
 static bool areBytesZero(const uint8_t *bytes, size_t count);
 
+describe("txn_message", []() {
+    it("rewrites the channel every transaction message carries first", []() {
+        TxnAbortMessage abort_message = { 3, 7 };
+        TxnAbortMessage decoded;
+        uint8_t buffer[TEST_BUFFER_SIZE];
+        uint8_t channel;
+
+        TxnAbortMessage_Encode(&abort_message, buffer, sizeof(buffer));
+
+        TxnMessage_SetChannel(buffer, 9);
+        channel = TxnMessage_Channel(buffer + MESSAGE_HEADER_SIZE);
+        TxnAbortMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, TXN_ABORT_BODY_SIZE);
+
+        expect(channel).toBe(9);
+        expect(decoded.channel).toBe(9);
+        expect(decoded.txn_id).toBe((uint16_t)7);
+    });
+});
+
 describe("txn_begin_message", []() {
     it("round-trips the channel, the flags, the origin extractor and a full roster", []() {
         TxnBeginMessage begin;

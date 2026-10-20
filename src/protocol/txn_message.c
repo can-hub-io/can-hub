@@ -67,6 +67,16 @@ static void readPattern(const uint8_t *source, TxnPattern *pattern);
 
 /* ---------- public ---------- */
 
+void TxnMessage_SetChannel(uint8_t *encoded, uint8_t channel)
+{
+    encoded[MESSAGE_HEADER_SIZE + TXN_CHANNEL_OFFSET] = channel;
+}
+
+uint8_t TxnMessage_Channel(const uint8_t *payload)
+{
+    return payload[TXN_CHANNEL_OFFSET];
+}
+
 size_t TxnBeginMessage_Encode(const TxnBeginMessage *self, uint8_t *buffer, size_t buffer_size)
 {
     uint8_t *body;

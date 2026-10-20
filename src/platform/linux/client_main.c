@@ -1,3 +1,4 @@
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -608,9 +609,9 @@ static void printFrame(const FrameMessage *frame)
     uint8_t i;
 
     printf(
-        "(%llu.%06llu) %03X [%u] ",
-        (unsigned long long)(frame->timestamp_us / 1000000),
-        (unsigned long long)(frame->timestamp_us % 1000000),
+        "(%" PRIu64 ".%06" PRIu64 ") %03X [%u] ",
+        frame->timestamp_us / 1000000,
+        frame->timestamp_us % 1000000,
         printedCanId(frame),
         frame->payload_length
     );

@@ -7,7 +7,7 @@
 #include "protocol/register_message.h"
 #include "protocol/subscribe_message.h"
 
-#define ADMIN_STATUS_REPLY_BODY_SIZE 44
+#define ADMIN_STATUS_REPLY_BODY_SIZE 92
 #define ADMIN_PEERS_BODY_SIZE 4
 #define ADMIN_PEERS_REPLY_FIXED_FIELDS_SIZE 4
 #define ADMIN_PEERS_REPLY_ENTRIES_MAX 15
@@ -101,6 +101,15 @@
 #define ADMIN_REJECTED_REASON_FINGERPRINT_MISMATCH 1
 
 typedef struct {
+    uint64_t started;
+    uint64_t completed;
+    uint64_t aborted;
+    uint64_t rejected;
+    uint64_t steps_completed;
+    uint64_t lease_frame_drops;
+} TransactionCounters;
+
+typedef struct {
     uint16_t peer_count;
     uint16_t agent_count;
     uint16_t client_count;
@@ -110,6 +119,7 @@ typedef struct {
     uint64_t frames_forwarded;
     uint64_t frames_dropped;
     uint64_t frames_unroutable;
+    TransactionCounters transactions;
 } AdminStatusReplyMessage;
 
 typedef struct {
