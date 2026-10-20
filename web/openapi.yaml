@@ -1285,7 +1285,7 @@ components:
     TelemetryFrame:
       type: object
       description: One WebSocket telemetry message (absolute counters + rates since the last sample).
-      required: [received, forwarded, dropped, unroutable, rates, interfaces]
+      required: [received, forwarded, dropped, unroutable, rates, interfaces, transactions, transactionsInFlight]
       properties:
         received: { type: integer, format: uint64 }
         forwarded: { type: integer, format: uint64 }
@@ -1310,6 +1310,34 @@ components:
               interfaceName: { type: string }
               framesReceived: { type: integer, format: uint64 }
               framesPerS: { type: number, format: double }
+        transactions:
+          type: object
+          description: >-
+            Transactions now running, the steps they complete per second (finished
+            transactions plus the progress of running ones), the share of finished
+            transactions that ended done (null before any finished), and the client
+            frames dropped because another client held the lease.
+          required: [active, stepsPerS, successRatio, leaseDrops]
+          properties:
+            active: { type: integer, format: uint32 }
+            stepsPerS: { type: number, format: double }
+            successRatio: { type: number, format: double, nullable: true }
+            leaseDrops: { type: integer, format: uint64 }
+        transactionsInFlight:
+          type: array
+          items:
+            type: object
+            required: [interface, clientPeerId, clientName, state, exclusive, completedSteps, bytesInFlight, ageMs, progressAgeMs]
+            properties:
+              interface: { type: string, description: agent/iface }
+              clientPeerId: { type: integer, format: uint32, description: 0 once the client left }
+              clientName: { type: string, nullable: true }
+              state: { type: string, enum: [pending, active] }
+              exclusive: { type: boolean }
+              completedSteps: { type: integer, format: uint32 }
+              bytesInFlight: { type: integer, format: uint32 }
+              ageMs: { type: integer, format: uint32 }
+              progressAgeMs: { type: integer, format: uint32, nullable: true }
 
 security:
   - cookieAuth: []

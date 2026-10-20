@@ -160,6 +160,25 @@ export interface InterfaceRate {
   framesPerS: number
 }
 
+export interface TransactionKpis {
+  active: number
+  stepsPerS: number
+  successRatio: number | null
+  leaseDrops: number
+}
+
+export interface TransactionRow {
+  interface: string
+  clientPeerId: number
+  clientName: string | null
+  state: 'pending' | 'active'
+  exclusive: boolean
+  completedSteps: number
+  bytesInFlight: number
+  ageMs: number
+  progressAgeMs: number | null
+}
+
 export interface TelemetryFrame {
   received: number
   forwarded: number
@@ -172,6 +191,8 @@ export interface TelemetryFrame {
     unroutablePerS: number
   }
   interfaces: InterfaceRate[]
+  transactions: TransactionKpis
+  transactionsInFlight: TransactionRow[]
 }
 
 async function getJson<T>(path: string): Promise<T> {

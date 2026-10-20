@@ -67,6 +67,8 @@ pub enum MessageType {
     AdminGroupLeaveReply = 0x39,
     AdminGroupList = 0x3A,
     AdminGroupListReply = 0x3B,
+    AdminTxns = 0x3C,
+    AdminTxnsReply = 0x3D,
 }
 
 impl MessageType {
@@ -121,6 +123,8 @@ impl MessageType {
             0x39 => AdminGroupLeaveReply,
             0x3A => AdminGroupList,
             0x3B => AdminGroupListReply,
+            0x3C => AdminTxns,
+            0x3D => AdminTxnsReply,
             _ => return None,
         };
         Some(kind)

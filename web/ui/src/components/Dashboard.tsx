@@ -1,7 +1,18 @@
-import { api } from '../api'
+import { api, type TelemetryFrame, type TransactionRow } from '../api'
 import { usePolling, useTelemetry } from '../hooks'
+import { formatBytes, formatUptime, peerId } from '../lib'
+import { Badge } from './ui/badge'
 import { Card } from './ui/card'
 import { Table, Tbody, Td, Th, Thead, Tr } from './ui/table'
+
+function LiveDot({ connected }: { connected: boolean }) {
+  return (
+    <span
+      className={`inline-block h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-300'}`}
+      title={connected ? 'connected' : 'offline'}
+    />
+  )
+}
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -40,10 +51,7 @@ export function Dashboard() {
       <div>
         <h2 className="mb-2 flex items-center gap-2 text-base font-semibold text-gray-900">
           Live rates
-          <span
-            className={`inline-block h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-300'}`}
-            title={connected ? 'connected' : 'offline'}
-          />
+          <LiveDot connected={connected} />
         </h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {rates.map(([label, value]) => (
@@ -51,6 +59,8 @@ export function Dashboard() {
           ))}
         </div>
       </div>
+
+      <Transactions frame={frame} connected={connected} />
 
       <div>
         <h2 className="mb-2 text-base font-semibold text-gray-900">Per-interface throughput</h2>
@@ -80,4 +90,67 @@ export function Dashboard() {
       </div>
     </div>
   )
+}
+
+function Transactions({ frame, connected }: { frame: TelemetryFrame | null; connected: boolean }) {
+  const kpis = frame?.transactions
+  const stats: [string, string][] = [
+    ['Active', kpis ? String(kpis.active) : '—'],
+    ['Steps /s', kpis ? kpis.stepsPerS.toFixed(1) : '—'],
+    ['Success', kpis?.successRatio == null ? '—' : `${(kpis.successRatio * 100).toFixed(1)} %`],
+    ['Lease drops', kpis ? kpis.leaseDrops.toLocaleString() : '—'],
+  ]
+  const rows = frame?.transactionsInFlight ?? []
+
+  return (
+    <div>
+      <h2 className="mb-2 flex items-center gap-2 text-base font-semibold text-gray-900">
+        Transactions
+        <LiveDot connected={connected} />
+      </h2>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {stats.map(([label, value]) => <Stat key={label} label={label} value={value} />)}
+      </div>
+
+      <h3 className="mb-2 mt-4 text-sm font-semibold text-gray-700">In flight</h3>
+      <Table>
+        <Thead>
+          <Tr className="hover:bg-transparent">
+            <Th>Interface</Th>
+            <Th>Client</Th>
+            <Th>State</Th>
+            <Th>Lease</Th>
+            <Th className="text-right">Steps</Th>
+            <Th className="text-right">In flight</Th>
+            <Th className="text-right">Age</Th>
+            <Th className="text-right">Last progress</Th>
+          </Tr>
+        </Thead>
+        <Tbody>
+          {rows.map((row) => (
+            <Tr key={`${row.interface}-${row.clientPeerId}`}>
+              <Td className="font-mono text-gray-800">{row.interface}</Td>
+              <Td className="font-mono text-gray-800">{clientOf(row)}</Td>
+              <Td><Badge variant={row.state === 'active' ? 'success' : 'warning'}>{row.state}</Badge></Td>
+              <Td>{row.exclusive ? 'yes' : 'no'}</Td>
+              <Td className="text-right tabular-nums">{row.completedSteps.toLocaleString()}</Td>
+              <Td className="text-right tabular-nums">{formatBytes(row.bytesInFlight)}</Td>
+              <Td className="text-right tabular-nums">{formatUptime(Math.floor(row.ageMs / 1000))}</Td>
+              <Td className="text-right tabular-nums">{row.progressAgeMs == null ? '—' : `${(row.progressAgeMs / 1000).toFixed(1)} s ago`}</Td>
+            </Tr>
+          ))}
+          {rows.length === 0 && (
+            <Tr className="hover:bg-transparent">
+              <Td className="text-gray-500" colSpan={8}>{frame ? 'No transactions in flight' : 'Waiting for telemetry…'}</Td>
+            </Tr>
+          )}
+        </Tbody>
+      </Table>
+    </div>
+  )
+}
+
+function clientOf(row: TransactionRow): string {
+  if (row.clientPeerId === 0) return '— (left)'
+  return row.clientName ? `${peerId(row.clientPeerId)} ${row.clientName}` : peerId(row.clientPeerId)
 }

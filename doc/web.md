@@ -71,7 +71,10 @@ operation lands in the audit log (Audit tab or `/api/audit`).
 The hub only keeps cumulative counters. The daemon polls them over the admin
 socket, derives rates from successive samples, and fans them out to all
 subscribed browsers over one WebSocket pipeline — one poller regardless of
-how many dashboards are open.
+how many dashboards are open. The dashboard's Transactions section comes from
+the same poller: transactions running now, steps per second, the share of
+finished transactions that ended done and the frames dropped by a lease, plus
+the table of transactions in flight.
 
 ## Behind TLS
 
