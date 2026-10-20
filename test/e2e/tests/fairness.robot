@@ -4,7 +4,10 @@ Documentation     Per-channel TX fairness (#59). One agent exports a quiet and a
 ...               hub peer over a rate-limited link. The noisy bus floods and
 ...               saturates the shared pipe; the quiet bus must still get through.
 ...               Without the fix the quiet bus loses ~70%% of its frames; with it,
-...               the drops land on the noisy channel and the quiet bus stays 100%%.
+...               the hub drops none of them and charges the drops to the noisy
+...               channel. The rate limit itself still drops packets of the lossy
+...               datagram plane (#70), and those carry frames of either bus, so
+...               end to end the quiet bus is held to a floor, not to every frame.
 Library           BenchKeywords
 Variables         bench_variables.py
 Suite Setup       Setup Bench    ${BENCH}
@@ -12,6 +15,7 @@ Suite Teardown    Teardown Bench    ${BENCH}
 
 *** Variables ***
 ${QUIET_FRAMES}    ${60}
+${QUIET_FLOOR}     ${54}
 
 *** Test Cases ***
 Quiet Channel Survives A Noisy Neighbour On The Same Peer
@@ -35,8 +39,6 @@ Quiet Channel Survives A Noisy Neighbour On The Same Peer
     ${counts}=    Drain Result Of ${consumer}
     Log    quiet delivered: ${counts}[truck42/quiet]/${QUIET_FRAMES}, channel drops: ${drops}    console=True
 
-    # The quiet bus is delivered in full and never charged a drop...
-    Should Be Equal As Integers    ${counts}[truck42/quiet]    ${QUIET_FRAMES}
     Should Be Equal As Integers    ${drops}[quiet]    0
-    # ...while the noisy bus absorbs the saturation it caused.
     Should Be True    ${drops}[noisy] > 0
+    Should Be True    ${counts}[truck42/quiet] >= ${QUIET_FLOOR}
