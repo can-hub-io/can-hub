@@ -42,3 +42,4 @@ typedef struct {
 
 void ScriptGenerator_Start(ScriptGenerator *self, const ScriptProgram *program, const ScriptFiles *files);
 uint8_t ScriptGenerator_Next(ScriptGenerator *self, TxnStep *step, ScriptError *error);
+bool ScriptGenerator_Frame(ScriptGenerator *self, const ScriptStatement *statement, TxnStep *step, ScriptError *error);

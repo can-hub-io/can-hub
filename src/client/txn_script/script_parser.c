@@ -78,12 +78,15 @@ static bool parseTemplateHeader(Parser *self, Cursor *cursor);
 static bool parseRosterHeader(Parser *self, Cursor *cursor);
 static bool parseTimeout(Parser *self, Cursor *cursor, ScriptTemplate *template_node);
 static bool parseSend(Parser *self, Cursor *cursor);
+static bool parseKeepalive(Parser *self, Cursor *cursor);
+static bool parseIdleTimeout(Parser *self, Cursor *cursor);
 static bool parseExpect(Parser *self, Cursor *cursor);
 static bool parseExpectClause(Parser *self, Cursor *cursor, ScriptStatement *statement);
 static bool parseFor(Parser *self, Cursor *cursor);
 static bool parseChunks(Parser *self, Cursor *cursor, ScriptStatement *statement);
 static bool parseDataItems(Parser *self, Cursor *cursor, ScriptStatement *statement);
 static bool parseDataItem(Parser *self, const ScriptToken *token, ScriptDataItem *item);
+static bool endsData(const ScriptToken *token);
 static bool parseListReference(Parser *self, Cursor *cursor, ScriptListReference *reference);
 static bool parseList(Parser *self, Cursor *cursor, ScriptList *list);
 static bool parseCondition(Parser *self, Cursor *cursor, uint16_t *condition_index);
@@ -118,6 +121,7 @@ bool ScriptParser_Parse(Script *script, const char *text, size_t size, ScriptErr
 
     memset(script, 0, sizeof(*script));
     script->first_statement = SCRIPT_NO_INDEX;
+    script->keepalive = SCRIPT_NO_INDEX;
     memset(&parser, 0, sizeof(parser));
     parser.script = script;
     parser.error = error;
@@ -252,6 +256,12 @@ static bool parseRootOrForLine(Parser *self, Cursor *cursor)
     if (acceptWord(cursor, "exclusive")) {
         self->script->exclusive = true;
         return expectEnd(self, cursor);
+    }
+    if (acceptWord(cursor, "keepalive")) {
+        return parseKeepalive(self, cursor);
+    }
+    if (acceptWord(cursor, "idle")) {
+        return parseIdleTimeout(self, cursor);
     }
     if (acceptWord(cursor, "template")) {
         return parseTemplateHeader(self, cursor);
@@ -532,6 +542,50 @@ static bool parseSend(Parser *self, Cursor *cursor)
     return expectEnd(self, cursor);
 }
 
+static bool parseKeepalive(Parser *self, Cursor *cursor)
+{
+    uint16_t index;
+    const ScriptToken *duration;
+
+    if (self->script->keepalive != SCRIPT_NO_INDEX) {
+        return fail(self, "a script has one keepalive");
+    }
+    index = addStatement(self, kSCRIPT_STATEMENT_SEND, cursor->line->line_number);
+    if (index == SCRIPT_NO_INDEX) {
+        return false;
+    }
+    if (!parseValue(self, cursor, &self->script->statements[index].id) ||
+        !expectWord(self, cursor, "data", "expected data after the identifier") ||
+        !parseDataItems(self, cursor, &self->script->statements[index]) ||
+        !expectWord(self, cursor, "every", "expected every and a time after the keepalive data")) {
+        return false;
+    }
+    duration = next(cursor);
+    if (duration == NULL || duration->kind != kSCRIPT_TOKEN_DURATION) {
+        return fail(self, "expected a time such as 2s after every");
+    }
+
+    self->script->keepalive = index;
+    self->script->keepalive_period_us = (uint32_t)duration->number;
+    return expectEnd(self, cursor);
+}
+
+static bool parseIdleTimeout(Parser *self, Cursor *cursor)
+{
+    const ScriptToken *duration;
+
+    if (!expectWord(self, cursor, "timeout", "expected idle timeout and a time")) {
+        return false;
+    }
+    duration = next(cursor);
+    if (duration == NULL || duration->kind != kSCRIPT_TOKEN_DURATION) {
+        return fail(self, "expected a time such as 60s after idle timeout");
+    }
+
+    self->script->idle_timeout_us = (uint32_t)duration->number;
+    return expectEnd(self, cursor);
+}
+
 static bool parseExpect(Parser *self, Cursor *cursor)
 {
     uint16_t index = addStatement(self, kSCRIPT_STATEMENT_EXPECT, cursor->line->line_number);
@@ -623,7 +677,7 @@ static bool parseDataItems(Parser *self, Cursor *cursor, ScriptStatement *statem
     ScriptDataItem *item;
 
     statement->first_data_item = self->script->data_item_count;
-    while ((token = peek(cursor)) != NULL && !ScriptToken_Is(token, "gap") && !ScriptToken_Is(token, "expect")) {
+    while ((token = peek(cursor)) != NULL && !endsData(token)) {
         if (self->script->data_item_count == SCRIPT_DATA_ITEMS_MAX) {
             return fail(self, "too many data bytes in the script");
         }
@@ -640,6 +694,11 @@ static bool parseDataItems(Parser *self, Cursor *cursor, ScriptStatement *statem
     }
 
     return true;
+}
+
+static bool endsData(const ScriptToken *token)
+{
+    return ScriptToken_Is(token, "gap") || ScriptToken_Is(token, "expect") || ScriptToken_Is(token, "every");
 }
 
 static bool parseDataItem(Parser *self, const ScriptToken *token, ScriptDataItem *item)

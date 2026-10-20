@@ -201,6 +201,8 @@ The cell number is the third data byte; 24 answers out of 32 are enough.
 |---|---|
 | `# ...` | comment, to the end of the line |
 | `exclusive` | lease the interface for the transaction: other clients' frames are dropped |
+| `idle timeout TIME` | how long the agent waits for steps once it ran out of them (default 5s) |
+| `keepalive ID data BYTES every TIME` | a frame the agent sends while it waits for steps, e.g. to keep a device session open |
 | `NAME = value` | constant: a number, a list (`0..31`, `1, 4, 7..9`), `read("file")` or `crc(...)` |
 | `template NAME` | starts a template block |
 | `send ID data BYTES [gap TIME] [expect TEMPLATE [where CONDITION]]` | transmit a frame, then wait as the template says (or not at all) |

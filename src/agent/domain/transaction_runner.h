@@ -76,6 +76,9 @@ typedef struct {
     uint64_t starve_deadline_us;
     uint64_t next_transmit_us;
     uint64_t last_tick_us;
+    uint64_t idle_timeout_us;
+    uint64_t last_frame_us;
+    TxnKeepalive keepalive;
     ActiveStep current;
     IsotpLink isotp;
     uint8_t message[TXN_ISOTP_MESSAGE_SIZE_MAX];

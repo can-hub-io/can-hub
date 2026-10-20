@@ -30,6 +30,11 @@ static void feedIsotp(TransactionRunner *self, const FrameMessage *frame);
 static bool isIsotpStep(const TransactionRunner *self);
 static bool transmitIsotpFrame(void *context, const FrameMessage *frame);
 static void releaseRecord(TransactionRunner *self);
+static uint64_t idleTimeoutUs(const TxnBeginMessage *begin);
+static bool waitForSteps(TransactionRunner *self, uint64_t now_us);
+static void sendKeepaliveIfDue(TransactionRunner *self, uint64_t now_us);
+static uint64_t keepaliveDueUs(const TransactionRunner *self);
+static bool transmitTracked(TransactionRunner *self, const FrameMessage *frame, uint64_t now_us);
 static bool settleWait(TransactionRunner *self, uint64_t now_us);
 static void startWait(TransactionRunner *self, uint64_t now_us);
 static void completeStep(TransactionRunner *self);
@@ -127,7 +132,10 @@ void TransactionRunner_Begin(
     self->consumed_bytes = 0;
     self->reported_bytes = 0;
     self->report_due_us = 0;
-    self->starve_deadline_us = now_us + TRANSACTION_STARVATION_TIMEOUT_US;
+    self->idle_timeout_us = idleTimeoutUs(begin);
+    self->keepalive = begin->keepalive;
+    self->last_frame_us = now_us;
+    self->starve_deadline_us = now_us + self->idle_timeout_us;
     self->next_transmit_us = 0;
     self->last_tick_us = now_us;
     self->message_length = 0;
@@ -249,6 +257,9 @@ uint64_t TransactionRunner_NextWakeUs(const TransactionRunner *self)
         if (!StepRing_IsEmpty(&self->ring)) {
             return self->last_tick_us;
         }
+        if (self->keepalive.period_ms != 0) {
+            wake_us = earliestWake(wake_us, keepaliveDueUs(self));
+        }
         return earliestWake(wake_us, self->starve_deadline_us);
     }
     if (self->current.phase == kTRANSACTION_PHASE_TRANSMIT && self->current.message_started) {
@@ -268,6 +279,11 @@ uint64_t TransactionRunner_NextWakeUs(const TransactionRunner *self)
 
 static bool isBeginValid(const TxnBeginMessage *begin)
 {
+    const TxnKeepalive *keepalive = &begin->keepalive;
+
+    if (keepalive->period_ms != 0 && !FrameMessage_IsPayloadLengthValid(keepalive->payload_length, keepalive->frame_flags)) {
+        return false;
+    }
     if (begin->origin.source >= kTXN_ORIGIN_SOURCE_MAX) {
         return false;
     }
@@ -400,14 +416,7 @@ static bool loadNextStep(TransactionRunner *self, uint64_t now_us)
 
     available = StepRing_Peek(&self->ring, &record);
     if (available == 0) {
-        if (self->starve_deadline_us == 0) {
-            self->starve_deadline_us = now_us + TRANSACTION_STARVATION_TIMEOUT_US;
-            return false;
-        }
-        if (now_us >= self->starve_deadline_us) {
-            abortWith(self, kTXN_REASON_STARVED, self->completed_steps);
-        }
-        return false;
+        return waitForSteps(self, now_us);
     }
 
     memset(&self->current, 0, sizeof(self->current));
@@ -454,7 +463,7 @@ static bool transmitStep(TransactionRunner *self, uint64_t now_us)
     frame.frame_flags = self->current.step.frame_flags;
     memcpy(frame.payload, self->current.step.payload, frame.payload_length);
 
-    if (!self->port.transmit(self->port.context, self->interface_index, &frame)) {
+    if (!transmitTracked(self, &frame, now_us)) {
         if (now_us >= self->current.deadline_us) {
             abortWith(self, kTXN_REASON_TX_FAILED, self->completed_steps);
             return false;
@@ -558,7 +567,61 @@ static bool transmitIsotpFrame(void *context, const FrameMessage *frame)
 {
     TransactionRunner *self = context;
 
-    return self->port.transmit(self->port.context, self->interface_index, frame);
+    return transmitTracked(self, frame, self->last_tick_us);
+}
+
+static uint64_t idleTimeoutUs(const TxnBeginMessage *begin)
+{
+    if (begin->idle_timeout_ms == 0) {
+        return TRANSACTION_STARVATION_TIMEOUT_US;
+    }
+    return (uint64_t)begin->idle_timeout_ms * MICROSECONDS_PER_MILLISECOND;
+}
+
+static bool waitForSteps(TransactionRunner *self, uint64_t now_us)
+{
+    if (self->starve_deadline_us == 0) {
+        self->starve_deadline_us = now_us + self->idle_timeout_us;
+    }
+    if (now_us >= self->starve_deadline_us) {
+        abortWith(self, kTXN_REASON_STARVED, self->completed_steps);
+        return false;
+    }
+    sendKeepaliveIfDue(self, now_us);
+    return false;
+}
+
+static void sendKeepaliveIfDue(TransactionRunner *self, uint64_t now_us)
+{
+    FrameMessage frame;
+
+    if (self->keepalive.period_ms == 0 || now_us < keepaliveDueUs(self)) {
+        return;
+    }
+
+    memset(&frame, 0, sizeof(frame));
+    frame.can_id = self->keepalive.can_id;
+    frame.channel = self->channel;
+    frame.payload_length = self->keepalive.payload_length;
+    frame.frame_flags = self->keepalive.frame_flags;
+    memcpy(frame.payload, self->keepalive.payload, frame.payload_length);
+    if (transmitTracked(self, &frame, now_us)) {
+        self->early_frame_count = 0;
+    }
+}
+
+static uint64_t keepaliveDueUs(const TransactionRunner *self)
+{
+    return self->last_frame_us + (uint64_t)self->keepalive.period_ms * MICROSECONDS_PER_MILLISECOND;
+}
+
+static bool transmitTracked(TransactionRunner *self, const FrameMessage *frame, uint64_t now_us)
+{
+    if (!self->port.transmit(self->port.context, self->interface_index, frame)) {
+        return false;
+    }
+    self->last_frame_us = now_us;
+    return true;
 }
 
 static void releaseRecord(TransactionRunner *self)

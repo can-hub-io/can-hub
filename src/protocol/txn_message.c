@@ -14,6 +14,12 @@
 #define BEGIN_ROSTER_COUNT_OFFSET 9
 #define BEGIN_ROSTER_OFFSET 12
 #define ROSTER_ENTRY_SIZE 4
+#define BEGIN_IDLE_TIMEOUT_MS_OFFSET 268
+#define BEGIN_KEEPALIVE_PERIOD_MS_OFFSET 272
+#define BEGIN_KEEPALIVE_CAN_ID_OFFSET 276
+#define BEGIN_KEEPALIVE_PAYLOAD_LENGTH_OFFSET 280
+#define BEGIN_KEEPALIVE_FRAME_FLAGS_OFFSET 281
+#define BEGIN_KEEPALIVE_PAYLOAD_OFFSET 284
 
 #define BEGIN_ACK_CHANNEL_OFFSET 0
 #define BEGIN_ACK_STATUS_OFFSET 1
@@ -74,6 +80,8 @@ static size_t encodeFixedBody(uint8_t type, size_t body_size, uint8_t *buffer, s
 static void writePattern(uint8_t *destination, const TxnPattern *pattern);
 static void readPattern(const uint8_t *source, TxnPattern *pattern);
 static void writeIsotpParameters(uint8_t *body, const TxnIsotpParameters *isotp);
+static void writeKeepalive(uint8_t *body, const TxnKeepalive *keepalive);
+static bool readKeepalive(const uint8_t *body, TxnKeepalive *keepalive);
 static void readIsotpParameters(const uint8_t *body, TxnIsotpParameters *isotp);
 
 /* ---------- public ---------- */
@@ -112,6 +120,8 @@ size_t TxnBeginMessage_Encode(const TxnBeginMessage *self, uint8_t *buffer, size
     for(i=0; i<self->roster_count; i++) {
         Wire_WriteU32(body + BEGIN_ROSTER_OFFSET + i * ROSTER_ENTRY_SIZE, self->roster[i]);
     }
+    Wire_WriteU32(body + BEGIN_IDLE_TIMEOUT_MS_OFFSET, self->idle_timeout_ms);
+    writeKeepalive(body, &self->keepalive);
 
     return total_size;
 }
@@ -138,8 +148,9 @@ bool TxnBeginMessage_Decode(TxnBeginMessage *self, const uint8_t *payload, size_
     for(i=0; i<self->roster_count; i++) {
         self->roster[i] = Wire_ReadU32(payload + BEGIN_ROSTER_OFFSET + i * ROSTER_ENTRY_SIZE);
     }
+    self->idle_timeout_ms = Wire_ReadU32(payload + BEGIN_IDLE_TIMEOUT_MS_OFFSET);
 
-    return true;
+    return readKeepalive(payload, &self->keepalive);
 }
 
 size_t TxnBeginAckMessage_Encode(const TxnBeginAckMessage *self, uint8_t *buffer, size_t buffer_size)
@@ -423,4 +434,28 @@ static void readIsotpParameters(const uint8_t *body, TxnIsotpParameters *isotp)
     isotp->tx_data_length = body[TEMPLATE_ISOTP_TX_DATA_LENGTH_OFFSET];
     isotp->block_size = body[TEMPLATE_ISOTP_BLOCK_SIZE_OFFSET];
     isotp->st_min = body[TEMPLATE_ISOTP_ST_MIN_OFFSET];
+}
+
+static void writeKeepalive(uint8_t *body, const TxnKeepalive *keepalive)
+{
+    uint8_t length = keepalive->payload_length > FRAME_PAYLOAD_MAX_FD ? FRAME_PAYLOAD_MAX_FD : keepalive->payload_length;
+
+    Wire_WriteU32(body + BEGIN_KEEPALIVE_PERIOD_MS_OFFSET, keepalive->period_ms);
+    Wire_WriteU32(body + BEGIN_KEEPALIVE_CAN_ID_OFFSET, keepalive->can_id);
+    body[BEGIN_KEEPALIVE_PAYLOAD_LENGTH_OFFSET] = length;
+    body[BEGIN_KEEPALIVE_FRAME_FLAGS_OFFSET] = keepalive->frame_flags;
+    memcpy(body + BEGIN_KEEPALIVE_PAYLOAD_OFFSET, keepalive->payload, length);
+}
+
+static bool readKeepalive(const uint8_t *body, TxnKeepalive *keepalive)
+{
+    keepalive->period_ms = Wire_ReadU32(body + BEGIN_KEEPALIVE_PERIOD_MS_OFFSET);
+    keepalive->can_id = Wire_ReadU32(body + BEGIN_KEEPALIVE_CAN_ID_OFFSET);
+    keepalive->payload_length = body[BEGIN_KEEPALIVE_PAYLOAD_LENGTH_OFFSET];
+    keepalive->frame_flags = body[BEGIN_KEEPALIVE_FRAME_FLAGS_OFFSET];
+    if (keepalive->payload_length > FRAME_PAYLOAD_MAX_FD) {
+        return false;
+    }
+    memcpy(keepalive->payload, body + BEGIN_KEEPALIVE_PAYLOAD_OFFSET, keepalive->payload_length);
+    return true;
 }

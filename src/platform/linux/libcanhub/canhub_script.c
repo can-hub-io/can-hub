@@ -26,6 +26,7 @@ typedef struct {
     Script script;
     ScriptProgram program;
     ScriptGenerator generator;
+    TxnStep keepalive;
     char *text;
     size_t text_size;
     char directory[SCRIPT_PATH_MAX];
@@ -48,6 +49,7 @@ static bool resolvePath(const ScriptRun *run, const char *path, char *resolved, 
 static int32_t compileScript(ScriptRun *run, CanHubSession *session, const char *script_path, CanHubScriptOutcome *outcome);
 static int32_t countSteps(ScriptRun *run, CanHubSession *session, const char *script_path, CanHubScriptOutcome *outcome);
 static int32_t reportScriptError(CanHubSession *session, const char *script_path, const ScriptError *error, CanHubScriptOutcome *outcome);
+static int32_t buildKeepalive(ScriptRun *run, CanHubSession *session, const char *script_path, CanHubScriptOutcome *outcome);
 static int32_t beginTransaction(ScriptRun *run, CanHubSession *session);
 static int32_t defineTemplates(ScriptRun *run, CanHubSession *session);
 static int32_t streamSteps(ScriptRun *run, Progress *progress, const char *script_path, CanHubScriptOutcome *outcome);
@@ -94,6 +96,9 @@ int32_t canhub_txn_run_script(
         result = countSteps(run, session, script_path, outcome);
     }
     progress.total_steps = outcome->total_steps;
+    if (result == CANHUB_OK) {
+        result = buildKeepalive(run, session, script_path, outcome);
+    }
     if (result == CANHUB_OK) {
         result = beginTransaction(run, session);
     }
@@ -251,6 +256,24 @@ static int32_t reportScriptError(CanHubSession *session, const char *script_path
     return CANHUB_ERR_ARGUMENT;
 }
 
+static int32_t buildKeepalive(ScriptRun *run, CanHubSession *session, const char *script_path, CanHubScriptOutcome *outcome)
+{
+    ScriptFiles files = { run, readScriptFile };
+    ScriptError error;
+
+    memset(&run->keepalive, 0, sizeof(run->keepalive));
+    if (run->script.keepalive == SCRIPT_NO_INDEX) {
+        return CANHUB_OK;
+    }
+
+    memset(&error, 0, sizeof(error));
+    ScriptGenerator_Start(&run->generator, &run->program, &files);
+    if (!ScriptGenerator_Frame(&run->generator, &run->script.statements[run->script.keepalive], &run->keepalive, &error)) {
+        return reportScriptError(session, script_path, &error, outcome);
+    }
+    return CANHUB_OK;
+}
+
 static int32_t beginTransaction(ScriptRun *run, CanHubSession *session)
 {
     const TxnBeginMessage *wire = &run->program.begin;
@@ -265,6 +288,12 @@ static int32_t beginTransaction(ScriptRun *run, CanHubSession *session)
     begin.origin_mask = wire->origin.mask;
     begin.roster_count = wire->roster_count;
     memcpy(begin.roster, wire->roster, sizeof(begin.roster));
+    begin.idle_timeout_ms = wire->idle_timeout_ms;
+    begin.keepalive_period_ms = wire->keepalive.period_ms;
+    begin.keepalive.can_id = run->keepalive.can_id;
+    begin.keepalive.flags = run->keepalive.frame_flags;
+    begin.keepalive.length = run->keepalive.payload_length;
+    memcpy(begin.keepalive.payload, run->keepalive.payload, run->keepalive.payload_length);
     return canhub_txn_begin(session, &begin, GRANT_TIMEOUT_MS);
 }
 

@@ -24,6 +24,7 @@ static const char *const RESERVED_NAMES[] = {
     "id", "byte", "and", "data", "send", "expect", "where", "for", "in", "of", "template", "exclusive",
     "success", "failure", "pending", "timeout", "then", "continue", "on", "mismatch", "abort", "gap",
     "read", "chunks", "crc", "sum8", "sum16", "sum32", "crc16", "crc32", "little_endian", "big_endian", "pad",
+    "keepalive", "every", "idle",
 };
 
 static bool fail(Compiler *self, uint16_t line_number, const char *message);
@@ -71,8 +72,13 @@ bool ScriptCompiler_Compile(ScriptProgram *program, const Script *script, Script
     if (!checkConstants(&compiler) || !checkTemplates(&compiler) || !walk(&compiler, script->first_statement)) {
         return false;
     }
+    if (script->keepalive != SCRIPT_NO_INDEX && !checkSend(&compiler, &script->statements[script->keepalive])) {
+        return false;
+    }
 
     program->begin.flags = script->exclusive ? TXN_BEGIN_FLAG_EXCLUSIVE : 0;
+    program->begin.idle_timeout_ms = script->idle_timeout_us / MICROSECONDS_PER_MILLISECOND;
+    program->begin.keepalive.period_ms = script->keepalive_period_us / MICROSECONDS_PER_MILLISECOND;
     program->begin.origin = compiler.origin;
     program->begin.roster_count = compiler.roster_count;
     memcpy(program->begin.roster, compiler.roster, sizeof(compiler.roster));

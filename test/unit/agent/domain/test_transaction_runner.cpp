@@ -47,6 +47,9 @@ extern "C" {
 #define MESSAGE_PENDING_MASK 0xFF00FF
 #define MESSAGE_PENDING 0x78007F
 #define HALF_MESSAGE 10
+#define IDLE_TIMEOUT_MS 30000
+#define KEEPALIVE_PERIOD_MS 2000
+#define KEEPALIVE_PERIOD_US (KEEPALIVE_PERIOD_MS * 1000)
 
 static TransactionRunner runner;
 static uint8_t ring_storage[RING_CAPACITY];
@@ -67,6 +70,7 @@ static TxnTemplateMessage transmitOnlyTemplate(uint8_t template_id, uint32_t gap
 static TxnTemplateMessage batchAckTemplate(void);
 static TxnTemplateMessage isotpTemplate(void);
 static TxnBeginAckMessage beginWithIsotp(uint64_t now_us);
+static TxnBeginAckMessage beginWithKeepalive(uint32_t idle_timeout_ms);
 static void defineTemplate(const TxnTemplateMessage *template_message);
 static TxnStep requestStep(uint8_t service);
 static TxnStep transmitOnlyStep(uint8_t template_id, uint32_t can_id);
@@ -569,6 +573,66 @@ describe("transaction_runner", []() {
         });
     });
 
+    describe("keepalive", []() {
+        beforeEach([]() {
+            TxnTemplateMessage template_message;
+
+            resetRunner(RING_CAPACITY);
+            beginWithKeepalive(IDLE_TIMEOUT_MS);
+            template_message = responseTemplate();
+            defineTemplate(&template_message);
+        });
+
+        it("sends the keepalive frame every period while it waits for steps", []() {
+            uint32_t sent_before_period;
+
+            TransactionRunner_Tick(&runner, KEEPALIVE_PERIOD_US - 1);
+            sent_before_period = transmit_count;
+            TransactionRunner_Tick(&runner, KEEPALIVE_PERIOD_US);
+            TransactionRunner_Tick(&runner, 2 * KEEPALIVE_PERIOD_US);
+
+            expect(sent_before_period).toBe((uint32_t)0);
+            expect(transmit_count).toBe((uint32_t)2);
+            expect(transmitted[0].can_id).toBe((uint32_t)REQUEST_ID);
+            expect(transmitted[0].payload[1]).toBe(0x3E);
+        });
+
+        it("stays quiet while a step waits for its answer", []() {
+            TxnTemplateMessage slow_answer;
+            TxnStep step;
+
+            slow_answer = responseTemplate();
+            slow_answer.template_id = BLOCK_TEMPLATE;
+            slow_answer.timeout_ms = 3 * KEEPALIVE_PERIOD_MS;
+            defineTemplate(&slow_answer);
+            step = requestStep(0x36);
+            step.template_id = BLOCK_TEMPLATE;
+            pushSteps(&step, 1, 0);
+
+            TransactionRunner_Tick(&runner, 100);
+            TransactionRunner_Tick(&runner, 100 + KEEPALIVE_PERIOD_US);
+
+            expect(TransactionRunner_IsActive(&runner)).toBe(true);
+            expect(transmit_count).toBe((uint32_t)1);
+            expect(transmitted[0].payload[1]).toBe(0x36);
+        });
+
+        it("waits for steps as long as the transaction asked", []() {
+            TransactionRunner_Tick(&runner, TRANSACTION_STARVATION_TIMEOUT_US);
+            TransactionRunner_Tick(&runner, (uint64_t)IDLE_TIMEOUT_MS * 1000 - 1);
+
+            expect(status_count).toBe((uint32_t)0);
+            expect(TransactionRunner_IsActive(&runner)).toBe(true);
+        });
+
+        it("starves once the idle timeout passes", []() {
+            TransactionRunner_Tick(&runner, 1);
+            TransactionRunner_Tick(&runner, (uint64_t)IDLE_TIMEOUT_MS * 1000 + 1);
+
+            expect(last_status.reason).toBe((uint8_t)kTXN_REASON_STARVED);
+        });
+    });
+
     describe("transmit", []() {
         beforeEach([]() {
             resetRunner(RING_CAPACITY);
@@ -929,6 +993,24 @@ static TxnTemplateMessage isotpTemplate(void)
     template_message.isotp.response_id = RESPONSE_ID;
     template_message.isotp.tx_data_length = FRAME_PAYLOAD_MAX_CLASSIC;
     return template_message;
+}
+
+static TxnBeginAckMessage beginWithKeepalive(uint32_t idle_timeout_ms)
+{
+    TxnBeginMessage begin = { 0 };
+    TxnBeginAckMessage ack;
+
+    begin.channel = CHANNEL;
+    begin.idle_timeout_ms = idle_timeout_ms;
+    begin.keepalive.period_ms = KEEPALIVE_PERIOD_MS;
+    begin.keepalive.can_id = REQUEST_ID;
+    begin.keepalive.payload_length = 3;
+    begin.keepalive.payload[0] = 0x02;
+    begin.keepalive.payload[1] = 0x3E;
+    begin.keepalive.payload[2] = 0x80;
+    TransactionRunner_Begin(&runner, &begin, INTERFACE_INDEX, 0, &ack);
+    txn_id = ack.txn_id;
+    return ack;
 }
 
 static TxnBeginAckMessage beginWithIsotp(uint64_t now_us)

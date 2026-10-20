@@ -13,6 +13,7 @@ __all__ = [
     "CanHubMessage",
     "InterfaceSettings",
     "Isotp",
+    "Keepalive",
     "Origin",
     "Pattern",
     "ScriptError",
@@ -24,7 +25,7 @@ __all__ = [
     "identity_fingerprint",
 ]
 
-TRANSACTION_NAMES = {"Advance", "Isotp", "Origin", "Pattern", "ScriptError", "Step", "Template", "Transaction", "TransactionAborted", "TransactionResult"}
+TRANSACTION_NAMES = {"Advance", "Isotp", "Keepalive", "Origin", "Pattern", "ScriptError", "Step", "Template", "Transaction", "TransactionAborted", "TransactionResult"}
 
 
 def __getattr__(name):

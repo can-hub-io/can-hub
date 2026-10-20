@@ -220,6 +220,10 @@ typedef struct {
  * (can_id & can_mask) == (pattern can_id & can_mask) and its first 8 payload
  * bytes, little-endian, match payload_value under payload_mask; a pattern
  * counts only if its bit (1 << CANHUB_TXN_PATTERN_*) is in patterns_present.
+ * idle_timeout_ms is how long the agent waits for steps once it has run out of
+ * them before it aborts (reason starved; 0: 5 s); while it waits it sends the
+ * keepalive frame every keepalive_period_ms (0: none), for instance to keep a
+ * device session open across a slow link.
  */
 typedef struct {
     uint32_t struct_size;
@@ -230,6 +234,9 @@ typedef struct {
     uint32_t origin_mask;
     uint32_t roster_count;
     uint32_t roster[CANHUB_TXN_ROSTER_MAX];
+    uint32_t idle_timeout_ms;
+    uint32_t keepalive_period_ms;
+    CanHubFrame keepalive;
 } CanHubTxnBegin;
 
 typedef struct {

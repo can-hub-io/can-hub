@@ -171,6 +171,9 @@ class CanHubTxnBegin(Structure):
         ("origin_mask", c_uint32),
         ("roster_count", c_uint32),
         ("roster", c_uint32 * TXN_ROSTER_MAX),
+        ("idle_timeout_ms", c_uint32),
+        ("keepalive_period_ms", c_uint32),
+        ("keepalive", CanHubFrame),
     ]
 
 

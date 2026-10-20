@@ -157,7 +157,7 @@ if (canhub_txn_wait(session, &result, -1) == CANHUB_ERR_TXN_ABORTED) {
 
 | Function | Notes |
 |---|---|
-| `canhub_txn_begin(session, begin, timeout_ms)` | waits for the agent's grant; `begin` carries the exclusive flag and the roster with its origin extractor. `CANHUB_ERR_TXN_BUSY` while the agent runs another one, `CANHUB_ERR_TXN_UNSUPPORTED` for an agent that cannot, `CANHUB_ERR_WRITE_DENIED`, `CANHUB_ERR_STATE` on a lossy channel |
+| `canhub_txn_begin(session, begin, timeout_ms)` | waits for the agent's grant; `begin` carries the exclusive flag, the roster with its origin extractor, how long the agent waits for steps once it ran out (`idle_timeout_ms`) and the `keepalive` frame it sends meanwhile every `keepalive_period_ms`. `CANHUB_ERR_TXN_BUSY` while the agent runs another one, `CANHUB_ERR_TXN_UNSUPPORTED` for an agent that cannot, `CANHUB_ERR_WRITE_DENIED`, `CANHUB_ERR_STATE` on a lossy channel |
 | `canhub_txn_template(session, template, timeout_ms)` | define template 0-15 (once per transaction), before the steps that use it |
 | `canhub_txn_send(session, steps, count, timeout_ms)` | like a blocking socket write: hands the steps over as the agent's window allows and returns how many it took; hand over a whole image at once or in chunks. Frames received meanwhile stay queued for `canhub_recv` |
 | `canhub_txn_end(session, timeout_ms)` | the step handed over last is held back until now, so it can be marked the last one |

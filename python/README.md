@@ -109,7 +109,11 @@ a set of nodes: `bus.transaction(roster=range(32), origin=Origin(mask=0x1F))`
 tells the nodes apart by `(id & mask) >> shift` (or by payload bytes), and the
 result names who answered (`answered`) and who did not (`missing`).
 `exclusive=True` keeps other clients' frames off the bus meanwhile; their
-`send()` raises `CanOperationError`.
+`send()` raises `CanOperationError`. When the client may lag behind the bus (a
+slow link, data produced as it goes), `idle_timeout=60` lets the agent wait
+that long for steps, and `keepalive=Keepalive(0x7E0, b"\x02\x3e\x80",
+period=2.0)` is the frame it sends meanwhile, for instance to keep a device
+session open.
 
 A [transaction script](../doc/transaction-scripts.md) describes the same in a
 file, and runs as it does from `can-hub-client txn`:

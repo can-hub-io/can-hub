@@ -92,6 +92,31 @@ describe("txn_begin_message", []() {
         expect(reserved_zeroed).toBe(true);
     });
 
+    it("round-trips the idle timeout and the keepalive frame", []() {
+        TxnBeginMessage begin = { 0 };
+        TxnBeginMessage decoded;
+        uint8_t buffer[TEST_BUFFER_SIZE];
+        bool decoded_ok;
+
+        begin.idle_timeout_ms = 60000;
+        begin.keepalive.period_ms = 2000;
+        begin.keepalive.can_id = 0x7E0;
+        begin.keepalive.payload_length = 3;
+        begin.keepalive.payload[0] = 0x02;
+        begin.keepalive.payload[1] = 0x3E;
+        begin.keepalive.payload[2] = 0x80;
+
+        TxnBeginMessage_Encode(&begin, buffer, sizeof(buffer));
+        decoded_ok = TxnBeginMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, TXN_BEGIN_BODY_SIZE);
+
+        expect(decoded_ok).toBe(true);
+        expect(decoded.idle_timeout_ms).toBe((uint32_t)60000);
+        expect(decoded.keepalive.period_ms).toBe((uint32_t)2000);
+        expect(decoded.keepalive.can_id).toBe((uint32_t)0x7E0);
+        expect(decoded.keepalive.payload_length).toBe(3);
+        expect(decoded.keepalive.payload[1]).toBe(0x3E);
+    });
+
     it("refuses to encode a roster above the maximum", []() {
         TxnBeginMessage begin;
         uint8_t buffer[TEST_BUFFER_SIZE];

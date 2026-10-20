@@ -90,6 +90,18 @@ class Origin:
 
 
 @dataclass(frozen=True)
+class Keepalive:
+    """A frame the agent sends every ``period`` seconds while it waits for
+    steps, for instance to keep a device session open across a slow link."""
+
+    arbitration_id: int
+    data: bytes
+    period: float
+    is_extended_id: bool = False
+    is_fd: bool = False
+
+
+@dataclass(frozen=True)
 class Isotp:
     """Makes a template's steps ISO-TP messages (begin with ``isotp=True``):
     the agent segments each step's data (up to 4095 bytes) and reassembles the
@@ -318,11 +330,9 @@ class Transaction:
         return from_native_result(report, self._roster)
 
 
-def begin(
-    bus, roster: Iterable[int], origin: Optional[Origin], exclusive: bool, isotp: bool, timeout: float
-) -> Transaction:
+def begin(bus, roster: Iterable[int], origin: Optional[Origin], options: "BeginOptions", timeout: float) -> Transaction:
     members = tuple(roster)
-    request = to_native_begin(members, origin, exclusive, isotp)
+    request = to_native_begin(members, origin, options)
     with bus._lock:
         result = native.lib.canhub_txn_begin(bus._session, ctypes.byref(request), int(timeout * MILLISECONDS_PER_SECOND))
     if result != native.OK:
@@ -367,7 +377,15 @@ def run_script(
     raise CanOperationError(error)
 
 
-def to_native_begin(roster, origin: Optional[Origin], exclusive: bool, isotp: bool = False) -> "native.CanHubTxnBegin":
+@dataclass(frozen=True)
+class BeginOptions:
+    exclusive: bool = False
+    isotp: bool = False
+    idle_timeout: Optional[float] = None
+    keepalive: Optional[Keepalive] = None
+
+
+def to_native_begin(roster, origin: Optional[Origin], options: BeginOptions = BeginOptions()) -> "native.CanHubTxnBegin":
     if len(roster) > native.TXN_ROSTER_MAX:
         raise ValueError(f"a roster holds at most {native.TXN_ROSTER_MAX} origins")
     if roster and origin is None:
@@ -375,9 +393,13 @@ def to_native_begin(roster, origin: Optional[Origin], exclusive: bool, isotp: bo
 
     request = native.CanHubTxnBegin()
     request.struct_size = ctypes.sizeof(request)
-    request.flags = native.TXN_FLAG_EXCLUSIVE if exclusive else 0
-    if isotp:
+    request.flags = native.TXN_FLAG_EXCLUSIVE if options.exclusive else 0
+    if options.isotp:
         request.flags |= native.TXN_FLAG_ISOTP
+    if options.idle_timeout is not None:
+        request.idle_timeout_ms = int(round(options.idle_timeout * MILLISECONDS_PER_SECOND))
+    if options.keepalive is not None:
+        to_native_keepalive(options.keepalive, request)
     if origin is not None:
         request.origin_source = native.TXN_ORIGIN_CAN_ID if origin.payload_offset is None else native.TXN_ORIGIN_PAYLOAD
         request.origin_shift = origin.shift
@@ -387,6 +409,17 @@ def to_native_begin(roster, origin: Optional[Origin], exclusive: bool, isotp: bo
     for index, member in enumerate(roster):
         request.roster[index] = member
     return request
+
+
+def to_native_keepalive(keepalive: Keepalive, request: "native.CanHubTxnBegin") -> None:
+    data = bytes(keepalive.data)
+    if len(data) > native.FRAME_PAYLOAD_MAX:
+        raise ValueError(f"a keepalive frame holds at most {native.FRAME_PAYLOAD_MAX} bytes")
+    request.keepalive_period_ms = int(round(keepalive.period * MILLISECONDS_PER_SECOND))
+    request.keepalive.can_id = _wire_id(keepalive.arbitration_id, keepalive.is_extended_id)
+    request.keepalive.flags = native.FRAME_FLAG_FD if keepalive.is_fd else 0
+    request.keepalive.length = len(data)
+    request.keepalive.payload[: len(data)] = data
 
 
 def to_native_template(template_id: int, template: Template) -> "native.CanHubTxnTemplate":

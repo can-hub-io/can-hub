@@ -6,7 +6,7 @@
 
 #include "protocol/frame_message.h"
 
-#define TXN_BEGIN_BODY_SIZE 268
+#define TXN_BEGIN_BODY_SIZE 348
 #define TXN_BEGIN_ACK_BODY_SIZE 8
 #define TXN_TEMPLATE_BODY_SIZE 108
 #define TXN_PROGRESS_BODY_SIZE 12
@@ -100,11 +100,21 @@ typedef struct {
 } TxnOriginExtractor;
 
 typedef struct {
+    uint32_t period_ms;
+    uint32_t can_id;
+    uint8_t payload_length;
+    uint8_t frame_flags;
+    uint8_t payload[FRAME_PAYLOAD_MAX_FD];
+} TxnKeepalive;
+
+typedef struct {
     uint8_t channel;
     uint8_t flags;
     TxnOriginExtractor origin;
     uint8_t roster_count;
     uint32_t roster[TXN_ROSTER_MAX];
+    uint32_t idle_timeout_ms;
+    TxnKeepalive keepalive;
 } TxnBeginMessage;
 
 typedef struct {

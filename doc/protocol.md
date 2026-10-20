@@ -988,7 +988,12 @@ the agent cannot stop reading the connection without stalling the control
 stream; over QUIC, stream flow control backs it up.
 
 **Starvation.** If the ring stays empty while the transaction is incomplete for
-longer than an agent-defined deadline, the transaction aborts (reason starved).
+longer than TXN_BEGIN `idle_timeout_ms` (an agent default of 5 s when zero),
+the transaction aborts (reason starved). While it waits, the agent sends the
+TXN_BEGIN keepalive frame every `keepalive_period_ms` (none when zero) since the
+last frame it sent for the transaction, for instance to keep a device session
+open across a slow link; never while a step runs, so never inside an ISO-TP
+transfer. Frames that answer a keepalive are not taken by the next step.
 
 **Exclusive lease.** TXN_BEGIN flag bit 0 asks for exclusive write access to the
 interface for the life of the transaction, from TXN_BEGIN_ACK ok to TXN_STATUS.
@@ -1006,7 +1011,7 @@ and releases the lease. If the agent disconnects, the hub answers the client wit
 TXN_STATUS aborted, reason agent disconnected.
 
 ```
-TXN_BEGIN (total 272)
+TXN_BEGIN (total 352)
 @4   channel u8
 @5   flags u8 (bit 0: exclusive lease, bit 1: uses ISO-TP templates)
 @6   origin_source u8 (0 none, 1 can_id, 2 payload)
@@ -1016,6 +1021,13 @@ TXN_BEGIN (total 272)
 @13  roster_count u8 (0-64)
 @14  reserved u16
 @16  roster u32[64] (first roster_count used, the rest zero)
+@272 idle_timeout_ms u32 (0: agent default, 5 s)
+@276 keepalive_period_ms u32 (0: no keepalive)
+@280 keepalive_can_id u32 (as FRAME)
+@284 keepalive_payload_length u8 (as FRAME)
+@285 keepalive_frame_flags u8 (as FRAME)
+@286 reserved u16
+@288 keepalive_payload u8[64]
 
 TXN_BEGIN_ACK (total 12)
 @4   channel u8
