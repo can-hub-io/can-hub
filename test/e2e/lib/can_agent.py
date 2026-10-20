@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import signal
 import time
 from pathlib import Path
 
 from .binaries import binary
 from .configuration import AgentConfig
 from .server import Server
+
+REGISTERED = "registered as"
 
 
 class CanAgent:
@@ -45,6 +48,22 @@ class CanAgent:
             f"agent {self.config.name} did not register {want} interfaces\n{self.process.read_log()}"
         )
 
+    def wait_registered_times(self, count: int, timeout: float) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.process.read_log().count(REGISTERED) >= count:
+                return
+            time.sleep(0.1)
+        raise TimeoutError(
+            f"agent {self.config.name} registered fewer than {count} times\n{self.process.read_log()}"
+        )
+
+    def assert_held_once_by(self, hub) -> None:
+        self._single_peer_on(hub)
+        mine = [row for row in hub.interfaces() if row.agent == self.config.name]
+        if len(mine) != len(self.config.interfaces):
+            raise AssertionError(f"hub holds {len(mine)} interfaces of agent {self.config.name}: {mine}")
+
     def peer_id_on(self, hub) -> int:
         return self._single_peer_on(hub).peer_id
 
@@ -81,3 +100,7 @@ class CanAgent:
 
     def stop(self) -> None:
         self.process.stop()
+
+    def restarted(self, sig: int = signal.SIGTERM) -> "CanAgent":
+        self.process.stop(sig)
+        return CanAgent.start(self.server, self.config)

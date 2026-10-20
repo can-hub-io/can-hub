@@ -82,6 +82,7 @@ static void notifyWritable(QuicServerTransport *self, QuicServerPeer *peer);
 static void sendPacketToPeer(void *context, const uint8_t *data, size_t size, size_t segment_size);
 static void sendToPeer(QuicServerTransport *self, QuicServerPeer *peer, const uint8_t *data, size_t size, size_t segment_size);
 static void rearmTimer(QuicServerTransport *self);
+static void closePeer(QuicServerTransport *self, QuicServerPeer *peer);
 static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool notify);
 static void dispatchControlMessages(QuicServerTransport *self, QuicServerPeer *peer);
 static void capturePeerFingerprint(QuicServerPeer *peer);
@@ -226,7 +227,7 @@ void QuicServerTransport_OnTimer(QuicServerTransport *self)
 
         if (peer->close_pending) {
             flushPeer(self, peer);
-            teardownPeer(self, peer, false);
+            closePeer(self, peer);
             continue;
         }
         flushPeer(self, peer);
@@ -247,6 +248,17 @@ void QuicServerTransport_Uncork(QuicServerTransport *self)
 {
     self->corked = false;
     flushStagedPeers(self);
+}
+
+void QuicServerTransport_CloseAll(QuicServerTransport *self)
+{
+    uint16_t i;
+
+    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
+        if (QuicConnection_IsOpen(&self->peers[i].connection)) {
+            closePeer(self, &self->peers[i]);
+        }
+    }
 }
 
 uint32_t QuicServerTransport_ReceiveOverflows(const QuicServerTransport *self)
@@ -383,7 +395,7 @@ static void portClosePeer(void *context, uint32_t peer_id)
         return;
     }
 
-    teardownPeer(self, peer, false);
+    closePeer(self, peer);
 }
 
 /* ---------- private: peers ---------- */
@@ -694,7 +706,7 @@ static void dispatchPacket(
 
     if (peer->close_pending) {
         flushPeer(self, peer);
-        teardownPeer(self, peer, false);
+        closePeer(self, peer);
         return;
     }
     flushPeer(self, peer);
@@ -836,6 +848,19 @@ static void rearmTimer(QuicServerTransport *self)
     timer_specification.it_value.tv_sec = (time_t)(earliest_ns / NGTCP2_SECONDS);
     timer_specification.it_value.tv_nsec = (long)(earliest_ns % NGTCP2_SECONDS);
     timerfd_settime(self->timer_fd, TFD_TIMER_ABSTIME, &timer_specification, NULL);
+}
+
+static void closePeer(QuicServerTransport *self, QuicServerPeer *peer)
+{
+    uint8_t packet[UDP_PACKET_BUFFER_SIZE];
+    ngtcp2_ssize written;
+
+    written = QuicConnection_WriteConnectionClose(&peer->connection, packet, sizeof(packet));
+    if (written > 0) {
+        sendToPeer(self, peer, packet, (size_t)written, (size_t)written);
+    }
+
+    teardownPeer(self, peer, false);
 }
 
 static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool notify)

@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <sys/epoll.h>
+#include <sys/signalfd.h>
 #include <sys/stat.h>
 
 #include "hub/hub_app.h"
@@ -54,6 +55,7 @@ typedef enum thub_event_tag_e {
     kHUB_EVENT_TAG_QUIC_UDP,
     kHUB_EVENT_TAG_QUIC_TIMER,
     kHUB_EVENT_TAG_TLS_LISTENER,
+    kHUB_EVENT_TAG_SIGNAL,
     kHUB_EVENT_TAG_MAX,
 } THUB_EVENT_TAG;
 
@@ -72,6 +74,8 @@ static bool unix_enabled;
 static bool quic_enabled;
 static bool tls_enabled;
 static EpollRegistry poll_registry;
+static int32_t signal_fd = -1;
+static bool should_shutdown;
 static char state_directory[TLS_IDENTITY_PATH_MAX];
 static char identity_certificate_path[TLS_IDENTITY_PATH_MAX];
 static char identity_key_path[TLS_IDENTITY_PATH_MAX];
@@ -96,6 +100,7 @@ static void muxSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, 
 static void muxClosePeer(void *context, uint32_t peer_id);
 static uint32_t muxReceiveOverflows(void *context);
 static HubTransportPort *portForPeer(uint32_t peer_id);
+static bool setupSignalFd(void);
 static bool registerStaticPollFds(void);
 static void syncStreamSlotRegistrations(TcpServerTransport *transport, uint16_t slot_offset);
 static void syncTlsSlotRegistrations(void);
@@ -129,7 +134,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (!EpollRegistry_Open(&poll_registry) || !registerStaticPollFds()) {
+    if (!setupSignalFd() || !EpollRegistry_Open(&poll_registry) || !registerStaticPollFds()) {
         return 1;
     }
 
@@ -144,7 +149,7 @@ int main(int argc, char **argv)
     );
     warnIfPlainTcpExposed();
 
-    for (;;) {
+    while (!should_shutdown) {
         if (tcp_enabled) {
             syncStreamSlotRegistrations(&tcp_transport, 0);
         }
@@ -169,6 +174,13 @@ int main(int argc, char **argv)
             TlsServerTransport_Tick(&tls_transport, Clock_MonotonicUs());
         }
     }
+
+    if (quic_enabled) {
+        QuicServerTransport_CloseAll(&quic_transport);
+    }
+    LOG_INFO("shutting down");
+
+    return 0;
 }
 
 /* ---------- private ---------- */
@@ -517,8 +529,27 @@ static HubTransportPort *portForPeer(uint32_t peer_id)
     return TcpServerTransport_Port(&tcp_transport);
 }
 
+static bool setupSignalFd(void)
+{
+    sigset_t mask;
+
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGTERM);
+    if (sigprocmask(SIG_BLOCK, &mask, NULL) != 0) {
+        return false;
+    }
+
+    signal_fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
+
+    return signal_fd >= 0;
+}
+
 static bool registerStaticPollFds(void)
 {
+    if (!EpollRegistry_AddStatic(&poll_registry, signal_fd, kHUB_EVENT_TAG_SIGNAL)) {
+        return false;
+    }
     if (tcp_enabled) {
         int32_t listen_fd = TcpServerTransport_ListenFd(&tcp_transport);
         if (!EpollRegistry_AddStatic(&poll_registry, listen_fd, kHUB_EVENT_TAG_TCP_LISTENER)) {
@@ -587,6 +618,15 @@ static void syncTlsSlotRegistrations(void)
 
 static void dispatchEvent(const struct epoll_event *event)
 {
+    struct signalfd_siginfo signal_info;
+    ssize_t bytes_read;
+
+    if (event->data.u32 == kHUB_EVENT_TAG_SIGNAL) {
+        bytes_read = read(signal_fd, &signal_info, sizeof(signal_info));
+        (void)bytes_read;
+        should_shutdown = true;
+        return;
+    }
     if (event->data.u32 == kHUB_EVENT_TAG_TCP_LISTENER) {
         TcpServerTransport_OnAcceptReady(&tcp_transport);
         return;

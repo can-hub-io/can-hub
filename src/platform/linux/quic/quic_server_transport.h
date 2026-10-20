@@ -100,4 +100,5 @@ void QuicServerTransport_OnUdpReadable(QuicServerTransport *self);
 void QuicServerTransport_OnTimer(QuicServerTransport *self);
 void QuicServerTransport_Cork(QuicServerTransport *self);
 void QuicServerTransport_Uncork(QuicServerTransport *self);
+void QuicServerTransport_CloseAll(QuicServerTransport *self);
 uint32_t QuicServerTransport_ReceiveOverflows(const QuicServerTransport *self);

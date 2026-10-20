@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import signal
 import time
 from pathlib import Path
 
@@ -67,8 +68,20 @@ class CanHub:
             time.sleep(0.1)
         raise TimeoutError(f"hub logged {text!r} fewer than {count} times\n{self.process.read_log()}")
 
+    def wait_peers(self, role: str, count: int, timeout: float) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if len([peer for peer in self.peers() if peer.role == role]) >= count:
+                return
+            time.sleep(0.1)
+        raise TimeoutError(f"hub holds fewer than {count} {role} peers: {self.peers()}")
+
     def stop(self) -> None:
         self.process.stop()
+
+    def restarted(self, sig: int = signal.SIGTERM) -> "CanHub":
+        self.process.stop(sig)
+        return CanHub.start(self.server, self.config)
 
     def _wait_listening(self, timeout: float = 5.0) -> None:
         deadline = time.monotonic() + timeout
