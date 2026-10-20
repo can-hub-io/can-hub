@@ -36,7 +36,7 @@ _can-hub-client()
     local -a commands flags values
     local verb verb_index i
 
-    commands=(list dump send attach socketcand show configure)
+    commands=(list dump send attach socketcand show configure txn)
     flags=(
         '--connect[hub URL: quic/tls/tcp/unix]:url:'
         '--state-dir[identity and pin store directory]:dir:_files -/'
@@ -66,10 +66,12 @@ _can-hub-client()
     fi
 
     case $verb in
-        dump | send | attach | show | configure)
+        dump | send | attach | show | configure | txn)
             if (( CURRENT == verb_index + 1 )); then
                 values=(${(f)"$(_can_hub_client_interfaces)"})
                 _describe 'interface' values
+            elif [[ $verb == txn ]] && (( CURRENT == verb_index + 2 )); then
+                _files -g '*.txn'
             elif [[ $verb == attach ]] && (( CURRENT == verb_index + 2 )); then
                 _net_interfaces
             elif [[ $verb == configure ]]; then

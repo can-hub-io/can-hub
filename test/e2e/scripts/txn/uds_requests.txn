@@ -1,0 +1,13 @@
+REQUEST  = 0x7E0
+RESPONSE = 0x7E8
+COUNTERS = 0..199
+
+template transfer-response
+    success  id == RESPONSE and byte[1] == 0x76
+    failure  id == RESPONSE and byte[1] == 0x7F
+    pending  id == RESPONSE and byte[1] == 0x7F and byte[3] == 0x78
+    on mismatch abort
+    timeout  200ms
+
+for counter in COUNTERS
+    send REQUEST data 02 36 counter expect transfer-response where byte[2] == counter

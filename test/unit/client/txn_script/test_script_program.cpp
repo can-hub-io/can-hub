@@ -28,6 +28,7 @@ static bool compile(const char *text);
 static bool generate(void);
 static bool readImage(void *context, const char *path, uint64_t offset, uint8_t *buffer, uint32_t size, uint32_t *read_size);
 static uint16_t sum16(const uint8_t *data, uint32_t size);
+static uint16_t concatenateFrames(uint8_t *sent, uint16_t sent_max);
 static const TxnTemplateMessage *variantOf(const TxnStep *step);
 
 describe("script_program", []() {
@@ -157,6 +158,19 @@ describe("script_program", []() {
         expect(steps[16].expect_value).toBe((uint64_t)(0x01 | ((uint64_t)first_sum << 8)));
         expect(program.begin.roster_count).toBe(32);
         expect(program.begin.origin.mask).toBe((uint32_t)0x1F);
+    });
+
+    it("sends every byte of the image once and in order, frame by frame", []() {
+        bool ready;
+        uint8_t sent[BATTERY_IMAGE_SIZE];
+        uint16_t sent_size;
+
+        ready = compile(EXAMPLE_8) && generate();
+        sent_size = concatenateFrames(sent, sizeof(sent));
+
+        expect(ready).toBe(true);
+        expect(sent_size).toBe(BATTERY_IMAGE_SIZE);
+        expect(memcmp(sent, battery_image, BATTERY_IMAGE_SIZE)).toBe(0);
     });
 
     it("pads the last frame, checks blocks with a custom crc and the image with crc32", []() {
@@ -298,6 +312,21 @@ static uint16_t sum16(const uint8_t *data, uint32_t size)
         total += data[i];
     }
     return (uint16_t)total;
+}
+
+static uint16_t concatenateFrames(uint8_t *sent, uint16_t sent_max)
+{
+    uint16_t sent_size = 0;
+    uint16_t i;
+
+    for(i=0; i<step_count; i++) {
+        if ((steps[i].flags & TXN_STEP_FLAG_EXPECT_ONLY) != 0 || sent_size + steps[i].payload_length > sent_max) {
+            continue;
+        }
+        memcpy(sent + sent_size, steps[i].payload, steps[i].payload_length);
+        sent_size += steps[i].payload_length;
+    }
+    return sent_size;
 }
 
 static const TxnTemplateMessage *variantOf(const TxnStep *step)

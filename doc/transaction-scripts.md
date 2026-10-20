@@ -10,8 +10,9 @@ the agent never runs code.
 can-hub-client --connect quic://hub:7227 txn truck42/can0 flash.txn
 ```
 
-The same script runs from C (`canhub_txn_run_script`) and Python
-(`bus.run_script("flash.txn")`).
+The same script runs from C ([`canhub_txn_run_script`](libcanhub.md#scripts))
+and Python (`bus.run_script("flash.txn")`). What the client prints and its exit
+codes: [client](client.md#txn--run-a-transaction-script).
 
 ## Examples
 

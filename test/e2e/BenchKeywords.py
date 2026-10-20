@@ -466,6 +466,10 @@ class BenchKeywords:
     def kill(self, process):
         process.stop(signal.SIGKILL)
 
+    @keyword("Interrupt ${process}")
+    def interrupt(self, process):
+        return process.stop(signal.SIGINT)
+
     @keyword("Transactions Relayed By ${hub}")
     def transactions_relayed_by(self, hub):
         return hub.transactions()

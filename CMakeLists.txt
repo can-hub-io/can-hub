@@ -121,6 +121,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/platform/windows/libcanhub/canhub.c
         src/platform/linux/libcanhub/canhub_settings.c
         src/platform/linux/libcanhub/canhub_transactions.c
+        src/platform/linux/libcanhub/canhub_script.c
+        src/client/txn_script/checksum.c
+        src/client/txn_script/script.c
+        src/client/txn_script/script_error.c
+        src/client/txn_script/script_lexer.c
+        src/client/txn_script/script_parser.c
+        src/client/txn_script/script_resolver.c
+        src/client/txn_script/script_compiler.c
+        src/client/txn_script/script_generator.c
     )
     set(CAN_HUB_WINDOWS_LIBRARIES ws2_32 crypt32 bcrypt)
 
@@ -327,15 +336,33 @@ set(SOCKETCAND_SOURCES
     src/platform/linux/socketcand/beacon_udp.c
 )
 
-add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES} ${CLIENT_ATTACH_SOURCES} ${CLIENT_TLS_SOURCES} ${SOCKETCAND_SOURCES})
+set(TXN_SCRIPT_SOURCES
+    src/client/txn_script/checksum.c
+    src/client/txn_script/script.c
+    src/client/txn_script/script_error.c
+    src/client/txn_script/script_lexer.c
+    src/client/txn_script/script_parser.c
+    src/client/txn_script/script_resolver.c
+    src/client/txn_script/script_compiler.c
+    src/client/txn_script/script_generator.c
+)
+
+set(LIBCANHUB_API_SOURCES
+    src/platform/linux/libcanhub/canhub.c
+    src/platform/linux/libcanhub/canhub_settings.c
+    src/platform/linux/libcanhub/canhub_transactions.c
+    src/platform/linux/libcanhub/canhub_script.c
+    ${TXN_SCRIPT_SOURCES}
+)
+
+add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES} ${CLIENT_ATTACH_SOURCES} ${CLIENT_TLS_SOURCES} ${SOCKETCAND_SOURCES} ${LIBCANHUB_API_SOURCES})
+target_include_directories(can-hub-client PRIVATE include)
 target_link_libraries(can-hub-client PRIVATE ngtcp2_static can_hub_tls Threads::Threads)
 add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES})
 target_link_libraries(can-hub-cli PRIVATE Threads::Threads)
 
 set(LIBCANHUB_SOURCES
-    src/platform/linux/libcanhub/canhub.c
-    src/platform/linux/libcanhub/canhub_settings.c
-    src/platform/linux/libcanhub/canhub_transactions.c
+    ${LIBCANHUB_API_SOURCES}
     ${CLIENT_SOURCES}
     ${CLIENT_TLS_SOURCES}
 )

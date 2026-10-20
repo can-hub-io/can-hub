@@ -36,7 +36,7 @@ _can_hub_client()
     local cur prev words cword
     _init_completion || return
 
-    local commands="list dump send attach socketcand show configure"
+    local commands="list dump send attach socketcand show configure txn"
     local flags="--connect --state-dir --hub-fingerprint --no-echo --no-beacon --listen --show-identity"
 
     case $prev in
@@ -64,9 +64,11 @@ _can_hub_client()
     fi
 
     case $verb in
-        dump | send | attach | show | configure)
+        dump | send | attach | show | configure | txn)
             if (( cword == verb_index + 1 )); then
                 COMPREPLY=($(compgen -W "$(_can_hub_client_interfaces)" -- "$cur"))
+            elif [[ $verb == "txn" ]] && (( cword == verb_index + 2 )); then
+                _filedir txn
             elif [[ $verb == "attach" ]] && (( cword == verb_index + 2 )); then
                 _available_interfaces 2>/dev/null
             elif [[ $verb == "configure" ]]; then

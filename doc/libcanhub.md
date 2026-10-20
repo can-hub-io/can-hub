@@ -165,6 +165,33 @@ if (canhub_txn_wait(session, &result, -1) == CANHUB_ERR_TXN_ABORTED) {
 | `canhub_txn_progress(session, progress)` | steps sent and completed, record bytes in flight, window |
 | `canhub_txn_abort(session)` | cancel; `canhub_txn_wait` then reports the reason cancelled |
 
+### Scripts
+
+`canhub_txn_run_script` runs a [transaction script](transaction-scripts.md)
+on the open interface: it compiles it, begins, defines its templates, streams
+its steps and waits for the outcome, all over the calls above.
+
+```c
+static int32_t onProgress(void *context, const CanHubTxnProgress *progress, uint32_t total_steps)
+{
+    fprintf(stderr, "\r%" PRIu32 "/%" PRIu32, progress->completed_steps, total_steps);
+    return 1;                                     // 0 cancels the transaction
+}
+
+CanHubScriptOutcome outcome = { 0 };
+outcome.struct_size = sizeof(outcome);
+int32_t status = canhub_txn_run_script(session, "flash.txn", &outcome, onProgress, NULL);
+if (status == CANHUB_ERR_ARGUMENT) {
+    fprintf(stderr, "%s\n", canhub_last_error(session));   // "flash.txn:5: no template has this name"
+}
+```
+
+Files the script reads resolve against its directory. `outcome` holds the
+agent's `result`, the number of steps in the script, the line of a script
+error, and the roster of its template `for` with the loop variable's name, so a
+report can name who did not answer (`seen_bitmap` bit i is `roster[i]`).
+`on_progress` may be NULL; it is called a few times a second.
+
 ## Example
 
 [`examples/canhub_dump.c`](../examples/canhub_dump.c) is a complete

@@ -8,6 +8,7 @@
 #include <winsock2.h>
 
 #include "client/client.h"
+#include "platform/linux/libcanhub/canhub_internal.h"
 #include "platform/linux/libcanhub/canhub_settings.h"
 #include "platform/linux/libcanhub/canhub_transactions.h"
 #include "protocol/ifconfig_message.h"
@@ -644,6 +645,11 @@ int32_t canhub_txn_abort(CanHubSession *session)
     pumpOnce(session, 0);
 
     return CANHUB_OK;
+}
+
+void CanHubSession_SetError(CanHubSession *session, const char *message)
+{
+    setError(session, message);
 }
 
 /* ---------- private ---------- */

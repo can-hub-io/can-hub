@@ -90,6 +90,7 @@ extern "C" {
 #define CANHUB_TXN_REASON_OVERRUN 7
 #define CANHUB_TXN_REASON_AGENT_DISCONNECTED 8
 #define CANHUB_TXN_REASON_INVALID_STEP 9
+#define CANHUB_SCRIPT_NAME_MAX 32
 
 #define CANHUB_SETTING_BITRATE (1u << 0)
 #define CANHUB_SETTING_SAMPLE_POINT (1u << 1)
@@ -271,6 +272,24 @@ typedef struct {
     CanHubFrame rx_frame;
 } CanHubTxnResult;
 
+/*
+ * The outcome of canhub_txn_run_script: the agent's result, how many steps the
+ * script holds, its roster (the list of a template for) with the name of the
+ * loop variable, so a report can name who did not answer, and the line of a
+ * script error (0 when the script was fine).
+ */
+typedef struct {
+    uint32_t struct_size;
+    CanHubTxnResult result;
+    uint32_t total_steps;
+    uint32_t error_line;
+    uint32_t roster_count;
+    uint32_t roster[CANHUB_TXN_ROSTER_MAX];
+    char roster_name[CANHUB_SCRIPT_NAME_MAX];
+} CanHubScriptOutcome;
+
+typedef int32_t (*CanHubScriptProgress)(void *context, const CanHubTxnProgress *progress, uint32_t total_steps);
+
 CANHUB_API uint32_t canhub_api_version(void);
 
 CANHUB_API CanHubSession *canhub_connect(const CanHubConnectConfig *config);
@@ -327,6 +346,22 @@ CANHUB_API int32_t canhub_txn_end(CanHubSession *session, int32_t timeout_ms);
 CANHUB_API int32_t canhub_txn_wait(CanHubSession *session, CanHubTxnResult *result, int32_t timeout_ms);
 CANHUB_API int32_t canhub_txn_progress(CanHubSession *session, CanHubTxnProgress *progress);
 CANHUB_API int32_t canhub_txn_abort(CanHubSession *session);
+
+/*
+ * Run a transaction script (doc/transaction-scripts.md) on the open interface,
+ * opened as for canhub_txn_begin. Files the script reads resolve against the
+ * script's directory. on_progress, which may be NULL, is called a few times a
+ * second; returning 0 cancels the transaction. Returns CANHUB_OK when done,
+ * CANHUB_ERR_TXN_ABORTED with the report in outcome, CANHUB_ERR_ARGUMENT for a
+ * script error (canhub_last_error says "file:line: reason").
+ */
+CANHUB_API int32_t canhub_txn_run_script(
+    CanHubSession *session,
+    const char *script_path,
+    CanHubScriptOutcome *outcome,
+    CanHubScriptProgress on_progress,
+    void *context
+);
 
 #ifdef __cplusplus
 }
