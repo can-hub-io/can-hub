@@ -16,6 +16,7 @@
 #include "platform/linux/shared/epoll_registry.h"
 #include "platform/linux/shared/cli_meta.h"
 #include "platform/linux/shared/hub_defaults.h"
+#include "platform/linux/shared/listen_endpoint.h"
 #include "platform/linux/shared/log.h"
 #include "platform/linux/shared/tls_identity.h"
 #include "platform/linux/sqlite/identity_database.h"
@@ -87,6 +88,7 @@ static BridgeStorePort *bridgeStore(void);
 static void importLegacyPinFile(void);
 static void applyDefaultListen(ListenAddress *listen_address, const char *bind_address, const char *port_text);
 static bool startListeners(const char *unix_path, const char *certificate, const char *key, bool explicit_listen);
+static void warnIfPlainTcpExposed(void);
 static bool muxSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool muxSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
 static bool muxFrameFits(void *context, uint32_t peer_id, uint8_t channel, size_t size);
@@ -140,13 +142,7 @@ int main(int argc, char **argv)
         unix_enabled ? "on" : "off",
         require_known_peers ? " [locked: known peers only]" : ""
     );
-    if (require_known_peers && tcp_enabled && strcmp(tcp_listen.bind_address, "127.0.0.1") != 0) {
-        LOG_WARN(
-            "plain tcp on %s carries no identity and bypasses the allowlist;"
-            " bind it to a trusted interface or disable it",
-            tcp_listen.bind_address
-        );
-    }
+    warnIfPlainTcpExposed();
 
     for (;;) {
         if (tcp_enabled) {
@@ -434,6 +430,20 @@ static void importLegacyPinFile(void)
     snprintf(imported_path, sizeof(imported_path), "%s/%s.imported", state_directory, KNOWN_AGENTS_FILE);
     rename(pin_file_path, imported_path);
     LOG_INFO("imported %s into the identity database", pin_file_path);
+}
+
+static void warnIfPlainTcpExposed(void)
+{
+    if (!tcp_enabled || ListenEndpoint_IsLoopback(tcp_listen.bind_address)) {
+        return;
+    }
+
+    LOG_WARN(
+        "plain tcp on %s carries no identity: any peer that reaches it reads, writes"
+        " and configures every interface, with no pin, allowlist or ACL check;"
+        " bind it to a trusted interface or disable it",
+        tcp_listen.bind_address
+    );
 }
 
 static bool muxSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size)

@@ -13,6 +13,7 @@ static socklen_t address_length;
 static bool built;
 static char origin[64];
 static char host[64];
+static bool loopback;
 
 describe("listen_endpoint_build_sockaddr", []() {
     it("maps the any address to the IPv6 wildcard for a dual-stack socket", []() {
@@ -114,5 +115,49 @@ describe("listen_endpoint_format_host", []() {
         ListenEndpoint_FormatHost(&address, host, sizeof(host));
 
         expect((const char *)host).toBe("::1");
+    });
+});
+
+describe("listen_endpoint_is_loopback", []() {
+    it("accepts the default IPv4 loopback", []() {
+        loopback = ListenEndpoint_IsLoopback("127.0.0.1");
+
+        expect(loopback).toBe(true);
+    });
+
+    it("accepts any address in the IPv4 loopback network", []() {
+        loopback = ListenEndpoint_IsLoopback("127.0.0.2");
+
+        expect(loopback).toBe(true);
+    });
+
+    it("accepts the IPv6 loopback", []() {
+        loopback = ListenEndpoint_IsLoopback("::1");
+
+        expect(loopback).toBe(true);
+    });
+
+    it("accepts a v4-mapped IPv4 loopback", []() {
+        loopback = ListenEndpoint_IsLoopback("::ffff:127.0.0.1");
+
+        expect(loopback).toBe(true);
+    });
+
+    it("rejects the IPv4 any address", []() {
+        loopback = ListenEndpoint_IsLoopback("0.0.0.0");
+
+        expect(loopback).toBe(false);
+    });
+
+    it("rejects the IPv6 any address", []() {
+        loopback = ListenEndpoint_IsLoopback("::");
+
+        expect(loopback).toBe(false);
+    });
+
+    it("rejects an intranet address", []() {
+        loopback = ListenEndpoint_IsLoopback("10.0.0.5");
+
+        expect(loopback).toBe(false);
     });
 });
