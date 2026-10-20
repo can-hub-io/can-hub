@@ -650,6 +650,52 @@ describe("transaction_runner", []() {
             expect(transmit_count).toBe((uint32_t)0);
             expect(runner.current.phase).toBe((uint8_t)kTRANSACTION_PHASE_WAIT);
         });
+
+        it("takes an answer that outran its expect-only step", []() {
+            TxnTemplateMessage template_message;
+            TxnStep frame_step;
+            TxnStep listening_step;
+
+            template_message = responseTemplate();
+            defineTemplate(&template_message);
+            template_message = transmitOnlyTemplate(BROADCAST_TEMPLATE, 0);
+            defineTemplate(&template_message);
+            frame_step = transmitOnlyStep(BROADCAST_TEMPLATE, REQUEST_ID);
+            listening_step = expectOnlyStep(RESPONSE_TEMPLATE);
+            listening_step.flags |= TXN_STEP_FLAG_LAST;
+
+            pushSteps(&frame_step, 1, 0);
+            TransactionRunner_Tick(&runner, 100);
+            answer(RESPONSE_ID, 0x02, 0x76, 0x00, 0x00);
+            pushSteps(&listening_step, 1, 1);
+            TransactionRunner_Tick(&runner, 200);
+
+            expect(last_status.state).toBe((uint8_t)kTXN_STATE_DONE);
+            expect(last_status.completed_steps).toBe((uint32_t)2);
+        });
+
+        it("does not let a step that transmits take an answer from before its frame", []() {
+            TxnTemplateMessage template_message;
+            TxnStep frame_step;
+            TxnStep request;
+
+            template_message = responseTemplate();
+            defineTemplate(&template_message);
+            template_message = transmitOnlyTemplate(BROADCAST_TEMPLATE, 0);
+            defineTemplate(&template_message);
+            frame_step = transmitOnlyStep(BROADCAST_TEMPLATE, REQUEST_ID);
+            request = requestStep(0x36);
+            request.flags = TXN_STEP_FLAG_LAST;
+
+            pushSteps(&frame_step, 1, 0);
+            TransactionRunner_Tick(&runner, 100);
+            answer(RESPONSE_ID, 0x02, 0x76, 0x00, 0x00);
+            pushSteps(&request, 1, 1);
+            TransactionRunner_Tick(&runner, 200);
+            TransactionRunner_Tick(&runner, 200 + TIMEOUT_US);
+
+            expect(last_status.reason).toBe((uint8_t)kTXN_REASON_TIMEOUT);
+        });
     });
 
     describe("flow", []() {

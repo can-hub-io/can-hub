@@ -37,6 +37,10 @@ static void flushProgress(TransactionRunner *self, uint64_t now_us);
 static void reportProgress(TransactionRunner *self);
 static bool isOnBus(const TransactionRunner *self, uint8_t interface_index, const FrameMessage *frame);
 static bool isWaiting(const TransactionRunner *self);
+static bool isBetweenSteps(const TransactionRunner *self);
+static void keepEarlyFrame(TransactionRunner *self, const FrameMessage *frame);
+static void replayEarlyFrames(TransactionRunner *self);
+static void dispatchFrame(TransactionRunner *self, const FrameMessage *frame);
 static void matchFrame(TransactionRunner *self, const FrameMessage *frame);
 static void recordAnswer(TransactionRunner *self, const FrameMessage *frame);
 static void recordRosterAnswer(TransactionRunner *self, const FrameMessage *frame);
@@ -127,6 +131,7 @@ void TransactionRunner_Begin(
     self->next_transmit_us = 0;
     self->last_tick_us = now_us;
     self->message_length = 0;
+    self->early_frame_count = 0;
     memset(&self->current, 0, sizeof(self->current));
     StepRing_Clear(&self->ring);
 
@@ -185,13 +190,11 @@ void TransactionRunner_OnFrame(TransactionRunner *self, uint8_t interface_index,
     if (!isOnBus(self, interface_index, frame)) {
         return;
     }
-    if (isIsotpStep(self)) {
-        feedIsotp(self, frame);
+    if (isBetweenSteps(self)) {
+        keepEarlyFrame(self, frame);
         return;
     }
-    if (isWaiting(self)) {
-        matchFrame(self, frame);
-    }
+    dispatchFrame(self, frame);
 }
 
 void TransactionRunner_Tick(TransactionRunner *self, uint64_t now_us)
@@ -419,9 +422,12 @@ static bool loadNextStep(TransactionRunner *self, uint64_t now_us)
     }
     if (self->current.step.flags & TXN_STEP_FLAG_EXPECT_ONLY) {
         startWait(self, now_us);
-    } else {
-        self->current.phase = kTRANSACTION_PHASE_TRANSMIT;
+        replayEarlyFrames(self);
+        return self->active;
     }
+
+    self->current.phase = kTRANSACTION_PHASE_TRANSMIT;
+    self->early_frame_count = 0;
 
     return true;
 }
@@ -658,6 +664,44 @@ static bool isOnBus(const TransactionRunner *self, uint8_t interface_index, cons
 static bool isWaiting(const TransactionRunner *self)
 {
     return self->current.phase == kTRANSACTION_PHASE_WAIT && !self->current.satisfied;
+}
+
+static bool isBetweenSteps(const TransactionRunner *self)
+{
+    if (self->current.phase == kTRANSACTION_PHASE_IDLE) {
+        return true;
+    }
+    return self->current.phase == kTRANSACTION_PHASE_WAIT && self->current.satisfied;
+}
+
+static void keepEarlyFrame(TransactionRunner *self, const FrameMessage *frame)
+{
+    if (self->early_frame_count == TRANSACTION_EARLY_FRAMES_MAX) {
+        return;
+    }
+    self->early_frames[self->early_frame_count++] = *frame;
+}
+
+static void replayEarlyFrames(TransactionRunner *self)
+{
+    uint8_t count = self->early_frame_count;
+    uint8_t i;
+
+    self->early_frame_count = 0;
+    for(i=0; i<count && self->active; i++) {
+        dispatchFrame(self, &self->early_frames[i]);
+    }
+}
+
+static void dispatchFrame(TransactionRunner *self, const FrameMessage *frame)
+{
+    if (isIsotpStep(self)) {
+        feedIsotp(self, frame);
+        return;
+    }
+    if (isWaiting(self)) {
+        matchFrame(self, frame);
+    }
 }
 
 static void matchFrame(TransactionRunner *self, const FrameMessage *frame)

@@ -871,6 +871,9 @@ to every subscriber — the runner only matches, it never hides traffic. The bus
 echo of a frame the agent sent never matches a pattern. A frame the bus queue
 refuses is retried until the step times out (reason tx failed); for a step that
 does not wait, `timeout_ms` bounds those retries (an agent default when zero).
+An expect-only step also takes the frames that arrived since the previous step
+ended (up to 16), so an answer that outruns its step on the way to the agent is
+not lost; a step that transmits only takes frames that follow its own.
 
 **Templates.** A template (id 0-15) sets how a step waits:
 

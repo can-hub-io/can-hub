@@ -22,6 +22,7 @@
 #define TRANSACTION_DEFAULT_TX_TIMEOUT_MS 1000
 #define TRANSACTION_PROGRESS_FLUSH_US 10000
 #define TRANSACTION_STEPS_PER_TICK_MAX 64
+#define TRANSACTION_EARLY_FRAMES_MAX 16
 
 typedef enum ttransaction_phase_e {
     kTRANSACTION_PHASE_IDLE = 0,
@@ -79,6 +80,8 @@ typedef struct {
     IsotpLink isotp;
     uint8_t message[TXN_ISOTP_MESSAGE_SIZE_MAX];
     uint16_t message_length;
+    FrameMessage early_frames[TRANSACTION_EARLY_FRAMES_MAX];
+    uint8_t early_frame_count;
 } TransactionRunner;
 
 void TransactionRunner_Init(TransactionRunner *self, TransactionRunnerPort port, uint8_t *ring_storage, uint32_t ring_capacity);
