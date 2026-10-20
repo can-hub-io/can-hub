@@ -13,6 +13,8 @@
 #include "protocol/open_message.h"
 #include "protocol/register_message.h"
 #include "protocol/subscribe_message.h"
+#include "protocol/txn_message.h"
+#include "protocol/txn_steps_message.h"
 
 #define SUBSCRIBE_WIRE_SIZE (MESSAGE_HEADER_SIZE + SUBSCRIBE_FIXED_FIELDS_SIZE + SUBSCRIBE_FILTERS_MAX * CAN_FILTER_SIZE)
 #define FRAME_WIRE_SIZE (MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD)
@@ -49,5 +51,12 @@ static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + ADMIN_BRIDG
 static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + ADMIN_BRIDGE_LIST_BODY_SIZE, "ADMIN_BRIDGE_LIST exceeds control buffer");
 static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + ADMIN_GROUP_SET_BODY_SIZE, "ADMIN_GROUP_SET exceeds control buffer");
 static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + ADMIN_GROUP_MEMBER_BODY_SIZE, "ADMIN_GROUP_JOIN exceeds control buffer");
+static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + TXN_BEGIN_BODY_SIZE, "TXN_BEGIN exceeds control buffer");
+static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + TXN_BEGIN_ACK_BODY_SIZE, "TXN_BEGIN_ACK exceeds control buffer");
+static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + TXN_TEMPLATE_BODY_SIZE, "TXN_TEMPLATE exceeds control buffer");
+static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + TXN_STEPS_BODY_SIZE_MAX, "TXN_STEPS exceeds control buffer");
+static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + TXN_PROGRESS_BODY_SIZE, "TXN_PROGRESS exceeds control buffer");
+static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + TXN_STATUS_BODY_SIZE, "TXN_STATUS exceeds control buffer");
+static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= MESSAGE_HEADER_SIZE + TXN_ABORT_BODY_SIZE, "TXN_ABORT exceeds control buffer");
 static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= SUBSCRIBE_WIRE_SIZE, "SUBSCRIBE exceeds control buffer");
 static_assert(CONTROL_MESSAGE_MAX_WIRE_SIZE >= FRAME_WIRE_SIZE, "FRAME exceeds control buffer");

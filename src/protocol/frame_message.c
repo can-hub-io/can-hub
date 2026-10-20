@@ -13,9 +13,15 @@
 #define ROUTE_FLAGS_OFFSET 15
 #define PAYLOAD_OFFSET 16
 
-static bool isPayloadLengthValid(uint8_t payload_length, uint8_t frame_flags);
-
 /* ---------- public ---------- */
+
+bool FrameMessage_IsPayloadLengthValid(uint8_t payload_length, uint8_t frame_flags)
+{
+    if (frame_flags & FRAME_FLAG_FD) {
+        return payload_length <= FRAME_PAYLOAD_MAX_FD;
+    }
+    return payload_length <= FRAME_PAYLOAD_MAX_CLASSIC;
+}
 
 size_t FrameMessage_Encode(const FrameMessage *self, uint8_t *buffer, size_t buffer_size)
 {
@@ -23,7 +29,7 @@ size_t FrameMessage_Encode(const FrameMessage *self, uint8_t *buffer, size_t buf
     size_t total_size = MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + self->payload_length;
     uint8_t *body;
 
-    if (!isPayloadLengthValid(self->payload_length, self->frame_flags)) {
+    if (!FrameMessage_IsPayloadLengthValid(self->payload_length, self->frame_flags)) {
         return 0;
     }
     if (buffer_size < total_size) {
@@ -60,7 +66,7 @@ bool FrameMessage_Decode(FrameMessage *self, const uint8_t *payload, size_t payl
     self->frame_flags = payload[FRAME_FLAGS_OFFSET];
     self->route_flags = payload[ROUTE_FLAGS_OFFSET];
 
-    if (!isPayloadLengthValid(self->payload_length, self->frame_flags)) {
+    if (!FrameMessage_IsPayloadLengthValid(self->payload_length, self->frame_flags)) {
         return false;
     }
     if (payload_length < (size_t)FRAME_FIXED_FIELDS_SIZE + self->payload_length) {
@@ -70,16 +76,6 @@ bool FrameMessage_Decode(FrameMessage *self, const uint8_t *payload, size_t payl
     memcpy(self->payload, payload + PAYLOAD_OFFSET, self->payload_length);
 
     return true;
-}
-
-/* ---------- private ---------- */
-
-static bool isPayloadLengthValid(uint8_t payload_length, uint8_t frame_flags)
-{
-    if (frame_flags & FRAME_FLAG_FD) {
-        return payload_length <= FRAME_PAYLOAD_MAX_FD;
-    }
-    return payload_length <= FRAME_PAYLOAD_MAX_CLASSIC;
 }
 
 void FrameStream_Init(FrameStream *self, const uint8_t *data, size_t size)

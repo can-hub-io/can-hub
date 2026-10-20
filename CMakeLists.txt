@@ -153,6 +153,8 @@ set(COMMON_SOURCES
     src/protocol/ifconfig_message.c
     src/protocol/interface_status_message.c
     src/protocol/interface_name.c
+    src/protocol/txn_message.c
+    src/protocol/txn_steps_message.c
     src/shared/egress_shaper.c
     src/shared/bounded_string.c
 )

@@ -9,6 +9,7 @@
 #define PROTOCOL_VERSION 0
 
 #define HELLO_CAP_RELIABLE_CHANNELS (1u << 0)
+#define HELLO_CAP_TRANSACTIONS (1u << 1)
 
 typedef enum tpeer_role_e {
     kPEER_ROLE_AGENT = 1,

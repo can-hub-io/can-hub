@@ -97,6 +97,24 @@ add_unit_test(test_frame_message
         ${ROOT_SRC_DIR}/protocol/wire.c
 )
 
+add_unit_test(test_txn_message
+    SOURCES
+        protocol/test_txn_message.cpp
+        ${ROOT_SRC_DIR}/protocol/txn_message.c
+        ${ROOT_SRC_DIR}/protocol/frame_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+
+add_unit_test(test_txn_steps_message
+    SOURCES
+        protocol/test_txn_steps_message.cpp
+        ${ROOT_SRC_DIR}/protocol/txn_steps_message.c
+        ${ROOT_SRC_DIR}/protocol/frame_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+
 add_unit_test(test_hello_message
     SOURCES
         protocol/test_hello_message.cpp
