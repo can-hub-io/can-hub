@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "agent/domain/isotp_link.h"
 #include "agent/domain/step_ring.h"
 #include "protocol/frame_message.h"
 #include "protocol/txn_message.h"
@@ -42,6 +43,7 @@ typedef struct {
     uint8_t phase;
     bool satisfied;
     bool extend_requested;
+    bool message_started;
     uint64_t deadline_us;
     uint64_t retry_at_us;
     uint8_t match_count;
@@ -74,6 +76,9 @@ typedef struct {
     uint64_t next_transmit_us;
     uint64_t last_tick_us;
     ActiveStep current;
+    IsotpLink isotp;
+    uint8_t message[TXN_ISOTP_MESSAGE_SIZE_MAX];
+    uint16_t message_length;
 } TransactionRunner;
 
 void TransactionRunner_Init(TransactionRunner *self, TransactionRunnerPort port, uint8_t *ring_storage, uint32_t ring_capacity);

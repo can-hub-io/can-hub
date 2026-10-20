@@ -13,7 +13,7 @@
 
 #define MICROSECONDS_PER_MILLISECOND 1000
 #define PING_REPLY_FLAG 0x01
-#define AGENT_CAPABILITIES (HELLO_CAP_RELIABLE_CHANNELS | HELLO_CAP_TRANSACTIONS)
+#define AGENT_CAPABILITIES (HELLO_CAP_RELIABLE_CHANNELS | HELLO_CAP_TRANSACTIONS | HELLO_CAP_ISOTP)
 #define TIMING_CONFLICT_DETAIL "give a bitrate or a time quantum and segments, not both"
 
 typedef void (*TControlHandler)(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);

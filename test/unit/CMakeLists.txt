@@ -295,10 +295,17 @@ add_unit_test(test_step_ring
         ${ROOT_SRC_DIR}/agent/domain/step_ring.c
 )
 
+add_unit_test(test_isotp_link
+    SOURCES
+        agent/domain/test_isotp_link.cpp
+        ${ROOT_SRC_DIR}/agent/domain/isotp_link.c
+)
+
 add_unit_test(test_transaction_runner
     SOURCES
         agent/domain/test_transaction_runner.cpp
         ${ROOT_SRC_DIR}/agent/domain/transaction_runner.c
+        ${ROOT_SRC_DIR}/agent/domain/isotp_link.c
         ${ROOT_SRC_DIR}/agent/domain/step_ring.c
         ${ROOT_SRC_DIR}/protocol/txn_steps_message.c
         ${ROOT_SRC_DIR}/protocol/frame_message.c
@@ -314,6 +321,7 @@ add_unit_test(test_agent
         ${ROOT_SRC_DIR}/agent/domain/echo_correlator.c
         ${ROOT_SRC_DIR}/agent/domain/step_ring.c
         ${ROOT_SRC_DIR}/agent/domain/transaction_runner.c
+        ${ROOT_SRC_DIR}/agent/domain/isotp_link.c
         ${ROOT_SRC_DIR}/shared/reconnect_backoff.c
         ${ROOT_SRC_DIR}/agent/domain/tx_pacer.c
         ${ROOT_SRC_DIR}/protocol/txn_message.c
