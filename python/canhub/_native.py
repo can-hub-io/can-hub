@@ -215,6 +215,18 @@ class CanHubTxnTemplate(Structure):
     ]
 
 
+class CanHubUds(Structure):
+    _fields_ = [
+        ("struct_size", c_uint32),
+        ("request_id", c_uint32),
+        ("p2_ms", c_uint32),
+        ("p2_extended_ms", c_uint32),
+        ("flags", c_uint8),
+        ("reserved", c_uint8 * 3),
+        ("transport", CanHubTxnIsotp),
+    ]
+
+
 class CanHubTxnMessage(Structure):
     _fields_ = [
         ("struct_size", c_uint32),
@@ -360,6 +372,12 @@ lib.canhub_txn_send.argtypes = [c_void_p, POINTER(CanHubTxnStep), c_uint32, c_in
 
 lib.canhub_txn_send_message.restype = c_int32
 lib.canhub_txn_send_message.argtypes = [c_void_p, POINTER(CanHubTxnMessage), c_int32]
+
+lib.canhub_uds_begin.restype = c_int32
+lib.canhub_uds_begin.argtypes = [c_void_p, POINTER(CanHubUds), c_int32]
+
+lib.canhub_uds_request.restype = c_int32
+lib.canhub_uds_request.argtypes = [c_void_p, POINTER(CanHubUds), POINTER(c_uint8), c_uint16, POINTER(c_uint8), c_uint8, c_int32]
 
 lib.canhub_txn_end.restype = c_int32
 lib.canhub_txn_end.argtypes = [c_void_p, c_int32]

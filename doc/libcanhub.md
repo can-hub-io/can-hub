@@ -219,6 +219,40 @@ where the flow control for a multi-frame answer goes. Transport failures abort
 with `CANHUB_TXN_REASON_FLOW_CONTROL_TIMEOUT`, `_CONSECUTIVE_FRAME_TIMEOUT`,
 `_OVERFLOW`, `_SEQUENCE_ERROR` or `_WAIT_LIMIT`.
 
+### UDS
+
+`canhub_uds_*` runs UDS requests (ISO 14229) on top of ISO-TP steps, the
+answers checked by the UDS rules: a positive answer starts with the service id
++ 0x40 (or with the expected start given, which must), a negative one aborts
+the transaction (`canhub_uds_negative_code` reads its code from the result),
+`7F <service> 78` makes the request wait `p2_extended_ms`, and a request whose
+sub-function carries the suppress-positive-response bit does not wait.
+
+```c
+CanHubUds ecu = { 0 };
+ecu.struct_size = sizeof(ecu);
+ecu.request_id = 0x7E0;
+ecu.p2_ms = 150;
+ecu.p2_extended_ms = 5000;
+ecu.flags = CANHUB_TXN_FLAG_EXCLUSIVE;
+ecu.transport.response_id = 0x7E8;
+ecu.transport.flags = CANHUB_ISOTP_FLAG_PADDING;
+ecu.transport.padding = 0xCC;
+ecu.transport.tx_data_length = 8;
+
+canhub_uds_begin(session, &ecu, 5000);
+canhub_uds_request(session, &ecu, (const uint8_t[]){ 0x10, 0x02 }, 2, NULL, 0, -1);
+canhub_uds_transfer(session, &ecu, image, image_size, 4093, -1);   // 36 <counter> <block>, answered 76 <counter>
+canhub_uds_request(session, &ecu, (const uint8_t[]){ 0x37 }, 1, NULL, 0, -1);
+canhub_txn_end(session, -1);
+
+CanHubTxnResult result = { 0 };
+result.struct_size = sizeof(result);
+if (canhub_txn_wait(session, &result, -1) == CANHUB_ERR_TXN_ABORTED && canhub_uds_negative_code(&result) != 0) {
+    fprintf(stderr, "refused with code 0x%02X at step %" PRIu32 "\n", canhub_uds_negative_code(&result), result.failing_seq);
+}
+```
+
 ### Scripts
 
 `canhub_txn_run_script` runs a [transaction script](transaction-scripts.md)
