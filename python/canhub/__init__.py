@@ -21,12 +21,9 @@ __all__ = [
     "Transaction",
     "TransactionAborted",
     "TransactionResult",
-    "Uds",
-    "UdsNegativeResponse",
     "identity_fingerprint",
 ]
 
-UDS_NAMES = {"Uds", "UdsNegativeResponse"}
 TRANSACTION_NAMES = {"Advance", "Isotp", "Origin", "Pattern", "ScriptError", "Step", "Template", "Transaction", "TransactionAborted", "TransactionResult"}
 
 
@@ -43,9 +40,6 @@ def __getattr__(name):
     if name == "BitTiming":
         from .settings import BitTiming
         return BitTiming
-    if name in UDS_NAMES:
-        from . import uds
-        return getattr(uds, name)
     if name in TRANSACTION_NAMES:
         from . import transaction
         return getattr(transaction, name)

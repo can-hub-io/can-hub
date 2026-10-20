@@ -308,13 +308,6 @@ add_unit_test(test_canhub_transactions
 )
 target_include_directories(test_canhub_transactions PRIVATE ${ROOT_SRC_DIR}/../include)
 
-add_unit_test(test_canhub_uds
-    SOURCES
-        platform/test_canhub_uds.cpp
-        ${ROOT_SRC_DIR}/platform/linux/libcanhub/canhub_uds.c
-)
-target_include_directories(test_canhub_uds PRIVATE ${ROOT_SRC_DIR}/../include)
-
 add_unit_test(test_isotp_link
     SOURCES
         agent/domain/test_isotp_link.cpp

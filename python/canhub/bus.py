@@ -11,10 +11,8 @@ from can import BusABC, CanInitializationError, CanOperationError, Message
 from . import _native as native
 from . import settings as interface_settings
 from .settings import InterfaceSettings
-from .transaction import Isotp, Origin, Transaction, TransactionProgress, TransactionResult
+from .transaction import Origin, Transaction, TransactionProgress, TransactionResult
 from . import transaction as transactions
-from . import uds as uds_sessions
-from .uds import Uds
 
 DEFAULT_TIMEOUT_MS = 5000
 FINGERPRINT_HEX_LENGTH = 64
@@ -256,26 +254,6 @@ class CanHubBus(BusABC):
         if not self._writable:
             raise CanOperationError("bus is read-only (write denied by the hub ACL)")
         return transactions.run_script(self, script_path, progress)
-
-    def uds(
-        self,
-        request_id: int,
-        transport: Isotp,
-        p2: float = 0.15,
-        p2_extended: float = 5.0,
-        exclusive: bool = False,
-        timeout: float = DEFAULT_TIMEOUT_MS / 1000,
-    ) -> Uds:
-        """Start a UDS conversation with the ECU at ``request_id`` (open the bus
-        with ``reliable=True``): requests run at the agent as one transaction,
-        their answers checked by the UDS rules, each waiting ``p2`` seconds, and
-        ``p2_extended`` after a response pending. ``transport.response_id`` is
-        where the ECU answers; the request id is extended when it is. See
-        :mod:`canhub.uds`.
-        """
-        if not self._writable:
-            raise CanOperationError("bus is read-only (write denied by the hub ACL)")
-        return uds_sessions.begin(self, request_id, transport, p2, p2_extended, exclusive, timeout)
 
     def drop_counters(self) -> dict:
         with self._lock:
