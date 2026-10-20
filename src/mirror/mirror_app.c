@@ -11,13 +11,17 @@
 
 #define OPEN_FLAGS_READ_ONLY (OPEN_FLAG_SUPPRESS_OWN_ECHO | OPEN_FLAG_ERROR_FRAMES)
 #define OPEN_FLAGS_READ_WRITE (OPEN_FLAGS_READ_ONLY | OPEN_FLAG_WANT_WRITE)
+#define MICROSECONDS_PER_MILLISECOND 1000
 
 static void transportOnConnected(void *context);
 static void transportOnDisconnected(void *context, uint64_t now_us);
 static void transportOnControl(void *context, const uint8_t *data, size_t size, uint64_t now_us);
 static void transportOnFrame(void *context, const uint8_t *data, size_t size);
-static void handleListReply(MirrorApp *self, const uint8_t *body, uint16_t length);
-static void handleOpenAck(MirrorApp *self, const OpenAckMessage *ack);
+static void tryConnect(MirrorApp *self, uint64_t now_us);
+static void startResolution(MirrorApp *self);
+static void awaitInterface(MirrorApp *self, uint64_t now_us);
+static void handleListReply(MirrorApp *self, const uint8_t *body, uint16_t length, uint64_t now_us);
+static void handleOpenAck(MirrorApp *self, const OpenAckMessage *ack, uint64_t now_us);
 static void openResolvedInterface(MirrorApp *self);
 static uint8_t openFlags(const MirrorApp *self, uint8_t access_flags);
 static void sendHello(MirrorApp *self);
@@ -32,14 +36,13 @@ void MirrorApp_Init(MirrorApp *self, TransportPort *hub, CanPort *can, uint32_t 
     self->hub = hub;
     self->can = can;
     self->interface_id = interface_id;
+    self->state = kMIRROR_DISCONNECTED;
+    ReconnectBackoff_Init(&self->backoff, RECONNECT_DEFAULT_INITIAL_DELAY_MS, RECONNECT_DEFAULT_MAX_DELAY_MS);
 
     if (interface_name != NULL && interface_name[0] != '\0') {
         BoundedString_Copy(self->interface_name, sizeof(self->interface_name), interface_name);
-        self->state = kMIRROR_RESOLVING;
-        return;
+        self->resolve_by_name = true;
     }
-
-    self->state = kMIRROR_OPENING;
 }
 
 void MirrorApp_SetName(MirrorApp *self, const char *name)
@@ -63,6 +66,20 @@ TransportEvents MirrorApp_TransportEvents(MirrorApp *self)
     };
 
     return events;
+}
+
+void MirrorApp_Tick(MirrorApp *self, uint64_t now_us)
+{
+    if (now_us < self->next_attempt_at_us) {
+        return;
+    }
+    if (self->state == kMIRROR_DISCONNECTED) {
+        tryConnect(self, now_us);
+        return;
+    }
+    if (self->state == kMIRROR_AWAITING_INTERFACE) {
+        startResolution(self);
+    }
 }
 
 void MirrorApp_OnCanFrame(MirrorApp *self, const FrameMessage *frame)
@@ -93,6 +110,11 @@ bool MirrorApp_CanWrite(const MirrorApp *self)
     return self->can_write;
 }
 
+uint32_t MirrorApp_PendingReconnectDelayMs(const MirrorApp *self)
+{
+    return self->pending_reconnect_delay_ms;
+}
+
 /* ---------- private ---------- */
 
 static void transportOnConnected(void *context)
@@ -100,20 +122,25 @@ static void transportOnConnected(void *context)
     MirrorApp *self = context;
 
     sendHello(self);
-    if (self->state == kMIRROR_RESOLVING) {
-        sendList(self, 0);
-        return;
-    }
-    openResolvedInterface(self);
+    startResolution(self);
 }
 
 static void transportOnDisconnected(void *context, uint64_t now_us)
 {
     MirrorApp *self = context;
 
-    (void)now_us;
+    if (self->state == kMIRROR_DISCONNECTED || self->state == kMIRROR_FAILED) {
+        return;
+    }
+    if (self->state != kMIRROR_CONNECTING && !self->resolve_by_name) {
+        self->state = kMIRROR_FAILED;
+        return;
+    }
 
-    self->state = kMIRROR_FAILED;
+    self->can_write = false;
+    self->state = kMIRROR_DISCONNECTED;
+    self->pending_reconnect_delay_ms = ReconnectBackoff_NextDelayMs(&self->backoff);
+    self->next_attempt_at_us = now_us + (uint64_t)self->pending_reconnect_delay_ms * MICROSECONDS_PER_MILLISECOND;
 }
 
 static void transportOnControl(void *context, const uint8_t *data, size_t size, uint64_t now_us)
@@ -122,8 +149,6 @@ static void transportOnControl(void *context, const uint8_t *data, size_t size, 
     MessageHeader header;
     OpenAckMessage ack;
 
-    (void)now_us;
-
     if (!MessageHeader_Decode(&header, data, size)) {
         return;
     }
@@ -131,17 +156,13 @@ static void transportOnControl(void *context, const uint8_t *data, size_t size, 
         return;
     }
 
-    if (header.type == kMESSAGE_TYPE_ERROR) {
-        self->state = kMIRROR_FAILED;
-        return;
-    }
     if (header.type == kMESSAGE_TYPE_LIST_REPLY) {
-        handleListReply(self, data + MESSAGE_HEADER_SIZE, header.length);
+        handleListReply(self, data + MESSAGE_HEADER_SIZE, header.length, now_us);
         return;
     }
     if (header.type == kMESSAGE_TYPE_OPEN_ACK) {
         if (OpenAckMessage_Decode(&ack, data + MESSAGE_HEADER_SIZE, header.length)) {
-            handleOpenAck(self, &ack);
+            handleOpenAck(self, &ack, now_us);
         }
     }
 }
@@ -162,7 +183,35 @@ static void transportOnFrame(void *context, const uint8_t *data, size_t size)
     }
 }
 
-static void handleListReply(MirrorApp *self, const uint8_t *body, uint16_t length)
+static void tryConnect(MirrorApp *self, uint64_t now_us)
+{
+    self->state = kMIRROR_CONNECTING;
+    if (self->hub->connect(self->hub->context)) {
+        return;
+    }
+
+    transportOnDisconnected(self, now_us);
+}
+
+static void startResolution(MirrorApp *self)
+{
+    if (!self->resolve_by_name) {
+        openResolvedInterface(self);
+        return;
+    }
+
+    self->state = kMIRROR_RESOLVING;
+    self->list_offset = 0;
+    sendList(self, 0);
+}
+
+static void awaitInterface(MirrorApp *self, uint64_t now_us)
+{
+    self->state = kMIRROR_AWAITING_INTERFACE;
+    self->next_attempt_at_us = now_us + (uint64_t)MIRROR_INTERFACE_RETRY_MS * MICROSECONDS_PER_MILLISECOND;
+}
+
+static void handleListReply(MirrorApp *self, const uint8_t *body, uint16_t length, uint64_t now_us)
 {
     ListReplyMessage reply;
     uint32_t interface_id;
@@ -187,7 +236,7 @@ static void handleListReply(MirrorApp *self, const uint8_t *body, uint16_t lengt
         return;
     }
 
-    self->state = kMIRROR_FAILED;
+    awaitInterface(self, now_us);
 }
 
 static void openResolvedInterface(MirrorApp *self)
@@ -206,7 +255,7 @@ static uint8_t openFlags(const MirrorApp *self, uint8_t access_flags)
     return access_flags;
 }
 
-static void handleOpenAck(MirrorApp *self, const OpenAckMessage *ack)
+static void handleOpenAck(MirrorApp *self, const OpenAckMessage *ack, uint64_t now_us)
 {
     if (self->state != kMIRROR_OPENING || ack->interface_id != self->interface_id) {
         return;
@@ -216,6 +265,7 @@ static void handleOpenAck(MirrorApp *self, const OpenAckMessage *ack)
         self->channel = ack->channel;
         self->can_write = self->pending_write;
         self->state = kMIRROR_PUMPING;
+        ReconnectBackoff_Reset(&self->backoff);
         if (self->reliable) {
             self->hub->set_channel_mode(self->hub->context, self->channel, true);
         }
@@ -225,6 +275,10 @@ static void handleOpenAck(MirrorApp *self, const OpenAckMessage *ack)
     if (self->pending_write && ack->status == OPEN_STATUS_WRITE_DENIED) {
         self->pending_write = false;
         sendOpen(self, openFlags(self, OPEN_FLAGS_READ_ONLY));
+        return;
+    }
+    if (ack->status == OPEN_STATUS_REJECTED && self->resolve_by_name) {
+        awaitInterface(self, now_us);
         return;
     }
 

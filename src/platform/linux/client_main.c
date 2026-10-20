@@ -103,6 +103,8 @@ static SocketcandApp socketcand_app;
 static SocketcandServer socketcand_server;
 static char attach_interface_name[REGISTER_INTERFACE_NAME_SIZE];
 static MirrorApp mirror_app;
+static TransportEvents mirror_core_events;
+static uint32_t hub_connect_count;
 static SocketCanAdapter mirror_can_adapter;
 
 static void printUsage(FILE *stream, const char *program);
@@ -117,6 +119,11 @@ static void drainCanFrames(void);
 static void corkHubTransport(void);
 static void uncorkHubTransport(void);
 static void dispatchAttachEvent(const struct epoll_event *event);
+static TransportEvents attachTransportEvents(void);
+static void attachOnConnected(void *context);
+static void attachOnDisconnected(void *context, uint64_t now_us);
+static void attachOnControl(void *context, const uint8_t *data, size_t size, uint64_t now_us);
+static void logHubError(const uint8_t *data, size_t size);
 static void syncHubConnection(EpollRegistry *poll_registry);
 static uint32_t socketcandSlotMask(uint8_t slot);
 static void dispatchSocketcandEvent(const struct epoll_event *event);
@@ -911,7 +918,7 @@ static int32_t runSocketcandLoop(void)
 
 static int32_t runAttach(const char *host, const char *port_text)
 {
-    TransportEvents events = MirrorApp_TransportEvents(&mirror_app);
+    TransportEvents events = attachTransportEvents();
     RegisterMessage registration;
 
     memset(&registration, 0, sizeof(registration));
@@ -943,11 +950,6 @@ static int32_t runAttach(const char *host, const char *port_text)
     }
     MirrorApp_SetName(&mirror_app, client_name);
     MirrorApp_SetReliable(&mirror_app, (open_flags & OPEN_FLAG_RELIABLE) != 0);
-
-    if (!active_port->connect(active_port->context)) {
-        LOG_ERROR("could not connect to %s", host);
-        return 1;
-    }
 
     LOG_INFO("mirroring interface %s to %s, ctrl-c to stop", target_interface_text, attach_interface_name);
 
@@ -996,12 +998,12 @@ static int32_t runAttachLoop(void)
         for(i=0; i<event_count; i++) {
             dispatchAttachEvent(&events[i]);
         }
+        MirrorApp_Tick(&mirror_app, Clock_MonotonicUs());
     }
 
     if (stop_requested) {
         return stopCleanly();
     }
-    LOG_WARN("connection lost");
 
     return 1;
 }
@@ -1050,6 +1052,82 @@ static void dispatchAttachEvent(const struct epoll_event *event)
     if (tag == SC_TAG_HUB_STREAM) {
         handleHubStreamEvent(event);
     }
+}
+
+static TransportEvents attachTransportEvents(void)
+{
+    TransportEvents events;
+
+    mirror_core_events = MirrorApp_TransportEvents(&mirror_app);
+    events = mirror_core_events;
+    events.on_connected = attachOnConnected;
+    events.on_disconnected = attachOnDisconnected;
+    events.on_control = attachOnControl;
+
+    return events;
+}
+
+static void attachOnConnected(void *context)
+{
+    hub_connect_count++;
+    if (hub_connect_count > 1) {
+        LOG_INFO("reconnected to hub (session #%u)", hub_connect_count);
+    }
+
+    mirror_core_events.on_connected(context);
+}
+
+static void attachOnDisconnected(void *context, uint64_t now_us)
+{
+    uint32_t delay_seconds;
+
+    if (MirrorApp_State(&mirror_app) == kMIRROR_FAILED) {
+        return;
+    }
+
+    mirror_core_events.on_disconnected(context, now_us);
+    if (MirrorApp_State(&mirror_app) == kMIRROR_FAILED) {
+        LOG_ERROR("connection lost: a mirror opened by interface id cannot reconnect, attach <agent>/<interface>");
+        return;
+    }
+
+    delay_seconds = (MirrorApp_PendingReconnectDelayMs(&mirror_app) + 999) / 1000;
+    LOG_WARN("connection lost, reconnecting in %us", delay_seconds);
+}
+
+static void attachOnControl(void *context, const uint8_t *data, size_t size, uint64_t now_us)
+{
+    uint8_t previous_state = MirrorApp_State(&mirror_app);
+    uint8_t state;
+
+    logHubError(data, size);
+    mirror_core_events.on_control(context, data, size, now_us);
+    state = MirrorApp_State(&mirror_app);
+    if (state == previous_state) {
+        return;
+    }
+    if (state == kMIRROR_FAILED) {
+        LOG_ERROR("the hub refused %s", target_interface_text);
+        return;
+    }
+    if (state == kMIRROR_PUMPING && hub_connect_count > 1) {
+        LOG_INFO("mirroring interface %s to %s again", target_interface_text, attach_interface_name);
+    }
+}
+
+static void logHubError(const uint8_t *data, size_t size)
+{
+    MessageHeader header;
+    ErrorMessage error;
+
+    if (!MessageHeader_Decode(&header, data, size) || size < (size_t)MESSAGE_HEADER_SIZE + header.length) {
+        return;
+    }
+    if (header.type != kMESSAGE_TYPE_ERROR || !ErrorMessage_Decode(&error, data + MESSAGE_HEADER_SIZE, header.length)) {
+        return;
+    }
+
+    LOG_WARN("hub error %u: %.*s", error.code, (int)ERROR_DETAIL_SIZE, error.detail);
 }
 
 static const char *pinnedHubFingerprint(void)

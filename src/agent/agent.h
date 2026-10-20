@@ -6,7 +6,7 @@
 
 #include "agent/domain/channel_map.h"
 #include "agent/domain/echo_correlator.h"
-#include "agent/domain/reconnect_backoff.h"
+#include "shared/reconnect_backoff.h"
 #include "agent/domain/tx_pacer.h"
 #include "agent/ports/can_events.h"
 #include "agent/ports/can_port.h"

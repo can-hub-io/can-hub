@@ -1,7 +1,7 @@
 #include <cest>
 
 extern "C" {
-#include "agent/domain/reconnect_backoff.h"
+#include "shared/reconnect_backoff.h"
 }
 
 describe("reconnect_backoff", []() {
