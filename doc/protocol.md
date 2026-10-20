@@ -91,6 +91,8 @@ offset  size  field
 0x39  ADMIN_GROUP_LEAVE_REPLY
 0x3A  ADMIN_GROUP_LIST    admin: bridge groups with members and counters (one per page)
 0x3B  ADMIN_GROUP_LIST_REPLY
+0x3C  ADMIN_TXNS          admin: transactions in flight (paginated)
+0x3D  ADMIN_TXNS_REPLY
 0x41  TXN_BEGIN    client -> hub -> agent: start a transaction on an open channel
 0x42  TXN_BEGIN_ACK agent (or hub) -> client: status, transaction id, window
 0x43  TXN_TEMPLATE client -> hub -> agent: define a step template (on the channel's reliable stream)
@@ -347,6 +349,28 @@ ADMIN_STATUS_REPLY (total 96)
 @72  txns_rejected u64      (TXN_BEGINs refused, by the hub or the agent)
 @80  txn_steps_completed u64 (steps of finished transactions)
 @88  txn_lease_frame_drops u64 (client frames dropped because another client held the lease)
+
+ADMIN_TXNS (total 8)
+@4   offset u16        (pagination start index)
+@6   reserved u16
+
+ADMIN_TXNS_REPLY (total 8 + count * 176)
+@4   count u8          (0-16 entries in this reply)
+@5   flags u8          (bit 0: more entries beyond offset + count)
+@6   reserved u16
+@8   entries, each 176 bytes, one per transaction the hub relays:
+     +0   interface_id u32
+     +4   client_peer_id u32 (0: its client left, cancelled once the agent grants it)
+     +8   agent_peer_id u32
+     +12  txn_id u16      (0 while pending)
+     +14  state u8        (1 pending: waiting for the agent's grant, 2 active)
+     +15  flags u8        (bit 0: exclusive lease)
+     +16  completed_steps u32 (as of the last TXN_PROGRESS)
+     +20  bytes_in_flight u32 (step record bytes relayed and not yet consumed)
+     +24  age_ms u32      (since TXN_BEGIN)
+     +28  progress_age_ms u32 (since the last TXN_PROGRESS; 0xFFFFFFFF: none yet)
+     +32  agent_name char[128]
+     +160 interface_name char[16]
 
 ADMIN_PEERS (total 8)
 @4   offset u16        (pagination start index)

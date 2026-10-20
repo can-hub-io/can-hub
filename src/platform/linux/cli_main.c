@@ -35,6 +35,8 @@
 #define GROUP_COMMAND_NAME_WORDS 3
 #define GROUP_COMMAND_MEMBER_WORDS 4
 #define FILTER_TEXT_SIZE 24
+#define UPTIME_TEXT_SIZE 16
+#define MILLISECONDS_PER_SECOND 1000
 
 typedef enum tcli_command_e {
     kCLI_COMMAND_STATUS = 0,
@@ -62,6 +64,7 @@ typedef enum tcli_command_e {
     kCLI_COMMAND_GROUP_DELETE,
     kCLI_COMMAND_GROUP_JOIN,
     kCLI_COMMAND_GROUP_LEAVE,
+    kCLI_COMMAND_TRANSACTIONS,
     kCLI_COMMAND_MAX,
 } TCLI_COMMAND;
 
@@ -120,6 +123,9 @@ static void handlePeersReply(const uint8_t *payload, uint16_t payload_length);
 static void handleAgentsReply(const uint8_t *payload, uint16_t payload_length);
 static void handleClientsReply(const uint8_t *payload, uint16_t payload_length);
 static void handleInterfacesReply(const uint8_t *payload, uint16_t payload_length);
+static void handleTransactionsReply(const uint8_t *payload, uint16_t payload_length);
+static void printTransactionRow(const AdminTxnsReplyEntry *entry);
+static void formatProgressAge(uint32_t progress_age_ms, char *out, size_t size);
 static void handleListReply(const uint8_t *payload, uint16_t payload_length);
 static void handlePinsReply(const uint8_t *payload, uint16_t payload_length);
 static void handleAclListReply(const uint8_t *payload, uint16_t payload_length);
@@ -195,6 +201,7 @@ static void printUsage(FILE *stream, const char *program)
     fprintf(stream, "  agents kick <name>     disconnect an agent\n");
     fprintf(stream, "  clients                open client channels\n");
     fprintf(stream, "  interfaces             interface catalogue\n");
+    fprintf(stream, "  transactions           transactions in flight: owner, lease, steps, credit in flight\n");
     fprintf(stream, "  interface show <agent>/<iface>                the settings the bus holds now\n");
     fprintf(stream, "  interface set <agent>/<iface> <setting>...    reconfigure a bus in one step:\n");
     fprintf(stream, "      bitrate <bps> sample-point <0.xxx> dbitrate <bps> dsample-point <0.xxx>\n");
@@ -288,6 +295,8 @@ static bool mapCommand(const char *words[], uint8_t word_count)
             command = kCLI_COMMAND_CLIENTS;
         } else if (strcmp(words[0], "interfaces") == 0) {
             command = kCLI_COMMAND_INTERFACES;
+        } else if (strcmp(words[0], "transactions") == 0) {
+            command = kCLI_COMMAND_TRANSACTIONS;
         } else if (strcmp(words[0], "pins") == 0) {
             command = kCLI_COMMAND_PINS;
         } else if (strcmp(words[0], "acl") == 0) {
@@ -691,6 +700,10 @@ static void onControl(void *context, const uint8_t *data, size_t size, uint64_t 
         handleInterfacesReply(data + MESSAGE_HEADER_SIZE, header.length);
         return;
     }
+    if (header.type == kMESSAGE_TYPE_ADMIN_TXNS_REPLY) {
+        handleTransactionsReply(data + MESSAGE_HEADER_SIZE, header.length);
+        return;
+    }
     if (header.type == kMESSAGE_TYPE_LIST_REPLY) {
         handleListReply(data + MESSAGE_HEADER_SIZE, header.length);
         return;
@@ -813,6 +826,7 @@ static void sendRequest(void)
     AdminPeersMessage peers = { page_offset };
     AdminPinsMessage pins = { page_offset };
     AdminInterfacesMessage interfaces = { page_offset };
+    AdminTxnsMessage transactions = { page_offset };
     AdminAgentsMessage agents;
     AdminClientsMessage clients;
     AdminKickMessage kick;
@@ -856,6 +870,8 @@ static void sendRequest(void)
         encoded_size = AdminClientsMessage_Encode(&clients, encoded, sizeof(encoded));
     } else if (command == kCLI_COMMAND_INTERFACES) {
         encoded_size = AdminInterfacesMessage_Encode(&interfaces, encoded, sizeof(encoded));
+    } else if (command == kCLI_COMMAND_TRANSACTIONS) {
+        encoded_size = AdminTxnsMessage_Encode(&transactions, encoded, sizeof(encoded));
     } else if (command == kCLI_COMMAND_PINS) {
         encoded_size = AdminPinsMessage_Encode(&pins, encoded, sizeof(encoded));
     } else if (command == kCLI_COMMAND_PENDING) {
@@ -1172,6 +1188,32 @@ static void handleInterfacesReply(const uint8_t *payload, uint16_t payload_lengt
     }
 }
 
+static void handleTransactionsReply(const uint8_t *payload, uint16_t payload_length)
+{
+    AdminTxnsReplyMessage reply;
+    uint8_t i;
+
+    if (!AdminTxnsReplyMessage_Decode(&reply, payload, payload_length)) {
+        exit_code = 1;
+        return;
+    }
+
+    if (!page_header_printed) {
+        printf(
+            "%-32s %-12s %-8s %-6s %-6s %-10s %-10s %-10s %s\n",
+            "interface", "client", "state", "lease", "txn", "steps", "in-flight", "age", "last-progress"
+        );
+        page_header_printed = true;
+    }
+    for(i=0; i<reply.count; i++) {
+        printTransactionRow(&reply.entries[i]);
+    }
+
+    if (!requestNextPage(reply.flags, reply.count)) {
+        exit_code = 0;
+    }
+}
+
 static void handleListReply(const uint8_t *payload, uint16_t payload_length)
 {
     ListReplyMessage reply;
@@ -1292,6 +1334,38 @@ static void handleRejectedReply(const uint8_t *payload, uint16_t payload_length)
 }
 
 /* ---------- private: printing ---------- */
+
+static void printTransactionRow(const AdminTxnsReplyEntry *entry)
+{
+    char interface_text[REGISTER_AGENT_NAME_SIZE + REGISTER_INTERFACE_NAME_SIZE];
+    char age_text[UPTIME_TEXT_SIZE];
+    char progress_text[UPTIME_TEXT_SIZE];
+
+    snprintf(interface_text, sizeof(interface_text), "%s/%s", entry->agent_name, entry->interface_name);
+    formatUptime(entry->age_ms / MILLISECONDS_PER_SECOND, age_text, sizeof(age_text));
+    formatProgressAge(entry->progress_age_ms, progress_text, sizeof(progress_text));
+    printf(
+        "%-32s 0x%08" PRIX32 " %-8s %-6s %-6" PRIu16 " %-10" PRIu32 " %-10" PRIu32 " %-10s %s\n",
+        interface_text,
+        entry->client_peer_id,
+        entry->state == ADMIN_TXN_STATE_ACTIVE ? "active" : "pending",
+        (entry->flags & ADMIN_TXN_FLAG_EXCLUSIVE) ? "yes" : "no",
+        entry->txn_id,
+        entry->completed_steps,
+        entry->bytes_in_flight,
+        age_text,
+        progress_text
+    );
+}
+
+static void formatProgressAge(uint32_t progress_age_ms, char *out, size_t size)
+{
+    if (progress_age_ms == ADMIN_TXN_NO_PROGRESS) {
+        snprintf(out, size, "-");
+        return;
+    }
+    formatUptime(progress_age_ms / MILLISECONDS_PER_SECOND, out, size);
+}
 
 static void printClientRow(const AdminClientsReplyEntry *entry, const char *indent)
 {

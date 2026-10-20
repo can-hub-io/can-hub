@@ -17,7 +17,7 @@ Noun-first grammar; an omitted verb lists.
 
 | Command | Effect |
 |---|---|
-| `status` | hub frame counters and peer/agent/client/interface counts |
+| `status` | hub frame and transaction counters, and peer/agent/client/interface counts |
 | `peers` | every live connection, including pre-HELLO and admin peers |
 | `peers kick <peer-id>` | disconnect any peer (id as printed, `0x...` or decimal) |
 | `agents` | live agents with interface counts |
@@ -25,6 +25,7 @@ Noun-first grammar; an omitted verb lists.
 | `agents kick <name>` | disconnect an agent by registered name |
 | `clients` | open client channels, one row per channel |
 | `interfaces` | interface catalogue with subscriber and traffic counters, and whether each bus carries CAN FD (`fd`, `classic`, or `-` when its agent does not report it) |
+| `transactions` | transactions in flight: interface, owning client, state, lease, steps done, record bytes in flight, age and time since the last progress |
 | `interface show <agent>/<iface>` | the settings the bus holds now: link, state, bit timing, modes, TX queue |
 | `interface set <agent>/<iface> <setting>...` | reconfigure a bus, every setting in one step ([settings](#interface-settings)) |
 | `interface up\|down <agent>/<iface>` | bring a bus up or down |

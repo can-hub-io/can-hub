@@ -240,6 +240,26 @@ describe("broker transactions", []() {
             expect(counters.steps_completed).toBe((uint64_t)17);
         });
 
+        it("lists the relayed transaction to the admin", []() {
+            AdminTxnsMessage request = { 0 };
+            AdminTxnsReplyMessage reply;
+            uint8_t encoded[MESSAGE_BUFFER_SIZE];
+            size_t encoded_size;
+            int32_t index;
+
+            BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
+            encoded_size = AdminTxnsMessage_Encode(&request, encoded, sizeof(encoded));
+            events.on_peer_control(events.context, ADMIN_PEER, encoded, encoded_size, 0);
+            index = lastControlIndex(ADMIN_PEER, kMESSAGE_TYPE_ADMIN_TXNS_REPLY);
+            AdminTxnsReplyMessage_Decode(&reply, transport.control_log[index] + MESSAGE_HEADER_SIZE, transport.control_sizes[index] - MESSAGE_HEADER_SIZE);
+
+            expect(reply.count).toBe(1);
+            expect(reply.entries[0].client_peer_id).toBe((uint32_t)CLIENT_PEER);
+            expect(reply.entries[0].agent_peer_id).toBe((uint32_t)AGENT_PEER);
+            expect(reply.entries[0].state).toBe((uint8_t)ADMIN_TXN_STATE_ACTIVE);
+            expect(reply.entries[0].txn_id).toBe((uint16_t)TXN_ID);
+        });
+
         it("forwards the client's abort to the agent", []() {
             TxnAbortMessage abort_message = { client_channel, TXN_ID };
             TxnAbortMessage forwarded;

@@ -352,6 +352,7 @@ add_unit_test(test_admin_views
     SOURCES
         hub/domain/test_admin_views.cpp
         ${ROOT_SRC_DIR}/hub/domain/admin_views.c
+        ${ROOT_SRC_DIR}/hub/domain/transaction_table.c
         ${ROOT_SRC_DIR}/hub/domain/hub_peer.c
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
         ${ROOT_SRC_DIR}/hub/domain/egress_queue.c

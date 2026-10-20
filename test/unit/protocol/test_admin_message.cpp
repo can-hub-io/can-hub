@@ -611,6 +611,69 @@ describe("admin_acl_message", []() {
     });
 });
 
+describe("admin_txns_message", []() {
+    it("round-trips the pagination offset", []() {
+        AdminTxnsMessage request = { 3 };
+        AdminTxnsMessage decoded;
+        uint8_t buffer[16];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminTxnsMessage_Encode(&request, buffer, sizeof(buffer));
+        decoded_ok = AdminTxnsMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + ADMIN_TXNS_BODY_SIZE));
+        expect(buffer[0]).toBe((uint8_t)kMESSAGE_TYPE_ADMIN_TXNS);
+        expect(decoded_ok).toBe(true);
+        expect(decoded.offset).toBe(3);
+    });
+
+    it("round-trips transaction entries", []() {
+        AdminTxnsReplyMessage reply = {
+            1,
+            ADMIN_REPLY_FLAG_MORE,
+            { { 7, 0x80000003, 0x80000001, 42, ADMIN_TXN_STATE_ACTIVE, ADMIN_TXN_FLAG_EXCLUSIVE, 140000, 18432, 61000, ADMIN_TXN_NO_PROGRESS, "truck42", "can0" } },
+        };
+        AdminTxnsReplyMessage decoded;
+        uint8_t buffer[512];
+        size_t expected_size = MESSAGE_HEADER_SIZE + ADMIN_TXNS_REPLY_FIXED_FIELDS_SIZE + ADMIN_TXNS_REPLY_ENTRY_SIZE;
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = AdminTxnsReplyMessage_Encode(&reply, buffer, sizeof(buffer));
+        decoded_ok = AdminTxnsReplyMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(encoded_size).toBe(expected_size);
+        expect(decoded_ok).toBe(true);
+        expect(decoded.count).toBe(1);
+        expect(decoded.flags).toBe((uint8_t)ADMIN_REPLY_FLAG_MORE);
+        expect(decoded.entries[0].interface_id).toBe((uint32_t)7);
+        expect(decoded.entries[0].client_peer_id).toBe((uint32_t)0x80000003);
+        expect(decoded.entries[0].agent_peer_id).toBe((uint32_t)0x80000001);
+        expect(decoded.entries[0].txn_id).toBe((uint16_t)42);
+        expect(decoded.entries[0].state).toBe((uint8_t)ADMIN_TXN_STATE_ACTIVE);
+        expect(decoded.entries[0].flags).toBe((uint8_t)ADMIN_TXN_FLAG_EXCLUSIVE);
+        expect(decoded.entries[0].completed_steps).toBe((uint32_t)140000);
+        expect(decoded.entries[0].bytes_in_flight).toBe((uint32_t)18432);
+        expect(decoded.entries[0].age_ms).toBe((uint32_t)61000);
+        expect(decoded.entries[0].progress_age_ms).toBe((uint32_t)ADMIN_TXN_NO_PROGRESS);
+        expect((const char *)decoded.entries[0].agent_name).toBe("truck42");
+        expect((const char *)decoded.entries[0].interface_name).toBe("can0");
+    });
+
+    it("rejects a payload shorter than its declared entries", []() {
+        AdminTxnsReplyMessage decoded;
+        uint8_t payload[ADMIN_TXNS_REPLY_FIXED_FIELDS_SIZE + ADMIN_TXNS_REPLY_ENTRY_SIZE] = { 0 };
+        bool decoded_ok;
+
+        payload[0] = 2;
+
+        decoded_ok = AdminTxnsReplyMessage_Decode(&decoded, payload, sizeof(payload));
+
+        expect(decoded_ok).toBe(false);
+    });
+});
+
 describe("admin_interfaces_message", []() {
     it("round-trips the pagination offset", []() {
         AdminInterfacesMessage request = { 9 };
