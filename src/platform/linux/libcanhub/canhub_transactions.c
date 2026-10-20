@@ -104,3 +104,21 @@ int32_t CanHubTransactions_BeginResult(uint8_t begin_status)
 
     return CANHUB_ERR_ARGUMENT;
 }
+
+const char *CanHubTransactions_BeginDetail(uint8_t begin_status)
+{
+    if (begin_status == kTXN_BEGIN_STATUS_BUSY) {
+        return "transaction refused: busy, the agent runs another transaction";
+    }
+    if (begin_status == kTXN_BEGIN_STATUS_WRITE_DENIED) {
+        return "transaction refused: write denied, no write grant on this interface";
+    }
+    if (begin_status == kTXN_BEGIN_STATUS_UNSUPPORTED) {
+        return "transaction refused: the agent does not run transactions";
+    }
+    if (begin_status == kTXN_BEGIN_STATUS_RELIABLE_CHANNEL_REQUIRED) {
+        return "transaction refused: open the interface reliable";
+    }
+
+    return "transaction refused: invalid request";
+}

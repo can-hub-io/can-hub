@@ -216,9 +216,11 @@ class Transaction:
         return result
 
     def abort(self) -> None:
+        """Cancel at the agent; wait() then reports the reason cancelled."""
         with self._bus._lock:
             result = native.lib.canhub_txn_abort(self._bus._session)
         self._check(result)
+        self._ended = True
 
     def progress(self) -> TransactionProgress:
         progress = native.CanHubTxnProgress()
@@ -261,7 +263,7 @@ def begin(bus, roster: Iterable[int], origin: Optional[Origin], exclusive: bool,
     with bus._lock:
         result = native.lib.canhub_txn_begin(bus._session, ctypes.byref(request), int(timeout * MILLISECONDS_PER_SECOND))
     if result != native.OK:
-        raise CanOperationError(f"transaction refused: {native.last_error(bus._session)}")
+        raise CanOperationError(native.last_error(bus._session))
     return Transaction(bus, members)
 
 

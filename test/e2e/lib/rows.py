@@ -16,6 +16,20 @@ class HubStatus:
     dropped: int
     unroutable: int
     receive_overflows: int
+    transactions_completed: int = 0
+    transactions_aborted: int = 0
+    transaction_steps: int = 0
+
+
+@dataclass
+class TransactionRow:
+    interface: str
+    client: int
+    state: str
+    lease: str
+    txn: int
+    steps: int
+    in_flight: int
 
 
 @dataclass
@@ -75,6 +89,7 @@ def parse_status(text: str) -> HubStatus:
         text,
     )
     overflows = re.search(r"receive overflows:\s*(\d+)", text)
+    transactions = re.search(r"transactions:\s*started\s*\d+,\s*completed\s*(\d+),\s*aborted\s*(\d+),.*steps\s*(\d+)", text)
     if not peers or not frames or not overflows:
         raise ValueError(f"unparsable status:\n{text}")
     return HubStatus(
@@ -86,6 +101,9 @@ def parse_status(text: str) -> HubStatus:
         dropped=int(frames.group(3)),
         unroutable=int(frames.group(4)),
         receive_overflows=int(overflows.group(1)),
+        transactions_completed=int(transactions.group(1)) if transactions else 0,
+        transactions_aborted=int(transactions.group(2)) if transactions else 0,
+        transaction_steps=int(transactions.group(3)) if transactions else 0,
     )
 
 
@@ -127,6 +145,15 @@ def parse_interfaces(text: str) -> list[InterfaceRow]:
         if len(f) < 6 or not f[0].isdigit():
             continue
         rows.append(InterfaceRow(int(f[0]), f[1], f[2], int(f[3]), int(f[4]), int(f[5])))
+    return rows
+
+
+def parse_transactions(text: str) -> list[TransactionRow]:
+    rows = []
+    for f in _data_rows(text):
+        if len(f) < 7 or not f[1].startswith("0x"):
+            continue
+        rows.append(TransactionRow(f[0], int(f[1], 16), f[2], f[3], int(f[4]), int(f[5]), int(f[6])))
     return rows
 
 

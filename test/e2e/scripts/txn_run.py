@@ -1,12 +1,15 @@
 """Run a transaction through the hub with python-can-hub.
 
-usage: txn_run.py <url> <channel> uds <count> [--exclusive] [--timeout-ms T] [--within S] [--state-dir PATH]
+usage: txn_run.py <url> <channel> uds <count> [--exclusive] [--timeout-ms T] [--within S] [--abort-after-ms T]
+                   [--lossy] [--state-dir PATH]
        txn_run.py <url> <channel> batch <batches> <nodes> [--state-dir PATH]
 
 uds: <count> requests [02 36 n] to 0x7E0, each waiting for [.. 76 n] on 0x7E8,
 aborting on a negative response and extended by a response pending.
 batch: <batches> batches of 16 frames on 0x123, each acknowledged with its
 crc by every node of a <nodes>-strong roster (ids 0x700 | node).
+--abort-after-ms cancels the transaction that long after handing the steps
+over; --lossy opens the bus without the reliable channel a transaction needs.
 Prints "granted", then "done steps=N seconds=S" (exit 0), or "aborted
 reason=R step=S missing=[...]" (exit 2); --within S fails with exit 3 when
 the transaction took longer.
@@ -55,10 +58,16 @@ def main():
     parser.add_argument("--timeout-ms", type=int, default=200)
     parser.add_argument("--within", type=float)
     parser.add_argument("--state-dir")
+    parser.add_argument("--abort-after-ms", type=int)
+    parser.add_argument("--lossy", action="store_true")
     arguments = parser.parse_args()
 
     bus = can.Bus(
-        interface="canhub", channel=arguments.channel, url=arguments.url, state_dir=arguments.state_dir, reliable=True
+        interface="canhub",
+        channel=arguments.channel,
+        url=arguments.url,
+        state_dir=arguments.state_dir,
+        reliable=not arguments.lossy,
     )
     started = time.monotonic()
     try:
@@ -68,7 +77,11 @@ def main():
             result = run_batches(bus, arguments)
     except TransactionAborted as aborted:
         report = aborted.result
-        print(f"aborted reason={report.reason} step={report.failing_step} missing={sorted(report.missing)}", flush=True)
+        print(
+            f"aborted reason={report.reason} step={report.failing_step} missing={sorted(report.missing)}"
+            f" expected={report.expected.hex()} got={report.got.hex()}",
+            flush=True,
+        )
         sys.exit(EXIT_ABORTED)
     finally:
         bus.shutdown()
@@ -97,6 +110,9 @@ def run_requests(bus, arguments):
         print("granted", flush=True)
         transaction.template(RESPONSE_TEMPLATE, template)
         transaction.send(request_step(index) for index in range(count))
+        if arguments.abort_after_ms is not None:
+            time.sleep(arguments.abort_after_ms / MILLISECONDS_PER_SECOND)
+            transaction.abort()
         return transaction.wait()
 
 

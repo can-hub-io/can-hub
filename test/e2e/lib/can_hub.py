@@ -9,7 +9,7 @@ from pathlib import Path
 from .binaries import binary
 from .configuration import HubConfig
 from .rows import (
-    HubStatus, parse_clients, parse_interfaces, parse_peers, parse_status,
+    HubStatus, parse_clients, parse_interfaces, parse_peers, parse_status, parse_transactions,
 )
 from .server import Server
 from .shell import Result
@@ -59,6 +59,9 @@ class CanHub:
 
     def interfaces(self):
         return parse_interfaces(self.cli("interfaces").stdout)
+
+    def transactions(self):
+        return parse_transactions(self.cli("transactions").stdout)
 
     def wait_logged(self, text: str, count: int, timeout: float = 10.0) -> None:
         deadline = time.monotonic() + timeout

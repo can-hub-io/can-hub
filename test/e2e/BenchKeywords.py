@@ -457,6 +457,32 @@ class BenchKeywords:
         server.exec("tc", "qdisc", "replace", "dev", "eth0", "root",
                     "netem", "loss", f"{percent}%", check=False)
 
+    @keyword("Set Link Loss On ${server} To ${percent} Keeping Its Latency")
+    def set_link_loss_keeping_latency(self, server, percent):
+        server.exec("tc", "qdisc", "replace", "dev", "eth0", "root", "netem",
+                    "delay", f"{server.latency_ms}ms", "loss", f"{percent}%", "limit", "200000")
+
+    @keyword("Kill ${process}")
+    def kill(self, process):
+        process.stop(signal.SIGKILL)
+
+    @keyword("Transactions Relayed By ${hub}")
+    def transactions_relayed_by(self, hub):
+        return hub.transactions()
+
+    @keyword("Wait Until ${hub} Relays No Transaction")
+    def wait_until_no_transaction(self, hub, timeout=15):
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            if not hub.transactions():
+                return
+            time.sleep(0.2)
+        raise AssertionError(f"the hub still relays {hub.transactions()}")
+
+    @keyword("Status Of ${hub}")
+    def status_of(self, hub):
+        return hub.status()
+
     @keyword("Set Link MTU On ${server} To ${mtu}")
     def set_link_mtu(self, server, mtu):
         server.exec("ip", "link", "set", "eth0", "mtu", str(mtu), check=False)
