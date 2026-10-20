@@ -13,10 +13,15 @@ extern "C" {
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
 #include "protocol/subscribe_message.h"
+#include "protocol/txn_message.h"
+#include "protocol/txn_steps_message.h"
 #include "transport_port_mock.h"
 }
 
 #define TEST_INTERFACE_ID 7
+#define TXN_CHANNEL 5
+#define TXN_ID 9
+#define TXN_WINDOW (48 * 1024)
 
 static Client client;
 static TransportPortMock hub;
@@ -59,6 +64,11 @@ static void onConfigureReply(void *context, const ConfigureReplyMessage *reply);
 static void decodeSentConfigure(uint8_t slot, ConfigureMessage *configure);
 static void feedConfigureReply(uint8_t status);
 static InterfaceSettings bitrateSettings(void);
+static void openReliable(void);
+static void feedTxnBeginAck(uint8_t status);
+static void feedLeased(bool leased);
+static TxnStep classicStep(uint32_t can_id);
+static uint8_t lastFrameType(void);
 
 describe("client", []() {
     beforeEach([]() {
@@ -389,6 +399,116 @@ describe("client", []() {
     });
 });
 
+describe("client transactions", []() {
+    beforeEach([]() {
+        ClientEvents events = clientEvents();
+
+        TransportPortMock_Reset(&hub);
+        resetCallbackLog();
+        Client_Init(&client, &hub.port, &events);
+        hub_events = Client_TransportEvents(&client);
+        openReliable();
+    });
+
+    it("begins a transaction on its open channel", []() {
+        TxnBeginMessage begin;
+        TxnBeginMessage sent;
+        bool begun;
+        uint32_t last;
+
+        memset(&begin, 0, sizeof(begin));
+
+        begun = Client_BeginTransaction(&client, &begin);
+        last = (uint32_t)hub.control_count - 1;
+        TxnBeginMessage_Decode(&sent, hub.control_log[last] + MESSAGE_HEADER_SIZE, hub.control_sizes[last] - MESSAGE_HEADER_SIZE);
+
+        expect(begun).toBe(true);
+        expect(hub.control_log[last][0]).toBe((uint8_t)kMESSAGE_TYPE_TXN_BEGIN);
+        expect(sent.channel).toBe(TXN_CHANNEL);
+        expect(Client_Transaction(&client)->state).toBe((uint8_t)kTRANSACTION_SENDER_BEGINNING);
+    });
+
+    it("sends templates and step batches on the channel's stream", []() {
+        TxnBeginMessage begin;
+        TxnTemplateMessage template_message;
+        TxnStep steps[3];
+        TTRANSACTION_OFFER stopped_by;
+        uint8_t template_type;
+        uint32_t accepted;
+
+        memset(&begin, 0, sizeof(begin));
+        memset(&template_message, 0, sizeof(template_message));
+        steps[0] = classicStep(0x100);
+        steps[1] = classicStep(0x101);
+        steps[2] = classicStep(0x102);
+        Client_BeginTransaction(&client, &begin);
+        feedTxnBeginAck(kTXN_BEGIN_STATUS_OK);
+
+        Client_DefineTemplate(&client, &template_message);
+        template_type = lastFrameType();
+        accepted = Client_SendSteps(&client, steps, 3, &stopped_by);
+
+        expect(template_type).toBe((uint8_t)kMESSAGE_TYPE_TXN_TEMPLATE);
+        expect(template_message.txn_id).toBe((uint16_t)TXN_ID);
+        expect(accepted).toBe((uint32_t)3);
+        expect(lastFrameType()).toBe((uint8_t)kMESSAGE_TYPE_TXN_STEPS);
+        expect(hub.last_frame_channel).toBe(TXN_CHANNEL);
+        expect(hub.frame_count).toBe(2);
+    });
+
+    it("keeps a batch the transport refused and sends it on the next flush", []() {
+        TxnBeginMessage begin;
+        TxnStep steps[2];
+        TTRANSACTION_OFFER stopped_by;
+        int frames_while_full;
+        bool flushed;
+
+        memset(&begin, 0, sizeof(begin));
+        steps[0] = classicStep(0x100);
+        steps[1] = classicStep(0x101);
+        Client_BeginTransaction(&client, &begin);
+        feedTxnBeginAck(kTXN_BEGIN_STATUS_OK);
+        hub.frame_result = false;
+
+        Client_SendSteps(&client, steps, 2, &stopped_by);
+        frames_while_full = hub.frame_count;
+        hub.frame_result = true;
+        flushed = Client_FlushTransaction(&client);
+
+        expect(frames_while_full).toBe(0);
+        expect(flushed).toBe(true);
+        expect(hub.frame_count).toBe(1);
+        expect(lastFrameType()).toBe((uint8_t)kMESSAGE_TYPE_TXN_STEPS);
+    });
+
+    it("refuses to write while another client's transaction holds the interface", []() {
+        FrameMessage frame = { 0x123, 0, 0, 1, 0, 0, { 0x55 } };
+        TCLIENT_SEND_RESULT while_leased;
+        TCLIENT_SEND_RESULT after_lease;
+
+        feedLeased(true);
+        while_leased = Client_SendFrame(&client, &frame, 1000);
+        feedLeased(false);
+        after_lease = Client_SendFrame(&client, &frame, 1000);
+
+        expect(while_leased).toBe(kCLIENT_SEND_LEASED);
+        expect(after_lease).toBe(kCLIENT_SEND_SENT);
+    });
+
+    it("refuses to begin a second transaction while one runs", []() {
+        TxnBeginMessage begin;
+        bool second;
+
+        memset(&begin, 0, sizeof(begin));
+        Client_BeginTransaction(&client, &begin);
+        feedTxnBeginAck(kTXN_BEGIN_STATUS_OK);
+
+        second = Client_BeginTransaction(&client, &begin);
+
+        expect(second).toBe(false);
+    });
+});
+
 static ClientEvents clientEvents()
 {
     ClientEvents events = {
@@ -623,4 +743,50 @@ static InterfaceSettings bitrateSettings(void)
     settings.bitrate = 500000;
 
     return settings;
+}
+
+static void openReliable(void)
+{
+    Client_OpenById(&client, TEST_INTERFACE_ID, OPEN_FLAG_RELIABLE | OPEN_FLAG_WANT_WRITE);
+    connect();
+    feedOpenAck(OPEN_STATUS_OK, TXN_CHANNEL);
+}
+
+static void feedTxnBeginAck(uint8_t status)
+{
+    TxnBeginAckMessage ack = { TXN_CHANNEL, status, TXN_ID, TXN_WINDOW };
+    uint8_t wire[64];
+    size_t size = TxnBeginAckMessage_Encode(&ack, wire, sizeof(wire));
+
+    hub_events.on_control(hub_events.context, wire, size, 1000);
+}
+
+static void feedLeased(bool leased)
+{
+    InterfaceStatusMessage status;
+    uint8_t wire[MESSAGE_HEADER_SIZE + INTERFACE_STATUS_BODY_SIZE];
+    size_t size;
+
+    memset(&status, 0, sizeof(status));
+    status.interface_count = 1;
+    status.entries[0].channel = TXN_CHANNEL;
+    status.entries[0].flags = leased ? INTERFACE_STATUS_FLAG_LEASED : 0;
+    size = InterfaceStatusMessage_Encode(&status, wire, sizeof(wire));
+
+    hub_events.on_control(hub_events.context, wire, size, 1000);
+}
+
+static TxnStep classicStep(uint32_t can_id)
+{
+    TxnStep step;
+
+    memset(&step, 0, sizeof(step));
+    step.can_id = can_id;
+    step.payload_length = FRAME_PAYLOAD_MAX_CLASSIC;
+    return step;
+}
+
+static uint8_t lastFrameType(void)
+{
+    return hub.last_frame[0];
 }

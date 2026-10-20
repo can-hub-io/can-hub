@@ -5,6 +5,7 @@
 
 #include "agent/ports/transport_events.h"
 #include "agent/ports/transport_port.h"
+#include "client/transaction_sender.h"
 #include "shared/egress_shaper.h"
 #include "protocol/error_message.h"
 #include "protocol/frame_message.h"
@@ -31,6 +32,7 @@ typedef enum tclient_send_result_e {
     kCLIENT_SEND_SENT = 0,
     kCLIENT_SEND_RATE_LIMITED,
     kCLIENT_SEND_FAILED,
+    kCLIENT_SEND_LEASED,
     kCLIENT_SEND_RESULT_MAX,
 } TCLIENT_SEND_RESULT;
 
@@ -62,6 +64,8 @@ typedef struct {
     ConfigureMessage configure_request;
     EgressShaper shaper;
     uint64_t frames_paced_dropped;
+    bool interface_leased;
+    TransactionSender transaction;
 } Client;
 
 void Client_Init(Client *self, TransportPort *hub, const ClientEvents *events);
@@ -76,3 +80,11 @@ TCLIENT_SEND_RESULT Client_SendFrame(Client *self, FrameMessage *frame, uint64_t
 uint64_t Client_FramesPacedDropped(const Client *self);
 uint8_t Client_State(const Client *self);
 uint8_t Client_Channel(const Client *self);
+bool Client_InterfaceLeased(const Client *self);
+bool Client_BeginTransaction(Client *self, TxnBeginMessage *begin);
+bool Client_DefineTemplate(Client *self, TxnTemplateMessage *template_message);
+uint32_t Client_SendSteps(Client *self, const TxnStep *steps, uint32_t count, TTRANSACTION_OFFER *stopped_by);
+TTRANSACTION_OFFER Client_EndTransaction(Client *self);
+bool Client_FlushTransaction(Client *self);
+void Client_AbortTransaction(Client *self);
+const TransactionSender *Client_Transaction(const Client *self);
