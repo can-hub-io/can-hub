@@ -181,6 +181,19 @@ bool ClientSession_HoldsReliable(const ClientSession *self, uint32_t interface_i
     return false;
 }
 
+bool ClientSession_HoldsChannels(const ClientSession *self)
+{
+    uint8_t i;
+
+    for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
+        if (self->bindings[i].in_use) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 bool ClientSession_TakeReliableBinding(ClientSession *self, uint32_t *interface_id)
 {
     uint8_t i;

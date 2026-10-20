@@ -33,6 +33,29 @@ describe("client_session", []() {
         expect(first_channel == second_channel).toBe(false);
     });
 
+    it("holds channels only while an interface is open", []() {
+        ChannelOpenRequest request = {
+            .interface_id = 7,
+            .suppress_echo = false,
+            .can_write = false,
+            .reliable = false,
+        };
+        uint8_t channel = 0;
+        bool held_before;
+        bool held_open;
+        bool held_after;
+
+        held_before = ClientSession_HoldsChannels(&session);
+        ClientSession_OpenInterface(&session, &request, &channel);
+        held_open = ClientSession_HoldsChannels(&session);
+        ClientSession_CloseChannel(&session, channel);
+        held_after = ClientSession_HoldsChannels(&session);
+
+        expect(held_before).toBe(false);
+        expect(held_open).toBe(true);
+        expect(held_after).toBe(false);
+    });
+
     it("records the reliable flag on the binding", []() {
         ChannelOpenRequest reliable_request = {
             .interface_id = 7,

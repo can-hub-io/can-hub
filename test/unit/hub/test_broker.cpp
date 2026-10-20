@@ -24,6 +24,8 @@ extern "C" {
 #define ADMIN_PEER 300
 #define TRUCK_FINGERPRINT "aa11bb22cc33dd44ee55ff66aa77bb88cc99dd00ee11ff22aa33bb44cc55dd66"
 #define OTHER_FINGERPRINT "0000000000000000000000000000000000000000000000000000000000000000"
+#define UNKNOWN_FINGERPRINT "1111111111111111111111111111111111111111111111111111111111111111"
+#define FIRST_CONTACT_FINGERPRINT "2222222222222222222222222222222222222222222222222222222222222222"
 #define BUS_INTERFACE_INDEX 2
 #define CLIENT_TOKEN 1
 #define SUPPRESS_ECHO_AND_WRITE (OPEN_FLAG_SUPPRESS_OWN_ECHO | OPEN_FLAG_WANT_WRITE)
@@ -33,6 +35,9 @@ extern "C" {
 #define PER_HOST_SHARE 4
 #define HUB_WIDE_SHARE (HUB_PEERS_MAX / 2)
 #define CROWD_PEER_BASE 10000
+#define FULL_AGENT_BASE 20000
+#define FIRST_CONTACT_SHARE (2 * HUB_PEERS_MAX)
+#define AGENTS_FILLING_REGISTRY (INTERFACE_REGISTRY_MAX / REGISTER_INTERFACES_MAX)
 #define CONFIGURED_BITRATE 500000
 #define CONFIGURED_SAMPLE_POINT 875
 
@@ -66,6 +71,11 @@ static void sendConfigure(uint32_t peer_id, const char *interface_name, uint8_t 
 static uint32_t lastForwardedRequestId(void);
 static void replyFromAgent(uint32_t request_id, uint8_t status, const char *detail);
 static void connectDistinctClients(uint32_t count);
+static void crowdWithUnknownClients(uint32_t count);
+static void registerBusWithFingerprint(uint32_t peer_id, const char *fingerprint);
+static void fillRegistryWithAgents(bool with_fingerprints);
+static void registerFullAgentAt(uint32_t index, const char *fingerprint, uint64_t now_us);
+static void connectClientAt(uint32_t peer_id, const char *fingerprint, uint64_t now_us);
 static void listRejected(AdminRejectedReplyMessage *reply);
 
 static void connectPeer(uint32_t peer_id, const char *fingerprint, bool local)
@@ -537,7 +547,7 @@ describe("broker", []() {
             BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
         });
 
-        it("pins an agent fingerprint from the admin plane", []() {
+        it("enrolls an agent fingerprint from the admin plane", []() {
             AdminPinAddMessage request;
             AdminPinAddReplyMessage reply;
             uint8_t reply_type;
@@ -556,6 +566,7 @@ describe("broker", []() {
             expect(reply.status).toBe(ADMIN_STATUS_OK);
             expect((const char *)identity_store.names[0]).toBe("truck42");
             expect((const char *)identity_store.fingerprints[0]).toBe(TRUCK_FINGERPRINT);
+            expect(identity_store.enrolled[0]).toBe(true);
         });
     });
 
@@ -1708,6 +1719,213 @@ describe("broker", []() {
         });
     });
 
+    describe("displacement when full", []() {
+        static uint32_t newest_unknown;
+
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            IdentityStoreMock_Reset(&identity_store);
+            AuthorizationMock_Reset(&authorization);
+            Broker_Init(&broker, &transport.port, &identity_store.port, &authorization.port, NULL, false);
+            events = Broker_Events(&broker);
+            IdentityStoreMock_Preload(&identity_store, "truck42", TRUCK_FINGERPRINT);
+            newest_unknown = CROWD_PEER_BASE + HUB_PEERS_MAX - 1;
+        });
+
+        it("lets a pinned agent in by displacing the newest unknown client", []() {
+            crowdWithUnknownClients(HUB_PEERS_MAX);
+
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe(newest_unknown);
+        });
+
+        it("tells the displaced peer why it was closed", []() {
+            ErrorMessage error;
+
+            crowdWithUnknownClients(HUB_PEERS_MAX);
+
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+            replyAt(0, &error, ErrorMessage_Decode);
+
+            expect(transport.control_peers[0]).toBe(newest_unknown);
+            expect(error.code).toBe((uint16_t)kERROR_CODE_HUB_FULL);
+            expect((const char *)error.detail).toBe("displaced by a known peer");
+        });
+
+        it("lets in a client an ACL names", []() {
+            AuthorizationMock_Grant(&authorization, OTHER_FINGERPRINT, "truck42", "can0", true, false);
+            crowdWithUnknownClients(HUB_PEERS_MAX);
+
+            connectClientWithFingerprint(CLIENT_PEER, OTHER_FINGERPRINT);
+
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe(newest_unknown);
+        });
+
+        it("lets in a local peer", []() {
+            crowdWithUnknownClients(HUB_PEERS_MAX);
+
+            BrokerDriver_ConnectAdmin(&events, ADMIN_PEER);
+
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe(newest_unknown);
+        });
+
+        it("turns away an unknown peer", []() {
+            crowdWithUnknownClients(HUB_PEERS_MAX);
+
+            connectClientWithFingerprint(CLIENT_PEER, UNKNOWN_FINGERPRINT);
+
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)CLIENT_PEER);
+        });
+
+        it("displaces a peer that has not said hello first", []() {
+            crowdWithUnknownClients(HUB_PEERS_MAX - 1);
+            connectPeer(AWAITING_PEER_BASE, UNKNOWN_FINGERPRINT, false);
+
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+
+            expect(transport.last_closed_peer).toBe((uint32_t)AWAITING_PEER_BASE);
+        });
+
+        it("displaces an idle unknown client before one with open channels", []() {
+            uint32_t interface_id;
+            uint32_t newest_idle = CROWD_PEER_BASE + HUB_PEERS_MAX - 3;
+
+            BrokerDriver_ConnectAgent(&events, &transport, BUS_AGENT_PEER, &bus_registration);
+            interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            crowdWithUnknownClients(HUB_PEERS_MAX - 1);
+            openInterface(newest_idle + 1, interface_id, 0);
+
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+
+            expect(transport.last_closed_peer).toBe(newest_idle);
+        });
+
+        it("does not count a fingerprint pinned on first contact as known", []() {
+            registerBusWithFingerprint(BUS_AGENT_PEER, FIRST_CONTACT_FINGERPRINT);
+            events.on_peer_disconnected(events.context, BUS_AGENT_PEER, 0);
+            crowdWithUnknownClients(HUB_PEERS_MAX);
+
+            connectClientWithFingerprint(CLIENT_PEER, FIRST_CONTACT_FINGERPRINT);
+
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)CLIENT_PEER);
+        });
+
+        it("displaces an agent pinned on first contact once no unknown client is left", []() {
+            registerBusWithFingerprint(BUS_AGENT_PEER, FIRST_CONTACT_FINGERPRINT);
+            connectDistinctClients(HUB_PEERS_MAX - 1);
+
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+
+            expect(transport.last_closed_peer).toBe((uint32_t)BUS_AGENT_PEER);
+        });
+
+        it("keeps an agent the admin enrolled", []() {
+            AuthorizationMock_Grant(&authorization, OTHER_FINGERPRINT, "truck42", "can0", true, false);
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+            connectDistinctClients(HUB_PEERS_MAX - 1);
+            HubTransportPortMock_Reset(&transport);
+
+            connectClientWithFingerprint(CLIENT_PEER, OTHER_FINGERPRINT);
+
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)CLIENT_PEER);
+        });
+
+        it("turns away a known peer when no peer can be displaced", []() {
+            connectDistinctClients(HUB_PEERS_MAX);
+
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)AGENT_PEER);
+        });
+    });
+
+    describe("first-contact limits", []() {
+        beforeEach([]() {
+            HubTransportPortMock_Reset(&transport);
+            IdentityStoreMock_Reset(&identity_store);
+            AuthorizationMock_Reset(&authorization);
+            Broker_Init(&broker, &transport.port, &identity_store.port, &authorization.port, NULL, false);
+            events = Broker_Events(&broker);
+            IdentityStoreMock_Preload(&identity_store, "truck42", TRUCK_FINGERPRINT);
+        });
+
+        it("lets an enrolled agent register by displacing the newest first-contact agent", []() {
+            RegisterAckMessage ack;
+
+            fillRegistryWithAgents(true);
+
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+            lastReply(&ack, RegisterAckMessage_Decode);
+
+            expect(ack.status).toBe((uint8_t)REGISTER_STATUS_OK);
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)(FULL_AGENT_BASE + AGENTS_FILLING_REGISTRY - 1));
+        });
+
+        it("turns an enrolled agent away when no first-contact agent can make room", []() {
+            RegisterAckMessage ack;
+
+            fillRegistryWithAgents(false);
+
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+            lastReply(&ack, RegisterAckMessage_Decode);
+
+            expect(ack.status).toBe((uint8_t)REGISTER_STATUS_REJECTED);
+            expect(transport.last_closed_peer).toBe((uint32_t)AGENT_PEER);
+        });
+
+        it("keeps pinning first contacts below the limit", []() {
+            identity_store.earlier_first_contact_pins = FIRST_CONTACT_SHARE - 1;
+
+            registerBusWithFingerprint(BUS_AGENT_PEER, FIRST_CONTACT_FINGERPRINT);
+
+            expect(registerAckStatus()).toBe((uint8_t)REGISTER_STATUS_OK);
+            expect(identity_store.pin_calls).toBe(1);
+        });
+
+        it("turns a new agent away once first-contact pins are full", []() {
+            ErrorMessage error;
+
+            identity_store.earlier_first_contact_pins = FIRST_CONTACT_SHARE;
+
+            registerBusWithFingerprint(BUS_AGENT_PEER, FIRST_CONTACT_FINGERPRINT);
+            lastReply(&error, ErrorMessage_Decode);
+
+            expect(registerAckStatus()).toBe((uint8_t)REGISTER_STATUS_UNKNOWN_AGENT);
+            expect((const char *)error.detail).toBe("first-contact pins are full; enroll the agent with pins add");
+            expect(identity_store.pin_calls).toBe(0);
+        });
+
+        it("lists the turned-away agent for the admin", []() {
+            AdminRejectedReplyMessage reply;
+
+            identity_store.earlier_first_contact_pins = FIRST_CONTACT_SHARE;
+
+            registerBusWithFingerprint(BUS_AGENT_PEER, FIRST_CONTACT_FINGERPRINT);
+            listRejected(&reply);
+
+            expect(reply.count).toBe((uint8_t)1);
+            expect((const char *)reply.entries[0].name).toBe("bus7");
+            expect(reply.entries[0].reason).toBe((uint8_t)ADMIN_REJECTED_REASON_NOT_ALLOWED);
+        });
+
+        it("still admits an agent the admin enrolled past the limit", []() {
+            identity_store.earlier_first_contact_pins = FIRST_CONTACT_SHARE;
+
+            registerAgentWithFingerprint(AGENT_PEER, TRUCK_FINGERPRINT);
+
+            expect(registerAckStatus()).toBe((uint8_t)REGISTER_STATUS_OK);
+        });
+    });
+
     describe("client write authorization", []() {
         static uint32_t can0_interface_id;
 
@@ -2458,4 +2676,74 @@ static void connectDistinctClients(uint32_t count)
     for(i=0; i<count; i++) {
         BrokerDriver_ConnectClient(&events, CROWD_PEER_BASE + i);
     }
+}
+
+static void crowdWithUnknownClients(uint32_t count)
+{
+    uint32_t i;
+
+    for(i=0; i<count; i++) {
+        connectClientAt(CROWD_PEER_BASE + i, UNKNOWN_FINGERPRINT, i + 1);
+    }
+    HubTransportPortMock_Reset(&transport);
+}
+
+static void connectClientAt(uint32_t peer_id, const char *fingerprint, uint64_t now_us)
+{
+    HubPeerConnectInfo info = { fingerprint, NULL, NULL, kPEER_TRANSPORT_TLS, false };
+    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_CLIENT, 0, "" };
+    uint8_t encoded[128];
+    size_t encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+
+    events.on_peer_connected(events.context, peer_id, &info, now_us);
+    events.on_peer_control(events.context, peer_id, encoded, encoded_size, now_us);
+}
+
+static void registerBusWithFingerprint(uint32_t peer_id, const char *fingerprint)
+{
+    HubPeerConnectInfo info = { fingerprint, NULL, NULL, kPEER_TRANSPORT_TLS, false };
+    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_AGENT, 0, "" };
+    uint8_t encoded[512];
+    size_t encoded_size;
+
+    events.on_peer_connected(events.context, peer_id, &info, 0);
+    encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+    events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
+    encoded_size = RegisterMessage_Encode(&bus_registration, encoded, sizeof(encoded));
+    events.on_peer_control(events.context, peer_id, encoded, encoded_size, 0);
+}
+
+static void fillRegistryWithAgents(bool with_fingerprints)
+{
+    char fingerprint[IDENTITY_FINGERPRINT_HEX_SIZE];
+    uint32_t i;
+
+    for(i=0; i<AGENTS_FILLING_REGISTRY; i++) {
+        snprintf(fingerprint, sizeof(fingerprint), "%064u", i);
+        registerFullAgentAt(i, with_fingerprints ? fingerprint : NULL, i + 1);
+        HubTransportPortMock_Reset(&transport);
+    }
+}
+
+static void registerFullAgentAt(uint32_t index, const char *fingerprint, uint64_t now_us)
+{
+    HubPeerConnectInfo info = { fingerprint, NULL, NULL, kPEER_TRANSPORT_TLS, false };
+    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_AGENT, 0, "" };
+    RegisterMessage registration;
+    uint8_t encoded[1024];
+    size_t encoded_size;
+    uint8_t i;
+
+    memset(&registration, 0, sizeof(registration));
+    snprintf(registration.agent_name, sizeof(registration.agent_name), "fake%u", index);
+    registration.interface_count = REGISTER_INTERFACES_MAX;
+    for(i=0; i<REGISTER_INTERFACES_MAX; i++) {
+        snprintf(registration.interface_names[i], sizeof(registration.interface_names[i]), "can%u", i);
+    }
+
+    events.on_peer_connected(events.context, FULL_AGENT_BASE + index, &info, now_us);
+    encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+    events.on_peer_control(events.context, FULL_AGENT_BASE + index, encoded, encoded_size, now_us);
+    encoded_size = RegisterMessage_Encode(&registration, encoded, sizeof(encoded));
+    events.on_peer_control(events.context, FULL_AGENT_BASE + index, encoded, encoded_size, now_us);
 }

@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+static bool displacesBefore(const HubPeer *peer, const HubPeer *other);
+
 /* ---------- public ---------- */
 
 void PeerDirectory_Reset(PeerDirectory *self)
@@ -74,6 +76,49 @@ HubPeer *PeerDirectory_FindAgentByName(PeerDirectory *self, const char *agent_na
     return NULL;
 }
 
+HubPeer *PeerDirectory_FindDisplaceable(PeerDirectory *self)
+{
+    HubPeer *candidate = NULL;
+    HubPeer *peer;
+    uint16_t i;
+
+    for(i=0; i<PEER_DIRECTORY_MAX; i++) {
+        peer = &self->peers[i];
+        if (!peer->in_use || HubPeer_Displacement(peer) == kHUB_PEER_DISPLACEMENT_NEVER) {
+            continue;
+        }
+        if (candidate == NULL || displacesBefore(peer, candidate)) {
+            candidate = peer;
+        }
+    }
+
+    return candidate;
+}
+
+HubPeer *PeerDirectory_FindDisplaceableAgent(PeerDirectory *self)
+{
+    HubPeer *candidate = NULL;
+    HubPeer *peer;
+    uint16_t i;
+
+    for(i=0; i<PEER_DIRECTORY_MAX; i++) {
+        peer = &self->peers[i];
+        if (!peer->in_use || HubPeer_Displacement(peer) != kHUB_PEER_DISPLACEMENT_UNVOUCHED_AGENT) {
+            continue;
+        }
+        if (candidate == NULL || peer->connected_at_us > candidate->connected_at_us) {
+            candidate = peer;
+        }
+    }
+
+    return candidate;
+}
+
+bool PeerDirectory_IsFull(const PeerDirectory *self)
+{
+    return PeerDirectory_Count(self) == PEER_DIRECTORY_MAX;
+}
+
 uint16_t PeerDirectory_Count(const PeerDirectory *self)
 {
     uint16_t count = 0;
@@ -141,4 +186,18 @@ void PeerDirectory_List(const PeerDirectory *self, uint16_t offset, AdminPeersRe
         }
         HubPeer_FillAdminEntry(peer, &reply->entries[reply->count++], now_us);
     }
+}
+
+/* ---------- private ---------- */
+
+static bool displacesBefore(const HubPeer *peer, const HubPeer *other)
+{
+    uint8_t peer_displacement = HubPeer_Displacement(peer);
+    uint8_t other_displacement = HubPeer_Displacement(other);
+
+    if (peer_displacement != other_displacement) {
+        return peer_displacement < other_displacement;
+    }
+
+    return peer->connected_at_us > other->connected_at_us;
 }

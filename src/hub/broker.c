@@ -32,6 +32,7 @@ static_assert(
 #define HELLO_TIMEOUT_US 5000000
 #define AWAITING_HELLO_MAX (PEER_DIRECTORY_MAX / 2)
 #define AWAITING_HELLO_PER_HOST_MAX 4
+#define FIRST_CONTACT_PINS_MAX (2 * PEER_DIRECTORY_MAX)
 #define FRAME_PAYLOAD_LENGTH_OFFSET (MESSAGE_HEADER_SIZE + 13)
 #define FRAME_BUFFER_SIZE (MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD)
 #define FRAME_PACE_OVERHEAD_BITS 64
@@ -47,6 +48,8 @@ typedef void (*TControlHandler)(
 
 static void onPeerConnected(void *context, uint32_t peer_id, const HubPeerConnectInfo *info, uint64_t now_us);
 static bool admitsPeerAwaitingHello(Broker *self, const HubPeerConnectInfo *info);
+static bool makeRoomForKnownPeer(Broker *self, const HubPeerConnectInfo *info);
+static bool connectingPeerIsKnown(Broker *self, const HubPeerConnectInfo *info);
 static void onPeerDisconnected(void *context, uint32_t peer_id, uint64_t now_us);
 static void onPeerControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size, uint64_t now_us);
 static bool onPeerFrame(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
@@ -123,10 +126,16 @@ static void releaseReliableBindings(Broker *self, HubPeer *client);
 static void revertAgentChannelIfUnused(Broker *self, uint32_t interface_id);
 static bool displaceGhostPeer(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
 static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const RegisterMessage *registration);
+static bool agentIsEnrolled(Broker *self, const HubPeer *peer);
+static bool firstContactPinsFull(Broker *self);
+static bool makeRoomForInterfaces(Broker *self, uint8_t interface_count);
+static bool registryHasRoomFor(const Broker *self, uint8_t interface_count);
+static bool clientIsNamedByAcl(Broker *self, const HubPeer *peer);
 static bool clientIsAdmitted(Broker *self, const HubPeer *peer);
 static void rejectClient(Broker *self, HubPeer *peer);
 static void rejectAgent(Broker *self, HubPeer *peer, const RegisterMessage *registration, uint8_t identity_status);
 static void recordRejection(Broker *self, const HubPeer *peer, const char *name, uint8_t reason);
+static const char *unknownAgentDetail(const Broker *self);
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
 static void reattachClientsToAgent(Broker *self, uint32_t agent_peer_id);
 static void detachInterface(Broker *self, const InterfaceEntry *entry);
@@ -326,13 +335,13 @@ static void onPeerConnected(void *context, uint32_t peer_id, const HubPeerConnec
         return;
     }
 
-    peer = PeerDirectory_Allocate(&self->directory, peer_id);
-    if (peer == NULL) {
+    if (PeerDirectory_IsFull(&self->directory) && !makeRoomForKnownPeer(self, info)) {
         sendError(self, peer_id, kERROR_CODE_HUB_FULL, "no peer slot available");
         self->transport->close_peer(self->transport->context, peer_id);
         return;
     }
 
+    peer = PeerDirectory_Allocate(&self->directory, peer_id);
     peer->local = info->local;
     peer->transport_kind = info->transport_kind;
     peer->connected_at_us = now_us;
@@ -360,6 +369,36 @@ static bool admitsPeerAwaitingHello(Broker *self, const HubPeerConnectInfo *info
     }
 
     return PeerDirectory_CountAwaitingHelloFrom(&self->directory, info->origin_host) < AWAITING_HELLO_PER_HOST_MAX;
+}
+
+static bool makeRoomForKnownPeer(Broker *self, const HubPeerConnectInfo *info)
+{
+    HubPeer *displaced;
+
+    if (!connectingPeerIsKnown(self, info)) {
+        return false;
+    }
+    displaced = PeerDirectory_FindDisplaceable(&self->directory);
+    if (displaced == NULL) {
+        return false;
+    }
+
+    sendError(self, displaced->peer_id, kERROR_CODE_HUB_FULL, "displaced by a known peer");
+    disconnectPeer(self, displaced->peer_id);
+
+    return true;
+}
+
+static bool connectingPeerIsKnown(Broker *self, const HubPeerConnectInfo *info)
+{
+    if (info->local || info->fingerprint_hex == NULL) {
+        return true;
+    }
+    if (self->authorization != NULL && self->authorization->knows(self->authorization->context, info->fingerprint_hex)) {
+        return true;
+    }
+
+    return self->identity_store != NULL && self->identity_store->knows(self->identity_store->context, info->fingerprint_hex);
 }
 
 static void onPeerDisconnected(void *context, uint32_t peer_id, uint64_t now_us)
@@ -548,6 +587,7 @@ static void handleHello(Broker *self, HubPeer *peer, const MessageHeader *header
     if (hello.name[0] != '\0') {
         HubPeer_SetAgentName(peer, hello.name);
     }
+    peer->vouched = clientIsNamedByAcl(self, peer);
     if (!clientIsAdmitted(self, peer)) {
         rejectClient(self, peer);
         return;
@@ -585,8 +625,12 @@ static void handleRegister(Broker *self, HubPeer *peer, const MessageHeader *hea
         return;
     }
 
+    peer->vouched = agentIsEnrolled(self, peer);
     registered = InterfaceRegistry_RegisterAgent(&self->registry, peer->peer_id, &registration, &ack);
     if (!registered && displaceGhostPeer(self, peer, &registration)) {
+        registered = InterfaceRegistry_RegisterAgent(&self->registry, peer->peer_id, &registration, &ack);
+    }
+    if (!registered && peer->vouched && makeRoomForInterfaces(self, registration.interface_count)) {
         registered = InterfaceRegistry_RegisterAgent(&self->registry, peer->peer_id, &registration, &ack);
     }
     sendControl(self, peer, encoded, RegisterAckMessage_Encode(&ack, encoded, sizeof(encoded)));
@@ -892,7 +936,7 @@ static void handleAdminPinAdd(Broker *self, HubPeer *peer, const MessageHeader *
     }
 
     if (self->identity_store != NULL) {
-        added = self->identity_store->pin(self->identity_store->context, request.agent_name, request.fingerprint_hex);
+        added = self->identity_store->enroll(self->identity_store->context, request.agent_name, request.fingerprint_hex);
     }
     reply.status = added ? ADMIN_STATUS_OK : ADMIN_STATUS_PIN_FAILED;
     sendControl(self, peer, encoded, AdminPinAddReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
@@ -1753,7 +1797,7 @@ static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const Regi
     }
 
     if (!self->identity_store->lookup(self->identity_store->context, registration->agent_name, pinned)) {
-        if (self->require_known_peers) {
+        if (self->require_known_peers || firstContactPinsFull(self)) {
             return REGISTER_STATUS_UNKNOWN_AGENT;
         }
         if (!self->identity_store->pin(
@@ -1769,16 +1813,61 @@ static uint8_t agentIdentityStatus(Broker *self, const HubPeer *peer, const Regi
     return strcmp(pinned, peer->fingerprint_hex) == 0 ? REGISTER_STATUS_OK : REGISTER_STATUS_IDENTITY_MISMATCH;
 }
 
+static bool agentIsEnrolled(Broker *self, const HubPeer *peer)
+{
+    if (self->identity_store == NULL || peer->fingerprint_hex[0] == '\0') {
+        return false;
+    }
+
+    return self->identity_store->knows(self->identity_store->context, peer->fingerprint_hex);
+}
+
+static bool firstContactPinsFull(Broker *self)
+{
+    return self->identity_store->count_first_contact(self->identity_store->context) >= FIRST_CONTACT_PINS_MAX;
+}
+
+static bool makeRoomForInterfaces(Broker *self, uint8_t interface_count)
+{
+    HubPeer *displaced;
+
+    if (registryHasRoomFor(self, interface_count)) {
+        return false;
+    }
+
+    while (!registryHasRoomFor(self, interface_count)) {
+        displaced = PeerDirectory_FindDisplaceableAgent(&self->directory);
+        if (displaced == NULL) {
+            return false;
+        }
+        sendError(self, displaced->peer_id, kERROR_CODE_HUB_FULL, "displaced by an enrolled agent");
+        disconnectPeer(self, displaced->peer_id);
+    }
+
+    return true;
+}
+
+static bool registryHasRoomFor(const Broker *self, uint8_t interface_count)
+{
+    return INTERFACE_REGISTRY_MAX - InterfaceRegistry_Count(&self->registry) >= interface_count;
+}
+
+static bool clientIsNamedByAcl(Broker *self, const HubPeer *peer)
+{
+    if (self->authorization == NULL || peer->fingerprint_hex[0] == '\0') {
+        return false;
+    }
+
+    return self->authorization->knows(self->authorization->context, peer->fingerprint_hex);
+}
+
 static bool clientIsAdmitted(Broker *self, const HubPeer *peer)
 {
     if (!self->require_known_peers || peer->fingerprint_hex[0] == '\0') {
         return true;
     }
-    if (self->authorization == NULL) {
-        return false;
-    }
 
-    return self->authorization->knows(self->authorization->context, peer->fingerprint_hex);
+    return peer->vouched;
 }
 
 static void rejectClient(Broker *self, HubPeer *peer)
@@ -1799,7 +1888,7 @@ static void rejectAgent(Broker *self, HubPeer *peer, const RegisterMessage *regi
 
     if (identity_status == REGISTER_STATUS_UNKNOWN_AGENT) {
         recordRejection(self, peer, registration->agent_name, ADMIN_REJECTED_REASON_NOT_ALLOWED);
-        sendError(self, peer->peer_id, kERROR_CODE_ROLE_REJECTED, "agent fingerprint not in the hub allowlist");
+        sendError(self, peer->peer_id, kERROR_CODE_ROLE_REJECTED, unknownAgentDetail(self));
     } else if (identity_status == REGISTER_STATUS_IDENTITY_MISMATCH) {
         recordRejection(self, peer, registration->agent_name, ADMIN_REJECTED_REASON_FINGERPRINT_MISMATCH);
         sendError(self, peer->peer_id, kERROR_CODE_ROLE_REJECTED, "agent name pinned to a different fingerprint");
@@ -1808,6 +1897,15 @@ static void rejectAgent(Broker *self, HubPeer *peer, const RegisterMessage *regi
     }
 
     disconnectPeer(self, peer->peer_id);
+}
+
+static const char *unknownAgentDetail(const Broker *self)
+{
+    if (self->require_known_peers) {
+        return "agent fingerprint not in the hub allowlist";
+    }
+
+    return "first-contact pins are full; enroll the agent with pins add";
 }
 
 static void recordRejection(Broker *self, const HubPeer *peer, const char *name, uint8_t reason)

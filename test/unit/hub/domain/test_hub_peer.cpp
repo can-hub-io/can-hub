@@ -20,6 +20,7 @@ static HubPeer other;
 static void fingerprintAgent(HubPeer *agent, const char *fingerprint);
 static void plaintextAgent(HubPeer *agent, uint8_t transport_kind, const char *host);
 static void localAgent(HubPeer *agent);
+static void fingerprintClient(HubPeer *client);
 
 describe("hub_peer", []() {
     beforeEach([]() {
@@ -94,6 +95,72 @@ describe("hub_peer", []() {
         expect((const char *)entry.agent_name).toBe("truck42");
         expect((const char *)entry.fingerprint_hex).toBe(FINGERPRINT);
         expect((const char *)entry.origin).toBe("203.0.113.7:51000");
+    });
+
+    describe("displacement", []() {
+        beforeEach([]() {
+            memset(&peer, 0, sizeof(peer));
+            memset(&other, 0, sizeof(other));
+        });
+
+        it("never displaces a local peer", []() {
+            localAgent(&peer);
+
+            expect(HubPeer_Displacement(&peer)).toBe((uint8_t)kHUB_PEER_DISPLACEMENT_NEVER);
+        });
+
+        it("never displaces a plaintext peer", []() {
+            plaintextAgent(&peer, kPEER_TRANSPORT_TCP, AGENT_HOST);
+            peer.role = kHUB_PEER_ROLE_CLIENT;
+
+            expect(HubPeer_Displacement(&peer)).toBe((uint8_t)kHUB_PEER_DISPLACEMENT_NEVER);
+        });
+
+        it("displaces first a peer that has not said hello", []() {
+            fingerprintAgent(&peer, FINGERPRINT);
+
+            expect(HubPeer_Displacement(&peer)).toBe((uint8_t)kHUB_PEER_DISPLACEMENT_UNIDENTIFIED);
+        });
+
+        it("displaces first an agent that has not registered", []() {
+            fingerprintAgent(&peer, FINGERPRINT);
+            peer.role = kHUB_PEER_ROLE_AGENT;
+
+            expect(HubPeer_Displacement(&peer)).toBe((uint8_t)kHUB_PEER_DISPLACEMENT_UNIDENTIFIED);
+        });
+
+        it("never displaces an agent the admin enrolled", []() {
+            fingerprintAgent(&peer, FINGERPRINT);
+            peer.role = kHUB_PEER_ROLE_AGENT;
+            HubPeer_SetAgentName(&peer, "truck42");
+            peer.vouched = true;
+
+            expect(HubPeer_Displacement(&peer)).toBe((uint8_t)kHUB_PEER_DISPLACEMENT_NEVER);
+        });
+
+        it("displaces an agent pinned on first contact after every unknown client", []() {
+            fingerprintAgent(&peer, FINGERPRINT);
+            peer.role = kHUB_PEER_ROLE_AGENT;
+            HubPeer_SetAgentName(&peer, "truck42");
+
+            expect(HubPeer_Displacement(&peer)).toBe((uint8_t)kHUB_PEER_DISPLACEMENT_UNVOUCHED_AGENT);
+        });
+
+        it("never displaces a client an ACL names", []() {
+            fingerprintClient(&peer);
+            peer.vouched = true;
+
+            expect(HubPeer_Displacement(&peer)).toBe((uint8_t)kHUB_PEER_DISPLACEMENT_NEVER);
+        });
+
+        it("displaces an idle unknown client before one with open channels", []() {
+            fingerprintClient(&peer);
+            fingerprintClient(&other);
+            other.session.bindings[0].in_use = true;
+
+            expect(HubPeer_Displacement(&peer)).toBe((uint8_t)kHUB_PEER_DISPLACEMENT_IDLE_CLIENT);
+            expect(HubPeer_Displacement(&other)).toBe((uint8_t)kHUB_PEER_DISPLACEMENT_ACTIVE_CLIENT);
+        });
     });
 
     describe("same agent", []() {
@@ -178,4 +245,10 @@ static void localAgent(HubPeer *agent)
 {
     agent->transport_kind = kPEER_TRANSPORT_UNIX;
     agent->local = true;
+}
+
+static void fingerprintClient(HubPeer *client)
+{
+    fingerprintAgent(client, FINGERPRINT);
+    client->role = kHUB_PEER_ROLE_CLIENT;
 }
