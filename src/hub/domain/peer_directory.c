@@ -95,6 +95,25 @@ HubPeer *PeerDirectory_FindDisplaceable(PeerDirectory *self)
     return candidate;
 }
 
+HubPeer *PeerDirectory_FindDisplaceableAgent(PeerDirectory *self)
+{
+    HubPeer *candidate = NULL;
+    HubPeer *peer;
+    uint16_t i;
+
+    for(i=0; i<PEER_DIRECTORY_MAX; i++) {
+        peer = &self->peers[i];
+        if (!peer->in_use || HubPeer_Displacement(peer) != kHUB_PEER_DISPLACEMENT_UNVOUCHED_AGENT) {
+            continue;
+        }
+        if (candidate == NULL || peer->connected_at_us > candidate->connected_at_us) {
+            candidate = peer;
+        }
+    }
+
+    return candidate;
+}
+
 bool PeerDirectory_IsFull(const PeerDirectory *self)
 {
     return PeerDirectory_Count(self) == PEER_DIRECTORY_MAX;

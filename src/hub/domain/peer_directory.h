@@ -25,6 +25,7 @@ void PeerDirectory_Release(PeerDirectory *self, uint32_t peer_id);
 HubPeer *PeerDirectory_At(PeerDirectory *self, uint16_t index);
 HubPeer *PeerDirectory_FindAgentByName(PeerDirectory *self, const char *agent_name);
 HubPeer *PeerDirectory_FindDisplaceable(PeerDirectory *self);
+HubPeer *PeerDirectory_FindDisplaceableAgent(PeerDirectory *self);
 bool PeerDirectory_IsFull(const PeerDirectory *self);
 uint16_t PeerDirectory_Count(const PeerDirectory *self);
 uint16_t PeerDirectory_CountRole(const PeerDirectory *self, uint8_t role);

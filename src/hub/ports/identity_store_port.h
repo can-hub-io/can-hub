@@ -25,6 +25,7 @@ typedef struct {
     void *context;
     bool (*lookup)(void *context, const char *agent_name, char *fingerprint_hex);
     bool (*knows)(void *context, const char *fingerprint_hex);
+    uint32_t (*count_first_contact)(void *context);
     bool (*pin)(void *context, const char *agent_name, const char *fingerprint_hex);
     bool (*enroll)(void *context, const char *agent_name, const char *fingerprint_hex);
     bool (*forget)(void *context, const char *agent_name);

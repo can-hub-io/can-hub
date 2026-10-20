@@ -5,6 +5,7 @@
 
 static bool mockLookup(void *context, const char *agent_name, char *fingerprint_hex);
 static bool mockKnows(void *context, const char *fingerprint_hex);
+static uint32_t mockCountFirstContact(void *context);
 static bool mockPin(void *context, const char *agent_name, const char *fingerprint_hex);
 static bool mockEnroll(void *context, const char *agent_name, const char *fingerprint_hex);
 static void addEntry(IdentityStoreMock *self, const char *agent_name, const char *fingerprint_hex, bool enrolled);
@@ -17,6 +18,7 @@ void IdentityStoreMock_Reset(IdentityStoreMock *self)
     self->port.context = self;
     self->port.lookup = mockLookup;
     self->port.knows = mockKnows;
+    self->port.count_first_contact = mockCountFirstContact;
     self->port.pin = mockPin;
     self->port.enroll = mockEnroll;
     self->port.forget = mockForget;
@@ -57,6 +59,21 @@ static bool mockKnows(void *context, const char *fingerprint_hex)
     }
 
     return false;
+}
+
+static uint32_t mockCountFirstContact(void *context)
+{
+    IdentityStoreMock *self = context;
+    uint32_t count = self->earlier_first_contact_pins;
+    int i;
+
+    for(i=0; i<self->entry_count; i++) {
+        if (!self->enrolled[i]) {
+            count++;
+        }
+    }
+
+    return count;
 }
 
 static bool mockPin(void *context, const char *agent_name, const char *fingerprint_hex)

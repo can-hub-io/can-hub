@@ -77,6 +77,7 @@ static bool readUserVersion(sqlite3 *database, int32_t *version);
 static bool setUserVersion(sqlite3 *database, int32_t version);
 static bool storeLookup(void *context, const char *agent_name, char *fingerprint_hex);
 static bool storeKnows(void *context, const char *fingerprint_hex);
+static uint32_t storeCountFirstContact(void *context);
 static bool storePin(void *context, const char *agent_name, const char *fingerprint_hex);
 static bool storeEnroll(void *context, const char *agent_name, const char *fingerprint_hex);
 static bool storeForget(void *context, const char *agent_name);
@@ -120,6 +121,7 @@ bool IdentityDatabase_Open(IdentityDatabase *self, const char *path)
     self->identity_port.context = self;
     self->identity_port.lookup = storeLookup;
     self->identity_port.knows = storeKnows;
+    self->identity_port.count_first_contact = storeCountFirstContact;
     self->identity_port.pin = storePin;
     self->identity_port.enroll = storeEnroll;
     self->identity_port.forget = storeForget;
@@ -324,6 +326,30 @@ static bool storeKnows(void *context, const char *fingerprint_hex)
     sqlite3_finalize(statement);
 
     return known;
+}
+
+static uint32_t storeCountFirstContact(void *context)
+{
+    IdentityDatabase *self = context;
+    sqlite3_stmt *statement = NULL;
+    uint32_t count = 0;
+
+    if (sqlite3_prepare_v2(
+            self->database,
+            "SELECT COUNT(*) FROM agent_identities WHERE enrolled_by_admin = 0",
+            -1,
+            &statement,
+            NULL
+        ) != SQLITE_OK) {
+        return 0;
+    }
+
+    if (sqlite3_step(statement) == SQLITE_ROW) {
+        count = (uint32_t)sqlite3_column_int64(statement, 0);
+    }
+    sqlite3_finalize(statement);
+
+    return count;
 }
 
 static bool storePin(void *context, const char *agent_name, const char *fingerprint_hex)

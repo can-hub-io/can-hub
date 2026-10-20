@@ -130,6 +130,17 @@ first contact by registering a new agent name, so such a pin proves nothing.
 - **Never displaced:** enrolled agents, clients an ACL names, local and
   plaintext peers.
 
+The same rule guards the interface catalogue, which holds 256 interfaces (an
+agent declares up to 16). An enrolled agent that does not fit closes agents
+pinned on first contact, newest first, until it does.
+
+First contact can pin at most 1024 agents. Past that, a new agent is turned
+away at REGISTER and listed in `can-hub-cli pending`. Enroll it with `pins add`,
+or free room with `pins delete`. Enrolled pins have no limit.
+
+In a TOFU-only hub nobody is enrolled, so these rules have nobody to favour.
+On an exposed hub, enroll the agents you rely on, or run `--require-known-peers`.
+
 Pins that existed before this rule (schema version 6) count as enrolled.
 `pins add` on a name already pinned on first contact, with the same
 fingerprint, enrolls it. In TOFU mode legitimate and hostile clients look

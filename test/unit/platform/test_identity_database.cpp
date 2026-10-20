@@ -65,6 +65,19 @@ describe("identity_database", []() {
         expect(known).toBe(true);
     });
 
+    it("counts only the pins made on first contact", []() {
+        uint32_t count;
+
+        port->pin(port->context, "truck42", TRUCK_FINGERPRINT);
+        port->pin(port->context, "van7", OTHER_FINGERPRINT);
+        port->enroll(port->context, "bus1", OTHER_FINGERPRINT);
+        port->enroll(port->context, "van7", OTHER_FINGERPRINT);
+
+        count = port->count_first_contact(port->context);
+
+        expect(count).toBe((uint32_t)1);
+    });
+
     it("does not know a fingerprint pinned on first contact", []() {
         bool known;
 
