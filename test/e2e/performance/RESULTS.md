@@ -1,5 +1,24 @@
 # Performance results
 
+## Transactions against lockstep (#94)
+
+`performance/transaction_bench.robot`: 50 UDS requests to an ECU (`ecu_sim.py
+uds`), the agent and the ECU behind a link of the given round trip, the client
+and the hub on the near side. **Transaction**: the agent runs the sequence.
+**Lockstep**: the client sends each request and waits for its answer, as a
+tester without transactions does.
+
+| round trip | transaction | lockstep | per request (transaction / lockstep) |
+|---|---|---|---|
+| 0 ms   | 0.003 s | 0.008 s | 0.07 / 0.16 ms |
+| 50 ms  | 0.107 s | 2.56 s  | 2.1 / 51 ms |
+| 150 ms | 0.310 s | 7.55 s  | 6.2 / 151 ms |
+| 300 ms | 0.610 s | 15.06 s | 12.2 / 301 ms |
+
+Lockstep pays one round trip per request; a transaction pays two in all (the
+grant and the outcome) plus the bus time, whatever the number of requests: 25
+times faster at 50 requests, and the gap grows with the sequence.
+
 Reliable QUIC data plane after the flow-control work (#143): end-to-end
 backpressure, BDP/RTT/MSS tuning and UDP GSO egress, on branch
 `feat/reliable-backpressure`. Topology: hub on WAN (50 ms), agents on LAN,
