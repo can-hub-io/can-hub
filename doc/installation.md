@@ -1,24 +1,39 @@
 # Installation
 
-## Debian packages (from releases)
+## Debian packages
 
-Every [release](https://github.com/can-hub-io/can-hub/releases) ships
-per-architecture `.deb` packages (x86_64, arm64, armv7), statically linked —
+Per-architecture `.deb` packages (amd64, arm64, armhf), statically linked —
 no runtime dependencies:
 
 | Package | Contents |
 |---|---|
-| `can-hub` | hub daemon **and `can-hub-cli`**, `can-hub.service` (enabled and started on install), `/etc/can-hub/hub.conf`, dedicated `can-hub` system user |
+| `can-hub` | hub daemon, `can-hub-cli` and the `can-hub-web` admin panel, `can-hub.service` and `can-hub-web.service` (both enabled and started on install, the panel on loopback), `/etc/can-hub/hub.conf` and `web.conf`, dedicated `can-hub` system user |
 | `can-hub-agent` | SocketCAN exporter, `can-hub-agent.service` (installed but not started until configured), `/etc/can-hub/agent.conf`, state in `/var/lib/can-hub-agent` |
 | `can-hub-client` | reference consumer, plus an optional `can-hub-socketcand.service` bridge (not started by default), `/etc/can-hub/socketcand.conf` |
 
-The web admin panel (`can-hub-web`) is built from source for now — see
-[web admin](web.md).
+### APT repository
+
+```sh
+curl -fsSL https://apt.can-hub.io/key.gpg | sudo tee /usr/share/keyrings/can-hub.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/can-hub.gpg] https://apt.can-hub.io stable main" | sudo tee /etc/apt/sources.list.d/can-hub.list
+sudo apt update
+```
+
+`gpg --show-keys /usr/share/keyrings/can-hub.gpg` must print the signing key
+fingerprint `882FA1A7753DE71C0FEC849CBCEB231428DE4144`.
+
+The repository keeps the last ten releases. Until the wire protocol is frozen,
+hub and agents should run the same version; pin one with
+`sudo apt install can-hub-agent=0.4.0`.
+
+Without the repository, every
+[release](https://github.com/can-hub-io/can-hub/releases) ships the same debs:
+`sudo dpkg -i can-hub_*.deb`.
 
 ### Hub
 
 ```sh
-sudo dpkg -i can-hub_*.deb        # service starts immediately
+sudo apt install can-hub          # services start immediately
 ```
 
 **The packaged hub does not use the bare-binary defaults**: `hub.conf` ships
@@ -34,7 +49,7 @@ HUB_LISTEN_ARGS=--listen quic://0.0.0.0:7227 --listen tls://0.0.0.0:7227 --liste
 ### Agent
 
 ```sh
-sudo dpkg -i can-hub-agent_*.deb
+sudo apt install can-hub-agent
 sudo editor /etc/can-hub/agent.conf      # HUB_URL, INTERFACES; AGENT_NAME defaults to the hostname
 sudo systemctl enable --now can-hub-agent
 ```

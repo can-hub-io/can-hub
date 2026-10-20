@@ -1,0 +1,50 @@
+name: apt-repo
+
+# Regenerates the whole repository from the GitHub releases on every run, so
+# there is no repository state to keep: release.yml calls it after each tag,
+# and a manual dispatch republishes it.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: apt-repo
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          sudo apt-get update
+          sudo apt-get install -y apt-utils
+      - name: import signing key
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+        run: printf '%s\n' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+      - name: download release debs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir debs
+          for tag in $(gh release list --exclude-drafts --exclude-pre-releases --limit 10 --json tagName -q '.[].tagName'); do
+              gh release download "$tag" -D debs -p 'can-hub_*.deb' -p 'can-hub-agent_*.deb' -p 'can-hub-client_*.deb'
+          done
+      - name: build repository
+        run: ./scripts/build-apt-repo.sh debs apt
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apt
+      - id: deploy
+        uses: actions/deploy-pages@v4
