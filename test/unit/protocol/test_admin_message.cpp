@@ -26,9 +26,9 @@ describe("admin_status_message", []() {
     });
 
     it("round-trips the status reply counters", []() {
-        AdminStatusReplyMessage reply = { 5, 2, 3, 8, 42, 5000000000ULL, 4999000000ULL, 999999, 1 };
+        AdminStatusReplyMessage reply = { 5, 2, 3, 8, 42, 5000000000ULL, 4999000000ULL, 999999, 1, { 10, 7, 2, 1, 150000, 33 } };
         AdminStatusReplyMessage decoded;
-        uint8_t buffer[64];
+        uint8_t buffer[MESSAGE_HEADER_SIZE + ADMIN_STATUS_REPLY_BODY_SIZE];
         size_t expected_size = MESSAGE_HEADER_SIZE + ADMIN_STATUS_REPLY_BODY_SIZE;
         size_t encoded_size;
         bool decoded_ok;
@@ -47,6 +47,12 @@ describe("admin_status_message", []() {
         expect(decoded.frames_forwarded).toBe(4999000000ULL);
         expect(decoded.frames_dropped).toBe((uint64_t)999999);
         expect(decoded.frames_unroutable).toBe((uint64_t)1);
+        expect(decoded.transactions.started).toBe((uint64_t)10);
+        expect(decoded.transactions.completed).toBe((uint64_t)7);
+        expect(decoded.transactions.aborted).toBe((uint64_t)2);
+        expect(decoded.transactions.rejected).toBe((uint64_t)1);
+        expect(decoded.transactions.steps_completed).toBe((uint64_t)150000);
+        expect(decoded.transactions.lease_frame_drops).toBe((uint64_t)33);
     });
 
     it("rejects a truncated status reply", []() {

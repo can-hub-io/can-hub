@@ -331,7 +331,7 @@ disconnects before replying the requester gets status agent unreachable.
 ADMIN_STATUS (total 4)
 empty payload
 
-ADMIN_STATUS_REPLY (total 48)
+ADMIN_STATUS_REPLY (total 96)
 @4   peer_count u16
 @6   agent_count u16
 @8   client_count u16
@@ -341,6 +341,12 @@ ADMIN_STATUS_REPLY (total 48)
 @24  frames_forwarded u64   (frame deliveries that reached a peer)
 @32  frames_dropped u64     (deliveries dropped, destination TX budget full)
 @40  frames_unroutable u64  (valid frames with no route: channel nobody opened)
+@48  txns_started u64       (transactions an agent granted)
+@56  txns_completed u64     (transactions that ended done)
+@64  txns_aborted u64       (granted transactions that ended aborted, cancelled or orphaned)
+@72  txns_rejected u64      (TXN_BEGINs refused, by the hub or the agent)
+@80  txn_steps_completed u64 (steps of finished transactions)
+@88  txn_lease_frame_drops u64 (client frames dropped because another client held the lease)
 
 ADMIN_PEERS (total 8)
 @4   offset u16        (pagination start index)
@@ -808,8 +814,9 @@ travel on the control stream. TXN_TEMPLATE and TXN_STEPS travel on the channel's
 reliable stream (over TCP/TLS, the connection), so templates and steps reach the
 agent in the order the client sent them, and a large window of steps never
 head-of-line-blocks the control stream. No transaction message travels as a
-datagram. Every message carries the sender's `channel`; the hub rewrites it
-between the client's and the agent's channel, as it does for FRAME.
+datagram. Every message carries the sender's `channel` as the first byte of its
+body; the hub rewrites it between the client's and the agent's channel, as it
+does for FRAME, and otherwise relays the message as is.
 
 **Lifecycle.**
 
@@ -880,7 +887,11 @@ records of TXN_STEPS, not the message headers) the client may have in flight.
 The agent releases a step's bytes when the step completes and reports the
 running total in TXN_PROGRESS `consumed_bytes` (modulo 2^32). The client must
 keep `bytes sent - consumed_bytes <= window`; a batch that does not fit in the
-ring aborts the transaction (reason overrun). Client libraries keep the steps
+ring aborts the transaction (reason overrun). The hub lowers the window it
+relays to what it can hold towards the agent (48 KiB of records), so a client
+that keeps to it never fills the hub's stream to the agent, whatever transport
+the client uses; over QUIC the hub also stops reading the client's stream while
+the agent's is full. Client libraries keep the steps
 not yet sent locally and send them as credit returns, so an application may hand
 over a whole firmware image at once. The agent sends TXN_PROGRESS once the bytes
 released since the previous one reach a quarter of the window, or 10 ms after

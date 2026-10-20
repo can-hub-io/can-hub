@@ -16,6 +16,7 @@
 #define TXN_ROSTER_MAX 64
 #define TXN_TEMPLATES_MAX 16
 #define TXN_PATTERN_PAYLOAD_BYTES 8
+#define TXN_CHANNEL_OFFSET 0
 
 #define TXN_BEGIN_FLAG_EXCLUSIVE (1u << 0)
 #define TXN_TEMPLATE_FLAG_SOFT (1u << 0)
@@ -150,6 +151,9 @@ typedef struct {
     uint8_t channel;
     uint16_t txn_id;
 } TxnAbortMessage;
+
+void TxnMessage_SetChannel(uint8_t *encoded, uint8_t channel);
+uint8_t TxnMessage_Channel(const uint8_t *payload);
 
 size_t TxnBeginMessage_Encode(const TxnBeginMessage *self, uint8_t *buffer, size_t buffer_size);
 bool TxnBeginMessage_Decode(TxnBeginMessage *self, const uint8_t *payload, size_t payload_length);

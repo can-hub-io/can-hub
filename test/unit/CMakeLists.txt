@@ -415,6 +415,12 @@ add_unit_test(test_frame_routes
         ${ROOT_SRC_DIR}/shared/bounded_string.c
 )
 
+add_unit_test(test_transaction_table
+    SOURCES
+        hub/domain/test_transaction_table.cpp
+        ${ROOT_SRC_DIR}/hub/domain/transaction_table.c
+)
+
 add_unit_test(test_broker
     SOURCES
         hub/test_broker.cpp
@@ -433,6 +439,9 @@ add_unit_test(test_broker
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
         ${ROOT_SRC_DIR}/hub/domain/peer_directory.c
         ${ROOT_SRC_DIR}/hub/domain/rejected_peers.c
+        ${ROOT_SRC_DIR}/hub/domain/transaction_table.c
+        ${ROOT_SRC_DIR}/protocol/txn_message.c
+        ${ROOT_SRC_DIR}/protocol/txn_steps_message.c
         ${ROOT_SRC_DIR}/protocol/admin_message.c
         ${ROOT_SRC_DIR}/protocol/frame_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c
@@ -466,6 +475,9 @@ add_unit_test(test_broker_bridges
         ${ROOT_SRC_DIR}/hub/domain/client_session.c
         ${ROOT_SRC_DIR}/hub/domain/peer_directory.c
         ${ROOT_SRC_DIR}/hub/domain/rejected_peers.c
+        ${ROOT_SRC_DIR}/hub/domain/transaction_table.c
+        ${ROOT_SRC_DIR}/protocol/txn_message.c
+        ${ROOT_SRC_DIR}/protocol/txn_steps_message.c
         ${ROOT_SRC_DIR}/protocol/admin_message.c
         ${ROOT_SRC_DIR}/protocol/frame_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c
@@ -481,6 +493,43 @@ add_unit_test(test_broker_bridges
         ${ROOT_SRC_DIR}/shared/bounded_string.c
 )
 target_link_libraries(test_broker_bridges PRIVATE port_mocks)
+
+add_unit_test(test_broker_transactions
+    SOURCES
+        hub/test_broker_transactions.cpp
+        ${ROOT_SRC_DIR}/hub/broker.c
+        ${ROOT_SRC_DIR}/hub/domain/admin_views.c
+        ${ROOT_SRC_DIR}/hub/domain/bridge_groups.c
+        ${ROOT_SRC_DIR}/hub/domain/bridge_routes.c
+        ${ROOT_SRC_DIR}/hub/domain/bridge_targets.c
+        ${ROOT_SRC_DIR}/hub/domain/echo_tokens.c
+        ${ROOT_SRC_DIR}/hub/domain/egress_queue.c
+        ${ROOT_SRC_DIR}/hub/domain/frame_routes.c
+        ${ROOT_SRC_DIR}/protocol/error_message.c
+        ${ROOT_SRC_DIR}/hub/domain/hub_peer.c
+        ${ROOT_SRC_DIR}/hub/domain/interface_registry.c
+        ${ROOT_SRC_DIR}/shared/egress_shaper.c
+        ${ROOT_SRC_DIR}/hub/domain/client_session.c
+        ${ROOT_SRC_DIR}/hub/domain/peer_directory.c
+        ${ROOT_SRC_DIR}/hub/domain/rejected_peers.c
+        ${ROOT_SRC_DIR}/hub/domain/transaction_table.c
+        ${ROOT_SRC_DIR}/protocol/txn_message.c
+        ${ROOT_SRC_DIR}/protocol/txn_steps_message.c
+        ${ROOT_SRC_DIR}/protocol/admin_message.c
+        ${ROOT_SRC_DIR}/protocol/frame_message.c
+        ${ROOT_SRC_DIR}/protocol/hello_message.c
+        ${ROOT_SRC_DIR}/protocol/list_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/open_message.c
+        ${ROOT_SRC_DIR}/protocol/register_message.c
+        ${ROOT_SRC_DIR}/protocol/subscribe_message.c
+        ${ROOT_SRC_DIR}/protocol/ifconfig_message.c
+        ${ROOT_SRC_DIR}/protocol/interface_name.c
+        ${ROOT_SRC_DIR}/protocol/interface_status_message.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
+)
+target_link_libraries(test_broker_transactions PRIVATE port_mocks)
 
 add_unit_test(test_frame_spec
     SOURCES

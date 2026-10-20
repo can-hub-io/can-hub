@@ -14,6 +14,12 @@
 #define FRAMES_FORWARDED_OFFSET 20
 #define FRAMES_DROPPED_OFFSET 28
 #define FRAMES_UNROUTABLE_OFFSET 36
+#define TXNS_STARTED_OFFSET 44
+#define TXNS_COMPLETED_OFFSET 52
+#define TXNS_ABORTED_OFFSET 60
+#define TXNS_REJECTED_OFFSET 68
+#define TXN_STEPS_COMPLETED_OFFSET 76
+#define TXN_LEASE_FRAME_DROPS_OFFSET 84
 
 #define OFFSET_OFFSET 0
 #define COUNT_OFFSET 0
@@ -177,6 +183,12 @@ size_t AdminStatusReplyMessage_Encode(const AdminStatusReplyMessage *self, uint8
     Wire_WriteU64(body + FRAMES_FORWARDED_OFFSET, self->frames_forwarded);
     Wire_WriteU64(body + FRAMES_DROPPED_OFFSET, self->frames_dropped);
     Wire_WriteU64(body + FRAMES_UNROUTABLE_OFFSET, self->frames_unroutable);
+    Wire_WriteU64(body + TXNS_STARTED_OFFSET, self->transactions.started);
+    Wire_WriteU64(body + TXNS_COMPLETED_OFFSET, self->transactions.completed);
+    Wire_WriteU64(body + TXNS_ABORTED_OFFSET, self->transactions.aborted);
+    Wire_WriteU64(body + TXNS_REJECTED_OFFSET, self->transactions.rejected);
+    Wire_WriteU64(body + TXN_STEPS_COMPLETED_OFFSET, self->transactions.steps_completed);
+    Wire_WriteU64(body + TXN_LEASE_FRAME_DROPS_OFFSET, self->transactions.lease_frame_drops);
 
     return total_size;
 }
@@ -196,6 +208,12 @@ bool AdminStatusReplyMessage_Decode(AdminStatusReplyMessage *self, const uint8_t
     self->frames_forwarded = Wire_ReadU64(payload + FRAMES_FORWARDED_OFFSET);
     self->frames_dropped = Wire_ReadU64(payload + FRAMES_DROPPED_OFFSET);
     self->frames_unroutable = Wire_ReadU64(payload + FRAMES_UNROUTABLE_OFFSET);
+    self->transactions.started = Wire_ReadU64(payload + TXNS_STARTED_OFFSET);
+    self->transactions.completed = Wire_ReadU64(payload + TXNS_COMPLETED_OFFSET);
+    self->transactions.aborted = Wire_ReadU64(payload + TXNS_ABORTED_OFFSET);
+    self->transactions.rejected = Wire_ReadU64(payload + TXNS_REJECTED_OFFSET);
+    self->transactions.steps_completed = Wire_ReadU64(payload + TXN_STEPS_COMPLETED_OFFSET);
+    self->transactions.lease_frame_drops = Wire_ReadU64(payload + TXN_LEASE_FRAME_DROPS_OFFSET);
 
     return true;
 }

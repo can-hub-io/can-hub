@@ -228,6 +228,7 @@ set(HUB_SOURCES
     src/hub/domain/interface_registry.c
     src/hub/domain/peer_directory.c
     src/hub/domain/rejected_peers.c
+    src/hub/domain/transaction_table.c
     src/platform/linux/clock/clock.c
     src/platform/linux/shared/connect_url.c
     src/platform/linux/shared/epoll_registry.c

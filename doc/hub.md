@@ -169,6 +169,11 @@ diff for rates (the [web panel](web.md) does this for you).
 | forwarded | frame deliveries that reached a peer |
 | dropped | deliveries dropped because the destination's TX budget was full |
 | unroutable | valid frames with no route (channel nobody opened) |
+| transactions started | transactions an agent granted |
+| transactions completed / aborted | granted transactions that ended done / any other way |
+| transactions rejected | TXN_BEGINs refused by the hub or the agent |
+| transaction steps | steps of finished transactions |
+| transaction lease drops | client frames dropped because another client held the interface's lease |
 
 Peer ids printed by the tables encode the transport in their high bits
 (unix `0x4...`, quic `0x8...`, tls `0xC...`, plain tcp low ids) — useful to
