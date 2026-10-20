@@ -932,7 +932,8 @@ interface for the life of the transaction, from TXN_BEGIN_ACK ok to TXN_STATUS.
 Meanwhile the hub drops and counts the FRAMEs other clients send to that
 interface, lossy and reliable channels alike, and tells them up front: it sends
 INTERFACE_STATUS with flag bit 1 (leased) set to every other client holding the
-interface open when the lease starts, and cleared when it ends. The lease
+interface open when the lease starts, to a client that opens it while leased,
+and cleared when it ends. The lease
 excludes other can-hub clients only: hub bridge routes, local processes on the
 device and the other nodes on the bus still talk.
 

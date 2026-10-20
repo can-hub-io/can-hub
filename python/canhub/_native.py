@@ -45,6 +45,26 @@ ERR_RATE_LIMITED = -12
 ERR_CONFIGURE_DENIED = -13
 ERR_APPLY_FAILED = -14
 ERR_AGENT_UNREACHABLE = -15
+ERR_LEASED = -16
+ERR_TXN_BUSY = -17
+ERR_TXN_UNSUPPORTED = -18
+ERR_TXN_ABORTED = -19
+
+TXN_ROSTER_MAX = 64
+TXN_TEMPLATES_MAX = 16
+TXN_PATTERNS = 3
+TXN_FLAG_EXCLUSIVE = 1 << 0
+TXN_ORIGIN_NONE = 0
+TXN_ORIGIN_CAN_ID = 1
+TXN_ORIGIN_PAYLOAD = 2
+TXN_TEMPLATE_SOFT = 1 << 0
+TXN_TEMPLATE_MISMATCH_ABORT = 1 << 1
+TXN_PATTERN_ADVANCE = 0
+TXN_PATTERN_ABORT = 1
+TXN_PATTERN_EXTEND = 2
+TXN_STEP_EXPECT_VALUE = 1 << 0
+TXN_STEP_EXPECT_ONLY = 1 << 1
+TXN_DONE = 0
 
 SETTING_BITRATE = 1 << 0
 SETTING_SAMPLE_POINT = 1 << 1
@@ -132,6 +152,82 @@ class CanHubInterfaceSettings(Structure):
     ]
 
 
+class CanHubTxnBegin(Structure):
+    _fields_ = [
+        ("struct_size", c_uint32),
+        ("flags", c_uint8),
+        ("origin_source", c_uint8),
+        ("origin_shift", c_uint8),
+        ("origin_payload_offset", c_uint8),
+        ("origin_mask", c_uint32),
+        ("roster_count", c_uint32),
+        ("roster", c_uint32 * TXN_ROSTER_MAX),
+    ]
+
+
+class CanHubTxnPattern(Structure):
+    _fields_ = [
+        ("can_id", c_uint32),
+        ("can_mask", c_uint32),
+        ("payload_mask", c_uint64),
+        ("payload_value", c_uint64),
+    ]
+
+
+class CanHubTxnTemplate(Structure):
+    _fields_ = [
+        ("struct_size", c_uint32),
+        ("template_id", c_uint8),
+        ("advance_mode", c_uint8),
+        ("flags", c_uint8),
+        ("count_k", c_uint8),
+        ("patterns_present", c_uint8),
+        ("reserved", c_uint8 * 3),
+        ("timeout_ms", c_uint32),
+        ("gap_us", c_uint32),
+        ("patterns", CanHubTxnPattern * TXN_PATTERNS),
+    ]
+
+
+class CanHubTxnStep(Structure):
+    _fields_ = [
+        ("can_id", c_uint32),
+        ("template_id", c_uint8),
+        ("flags", c_uint8),
+        ("frame_flags", c_uint8),
+        ("length", c_uint8),
+        ("expect_value", c_uint64),
+        ("payload", c_uint8 * FRAME_PAYLOAD_MAX),
+    ]
+
+
+class CanHubTxnProgress(Structure):
+    _fields_ = [
+        ("struct_size", c_uint32),
+        ("sent_steps", c_uint32),
+        ("completed_steps", c_uint32),
+        ("bytes_in_flight", c_uint32),
+        ("window_bytes", c_uint32),
+    ]
+
+
+class CanHubTxnResult(Structure):
+    _fields_ = [
+        ("struct_size", c_uint32),
+        ("state", c_uint8),
+        ("reason", c_uint8),
+        ("has_rx_frame", c_uint8),
+        ("reserved", c_uint8),
+        ("failing_seq", c_uint32),
+        ("completed_steps", c_uint32),
+        ("offending_origin", c_uint32),
+        ("seen_bitmap", c_uint64),
+        ("expected", c_uint64),
+        ("got", c_uint64),
+        ("rx_frame", CanHubFrame),
+    ]
+
+
 class CanHubConnectConfig(Structure):
     _fields_ = [
         ("struct_size", c_uint32),
@@ -199,6 +295,27 @@ lib.canhub_configure.argtypes = [
 
 lib.canhub_query.restype = c_int32
 lib.canhub_query.argtypes = [c_void_p, c_char_p, POINTER(CanHubInterfaceSettings), c_int32]
+
+lib.canhub_txn_begin.restype = c_int32
+lib.canhub_txn_begin.argtypes = [c_void_p, POINTER(CanHubTxnBegin), c_int32]
+
+lib.canhub_txn_template.restype = c_int32
+lib.canhub_txn_template.argtypes = [c_void_p, POINTER(CanHubTxnTemplate), c_int32]
+
+lib.canhub_txn_send.restype = c_int32
+lib.canhub_txn_send.argtypes = [c_void_p, POINTER(CanHubTxnStep), c_uint32, c_int32]
+
+lib.canhub_txn_end.restype = c_int32
+lib.canhub_txn_end.argtypes = [c_void_p, c_int32]
+
+lib.canhub_txn_wait.restype = c_int32
+lib.canhub_txn_wait.argtypes = [c_void_p, POINTER(CanHubTxnResult), c_int32]
+
+lib.canhub_txn_progress.restype = c_int32
+lib.canhub_txn_progress.argtypes = [c_void_p, POINTER(CanHubTxnProgress)]
+
+lib.canhub_txn_abort.restype = c_int32
+lib.canhub_txn_abort.argtypes = [c_void_p]
 
 
 def last_error(session):

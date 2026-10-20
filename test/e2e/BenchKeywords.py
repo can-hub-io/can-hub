@@ -128,6 +128,12 @@ class BenchKeywords:
     def start_can_hub(self, server) -> CanHub:
         return CanHub.start(server)
 
+    @keyword("Start CAN HUB Open To Writers On ${server}")
+    def start_can_hub_open_to_writers(self, server) -> CanHub:
+        hub = CanHub.start(server, HubConfig(state_dir=self.fresh_state_directory("hub")))
+        hub.cli("acl", "add", "*", "*/*", "rw")
+        return hub
+
     @keyword("Start CAN Agent On ${server} With ${config}")
     def start_can_agent_with(self, server, config) -> CanAgent:
         return CanAgent.start(server, config)
