@@ -1,0 +1,731 @@
+#include "agent/domain/transaction_runner.h"
+
+#include <string.h>
+
+#define MICROSECONDS_PER_MILLISECOND 1000
+#define PROGRESS_THRESHOLD_DIVISOR 4
+#define ORIGIN_PAYLOAD_BYTES 4
+#define BITS_PER_BYTE 8
+#define ORIGIN_SHIFT_MAX 32
+#define NO_TXN_ID 0
+
+static bool isBeginValid(const TxnBeginMessage *begin);
+static bool isTemplateValid(const TransactionRunner *self, const TxnTemplateMessage *template_message);
+static bool isWaitingMode(uint8_t advance_mode);
+static bool isTemplateDefined(const TransactionRunner *self, uint8_t template_id);
+static bool isPatternPresent(const TxnTemplateMessage *template_message, uint8_t pattern);
+static bool pushRecord(TransactionRunner *self, const uint8_t *record, size_t available, uint32_t seq, size_t *record_size);
+static bool runOnce(TransactionRunner *self, uint64_t now_us);
+static bool loadNextStep(TransactionRunner *self, uint64_t now_us);
+static bool transmitStep(TransactionRunner *self, uint64_t now_us);
+static bool settleWait(TransactionRunner *self, uint64_t now_us);
+static void startWait(TransactionRunner *self, uint64_t now_us);
+static void completeStep(TransactionRunner *self);
+static void flushProgress(TransactionRunner *self, uint64_t now_us);
+static void reportProgress(TransactionRunner *self);
+static bool isListening(const TransactionRunner *self, uint8_t interface_index, const FrameMessage *frame);
+static void recordAnswer(TransactionRunner *self, const FrameMessage *frame);
+static void recordRosterAnswer(TransactionRunner *self, const FrameMessage *frame);
+static bool findRosterIndex(const TransactionRunner *self, uint32_t origin, uint8_t *roster_index);
+static bool matchesId(const TxnPattern *pattern, uint32_t can_id);
+static bool matchesPayload(uint64_t payload_word, uint64_t payload_mask, uint64_t payload_value);
+static bool matchesPattern(const TxnPattern *pattern, const FrameMessage *frame, uint64_t payload_word);
+static bool matchesTemplatePattern(
+    const TxnTemplateMessage *template_message,
+    uint8_t pattern,
+    const FrameMessage *frame,
+    uint64_t payload_word
+);
+static void matchAdvance(
+    TransactionRunner *self,
+    const TxnTemplateMessage *template_message,
+    const FrameMessage *frame,
+    uint64_t payload_word
+);
+static uint64_t expectedValue(const TransactionRunner *self, const TxnTemplateMessage *template_message);
+static uint64_t payloadWord(const FrameMessage *frame);
+static uint32_t payloadOrigin(const FrameMessage *frame, uint8_t offset);
+static uint32_t extractOrigin(const TransactionRunner *self, const FrameMessage *frame);
+static void keepRxFrame(TransactionRunner *self, const FrameMessage *frame);
+static const TxnTemplateMessage *currentTemplate(const TransactionRunner *self);
+static uint64_t templateTimeoutUs(const TxnTemplateMessage *template_message);
+static uint64_t transmitTimeoutUs(const TxnTemplateMessage *template_message);
+static void prepareStatus(const TransactionRunner *self, TxnStatusMessage *status, uint8_t state, uint8_t reason);
+static void finish(TransactionRunner *self, const TxnStatusMessage *status);
+static void abortWith(TransactionRunner *self, uint8_t reason, uint32_t failing_seq);
+static void abortOnFrame(TransactionRunner *self, uint8_t reason, const FrameMessage *frame, uint64_t expected, uint64_t got);
+static uint64_t earliestWake(uint64_t current, uint64_t candidate);
+static uint64_t transmitReadyUs(const TransactionRunner *self);
+
+/* ---------- public ---------- */
+
+void TransactionRunner_Init(TransactionRunner *self, TransactionRunnerPort port, uint8_t *ring_storage, uint32_t ring_capacity)
+{
+    memset(self, 0, sizeof(*self));
+    self->port = port;
+    StepRing_Init(&self->ring, ring_storage, ring_capacity);
+    self->window_bytes = ring_capacity - TXN_STEP_RECORD_SIZE_MAX;
+}
+
+void TransactionRunner_Begin(
+    TransactionRunner *self,
+    const TxnBeginMessage *begin,
+    uint8_t interface_index,
+    uint64_t now_us,
+    TxnBeginAckMessage *ack
+)
+{
+    ack->channel = begin->channel;
+    ack->txn_id = NO_TXN_ID;
+    ack->window_bytes = 0;
+
+    if (self->active) {
+        ack->status = kTXN_BEGIN_STATUS_BUSY;
+        return;
+    }
+    if (!isBeginValid(begin)) {
+        ack->status = kTXN_BEGIN_STATUS_INVALID;
+        return;
+    }
+
+    self->txn_id++;
+    if (self->txn_id == NO_TXN_ID) {
+        self->txn_id++;
+    }
+    self->active = true;
+    self->channel = begin->channel;
+    self->interface_index = interface_index;
+    self->origin = begin->origin;
+    self->roster_count = begin->roster_count;
+    memcpy(self->roster, begin->roster, sizeof(self->roster));
+    self->defined_templates = 0;
+    self->next_seq = 0;
+    self->completed_steps = 0;
+    self->pushed_bytes = 0;
+    self->consumed_bytes = 0;
+    self->reported_bytes = 0;
+    self->report_due_us = 0;
+    self->starve_deadline_us = now_us + TRANSACTION_STARVATION_TIMEOUT_US;
+    self->next_transmit_us = 0;
+    self->last_tick_us = now_us;
+    memset(&self->current, 0, sizeof(self->current));
+    StepRing_Clear(&self->ring);
+
+    ack->status = kTXN_BEGIN_STATUS_OK;
+    ack->txn_id = self->txn_id;
+    ack->window_bytes = self->window_bytes;
+}
+
+void TransactionRunner_DefineTemplate(TransactionRunner *self, const TxnTemplateMessage *template_message)
+{
+    if (!self->active || template_message->txn_id != self->txn_id) {
+        return;
+    }
+    if (!isTemplateValid(self, template_message)) {
+        abortWith(self, kTXN_REASON_INVALID_STEP, self->next_seq);
+        return;
+    }
+
+    self->templates[template_message->template_id] = *template_message;
+    self->defined_templates |= (uint16_t)(1u << template_message->template_id);
+}
+
+void TransactionRunner_PushSteps(TransactionRunner *self, const TxnStepsMessage *steps)
+{
+    size_t offset = 0;
+    size_t record_size;
+    uint8_t i;
+
+    if (!self->active || steps->txn_id != self->txn_id) {
+        return;
+    }
+    if (steps->first_seq != self->next_seq) {
+        abortWith(self, kTXN_REASON_INVALID_STEP, steps->first_seq);
+        return;
+    }
+
+    for(i=0; i<steps->step_count; i++) {
+        if (!pushRecord(self, steps->records + offset, steps->records_size - offset, steps->first_seq + i, &record_size)) {
+            return;
+        }
+        offset += record_size;
+    }
+    self->next_seq += steps->step_count;
+}
+
+void TransactionRunner_OnFrame(TransactionRunner *self, uint8_t interface_index, const FrameMessage *frame)
+{
+    const TxnTemplateMessage *template_message;
+    uint64_t payload_word;
+
+    if (!isListening(self, interface_index, frame)) {
+        return;
+    }
+
+    template_message = currentTemplate(self);
+    payload_word = payloadWord(frame);
+
+    if (matchesTemplatePattern(template_message, kTXN_PATTERN_EXTEND, frame, payload_word)) {
+        keepRxFrame(self, frame);
+        self->current.extend_requested = true;
+        return;
+    }
+    if (matchesTemplatePattern(template_message, kTXN_PATTERN_ABORT, frame, payload_word)) {
+        abortOnFrame(self, kTXN_REASON_ABORT_MATCH, frame, 0, payload_word);
+        return;
+    }
+    if (isPatternPresent(template_message, kTXN_PATTERN_ADVANCE)) {
+        matchAdvance(self, template_message, frame, payload_word);
+    }
+}
+
+void TransactionRunner_Tick(TransactionRunner *self, uint64_t now_us)
+{
+    uint8_t i;
+
+    if (!self->active) {
+        return;
+    }
+
+    self->last_tick_us = now_us;
+    for(i=0; i<TRANSACTION_STEPS_PER_TICK_MAX && self->active; i++) {
+        if (!runOnce(self, now_us)) {
+            break;
+        }
+    }
+    if (self->active) {
+        flushProgress(self, now_us);
+    }
+}
+
+void TransactionRunner_Abort(TransactionRunner *self, uint16_t txn_id)
+{
+    if (!self->active || txn_id != self->txn_id) {
+        return;
+    }
+
+    abortWith(self, kTXN_REASON_CANCELLED, self->completed_steps);
+}
+
+void TransactionRunner_Cancel(TransactionRunner *self)
+{
+    self->active = false;
+    StepRing_Clear(&self->ring);
+}
+
+bool TransactionRunner_IsActive(const TransactionRunner *self)
+{
+    return self->active;
+}
+
+uint64_t TransactionRunner_NextWakeUs(const TransactionRunner *self)
+{
+    uint64_t wake_us = 0;
+
+    if (!self->active) {
+        return 0;
+    }
+
+    wake_us = earliestWake(wake_us, self->report_due_us);
+    if (self->current.phase == kTRANSACTION_PHASE_IDLE) {
+        if (!StepRing_IsEmpty(&self->ring)) {
+            return self->last_tick_us;
+        }
+        return earliestWake(wake_us, self->starve_deadline_us);
+    }
+    if (self->current.phase == kTRANSACTION_PHASE_TRANSMIT) {
+        return earliestWake(wake_us, transmitReadyUs(self));
+    }
+    return earliestWake(wake_us, self->current.deadline_us);
+}
+
+/* ---------- private ---------- */
+
+static bool isBeginValid(const TxnBeginMessage *begin)
+{
+    if (begin->origin.source >= kTXN_ORIGIN_SOURCE_MAX) {
+        return false;
+    }
+    if (begin->roster_count > 0 && begin->origin.source == kTXN_ORIGIN_SOURCE_NONE) {
+        return false;
+    }
+    if (begin->origin.shift >= ORIGIN_SHIFT_MAX) {
+        return false;
+    }
+    return begin->origin.payload_offset < FRAME_PAYLOAD_MAX_FD;
+}
+
+static bool isTemplateValid(const TransactionRunner *self, const TxnTemplateMessage *template_message)
+{
+    uint8_t mode = template_message->advance_mode;
+
+    if (isTemplateDefined(self, template_message->template_id)) {
+        return false;
+    }
+    if (mode >= kTXN_ADVANCE_MODE_MAX || template_message->type != 0) {
+        return false;
+    }
+    if (isWaitingMode(mode) && template_message->timeout_ms == 0) {
+        return false;
+    }
+    if ((mode == kTXN_ADVANCE_MODE_COUNT || mode == kTXN_ADVANCE_MODE_ROSTER_K) && template_message->count_k == 0) {
+        return false;
+    }
+    if ((mode == kTXN_ADVANCE_MODE_ROSTER_ALL || mode == kTXN_ADVANCE_MODE_ROSTER_K) && self->roster_count == 0) {
+        return false;
+    }
+    return mode != kTXN_ADVANCE_MODE_ROSTER_K || template_message->count_k <= self->roster_count;
+}
+
+static bool isWaitingMode(uint8_t advance_mode)
+{
+    return advance_mode != kTXN_ADVANCE_MODE_NONE;
+}
+
+static bool isTemplateDefined(const TransactionRunner *self, uint8_t template_id)
+{
+    return (self->defined_templates & (1u << template_id)) != 0;
+}
+
+static bool isPatternPresent(const TxnTemplateMessage *template_message, uint8_t pattern)
+{
+    return (template_message->patterns_present & (1u << pattern)) != 0;
+}
+
+static bool pushRecord(TransactionRunner *self, const uint8_t *record, size_t available, uint32_t seq, size_t *record_size)
+{
+    TxnStep step;
+    uint32_t in_flight;
+
+    *record_size = TxnStep_Decode(&step, record, available);
+    if (*record_size == 0 || !isTemplateDefined(self, step.template_id)) {
+        abortWith(self, kTXN_REASON_INVALID_STEP, seq);
+        return false;
+    }
+    if ((step.flags & TXN_STEP_FLAG_EXPECT_ONLY) && !isWaitingMode(self->templates[step.template_id].advance_mode)) {
+        abortWith(self, kTXN_REASON_INVALID_STEP, seq);
+        return false;
+    }
+
+    in_flight = self->pushed_bytes - self->consumed_bytes;
+    if (in_flight + *record_size > self->window_bytes || !StepRing_Push(&self->ring, record, (uint32_t)*record_size)) {
+        abortWith(self, kTXN_REASON_OVERRUN, seq);
+        return false;
+    }
+
+    self->pushed_bytes += (uint32_t)*record_size;
+
+    return true;
+}
+
+static bool runOnce(TransactionRunner *self, uint64_t now_us)
+{
+    if (self->current.phase == kTRANSACTION_PHASE_IDLE) {
+        return loadNextStep(self, now_us);
+    }
+    if (self->current.phase == kTRANSACTION_PHASE_TRANSMIT) {
+        return transmitStep(self, now_us);
+    }
+    return settleWait(self, now_us);
+}
+
+static bool loadNextStep(TransactionRunner *self, uint64_t now_us)
+{
+    const uint8_t *record;
+    uint32_t available;
+
+    available = StepRing_Peek(&self->ring, &record);
+    if (available == 0) {
+        if (self->starve_deadline_us == 0) {
+            self->starve_deadline_us = now_us + TRANSACTION_STARVATION_TIMEOUT_US;
+            return false;
+        }
+        if (now_us >= self->starve_deadline_us) {
+            abortWith(self, kTXN_REASON_STARVED, self->completed_steps);
+        }
+        return false;
+    }
+
+    memset(&self->current, 0, sizeof(self->current));
+    self->current.record_size = (uint32_t)TxnStep_Decode(&self->current.step, record, available);
+    self->starve_deadline_us = 0;
+
+    if (self->current.step.flags & TXN_STEP_FLAG_EXPECT_ONLY) {
+        startWait(self, now_us);
+    } else {
+        self->current.phase = kTRANSACTION_PHASE_TRANSMIT;
+    }
+
+    return true;
+}
+
+static bool transmitStep(TransactionRunner *self, uint64_t now_us)
+{
+    const TxnTemplateMessage *template_message = currentTemplate(self);
+    FrameMessage frame;
+
+    if (now_us < self->next_transmit_us || now_us < self->current.retry_at_us) {
+        return false;
+    }
+    if (self->current.deadline_us == 0) {
+        self->current.deadline_us = now_us + transmitTimeoutUs(template_message);
+    }
+
+    memset(&frame, 0, sizeof(frame));
+    frame.can_id = self->current.step.can_id;
+    frame.channel = self->channel;
+    frame.payload_length = self->current.step.payload_length;
+    frame.frame_flags = self->current.step.frame_flags;
+    memcpy(frame.payload, self->current.step.payload, frame.payload_length);
+
+    if (!self->port.transmit(self->port.context, self->interface_index, &frame)) {
+        if (now_us >= self->current.deadline_us) {
+            abortWith(self, kTXN_REASON_TX_FAILED, self->completed_steps);
+            return false;
+        }
+        self->current.retry_at_us = now_us + TRANSACTION_TX_RETRY_US;
+        return false;
+    }
+
+    self->next_transmit_us = now_us + template_message->gap_us;
+    if (!isWaitingMode(template_message->advance_mode)) {
+        completeStep(self);
+        return true;
+    }
+
+    startWait(self, now_us);
+
+    return true;
+}
+
+static bool settleWait(TransactionRunner *self, uint64_t now_us)
+{
+    const TxnTemplateMessage *template_message = currentTemplate(self);
+
+    if (self->current.satisfied) {
+        completeStep(self);
+        return true;
+    }
+    if (self->current.extend_requested) {
+        self->current.extend_requested = false;
+        self->current.deadline_us = now_us + templateTimeoutUs(template_message);
+    }
+    if (now_us < self->current.deadline_us) {
+        return false;
+    }
+    if (template_message->flags & TXN_TEMPLATE_FLAG_SOFT) {
+        completeStep(self);
+        return true;
+    }
+
+    abortWith(self, kTXN_REASON_TIMEOUT, self->completed_steps);
+
+    return false;
+}
+
+static void startWait(TransactionRunner *self, uint64_t now_us)
+{
+    self->current.phase = kTRANSACTION_PHASE_WAIT;
+    self->current.deadline_us = now_us + templateTimeoutUs(currentTemplate(self));
+}
+
+static void completeStep(TransactionRunner *self)
+{
+    TxnStatusMessage status;
+    bool last = (self->current.step.flags & TXN_STEP_FLAG_LAST) != 0;
+
+    StepRing_Release(&self->ring, self->current.record_size);
+    self->consumed_bytes += self->current.record_size;
+    self->completed_steps++;
+    self->current.phase = kTRANSACTION_PHASE_IDLE;
+
+    if (!last) {
+        return;
+    }
+
+    prepareStatus(self, &status, kTXN_STATE_DONE, kTXN_REASON_NONE);
+    finish(self, &status);
+}
+
+static void flushProgress(TransactionRunner *self, uint64_t now_us)
+{
+    uint32_t pending = self->consumed_bytes - self->reported_bytes;
+
+    if (pending == 0) {
+        return;
+    }
+    if (pending >= self->window_bytes / PROGRESS_THRESHOLD_DIVISOR) {
+        reportProgress(self);
+        return;
+    }
+    if (self->report_due_us == 0) {
+        self->report_due_us = now_us + TRANSACTION_PROGRESS_FLUSH_US;
+        return;
+    }
+    if (now_us >= self->report_due_us) {
+        reportProgress(self);
+    }
+}
+
+static void reportProgress(TransactionRunner *self)
+{
+    TxnProgressMessage progress;
+
+    progress.channel = self->channel;
+    progress.txn_id = self->txn_id;
+    progress.completed_steps = self->completed_steps;
+    progress.consumed_bytes = self->consumed_bytes;
+    self->reported_bytes = self->consumed_bytes;
+    self->report_due_us = 0;
+
+    self->port.report_progress(self->port.context, &progress);
+}
+
+static bool isListening(const TransactionRunner *self, uint8_t interface_index, const FrameMessage *frame)
+{
+    if (!self->active || interface_index != self->interface_index) {
+        return false;
+    }
+    if (self->current.phase != kTRANSACTION_PHASE_WAIT || self->current.satisfied) {
+        return false;
+    }
+    return (frame->route_flags & FRAME_ROUTE_FLAG_ECHO) == 0;
+}
+
+static void recordAnswer(TransactionRunner *self, const FrameMessage *frame)
+{
+    const TxnTemplateMessage *template_message = currentTemplate(self);
+
+    keepRxFrame(self, frame);
+    if (template_message->advance_mode != kTXN_ADVANCE_MODE_COUNT) {
+        recordRosterAnswer(self, frame);
+        return;
+    }
+
+    self->current.match_count++;
+    self->current.satisfied = self->current.match_count >= template_message->count_k;
+}
+
+static void recordRosterAnswer(TransactionRunner *self, const FrameMessage *frame)
+{
+    const TxnTemplateMessage *template_message = currentTemplate(self);
+    uint64_t roster_bit;
+    uint8_t roster_index;
+    uint8_t needed;
+
+    if (!findRosterIndex(self, extractOrigin(self, frame), &roster_index)) {
+        return;
+    }
+    roster_bit = (uint64_t)1 << roster_index;
+    if (self->current.seen_bitmap & roster_bit) {
+        return;
+    }
+
+    self->current.seen_bitmap |= roster_bit;
+    self->current.seen_count++;
+    needed = template_message->advance_mode == kTXN_ADVANCE_MODE_ROSTER_ALL ? self->roster_count : template_message->count_k;
+    self->current.satisfied = self->current.seen_count >= needed;
+}
+
+static bool findRosterIndex(const TransactionRunner *self, uint32_t origin, uint8_t *roster_index)
+{
+    uint8_t i;
+
+    for(i=0; i<self->roster_count; i++) {
+        if (self->roster[i] == origin) {
+            *roster_index = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool matchesId(const TxnPattern *pattern, uint32_t can_id)
+{
+    return (can_id & pattern->can_mask) == (pattern->can_id & pattern->can_mask);
+}
+
+static bool matchesPayload(uint64_t payload_word, uint64_t payload_mask, uint64_t payload_value)
+{
+    return (payload_word & payload_mask) == (payload_value & payload_mask);
+}
+
+static bool matchesPattern(const TxnPattern *pattern, const FrameMessage *frame, uint64_t payload_word)
+{
+    return matchesId(pattern, frame->can_id) && matchesPayload(payload_word, pattern->payload_mask, pattern->payload_value);
+}
+
+static bool matchesTemplatePattern(
+    const TxnTemplateMessage *template_message,
+    uint8_t pattern,
+    const FrameMessage *frame,
+    uint64_t payload_word
+)
+{
+    if (!isPatternPresent(template_message, pattern)) {
+        return false;
+    }
+    return matchesPattern(&template_message->patterns[pattern], frame, payload_word);
+}
+
+static void matchAdvance(
+    TransactionRunner *self,
+    const TxnTemplateMessage *template_message,
+    const FrameMessage *frame,
+    uint64_t payload_word
+)
+{
+    const TxnPattern *advance = &template_message->patterns[kTXN_PATTERN_ADVANCE];
+    uint64_t expected = expectedValue(self, template_message);
+
+    if (!matchesId(advance, frame->can_id)) {
+        return;
+    }
+    if (matchesPayload(payload_word, advance->payload_mask, expected)) {
+        recordAnswer(self, frame);
+        return;
+    }
+    if (template_message->flags & TXN_TEMPLATE_FLAG_MISMATCH_ABORT) {
+        abortOnFrame(self, kTXN_REASON_VALUE_MISMATCH, frame, expected, payload_word);
+    }
+}
+
+static uint64_t expectedValue(const TransactionRunner *self, const TxnTemplateMessage *template_message)
+{
+    if (self->current.step.flags & TXN_STEP_FLAG_EXPECT_VALUE) {
+        return self->current.step.expect_value;
+    }
+    return template_message->patterns[kTXN_PATTERN_ADVANCE].payload_value;
+}
+
+static uint64_t payloadWord(const FrameMessage *frame)
+{
+    uint64_t word = 0;
+    uint8_t i;
+
+    for(i=0; i<TXN_PATTERN_PAYLOAD_BYTES && i<frame->payload_length; i++) {
+        word |= (uint64_t)frame->payload[i] << (i * BITS_PER_BYTE);
+    }
+    return word;
+}
+
+static uint32_t payloadOrigin(const FrameMessage *frame, uint8_t offset)
+{
+    uint32_t value = 0;
+    uint8_t i;
+
+    for(i=0; i<ORIGIN_PAYLOAD_BYTES && offset + i < frame->payload_length; i++) {
+        value |= (uint32_t)frame->payload[offset + i] << (i * BITS_PER_BYTE);
+    }
+    return value;
+}
+
+static uint32_t extractOrigin(const TransactionRunner *self, const FrameMessage *frame)
+{
+    uint32_t source_value;
+
+    if (self->origin.source == kTXN_ORIGIN_SOURCE_NONE) {
+        return 0;
+    }
+    if (self->origin.source == kTXN_ORIGIN_SOURCE_CAN_ID) {
+        source_value = frame->can_id & FRAME_CAN_ID_MASK;
+    } else {
+        source_value = payloadOrigin(frame, self->origin.payload_offset);
+    }
+    return (source_value & self->origin.mask) >> self->origin.shift;
+}
+
+static void keepRxFrame(TransactionRunner *self, const FrameMessage *frame)
+{
+    self->current.has_rx_frame = true;
+    self->current.rx_frame.can_id = frame->can_id;
+    self->current.rx_frame.payload_length = frame->payload_length;
+    self->current.rx_frame.frame_flags = frame->frame_flags;
+    memcpy(self->current.rx_frame.payload, frame->payload, frame->payload_length);
+}
+
+static const TxnTemplateMessage *currentTemplate(const TransactionRunner *self)
+{
+    return &self->templates[self->current.step.template_id];
+}
+
+static uint64_t templateTimeoutUs(const TxnTemplateMessage *template_message)
+{
+    return (uint64_t)template_message->timeout_ms * MICROSECONDS_PER_MILLISECOND;
+}
+
+static uint64_t transmitTimeoutUs(const TxnTemplateMessage *template_message)
+{
+    if (template_message->timeout_ms == 0) {
+        return (uint64_t)TRANSACTION_DEFAULT_TX_TIMEOUT_MS * MICROSECONDS_PER_MILLISECOND;
+    }
+    return templateTimeoutUs(template_message);
+}
+
+static void prepareStatus(const TransactionRunner *self, TxnStatusMessage *status, uint8_t state, uint8_t reason)
+{
+    memset(status, 0, sizeof(*status));
+    status->channel = self->channel;
+    status->state = state;
+    status->txn_id = self->txn_id;
+    status->reason = reason;
+    status->failing_seq = self->completed_steps;
+    status->completed_steps = self->completed_steps;
+    status->seen_bitmap = self->current.seen_bitmap;
+    if (self->current.has_rx_frame) {
+        status->flags |= TXN_STATUS_FLAG_HAS_RX_FRAME;
+        status->rx_frame = self->current.rx_frame;
+    }
+}
+
+static void finish(TransactionRunner *self, const TxnStatusMessage *status)
+{
+    self->active = false;
+    StepRing_Clear(&self->ring);
+    self->port.report_status(self->port.context, status);
+}
+
+static void abortWith(TransactionRunner *self, uint8_t reason, uint32_t failing_seq)
+{
+    TxnStatusMessage status;
+
+    prepareStatus(self, &status, kTXN_STATE_ABORTED, reason);
+    status.failing_seq = failing_seq;
+    finish(self, &status);
+}
+
+static void abortOnFrame(TransactionRunner *self, uint8_t reason, const FrameMessage *frame, uint64_t expected, uint64_t got)
+{
+    TxnStatusMessage status;
+
+    keepRxFrame(self, frame);
+    prepareStatus(self, &status, kTXN_STATE_ABORTED, reason);
+    status.offending_origin = extractOrigin(self, frame);
+    status.expected = expected;
+    status.got = got;
+    finish(self, &status);
+}
+
+static uint64_t earliestWake(uint64_t current, uint64_t candidate)
+{
+    if (candidate == 0) {
+        return current;
+    }
+    if (current == 0 || candidate < current) {
+        return candidate;
+    }
+    return current;
+}
+
+static uint64_t transmitReadyUs(const TransactionRunner *self)
+{
+    uint64_t ready_us = self->next_transmit_us;
+
+    if (self->current.retry_at_us > ready_us) {
+        ready_us = self->current.retry_at_us;
+    }
+    if (ready_us < self->last_tick_us) {
+        return self->last_tick_us;
+    }
+    return ready_us;
+}

@@ -28,6 +28,7 @@
 
 #define MAX_EPOLL_EVENTS 16
 #define TICK_PERIOD_MS 100
+#define MICROSECONDS_PER_MILLISECOND 1000
 #define TRANSPORT_SLOT 0
 #define IDENTITY_NAME "agent"
 #define KNOWN_HUBS_FILE "known_hubs"
@@ -79,6 +80,7 @@ static void uncorkTransport(void);
 static void resumePausedCanInterfaces(const CanEvents *can_events);
 static int32_t showIdentity(void);
 static const char *pinnedHubFingerprint(void);
+static int32_t pollTimeoutMs(void);
 
 int main(int argc, char **argv)
 {
@@ -144,7 +146,7 @@ int main(int argc, char **argv)
 
     while (!should_shutdown) {
         syncStreamRegistration();
-        event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, TICK_PERIOD_MS);
+        event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, pollTimeoutMs());
 
         for(i=0; i<event_count; i++) {
             dispatchEvent(&events[i], &can_events);
@@ -575,4 +577,25 @@ static const char *pinnedHubFingerprint(void)
     }
 
     return hub_fingerprint;
+}
+
+static int32_t pollTimeoutMs(void)
+{
+    uint64_t wake_us = AgentApp_NextWakeUs(&app);
+    uint64_t now_us;
+    uint64_t remaining_ms;
+
+    if (wake_us == 0) {
+        return TICK_PERIOD_MS;
+    }
+    now_us = Clock_MonotonicUs();
+    if (wake_us <= now_us) {
+        return 0;
+    }
+
+    remaining_ms = (wake_us - now_us + MICROSECONDS_PER_MILLISECOND - 1) / MICROSECONDS_PER_MILLISECOND;
+    if (remaining_ms >= TICK_PERIOD_MS) {
+        return TICK_PERIOD_MS;
+    }
+    return (int32_t)remaining_ms;
 }

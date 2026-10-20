@@ -7,6 +7,7 @@
 #include "agent/domain/channel_map.h"
 #include "agent/domain/echo_correlator.h"
 #include "shared/reconnect_backoff.h"
+#include "agent/domain/transaction_runner.h"
 #include "agent/domain/tx_pacer.h"
 #include "agent/ports/can_events.h"
 #include "agent/ports/can_port.h"
@@ -24,6 +25,10 @@
 #define AGENT_REGISTER_TIMEOUT_MS 5000
 #define AGENT_STATUS_PERIOD_MS 1000
 
+#ifndef TXN_RING_BYTES
+#define TXN_RING_BYTES (256 * 1024)
+#endif
+
 typedef enum tagent_state_e {
     kAGENT_STATE_DISCONNECTED = 0,
     kAGENT_STATE_CONNECTING,
@@ -40,6 +45,8 @@ typedef struct {
     ReconnectBackoff backoff;
     EchoCorrelator echo;
     TxPacer tx_pacer;
+    TransactionRunner transactions;
+    uint8_t transaction_ring[TXN_RING_BYTES];
     uint8_t state;
     uint64_t next_connect_at_us;
     uint64_t register_deadline_us;
@@ -59,3 +66,4 @@ bool Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *
 void Agent_OnTransportFrame(Agent *self, const uint8_t *data, size_t size);
 uint8_t Agent_State(const Agent *self);
 uint32_t Agent_PendingReconnectDelayMs(const Agent *self);
+uint64_t Agent_NextWakeUs(const Agent *self);

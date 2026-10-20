@@ -26,3 +26,8 @@ uint32_t AgentApp_PendingReconnectDelayMs(const AgentApp *self)
 {
     return Agent_PendingReconnectDelayMs(&self->agent);
 }
+
+uint64_t AgentApp_NextWakeUs(const AgentApp *self)
+{
+    return Agent_NextWakeUs(&self->agent);
+}
