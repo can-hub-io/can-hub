@@ -34,6 +34,7 @@ typedef struct {
     uint8_t payload[FRAME_PAYLOAD_MAX_FD];
 } FrameMessage;
 
+bool FrameMessage_IsPayloadLengthValid(uint8_t payload_length, uint8_t frame_flags);
 size_t FrameMessage_Encode(const FrameMessage *self, uint8_t *buffer, size_t buffer_size);
 bool FrameMessage_Decode(FrameMessage *self, const uint8_t *payload, size_t payload_length);
 

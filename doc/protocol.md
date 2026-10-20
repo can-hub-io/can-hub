@@ -11,7 +11,7 @@ Binary protocol, little-endian. Two planes:
 - Control plane: reliable, ordered (QUIC bidirectional stream, or the TCP connection itself).
 - Data plane: unreliable, latest-wins by default (QUIC datagrams; over TCP it shares the control stream). CAN frame messages. A channel may opt in to **reliable** delivery at OPEN time (see [Reliable channels](#reliable-channels)): its frames move to a dedicated bidirectional QUIC stream — in-order and lossless — without head-of-line-blocking the lossy cyclic traffic.
 
-Design rules: every message has a fixed layout with fields at known offsets, naturally aligned (u32 on multiples of 4, u64 on multiples of 8, counting from the start of the message, header included), with explicit reserved padding zeroed by the sender. A 32-bit microcontroller agent decodes with a single bounds check and a packed-struct overlay — no parsing loops, no cursors. Strings are fixed-size char arrays, NUL-terminated and NUL-padded. Control messages are rare; their wire size does not matter. The only trailing variable part in the whole protocol is the FRAME payload.
+Design rules: every message has a fixed layout with fields at known offsets, naturally aligned (u32 on multiples of 4, u64 on multiples of 8, counting from the start of the message, header included), with explicit reserved padding zeroed by the sender. A 32-bit microcontroller agent decodes with a single bounds check and a packed-struct overlay — no parsing loops, no cursors. Strings are fixed-size char arrays, NUL-terminated and NUL-padded. Control messages are rare; their wire size does not matter. The only trailing variable parts in the whole protocol are the FRAME payload and the step records of TXN_STEPS, which are 8-byte aligned so each record's fields stay naturally aligned.
 
 ## Message header (both planes)
 
@@ -91,6 +91,13 @@ offset  size  field
 0x39  ADMIN_GROUP_LEAVE_REPLY
 0x3A  ADMIN_GROUP_LIST    admin: bridge groups with members and counters (one per page)
 0x3B  ADMIN_GROUP_LIST_REPLY
+0x41  TXN_BEGIN    client -> hub -> agent: start a transaction on an open channel
+0x42  TXN_BEGIN_ACK agent (or hub) -> client: status, transaction id, window
+0x43  TXN_TEMPLATE client -> hub -> agent: define a step template (on the channel's reliable stream)
+0x44  TXN_STEPS    client -> hub -> agent: a batch of steps (on the channel's reliable stream)
+0x45  TXN_PROGRESS agent -> hub -> client: completed steps, consumed credit
+0x46  TXN_STATUS   agent (or hub) -> client: terminal outcome
+0x47  TXN_ABORT    client (or hub) -> agent: cancel the transaction
 0x7F  PING/PONG    liveness (flags bit 0: reply)
 ```
 
@@ -120,7 +127,8 @@ HELLO (total 76)
 @5   role u8 (1 agent, 2 client, 3 admin)
 @6   reserved u16
 @8   capabilities u32 (feature bitset; bit 0 reliable channels — see Reliable
-              channels. Unknown bits are ignored, never fatal.)
+              channels; bit 1 transactions — see Transactions. Unknown bits
+              are ignored, never fatal.)
 @12  name char[64]   (optional client label; agents name themselves in REGISTER)
 
 ERROR (total 72)
@@ -275,7 +283,9 @@ INTERFACE_STATUS (total 328; agent -> hub, also hub -> client)
 @5   reserved u8[3]
 @8   entries[16], 20 bytes each, addressed by channel:
        +0  channel u8
-       +1  flags u8 (bit 0 reliable; reserved, sent 0)
+       +1  flags u8 (bit 0 reliable, reserved, sent 0; bit 1 leased, hub ->
+                     client only: another client's exclusive transaction holds
+                     the interface, see Transactions)
        +2  reserved u8[2]
        +4  advertised_rate u32 (nominal bus bits/s; 0 = unpaced)
        +8  credit u32 (agent's AIMD-measured sustainable rate)
@@ -766,6 +776,218 @@ planes. There the reliable flag is a no-op — the channel is already reliable, 
 with connection-wide head-of-line blocking. The HOL-isolation benefit is
 QUIC-only; this is the same documented fallback trade-off as the lossy plane
 losing latest-wins semantics over TCP.
+
+## Transactions
+
+A request/response exchange driven from a remote client pays one network round
+trip per exchange: a UDS firmware flash is tens of thousands of exchanges, hours
+over a cellular link. A **transaction** moves the gating loop to the agent: the
+client streams a declarative sequence of steps (transmit a frame, wait for the
+expected answer) and the agent executes it at the bus, at bus round-trip time.
+The name is colloquial: a transaction runs to completion or to the first failure;
+CAN has no atomicity and nothing is rolled back.
+
+**Capability.** An agent that runs transactions advertises bit 1 of the HELLO
+`capabilities` bitset (transactions). If the agent owning the interface did not,
+the hub answers TXN_BEGIN with status unsupported (3).
+
+**Prerequisites.** The client runs a transaction on a channel it has open, and:
+
+- the channel must be **reliable** (OPEN flag bit 2): its reliable stream carries
+  the steps. Otherwise the hub answers status reliable channel required (4). Over
+  TCP/TLS the flag is a no-op but must still be set;
+- the client must be authorized to **write** the interface (ACL `rw`; unix and
+  plain tcp clients are trusted). Otherwise the hub answers status write denied (2).
+
+**One transaction per agent.** An agent runs one transaction at a time across all
+its interfaces. A TXN_BEGIN while one is active — on any of the agent's
+interfaces, from any client — is answered with status busy (1).
+
+**Paths.** TXN_BEGIN, TXN_BEGIN_ACK, TXN_PROGRESS, TXN_STATUS and TXN_ABORT
+travel on the control stream. TXN_TEMPLATE and TXN_STEPS travel on the channel's
+reliable stream (over TCP/TLS, the connection), so templates and steps reach the
+agent in the order the client sent them, and a large window of steps never
+head-of-line-blocks the control stream. No transaction message travels as a
+datagram. Every message carries the sender's `channel`; the hub rewrites it
+between the client's and the agent's channel, as it does for FRAME.
+
+**Lifecycle.**
+
+1. The client sends TXN_BEGIN. The agent answers TXN_BEGIN_ACK with status ok,
+   the `txn_id` and the `window` in bytes (below); the hub may answer a rejection
+   itself.
+2. The client sends the TXN_TEMPLATEs, then TXN_STEPS batches. Sequence numbers
+   start at 0 and are contiguous: a batch whose `first_seq` is not the next
+   expected one aborts the transaction (reason invalid step). A template may be
+   redefined later; it applies to the steps after it in stream order.
+3. The agent executes the steps and reports TXN_PROGRESS.
+4. The step flagged **last** completes the transaction: TXN_STATUS done. The
+   first failure ends it instead: TXN_STATUS aborted, with the reason.
+
+Messages naming another `txn_id` than the active one are stale (steps still in
+flight from a cancelled transaction) and are discarded.
+
+**Steps.** A step transmits a frame (`can_id`, `frame_flags`, payload), unless it
+is expect-only, and then waits as its template says. The frame goes through the
+normal injection path: its bus echo reaches the other subscribers like any
+injected frame, and the frames the agent receives meanwhile are still forwarded
+to every subscriber — the runner only matches, it never hides traffic. A frame
+the bus queue refuses is retried until the step times out (reason tx failed).
+
+**Templates.** A template (id 0-15) sets how a step waits:
+
+- `advance_mode`: 0 none (the step completes once its frame is sent), 1 count
+  (`count_k` frames matching the advance pattern), 2 roster all (every roster
+  origin answered), 3 roster k (`count_k` distinct roster origins answered);
+- three patterns, each present if its bit is set in `patterns_present`: bit 0
+  advance, bit 1 abort, bit 2 extend. A frame matches a pattern when
+  `(can_id & can_mask) == (pattern.can_id & can_mask)` and
+  `(P & payload_mask) == (payload_value & payload_mask)`, where P is the first 8
+  payload bytes as a little-endian u64 (byte i at bits 8i-8i+7; missing bytes
+  read as zero). `can_id` includes the EFF/RTR/ERR flag bits;
+- each received frame is checked against abort first (the transaction aborts,
+  reason abort match), then extend (the step timeout restarts), then advance;
+- a step with the expect-value flag replaces the advance pattern's
+  `payload_value` with its own `expect_value` (a per-step answer such as a block
+  counter or a batch CRC). A frame that matches the advance `can_id` but not the
+  payload is a mismatch: it aborts the transaction (reason value mismatch,
+  `expected` and `got` reported) if the template has the mismatch-abort flag, and
+  is ignored otherwise;
+- `timeout_ms` bounds the wait from the step's start or the last extend; it must
+  be non-zero for a waiting mode. On expiry the step aborts the transaction
+  (reason timeout), or completes if the template has the soft flag;
+- `gap_us` is the minimum delay between this step's frame and the next step's.
+
+**Roster.** TXN_BEGIN carries up to 64 expected origins and how to extract a
+frame's origin: from the CAN id (X = id bits 0-28) or from the payload (X = the
+4 bytes at `payload_offset`, little-endian, missing bytes read as zero), then
+`origin = (X & mask) >> shift`. In the roster modes, a frame matching the advance
+pattern counts once per origin: a per-step bitmap (bit i = `roster[i]` answered)
+drops retransmissions, and frames from origins outside the roster do not count.
+A failure report carries that bitmap, so the client learns who did not answer,
+and the origin of the frame that triggered it.
+
+**Credit.** The agent buffers steps in a ring of fixed size, announced as
+`window` in TXN_BEGIN_ACK: the number of step record bytes (the 8-byte-aligned
+records of TXN_STEPS, not the message headers) the client may have in flight.
+The agent releases a step's bytes when the step completes and reports the
+running total in TXN_PROGRESS `consumed_bytes` (modulo 2^32). The client must
+keep `bytes sent - consumed_bytes <= window`; a batch that does not fit in the
+ring aborts the transaction (reason overrun). Client libraries keep the steps
+not yet sent locally and send them as credit returns, so an application may hand
+over a whole firmware image at once. The agent sends TXN_PROGRESS once the bytes
+released since the previous one reach a quarter of the window, and on its next
+tick when fewer are pending, so the pipe stays full without one message per
+step. Credit is explicit rather than left to the transport because over TCP/TLS
+the agent cannot stop reading the connection without stalling the control
+stream; over QUIC, stream flow control backs it up.
+
+**Starvation.** If the ring stays empty while the transaction is incomplete for
+longer than an agent-defined deadline, the transaction aborts (reason starved).
+
+**Exclusive lease.** TXN_BEGIN flag bit 0 asks for exclusive write access to the
+interface for the life of the transaction, from TXN_BEGIN_ACK ok to TXN_STATUS.
+Meanwhile the hub drops and counts the FRAMEs other clients send to that
+interface, lossy and reliable channels alike, and tells them up front: it sends
+INTERFACE_STATUS with flag bit 1 (leased) set to every other client holding the
+interface open when the lease starts, and cleared when it ends. The lease
+excludes other can-hub clients only: hub bridge routes, local processes on the
+device and the other nodes on the bus still talk.
+
+**Cancellation.** TXN_ABORT cancels the transaction (TXN_STATUS aborted, reason
+cancelled). If the owner disconnects, the hub sends TXN_ABORT to the agent itself
+and releases the lease. If the agent disconnects, the hub answers the client with
+TXN_STATUS aborted, reason agent disconnected.
+
+```
+TXN_BEGIN (total 272)
+@4   channel u8
+@5   flags u8 (bit 0: exclusive lease)
+@6   origin_source u8 (0 none, 1 can_id, 2 payload)
+@7   origin_shift u8
+@8   origin_mask u32
+@12  origin_payload_offset u8
+@13  roster_count u8 (0-64)
+@14  reserved u16
+@16  roster u32[64] (first roster_count used, the rest zero)
+
+TXN_BEGIN_ACK (total 12)
+@4   channel u8
+@5   status u8 (0 ok, 1 busy, 2 write denied, 3 unsupported,
+                4 reliable channel required, 5 invalid)
+@6   txn_id u16
+@8   window u32 (step record bytes the client may have in flight)
+
+TXN_TEMPLATE (total 96)
+@4   channel u8
+@5   template_id u8 (0-15)
+@6   txn_id u16
+@8   advance_mode u8 (0 none, 1 count, 2 roster all, 3 roster k)
+@9   flags u8 (bit 0: soft, bit 1: mismatch abort)
+@10  count_k u8
+@11  patterns_present u8 (bit 0 advance, bit 1 abort, bit 2 extend)
+@12  timeout_ms u32
+@16  gap_us u32
+@20  type u8 (0 generic; reserved for typed steps)
+@21  reserved u8[3]
+@24  patterns[3] (advance, abort, extend), 24 bytes each:
+       +0  can_id u32
+       +4  can_mask u32
+       +8  payload_mask u64
+       +16 payload_value u64
+
+TXN_STEPS (total 16 + records, records at most 400 bytes)
+@4   channel u8
+@5   step_count u8
+@6   txn_id u16
+@8   first_seq u32
+@12  reserved u32
+@16  records, back to back, each:
+       +0  template_id u8
+       +1  flags u8 (bit 0: expect value present, bit 1: expect-only, no
+                     frame, bit 2: last step)
+       +2  payload_length u8 (0-8 classic, 0-64 FD; 0 for expect-only)
+       +3  frame_flags u8 (as FRAME)
+       +4  can_id u32 (as FRAME; 0 for expect-only)
+       +8  payload, zero-padded to a multiple of 8 bytes
+       then expect_value u64, if flag bit 0
+
+TXN_PROGRESS (total 16)
+@4   channel u8
+@5   reserved u8
+@6   txn_id u16
+@8   completed_steps u32
+@12  consumed_bytes u32 (record bytes released, modulo 2^32)
+
+TXN_STATUS (total 116)
+@4   channel u8
+@5   state u8 (0 done, 1 aborted)
+@6   txn_id u16
+@8   failing_seq u32
+@12  offending_origin u32
+@16  seen_bitmap u64 (roster steps: bit i set if roster[i] answered)
+@24  expected u64
+@32  got u64
+@40  completed_steps u32
+@44  rx_can_id u32
+@48  reason u8 (0 none, 1 timeout, 2 abort match, 3 value mismatch,
+                4 tx failed, 5 cancelled, 6 starved, 7 overrun,
+                8 agent disconnected, 9 invalid step)
+@49  rx_payload_length u8
+@50  rx_frame_flags u8
+@51  flags u8 (bit 0: rx frame present — the last frame that matched a
+               pattern of the failing step)
+@52  rx_payload u8[64]
+
+TXN_ABORT (total 8)
+@4   channel u8
+@5   reserved u8
+@6   txn_id u16
+```
+
+A classic 8-byte step is a 16-byte record and an expect-only step 8 bytes, so a
+1 MB flash in batches of 16 frames plus one acknowledgement needs about 2 bytes
+of records per firmware byte.
 
 ## External protocol bridging
 
