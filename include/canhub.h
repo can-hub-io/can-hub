@@ -55,6 +55,41 @@ extern "C" {
 #define CANHUB_ERR_CONFIGURE_DENIED (-13)
 #define CANHUB_ERR_APPLY_FAILED (-14)
 #define CANHUB_ERR_AGENT_UNREACHABLE (-15)
+#define CANHUB_ERR_LEASED (-16)
+#define CANHUB_ERR_TXN_BUSY (-17)
+#define CANHUB_ERR_TXN_UNSUPPORTED (-18)
+#define CANHUB_ERR_TXN_ABORTED (-19)
+
+#define CANHUB_TXN_ROSTER_MAX 64
+#define CANHUB_TXN_TEMPLATES_MAX 16
+#define CANHUB_TXN_FLAG_EXCLUSIVE (1u << 0)
+#define CANHUB_TXN_ORIGIN_NONE 0
+#define CANHUB_TXN_ORIGIN_CAN_ID 1
+#define CANHUB_TXN_ORIGIN_PAYLOAD 2
+#define CANHUB_TXN_ADVANCE_NONE 0
+#define CANHUB_TXN_ADVANCE_COUNT 1
+#define CANHUB_TXN_ADVANCE_ROSTER_ALL 2
+#define CANHUB_TXN_ADVANCE_ROSTER_K 3
+#define CANHUB_TXN_TEMPLATE_SOFT (1u << 0)
+#define CANHUB_TXN_TEMPLATE_MISMATCH_ABORT (1u << 1)
+#define CANHUB_TXN_PATTERN_ADVANCE 0
+#define CANHUB_TXN_PATTERN_ABORT 1
+#define CANHUB_TXN_PATTERN_EXTEND 2
+#define CANHUB_TXN_PATTERNS 3
+#define CANHUB_TXN_STEP_EXPECT_VALUE (1u << 0)
+#define CANHUB_TXN_STEP_EXPECT_ONLY (1u << 1)
+#define CANHUB_TXN_DONE 0
+#define CANHUB_TXN_ABORTED 1
+#define CANHUB_TXN_REASON_NONE 0
+#define CANHUB_TXN_REASON_TIMEOUT 1
+#define CANHUB_TXN_REASON_ABORT_MATCH 2
+#define CANHUB_TXN_REASON_VALUE_MISMATCH 3
+#define CANHUB_TXN_REASON_TX_FAILED 4
+#define CANHUB_TXN_REASON_CANCELLED 5
+#define CANHUB_TXN_REASON_STARVED 6
+#define CANHUB_TXN_REASON_OVERRUN 7
+#define CANHUB_TXN_REASON_AGENT_DISCONNECTED 8
+#define CANHUB_TXN_REASON_INVALID_STEP 9
 
 #define CANHUB_SETTING_BITRATE (1u << 0)
 #define CANHUB_SETTING_SAMPLE_POINT (1u << 1)
@@ -162,6 +197,80 @@ typedef struct {
     CanHubBitTiming data_bit_timing;
 } CanHubInterfaceSettings;
 
+/*
+ * Transactions (see doc/protocol.md "Transactions"): the agent runs a sequence
+ * of steps at the bus. A step transmits a frame, unless it is expect-only, and
+ * waits as its template says. The roster lists the expected answering origins,
+ * extracted as (X & origin_mask) >> origin_shift from the CAN id or from the 4
+ * payload bytes at origin_payload_offset. Patterns match a frame when
+ * (can_id & can_mask) == (pattern can_id & can_mask) and its first 8 payload
+ * bytes, little-endian, match payload_value under payload_mask; a pattern
+ * counts only if its bit (1 << CANHUB_TXN_PATTERN_*) is in patterns_present.
+ */
+typedef struct {
+    uint32_t struct_size;
+    uint8_t flags;
+    uint8_t origin_source;
+    uint8_t origin_shift;
+    uint8_t origin_payload_offset;
+    uint32_t origin_mask;
+    uint32_t roster_count;
+    uint32_t roster[CANHUB_TXN_ROSTER_MAX];
+} CanHubTxnBegin;
+
+typedef struct {
+    uint32_t can_id;
+    uint32_t can_mask;
+    uint64_t payload_mask;
+    uint64_t payload_value;
+} CanHubTxnPattern;
+
+typedef struct {
+    uint32_t struct_size;
+    uint8_t template_id;
+    uint8_t advance_mode;
+    uint8_t flags;
+    uint8_t count_k;
+    uint8_t patterns_present;
+    uint8_t reserved[3];
+    uint32_t timeout_ms;
+    uint32_t gap_us;
+    CanHubTxnPattern patterns[CANHUB_TXN_PATTERNS];
+} CanHubTxnTemplate;
+
+typedef struct {
+    uint32_t can_id;
+    uint8_t template_id;
+    uint8_t flags;
+    uint8_t frame_flags;
+    uint8_t length;
+    uint64_t expect_value;
+    uint8_t payload[CANHUB_FRAME_PAYLOAD_MAX];
+} CanHubTxnStep;
+
+typedef struct {
+    uint32_t struct_size;
+    uint32_t sent_steps;
+    uint32_t completed_steps;
+    uint32_t bytes_in_flight;
+    uint32_t window_bytes;
+} CanHubTxnProgress;
+
+typedef struct {
+    uint32_t struct_size;
+    uint8_t state;
+    uint8_t reason;
+    uint8_t has_rx_frame;
+    uint8_t reserved;
+    uint32_t failing_seq;
+    uint32_t completed_steps;
+    uint32_t offending_origin;
+    uint64_t seen_bitmap;
+    uint64_t expected;
+    uint64_t got;
+    CanHubFrame rx_frame;
+} CanHubTxnResult;
+
 CANHUB_API uint32_t canhub_api_version(void);
 
 CANHUB_API CanHubSession *canhub_connect(const CanHubConnectConfig *config);
@@ -199,6 +308,25 @@ CANHUB_API int32_t canhub_query(
     CanHubInterfaceSettings *effective,
     int32_t timeout_ms
 );
+
+/*
+ * Run a transaction on the open interface, which must be opened with
+ * CANHUB_OPEN_FLAG_RELIABLE and CANHUB_OPEN_FLAG_WRITE. canhub_txn_begin waits
+ * for the agent's grant. canhub_txn_send behaves like a blocking socket write:
+ * it hands the steps over as the agent's window allows, waiting for credit,
+ * and returns how many it took (fewer than count on timeout); frames received
+ * meanwhile stay queued for canhub_recv. The last step handed over is held
+ * back until canhub_txn_end, which marks it the last one. canhub_txn_wait
+ * returns CANHUB_OK once the transaction is done, CANHUB_ERR_TXN_ABORTED with
+ * the report in result otherwise. canhub_txn_abort cancels it.
+ */
+CANHUB_API int32_t canhub_txn_begin(CanHubSession *session, const CanHubTxnBegin *begin, int32_t timeout_ms);
+CANHUB_API int32_t canhub_txn_template(CanHubSession *session, const CanHubTxnTemplate *template_definition, int32_t timeout_ms);
+CANHUB_API int32_t canhub_txn_send(CanHubSession *session, const CanHubTxnStep *steps, uint32_t count, int32_t timeout_ms);
+CANHUB_API int32_t canhub_txn_end(CanHubSession *session, int32_t timeout_ms);
+CANHUB_API int32_t canhub_txn_wait(CanHubSession *session, CanHubTxnResult *result, int32_t timeout_ms);
+CANHUB_API int32_t canhub_txn_progress(CanHubSession *session, CanHubTxnProgress *progress);
+CANHUB_API int32_t canhub_txn_abort(CanHubSession *session);
 
 #ifdef __cplusplus
 }

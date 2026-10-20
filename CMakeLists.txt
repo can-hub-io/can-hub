@@ -80,9 +80,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/protocol/interface_name.c
         src/protocol/interface_status_message.c
         src/protocol/ifconfig_message.c
+        src/protocol/txn_message.c
+        src/protocol/txn_steps_message.c
         src/shared/egress_shaper.c
         src/shared/bounded_string.c
         src/client/client.c
+        src/client/transaction_sender.c
         src/platform/windows/clock/clock.c
         src/platform/linux/shared/connect_url.c
         src/platform/linux/shared/message_framer.c
@@ -117,6 +120,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/platform/windows/shared/tls_identity.c
         src/platform/windows/libcanhub/canhub.c
         src/platform/linux/libcanhub/canhub_settings.c
+        src/platform/linux/libcanhub/canhub_transactions.c
     )
     set(CAN_HUB_WINDOWS_LIBRARIES ws2_32 crypt32 bcrypt)
 
@@ -266,6 +270,7 @@ add_executable(can-hub-agent src/platform/linux/agent_main.c ${COMMON_SOURCES} $
 target_link_libraries(can-hub-agent PRIVATE ngtcp2_static can_hub_tls Threads::Threads)
 set(CLIENT_SOURCES
     src/client/client.c
+    src/client/transaction_sender.c
     src/client/frame_spec.c
     src/platform/linux/clock/clock.c
     src/platform/linux/shared/connect_url.c
@@ -330,6 +335,7 @@ target_link_libraries(can-hub-cli PRIVATE Threads::Threads)
 set(LIBCANHUB_SOURCES
     src/platform/linux/libcanhub/canhub.c
     src/platform/linux/libcanhub/canhub_settings.c
+    src/platform/linux/libcanhub/canhub_transactions.c
     ${CLIENT_SOURCES}
     ${CLIENT_TLS_SOURCES}
 )

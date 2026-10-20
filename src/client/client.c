@@ -7,6 +7,8 @@
 #include "protocol/interface_status_message.h"
 #include "protocol/message_header.h"
 #include "protocol/open_message.h"
+#include "protocol/txn_message.h"
+#include "protocol/txn_steps_message.h"
 #include "shared/bounded_string.h"
 
 #define CLIENT_PACE_BURST_BITS 8192
@@ -42,6 +44,10 @@ static void sendList(Client *self, uint16_t offset);
 static void sendOpen(Client *self);
 static void sendSubscribe(Client *self);
 static void sendConfigure(Client *self);
+static void handleTxnBeginAck(Client *self, const uint8_t *body, uint16_t length);
+static void handleTxnProgress(Client *self, const uint8_t *body, uint16_t length);
+static void handleTxnStatus(Client *self, const uint8_t *body, uint16_t length);
+static bool isTransactionRunning(const Client *self);
 
 /* ---------- public ---------- */
 
@@ -151,6 +157,9 @@ TCLIENT_SEND_RESULT Client_SendFrame(Client *self, FrameMessage *frame, uint64_t
     if (self->state != kCLIENT_OPEN) {
         return kCLIENT_SEND_FAILED;
     }
+    if (self->interface_leased) {
+        return kCLIENT_SEND_LEASED;
+    }
 
     frame->channel = self->channel;
 
@@ -185,6 +194,125 @@ uint8_t Client_State(const Client *self)
 uint8_t Client_Channel(const Client *self)
 {
     return self->channel;
+}
+
+bool Client_InterfaceLeased(const Client *self)
+{
+    return self->interface_leased;
+}
+
+bool Client_BeginTransaction(Client *self, TxnBeginMessage *begin)
+{
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
+    size_t encoded_size;
+
+    if (self->state != kCLIENT_OPEN) {
+        return false;
+    }
+    if (self->transaction.state == kTRANSACTION_SENDER_BEGINNING || self->transaction.state == kTRANSACTION_SENDER_RUNNING) {
+        return false;
+    }
+
+    begin->channel = self->channel;
+    encoded_size = TxnBeginMessage_Encode(begin, encoded, sizeof(encoded));
+    if (encoded_size == 0 || !self->hub->send_control(self->hub->context, encoded, encoded_size)) {
+        return false;
+    }
+
+    TransactionSender_Begin(&self->transaction, self->channel);
+
+    return true;
+}
+
+bool Client_DefineTemplate(Client *self, TxnTemplateMessage *template_message)
+{
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
+    size_t encoded_size;
+
+    if (!isTransactionRunning(self) || !Client_FlushTransaction(self)) {
+        return false;
+    }
+
+    template_message->channel = self->channel;
+    template_message->txn_id = self->transaction.txn_id;
+    encoded_size = TxnTemplateMessage_Encode(template_message, encoded, sizeof(encoded));
+    if (encoded_size == 0) {
+        return false;
+    }
+
+    return self->hub->send_frame(self->hub->context, self->channel, encoded, encoded_size);
+}
+
+uint32_t Client_SendSteps(Client *self, const TxnStep *steps, uint32_t count, TTRANSACTION_OFFER *stopped_by)
+{
+    TTRANSACTION_OFFER result = kTRANSACTION_OFFER_ACCEPTED;
+    uint32_t accepted = 0;
+
+    while (accepted < count) {
+        result = TransactionSender_Offer(&self->transaction, &steps[accepted]);
+        if (result == kTRANSACTION_OFFER_ACCEPTED) {
+            accepted++;
+            continue;
+        }
+        if (result != kTRANSACTION_OFFER_FLUSH_NEEDED || !Client_FlushTransaction(self)) {
+            break;
+        }
+    }
+    Client_FlushTransaction(self);
+
+    *stopped_by = result;
+
+    return accepted;
+}
+
+TTRANSACTION_OFFER Client_EndTransaction(Client *self)
+{
+    TTRANSACTION_OFFER result = TransactionSender_End(&self->transaction);
+
+    if (result == kTRANSACTION_OFFER_FLUSH_NEEDED && Client_FlushTransaction(self)) {
+        result = TransactionSender_End(&self->transaction);
+    }
+    Client_FlushTransaction(self);
+
+    return result;
+}
+
+bool Client_FlushTransaction(Client *self)
+{
+    const uint8_t *batch;
+    size_t batch_size = TransactionSender_PendingBatch(&self->transaction, &batch);
+
+    if (batch_size == 0) {
+        return true;
+    }
+    if (!self->hub->send_frame(self->hub->context, self->channel, batch, batch_size)) {
+        return false;
+    }
+
+    TransactionSender_BatchSent(&self->transaction);
+
+    return true;
+}
+
+void Client_AbortTransaction(Client *self)
+{
+    TxnAbortMessage abort_message;
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
+    size_t encoded_size;
+
+    if (!isTransactionRunning(self)) {
+        return;
+    }
+
+    abort_message.channel = self->channel;
+    abort_message.txn_id = self->transaction.txn_id;
+    encoded_size = TxnAbortMessage_Encode(&abort_message, encoded, sizeof(encoded));
+    self->hub->send_control(self->hub->context, encoded, encoded_size);
+}
+
+const TransactionSender *Client_Transaction(const Client *self)
+{
+    return &self->transaction;
 }
 
 /* ---------- private ---------- */
@@ -240,6 +368,18 @@ static void transportOnControl(void *context, const uint8_t *data, size_t size, 
     }
     if (header.type == kMESSAGE_TYPE_CONFIGURE_REPLY) {
         handleConfigureReply(self, data + MESSAGE_HEADER_SIZE, header.length);
+        return;
+    }
+    if (header.type == kMESSAGE_TYPE_TXN_BEGIN_ACK) {
+        handleTxnBeginAck(self, data + MESSAGE_HEADER_SIZE, header.length);
+        return;
+    }
+    if (header.type == kMESSAGE_TYPE_TXN_PROGRESS) {
+        handleTxnProgress(self, data + MESSAGE_HEADER_SIZE, header.length);
+        return;
+    }
+    if (header.type == kMESSAGE_TYPE_TXN_STATUS) {
+        handleTxnStatus(self, data + MESSAGE_HEADER_SIZE, header.length);
     }
 }
 
@@ -395,6 +535,7 @@ static void handleInterfaceStatus(Client *self, const uint8_t *body, uint16_t le
         if (status.entries[i].channel != self->channel) {
             continue;
         }
+        self->interface_leased = (status.entries[i].flags & INTERFACE_STATUS_FLAG_LEASED) != 0;
         if (self->shaper.burst_bits == 0) {
             EgressShaper_Init(&self->shaper, now_us, status.entries[i].advertised_rate, CLIENT_PACE_BURST_BITS);
         } else {
@@ -488,4 +629,36 @@ static void sendConfigure(Client *self)
     if (encoded_size > 0) {
         self->hub->send_control(self->hub->context, encoded, encoded_size);
     }
+}
+
+static void handleTxnBeginAck(Client *self, const uint8_t *body, uint16_t length)
+{
+    TxnBeginAckMessage ack;
+
+    if (TxnBeginAckMessage_Decode(&ack, body, length)) {
+        TransactionSender_OnBeginAck(&self->transaction, &ack);
+    }
+}
+
+static void handleTxnProgress(Client *self, const uint8_t *body, uint16_t length)
+{
+    TxnProgressMessage progress;
+
+    if (TxnProgressMessage_Decode(&progress, body, length)) {
+        TransactionSender_OnProgress(&self->transaction, &progress);
+    }
+}
+
+static void handleTxnStatus(Client *self, const uint8_t *body, uint16_t length)
+{
+    TxnStatusMessage status;
+
+    if (TxnStatusMessage_Decode(&status, body, length)) {
+        TransactionSender_OnStatus(&self->transaction, &status);
+    }
+}
+
+static bool isTransactionRunning(const Client *self)
+{
+    return self->transaction.state == kTRANSACTION_SENDER_RUNNING;
 }

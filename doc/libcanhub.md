@@ -44,10 +44,11 @@ canhub_close(session);
 | `canhub_open(session, name, flags, timeout_ms)` | by namespaced name (`agent/iface`) or numeric id; flags `CANHUB_OPEN_FLAG_WRITE`, `CANHUB_OPEN_FLAG_NO_ECHO`, `CANHUB_OPEN_FLAG_RELIABLE` (lossless ordered QUIC stream, `quic://` only; `CANHUB_ERR_RELIABLE_UNSUPPORTED` if the hub lacks the capability), `CANHUB_OPEN_FLAG_ERROR_FRAMES` (also receive the bus error frames, `CANHUB_CAN_ID_FLAG_ERR` set) |
 | `canhub_set_filters(session, filters, count)` | hub-side CAN id mask filters, replace semantics, max 16 |
 | `canhub_recv(session, frame, timeout_ms)` | `CANHUB_RECEIVED`, `CANHUB_ERR_TIMEOUT`, or a failure; `frame.flags` carries `CANHUB_FRAME_FLAG_FD`, `CANHUB_FRAME_FLAG_BRS` and `CANHUB_FRAME_FLAG_BRIDGED` (the hub injected the frame along a [bridge](hub.md#bridging-buses); ignored on send) |
-| `canhub_send(session, frame)` | needs an open writable channel; `CANHUB_ERR_RATE_LIMITED` when the local pacer drops the frame |
+| `canhub_send(session, frame)` | needs an open writable channel; `CANHUB_ERR_RATE_LIMITED` when the local pacer drops the frame, `CANHUB_ERR_LEASED` while another client's exclusive [transaction](#transactions) holds the interface |
 | `canhub_stats(session, stats)` | local drop counters: `frames_rate_limited` (pacer), `frames_ring_dropped` (receive ring overrun) |
 | `canhub_configure(session, name, requested, effective, timeout_ms)` | reconfigure `agent/iface` in one step (needs an `rwa` grant; [settings](#interface-settings)); `effective` may be NULL |
 | `canhub_query(session, name, effective, timeout_ms)` | the settings the bus holds now |
+| `canhub_txn_*` | run a [transaction](#transactions) at the agent |
 | `canhub_last_error(session)` | human-readable detail for the last failure; pass `NULL` for why the last `canhub_connect` on this thread failed |
 | `canhub_api_version()` | `CANHUB_API_VERSION` of the linked library |
 
@@ -70,9 +71,9 @@ counters, so a consumer can tell a quiet bus from one it is losing:
 CanHubStats stats = { 0 };
 stats.struct_size = sizeof(stats);
 canhub_stats(session, &stats);
-printf("paced out %llu, ring lost %llu\n",
-       (unsigned long long)stats.frames_rate_limited,
-       (unsigned long long)stats.frames_ring_dropped);
+printf("paced out %" PRIu64 ", ring lost %" PRIu64 "\n",
+       stats.frames_rate_limited,
+       stats.frames_ring_dropped);
 ```
 
 ## Interface settings
@@ -117,6 +118,52 @@ connect on the calling thread — bad url, unreadable identity, a hub host
 that does not resolve, unreachable hub, timeout. The hub host resolves on a
 short-lived thread of its own, so `connect_timeout_ms` also bounds a slow
 resolver.
+
+## Transactions
+
+A transaction runs a request/response sequence at the agent, at bus speed,
+instead of paying a network round trip per exchange (UDS flashing, broadcast
+upgrades; [protocol](protocol.md#transactions)). Open the interface with
+`CANHUB_OPEN_FLAG_RELIABLE | CANHUB_OPEN_FLAG_WRITE`, then:
+
+```c
+CanHubTxnBegin begin = { 0 };
+begin.struct_size = sizeof(begin);
+begin.flags = CANHUB_TXN_FLAG_EXCLUSIVE;          // other clients' writes are dropped meanwhile
+canhub_txn_begin(session, &begin, 5000);
+
+CanHubTxnTemplate response = { 0 };               // wait for 0x7E8 xx 76, abort on 7F, extend on 7F xx 78
+response.struct_size = sizeof(response);
+response.template_id = 0;
+response.advance_mode = CANHUB_TXN_ADVANCE_COUNT;
+response.count_k = 1;
+response.timeout_ms = 1000;
+response.patterns_present = (1u << CANHUB_TXN_PATTERN_ADVANCE) | (1u << CANHUB_TXN_PATTERN_ABORT)
+                          | (1u << CANHUB_TXN_PATTERN_EXTEND);
+response.patterns[CANHUB_TXN_PATTERN_ADVANCE] = (CanHubTxnPattern){ 0x7E8, 0x7FF, 0xFF00, 0x7600 };
+response.patterns[CANHUB_TXN_PATTERN_ABORT] = (CanHubTxnPattern){ 0x7E8, 0x7FF, 0xFF00, 0x7F00 };
+response.patterns[CANHUB_TXN_PATTERN_EXTEND] = (CanHubTxnPattern){ 0x7E8, 0x7FF, 0xFF00FF00, 0x78007F00 };
+canhub_txn_template(session, &response, 5000);
+
+canhub_txn_send(session, steps, step_count, -1);  // blocks while waiting for credit
+canhub_txn_end(session, -1);                      // marks the last step
+
+CanHubTxnResult result = { 0 };
+result.struct_size = sizeof(result);
+if (canhub_txn_wait(session, &result, -1) == CANHUB_ERR_TXN_ABORTED) {
+    fprintf(stderr, "step %" PRIu32 " failed, reason %u\n", result.failing_seq, result.reason);
+}
+```
+
+| Function | Notes |
+|---|---|
+| `canhub_txn_begin(session, begin, timeout_ms)` | waits for the agent's grant; `begin` carries the exclusive flag and the roster with its origin extractor. `CANHUB_ERR_TXN_BUSY` while the agent runs another one, `CANHUB_ERR_TXN_UNSUPPORTED` for an agent that cannot, `CANHUB_ERR_WRITE_DENIED`, `CANHUB_ERR_STATE` on a lossy channel |
+| `canhub_txn_template(session, template, timeout_ms)` | define template 0-15 (once per transaction), before the steps that use it |
+| `canhub_txn_send(session, steps, count, timeout_ms)` | like a blocking socket write: hands the steps over as the agent's window allows and returns how many it took; hand over a whole image at once or in chunks. Frames received meanwhile stay queued for `canhub_recv` |
+| `canhub_txn_end(session, timeout_ms)` | the step handed over last is held back until now, so it can be marked the last one |
+| `canhub_txn_wait(session, result, timeout_ms)` | `CANHUB_OK` when done, `CANHUB_ERR_TXN_ABORTED` with the failing step, the reason, the roster bitmap of who answered, expected/got values and the frame that triggered it |
+| `canhub_txn_progress(session, progress)` | steps sent and completed, record bytes in flight, window |
+| `canhub_txn_abort(session)` | cancel; `canhub_txn_wait` then reports the reason cancelled |
 
 ## Example
 

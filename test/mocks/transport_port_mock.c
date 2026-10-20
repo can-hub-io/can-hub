@@ -20,6 +20,7 @@ void TransportPortMock_Reset(TransportPortMock *self)
     self->port.send_frame = mockSendFrame;
     self->port.set_channel_mode = mockSetChannelMode;
     self->connect_result = true;
+    self->frame_result = true;
 }
 
 /* ---------- private ---------- */
@@ -59,7 +60,7 @@ static bool mockSendFrame(void *context, uint8_t channel, const uint8_t *data, s
 {
     TransportPortMock *self = context;
 
-    if (size > MOCK_FRAME_BUFFER_SIZE) {
+    if (!self->frame_result || size > MOCK_FRAME_BUFFER_SIZE) {
         return false;
     }
 

@@ -4,7 +4,7 @@
 
 #define MOCK_CONTROL_LOG_SIZE 1024
 #define MOCK_CONTROL_LOG_MESSAGES_MAX 8
-#define MOCK_FRAME_BUFFER_SIZE 256
+#define MOCK_FRAME_BUFFER_SIZE 512
 
 typedef struct {
     TransportPort port;
@@ -14,6 +14,7 @@ typedef struct {
     int control_count;
     uint8_t control_log[MOCK_CONTROL_LOG_MESSAGES_MAX][MOCK_CONTROL_LOG_SIZE];
     size_t control_sizes[MOCK_CONTROL_LOG_MESSAGES_MAX];
+    bool frame_result;
     int frame_count;
     uint8_t last_frame[MOCK_FRAME_BUFFER_SIZE];
     size_t last_frame_size;

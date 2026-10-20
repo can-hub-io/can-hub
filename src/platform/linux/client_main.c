@@ -355,6 +355,11 @@ static void sendFrameAndQuit(void)
         exit_code = 1;
         return;
     }
+    if (result == kCLIENT_SEND_LEASED) {
+        LOG_ERROR("the frame was dropped: another client's transaction holds this interface");
+        exit_code = 1;
+        return;
+    }
     if (result == kCLIENT_SEND_FAILED) {
         LOG_ERROR("could not send the frame");
         exit_code = 1;

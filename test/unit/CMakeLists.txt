@@ -538,10 +538,24 @@ add_unit_test(test_frame_spec
         ${ROOT_SRC_DIR}/client/frame_spec.c
 )
 
+add_unit_test(test_transaction_sender
+    SOURCES
+        client/test_transaction_sender.cpp
+        ${ROOT_SRC_DIR}/client/transaction_sender.c
+        ${ROOT_SRC_DIR}/protocol/txn_message.c
+        ${ROOT_SRC_DIR}/protocol/txn_steps_message.c
+        ${ROOT_SRC_DIR}/protocol/frame_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+
 add_unit_test(test_client
     SOURCES
         client/test_client.cpp
         ${ROOT_SRC_DIR}/client/client.c
+        ${ROOT_SRC_DIR}/client/transaction_sender.c
+        ${ROOT_SRC_DIR}/protocol/txn_message.c
+        ${ROOT_SRC_DIR}/protocol/txn_steps_message.c
         ${ROOT_SRC_DIR}/protocol/error_message.c
         ${ROOT_SRC_DIR}/protocol/frame_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c
