@@ -538,6 +538,40 @@ add_unit_test(test_frame_spec
         ${ROOT_SRC_DIR}/client/frame_spec.c
 )
 
+add_unit_test(test_checksum
+    SOURCES
+        client/txn_script/test_checksum.cpp
+        ${ROOT_SRC_DIR}/client/txn_script/checksum.c
+)
+
+add_unit_test(test_script_parser
+    SOURCES
+        client/txn_script/test_script_parser.cpp
+        ${ROOT_SRC_DIR}/client/txn_script/script.c
+        ${ROOT_SRC_DIR}/client/txn_script/script_error.c
+        ${ROOT_SRC_DIR}/client/txn_script/script_lexer.c
+        ${ROOT_SRC_DIR}/client/txn_script/script_parser.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
+)
+
+add_unit_test(test_script_program
+    SOURCES
+        client/txn_script/test_script_program.cpp
+        ${ROOT_SRC_DIR}/client/txn_script/checksum.c
+        ${ROOT_SRC_DIR}/client/txn_script/script.c
+        ${ROOT_SRC_DIR}/client/txn_script/script_compiler.c
+        ${ROOT_SRC_DIR}/client/txn_script/script_error.c
+        ${ROOT_SRC_DIR}/client/txn_script/script_generator.c
+        ${ROOT_SRC_DIR}/client/txn_script/script_lexer.c
+        ${ROOT_SRC_DIR}/client/txn_script/script_parser.c
+        ${ROOT_SRC_DIR}/client/txn_script/script_resolver.c
+        ${ROOT_SRC_DIR}/protocol/txn_steps_message.c
+        ${ROOT_SRC_DIR}/protocol/frame_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+        ${ROOT_SRC_DIR}/shared/bounded_string.c
+)
+
 add_unit_test(test_transaction_sender
     SOURCES
         client/test_transaction_sender.cpp
