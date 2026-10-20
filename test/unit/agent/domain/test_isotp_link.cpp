@@ -18,6 +18,13 @@ extern "C" {
 #define ST_MIN_500_US 0xF5
 #define LONG_MESSAGE_SIZE 120
 #define SIXTEENTH_FRAME 16
+#define TARGET_ADDRESS 0x10
+#define SOURCE_ADDRESS 0xF1
+#define FD_DATA_LENGTH 64
+#define FD_SINGLE_MESSAGE 40
+#define FD_SEGMENTED_MESSAGE 100
+#define FD_FIRST_FRAME_DATA 62
+#define FD_LAST_FRAME_LENGTH 48
 
 static IsotpLink isotp;
 static FrameMessage transmitted[TRANSMITTED_MAX];
@@ -29,6 +36,9 @@ static FrameMessage answer;
 
 static void resetLink(void);
 static void openLink(uint8_t flags, uint8_t block_size, uint8_t st_min);
+static void openAddressedLink(void);
+static void openFdLink(void);
+static uint8_t fromPeerFrame(const uint8_t *bytes, uint8_t length, uint8_t frame_flags, uint64_t now_us);
 static void sendMessage(uint16_t length, uint64_t now_us);
 static uint8_t fromPeer(std::initializer_list<uint8_t> bytes, uint64_t now_us);
 static uint8_t fromId(uint32_t can_id, std::initializer_list<uint8_t> bytes, uint64_t now_us);
@@ -277,7 +287,126 @@ describe("isotp_link", []() {
             expect(events[1]).toBe((uint8_t)kISOTP_EVENT_NONE);
         });
     });
+
+    describe("address byte", []() {
+        beforeEach([]() {
+            resetLink();
+            openAddressedLink();
+        });
+
+        it("puts the target address first in every frame it sends", []() {
+            sendMessage(20, START_US);
+            IsotpLink_Tick(&isotp, START_US);
+            fromPeer({ SOURCE_ADDRESS, 0x30, 0x00, 0x00 }, START_US);
+            IsotpLink_Tick(&isotp, START_US);
+
+            expect(payloadIs(&transmitted[0], { TARGET_ADDRESS, 0x10, 0x14, 0x00, 0x01, 0x02, 0x03, 0x04 })).toBe(true);
+            expect(payloadIs(&transmitted[1], { TARGET_ADDRESS, 0x21, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A })).toBe(true);
+            expect(transmit_count).toBe((uint32_t)4);
+        });
+
+        it("takes only answers that carry its source address", []() {
+            events[0] = fromPeer({ 0x22, 0x02, 0x50, 0x03 }, START_US);
+            events[1] = fromPeer({ SOURCE_ADDRESS, 0x02, 0x50, 0x03 }, START_US);
+            IsotpLink_MessageFrame(&isotp, &answer);
+
+            expect(events[0]).toBe((uint8_t)kISOTP_EVENT_NONE);
+            expect(events[1]).toBe((uint8_t)kISOTP_EVENT_MESSAGE);
+            expect(payloadIs(&answer, { 0x50, 0x03 })).toBe(true);
+        });
+    });
+
+    describe("can fd", []() {
+        beforeEach([]() {
+            resetLink();
+            openFdLink();
+        });
+
+        it("sends a message that fits as one escaped single frame", []() {
+            sendMessage(FD_SINGLE_MESSAGE, START_US);
+            events[0] = IsotpLink_Tick(&isotp, START_US);
+
+            expect(events[0]).toBe((uint8_t)kISOTP_EVENT_SENT);
+            expect(transmitted[0].payload_length).toBe(FD_LAST_FRAME_LENGTH);
+            expect(transmitted[0].frame_flags).toBe((uint8_t)(FRAME_FLAG_FD | FRAME_FLAG_BRS));
+            expect(transmitted[0].payload[0]).toBe(0x00);
+            expect(transmitted[0].payload[1]).toBe(FD_SINGLE_MESSAGE);
+            expect(transmitted[0].payload[FD_LAST_FRAME_LENGTH - 1]).toBe(PADDING);
+        });
+
+        it("segments into frames of its data length", []() {
+            sendMessage(FD_SEGMENTED_MESSAGE, START_US);
+            IsotpLink_Tick(&isotp, START_US);
+            fromPeer({ 0x30, 0x00, 0x00 }, START_US);
+            events[0] = IsotpLink_Tick(&isotp, START_US);
+
+            expect(events[0]).toBe((uint8_t)kISOTP_EVENT_SENT);
+            expect(transmit_count).toBe((uint32_t)2);
+            expect(transmitted[0].payload_length).toBe(FD_DATA_LENGTH);
+            expect(transmitted[0].payload[1]).toBe(FD_SEGMENTED_MESSAGE);
+            expect(transmitted[1].payload_length).toBe(FD_LAST_FRAME_LENGTH);
+            expect(transmitted[1].payload[1]).toBe(FD_FIRST_FRAME_DATA);
+        });
+
+        it("reassembles an answer sent in CAN FD frames", []() {
+            uint8_t first_frame[FD_DATA_LENGTH];
+            uint8_t consecutive_frame[FD_LAST_FRAME_LENGTH];
+
+            first_frame[0] = 0x10;
+            first_frame[1] = FD_SEGMENTED_MESSAGE;
+            memcpy(first_frame + 2, message, FD_FIRST_FRAME_DATA);
+            consecutive_frame[0] = 0x21;
+            memcpy(consecutive_frame + 1, message + FD_FIRST_FRAME_DATA, FD_SEGMENTED_MESSAGE - FD_FIRST_FRAME_DATA);
+            memset(consecutive_frame + 1 + FD_SEGMENTED_MESSAGE - FD_FIRST_FRAME_DATA, PADDING, FD_LAST_FRAME_LENGTH - 1 - (FD_SEGMENTED_MESSAGE - FD_FIRST_FRAME_DATA));
+
+            fromPeerFrame(first_frame, FD_DATA_LENGTH, FRAME_FLAG_FD, START_US);
+            IsotpLink_Tick(&isotp, START_US);
+            events[0] = fromPeerFrame(consecutive_frame, FD_LAST_FRAME_LENGTH, FRAME_FLAG_FD, START_US + 100);
+            IsotpLink_MessageFrame(&isotp, &answer);
+
+            expect(events[0]).toBe((uint8_t)kISOTP_EVENT_MESSAGE);
+            expect(answer.payload_length).toBe(FRAME_PAYLOAD_MAX_FD);
+            expect(memcmp(answer.payload, message, FRAME_PAYLOAD_MAX_FD)).toBe(0);
+        });
+
+        it("takes an escaped single frame answer", []() {
+            uint8_t frame[FD_DATA_LENGTH];
+
+            memset(frame, PADDING, sizeof(frame));
+            frame[0] = 0x00;
+            frame[1] = 10;
+            memcpy(frame + 2, message, 10);
+
+            events[0] = fromPeerFrame(frame, 12, FRAME_FLAG_FD, START_US);
+            IsotpLink_MessageFrame(&isotp, &answer);
+
+            expect(events[0]).toBe((uint8_t)kISOTP_EVENT_MESSAGE);
+            expect(answer.payload_length).toBe(10);
+        });
+    });
 });
+
+static void openAddressedLink(void)
+{
+    openLink(TXN_ISOTP_FLAG_PADDING | TXN_ISOTP_FLAG_ADDRESS_BYTE, 0, 0);
+}
+
+static void openFdLink(void)
+{
+    openLink(TXN_ISOTP_FLAG_PADDING | TXN_ISOTP_FLAG_FD | TXN_ISOTP_FLAG_BIT_RATE_SWITCH, 0, 0);
+}
+
+static uint8_t fromPeerFrame(const uint8_t *bytes, uint8_t length, uint8_t frame_flags, uint64_t now_us)
+{
+    FrameMessage frame;
+
+    memset(&frame, 0, sizeof(frame));
+    frame.can_id = RESPONSE_ID;
+    frame.frame_flags = frame_flags;
+    frame.payload_length = length;
+    memcpy(frame.payload, bytes, length);
+    return IsotpLink_OnFrame(&isotp, &frame, now_us);
+}
 
 static void resetLink(void)
 {
@@ -301,7 +430,9 @@ static void openLink(uint8_t flags, uint8_t block_size, uint8_t st_min)
     parameters.response_id = RESPONSE_ID;
     parameters.flags = flags;
     parameters.padding = PADDING;
-    parameters.tx_data_length = FRAME_PAYLOAD_MAX_CLASSIC;
+    parameters.tx_address = TARGET_ADDRESS;
+    parameters.rx_address = SOURCE_ADDRESS;
+    parameters.tx_data_length = (flags & TXN_ISOTP_FLAG_FD) ? FD_DATA_LENGTH : FRAME_PAYLOAD_MAX_CLASSIC;
     parameters.block_size = block_size;
     parameters.st_min = st_min;
     IsotpLink_Init(&isotp, port);
