@@ -17,6 +17,7 @@
 ## Embedding
 
 - [libcanhub](libcanhub.md) — the C client library (Linux and Windows).
+- [Transaction scripts](transaction-scripts.md) — describe a request/response sequence for the agent to run at its bus.
 - [python-can-hub](../python/README.md) — native python-can backend.
 
 ## Internals
