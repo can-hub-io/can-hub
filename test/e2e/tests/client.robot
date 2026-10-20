@@ -50,6 +50,12 @@ Send To An Unknown Interface Fails
     Should Not Be True    ${result.ok}
     Should Contain    ${result.stderr}    not found
 
+A Client Names A Hub Host That Does Not Resolve
+    ${result}=    Send Frame On ${LOCAL_SERVER}    truck42/vcan0    123#11    connect=tcp://hub.invalid:7228
+
+    Should Not Be True    ${result.ok}
+    Should Contain    ${result.stderr}    could not resolve hub.invalid
+
 Dump Honours Subscribe Filters
     ${client_cfg}=    Client Configuration    dump    truck42/vcan0    1A0:7FF    connect=${CONNECT}
     ${client}=    Start CAN Client On ${LOCAL_SERVER} With ${client_cfg}

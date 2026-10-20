@@ -17,6 +17,9 @@ CANDUMP_RECEIVE_BUFFER_BYTES = 4 * 1024 * 1024
 CANDUMP_ALL_ERRORS = "#FFFFFFFF"
 CANFD_MTU = 72
 CAN_MTU = 16
+NAMESPACE_CONFIG_DIR = Path("/etc/netns")
+NAMESERVER_PORT = 53
+SILENT_RESOLVER_TIMEOUT_S = 15
 
 
 class Server:
@@ -76,6 +79,16 @@ class Server:
         return self.exec("candump", "-L", "-r", str(CANDUMP_RECEIVE_BUFFER_BYTES), *interfaces,
                          background=True, log_name=log_name)
 
+    def silence_dns(self) -> None:
+        self._resolv_conf().parent.mkdir(parents=True, exist_ok=True)
+        self._resolv_conf().write_text(f"nameserver {self.ip}\n"
+                                       f"options timeout:{SILENT_RESOLVER_TIMEOUT_S} attempts:1\n")
+        self.exec(*self._nameserver_drop_rule("-A"))
+
+    def restore_dns(self) -> None:
+        self._resolv_conf().unlink(missing_ok=True)
+        self.exec(*self._nameserver_drop_rule("-D"), check=False)
+
     def reachable(self, other: "Server") -> bool:
         return self._bench.reachable(self, other)
 
@@ -83,6 +96,12 @@ class Server:
         for process in self._processes:
             process.stop()
         self._processes.clear()
+
+    def _resolv_conf(self) -> Path:
+        return NAMESPACE_CONFIG_DIR / self.netns / "resolv.conf"
+
+    def _nameserver_drop_rule(self, action: str) -> list[str]:
+        return ["iptables", action, "INPUT", "-p", "udp", "--dport", str(NAMESERVER_PORT), "-j", "DROP"]
 
     def _next_log(self, label: str) -> Path:
         self._log_seq += 1

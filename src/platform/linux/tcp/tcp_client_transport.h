@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "platform/linux/shared/host_resolver.h"
 #include "platform/linux/tcp/tcp_channel.h"
 #include "agent/ports/transport_events.h"
 #include "agent/ports/transport_port.h"
@@ -18,7 +19,8 @@
  * stream never corrupts; frames are dropped when the backlog cannot take
  * the whole message (best-effort plane). The connection fd is created per
  * connect — the platform loop must re-register it after each reconnect and
- * watch EPOLLOUT until the connection is established.
+ * watch EPOLLOUT until the connection is established. While the host name
+ * resolves, Fd() is the resolver's and readable once the addresses are in.
  */
 typedef struct {
     TransportPort port;
@@ -26,6 +28,7 @@ typedef struct {
     char host[TCP_HOST_MAX];
     char port_text[TCP_PORT_TEXT_MAX];
     TcpChannel channel;
+    HostResolver resolver;
     bool unix_socket;
     bool connecting;
     bool connected;
@@ -39,6 +42,7 @@ bool TcpClientTransport_Init(
 );
 bool TcpClientTransport_InitUnix(TcpClientTransport *self, const char *socket_path, const TransportEvents *events);
 TransportPort *TcpClientTransport_Port(TcpClientTransport *self);
+const HostResolver *TcpClientTransport_Resolver(const TcpClientTransport *self);
 int32_t TcpClientTransport_Fd(const TcpClientTransport *self);
 bool TcpClientTransport_WantsWritable(const TcpClientTransport *self);
 void TcpClientTransport_OnReadable(TcpClientTransport *self);

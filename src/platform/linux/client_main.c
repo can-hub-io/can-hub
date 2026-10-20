@@ -40,6 +40,7 @@
 #define MAX_EPOLL_EVENTS 8
 #define POLL_PERIOD_MS 100
 #define TCP_SLOT 0
+#define QUIC_UDP_SLOT 0
 #define IDENTITY_NAME "client"
 #define KNOWN_HUBS_FILE "known_hubs"
 #define KNOWN_HUBS_PATH_MAX (TLS_IDENTITY_PATH_MAX + sizeof(KNOWN_HUBS_FILE))
@@ -47,7 +48,7 @@
 
 #define SOCKETCAND_DEFAULT_PORT_TEXT "29536"
 #define SOCKETCAND_BEACON_PORT 42000
-#define SOCKETCAND_HUB_STREAM_SLOT 0
+#define SOCKETCAND_HUB_SLOT 0
 #define SC_TAG_HUB_STREAM 0xE0000000u
 #define SC_TAG_HUB_QUIC_UDP 0xE0000001u
 #define SC_TAG_HUB_QUIC_TIMER 0xE0000002u
@@ -116,7 +117,7 @@ static void drainCanFrames(void);
 static void corkHubTransport(void);
 static void uncorkHubTransport(void);
 static void dispatchAttachEvent(const struct epoll_event *event);
-static void syncHubStream(EpollRegistry *poll_registry);
+static void syncHubConnection(EpollRegistry *poll_registry);
 static uint32_t socketcandSlotMask(uint8_t slot);
 static void dispatchSocketcandEvent(const struct epoll_event *event);
 static void handleSocketcandSlotEvent(uint8_t slot, const struct epoll_event *event);
@@ -686,15 +687,12 @@ static int32_t runQuicEventLoop(void)
 {
     struct epoll_event events[MAX_EPOLL_EVENTS];
     EpollRegistry poll_registry;
-    int32_t udp_fd = QuicClientTransport_UdpFd(&quic_transport);
     int32_t timer_fd = QuicClientTransport_TimerFd(&quic_transport);
+    int32_t udp_fd;
     int32_t event_count;
     int32_t i;
 
     if (!EpollRegistry_Open(&poll_registry)) {
-        return 1;
-    }
-    if (!EpollRegistry_AddStatic(&poll_registry, udp_fd, (uint32_t)udp_fd)) {
         return 1;
     }
     if (!EpollRegistry_AddStatic(&poll_registry, timer_fd, (uint32_t)timer_fd)) {
@@ -702,6 +700,8 @@ static int32_t runQuicEventLoop(void)
     }
 
     while (exit_code < 0 && !stop_requested) {
+        udp_fd = QuicClientTransport_UdpFd(&quic_transport);
+        EpollRegistry_SyncSlot(&poll_registry, QUIC_UDP_SLOT, udp_fd, EPOLLIN, (uint32_t)udp_fd);
         event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
         for(i=0; i<event_count; i++) {
             if ((int32_t)events[i].data.u32 == udp_fd) {
@@ -772,12 +772,14 @@ static int32_t runSocketcandServer(const char *host, const char *port_text)
     return runSocketcandLoop();
 }
 
-static void syncHubStream(EpollRegistry *poll_registry)
+static void syncHubConnection(EpollRegistry *poll_registry)
 {
     int32_t current_fd;
     uint32_t wanted_mask = EPOLLIN;
 
     if (connect_scheme == kCONNECT_SCHEME_QUIC) {
+        current_fd = QuicClientTransport_UdpFd(&quic_transport);
+        EpollRegistry_SyncSlot(poll_registry, SOCKETCAND_HUB_SLOT, current_fd, wanted_mask, SC_TAG_HUB_QUIC_UDP);
         return;
     }
     if (connect_scheme == kCONNECT_SCHEME_TLS) {
@@ -791,7 +793,7 @@ static void syncHubStream(EpollRegistry *poll_registry)
             wanted_mask |= EPOLLOUT;
         }
     }
-    EpollRegistry_SyncSlot(poll_registry, SOCKETCAND_HUB_STREAM_SLOT, current_fd, wanted_mask, SC_TAG_HUB_STREAM);
+    EpollRegistry_SyncSlot(poll_registry, SOCKETCAND_HUB_SLOT, current_fd, wanted_mask, SC_TAG_HUB_STREAM);
 }
 
 static uint32_t socketcandSlotMask(uint8_t slot)
@@ -882,12 +884,11 @@ static int32_t runSocketcandLoop(void)
         return 1;
     }
     if (connect_scheme == kCONNECT_SCHEME_QUIC) {
-        EpollRegistry_AddStatic(&poll_registry, QuicClientTransport_UdpFd(&quic_transport), SC_TAG_HUB_QUIC_UDP);
         EpollRegistry_AddStatic(&poll_registry, QuicClientTransport_TimerFd(&quic_transport), SC_TAG_HUB_QUIC_TIMER);
     }
 
     while (!stop_requested) {
-        syncHubStream(&poll_registry);
+        syncHubConnection(&poll_registry);
         for(slot=0; slot<SOCKETCAND_SERVER_SLOTS_MAX; slot++) {
             EpollRegistry_SyncSlot(
                 &poll_registry,
@@ -985,13 +986,12 @@ static int32_t runAttachLoop(void)
         return 1;
     }
     if (connect_scheme == kCONNECT_SCHEME_QUIC) {
-        EpollRegistry_AddStatic(&poll_registry, QuicClientTransport_UdpFd(&quic_transport), SC_TAG_HUB_QUIC_UDP);
         EpollRegistry_AddStatic(&poll_registry, QuicClientTransport_TimerFd(&quic_transport), SC_TAG_HUB_QUIC_TIMER);
     }
     EpollRegistry_AddStatic(&poll_registry, SocketCanAdapter_Fd(&mirror_can_adapter, 0), ATTACH_TAG_CAN);
 
     while (MirrorApp_State(&mirror_app) != kMIRROR_FAILED && !stop_requested) {
-        syncHubStream(&poll_registry);
+        syncHubConnection(&poll_registry);
         event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
         for(i=0; i<event_count; i++) {
             dispatchAttachEvent(&events[i]);

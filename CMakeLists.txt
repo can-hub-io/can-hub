@@ -167,6 +167,8 @@ add_library(sqlite3 STATIC ${sqlite3_SOURCE_DIR}/sqlite3.c)
 target_include_directories(sqlite3 PUBLIC ${sqlite3_SOURCE_DIR})
 target_compile_definitions(sqlite3 PRIVATE SQLITE_OMIT_LOAD_EXTENSION SQLITE_THREADSAFE=0)
 
+find_package(Threads REQUIRED)
+
 set(AGENT_SOURCES
     src/agent/agent.c
     src/agent/agent_app.c
@@ -177,6 +179,7 @@ set(AGENT_SOURCES
     src/platform/linux/clock/clock.c
     src/platform/linux/shared/connect_url.c
     src/platform/linux/shared/epoll_registry.c
+    src/platform/linux/shared/host_resolver.c
     src/platform/linux/shared/pin_store.c
     src/platform/linux/shared/pinned_server_verifier.c
     src/platform/linux/shared/tls_defaults.c
@@ -255,7 +258,7 @@ set(HUB_SOURCES
 add_executable(can-hub src/platform/linux/hub_main.c ${COMMON_SOURCES} ${HUB_SOURCES})
 target_link_libraries(can-hub PRIVATE ngtcp2_static can_hub_tls sqlite3)
 add_executable(can-hub-agent src/platform/linux/agent_main.c ${COMMON_SOURCES} ${AGENT_SOURCES})
-target_link_libraries(can-hub-agent PRIVATE ngtcp2_static can_hub_tls)
+target_link_libraries(can-hub-agent PRIVATE ngtcp2_static can_hub_tls Threads::Threads)
 set(CLIENT_SOURCES
     src/client/client.c
     src/client/frame_spec.c
@@ -263,6 +266,7 @@ set(CLIENT_SOURCES
     src/platform/linux/shared/connect_url.c
     src/platform/linux/shared/epoll_registry.c
     src/platform/linux/shared/filter_spec.c
+    src/platform/linux/shared/host_resolver.c
     src/platform/linux/shared/interface_settings_text.c
     src/platform/linux/shared/message_framer.c
     src/platform/linux/shared/tcp_keepalive.c
@@ -313,8 +317,9 @@ set(SOCKETCAND_SOURCES
 )
 
 add_executable(can-hub-client src/platform/linux/client_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES} ${CLIENT_ATTACH_SOURCES} ${CLIENT_TLS_SOURCES} ${SOCKETCAND_SOURCES})
-target_link_libraries(can-hub-client PRIVATE ngtcp2_static can_hub_tls)
+target_link_libraries(can-hub-client PRIVATE ngtcp2_static can_hub_tls Threads::Threads)
 add_executable(can-hub-cli src/platform/linux/cli_main.c ${COMMON_SOURCES} ${CLIENT_SOURCES})
+target_link_libraries(can-hub-cli PRIVATE Threads::Threads)
 
 set(LIBCANHUB_SOURCES
     src/platform/linux/libcanhub/canhub.c
@@ -325,12 +330,12 @@ set(LIBCANHUB_SOURCES
 
 add_library(canhub STATIC ${COMMON_SOURCES} ${LIBCANHUB_SOURCES})
 target_include_directories(canhub PUBLIC include)
-target_link_libraries(canhub PUBLIC ngtcp2_static can_hub_tls)
+target_link_libraries(canhub PUBLIC ngtcp2_static can_hub_tls Threads::Threads)
 
 if(NOT CAN_HUB_STATIC)
     add_library(canhub_shared SHARED ${COMMON_SOURCES} ${LIBCANHUB_SOURCES})
     target_include_directories(canhub_shared PUBLIC include)
-    target_link_libraries(canhub_shared PRIVATE ngtcp2_static can_hub_tls)
+    target_link_libraries(canhub_shared PRIVATE ngtcp2_static can_hub_tls Threads::Threads)
     set(LIBCANHUB_EXPORT_MAP ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/linux/libcanhub/canhub.map)
     target_link_options(canhub_shared PRIVATE "-Wl,--version-script=${LIBCANHUB_EXPORT_MAP}")
     set_target_properties(canhub_shared PROPERTIES

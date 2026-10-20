@@ -12,6 +12,7 @@
 #include <sys/un.h>
 
 #include "platform/linux/clock/clock.h"
+#include "platform/linux/shared/host_resolver.h"
 #include "platform/linux/shared/tcp_keepalive.h"
 #include "protocol/message_header.h"
 
@@ -21,7 +22,10 @@ static bool portSendControl(void *context, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, uint8_t channel, const uint8_t *data, size_t size);
 static void portSetChannelMode(void *context, uint8_t channel, bool reliable);
 static void initTransportBase(TcpClientTransport *self, const TransportEvents *events);
-static bool connectTcp(TcpClientTransport *self, int32_t *connected_fd);
+static bool resolveHost(TcpClientTransport *self);
+static void connectResolvedHost(TcpClientTransport *self);
+static int32_t connectFirstAddress(const struct addrinfo *addresses);
+static void bindConnecting(TcpClientTransport *self, int32_t connected_fd);
 static bool connectUnix(TcpClientTransport *self, int32_t *connected_fd);
 static void dispatchMessage(void *context, const uint8_t *message, size_t size);
 static void closeConnection(TcpClientTransport *self, bool notify);
@@ -62,8 +66,17 @@ TransportPort *TcpClientTransport_Port(TcpClientTransport *self)
     return &self->port;
 }
 
+const HostResolver *TcpClientTransport_Resolver(const TcpClientTransport *self)
+{
+    return &self->resolver;
+}
+
 int32_t TcpClientTransport_Fd(const TcpClientTransport *self)
 {
+    if (HostResolver_IsPending(&self->resolver)) {
+        return HostResolver_Fd(&self->resolver);
+    }
+
     return self->channel.fd;
 }
 
@@ -76,6 +89,10 @@ void TcpClientTransport_OnReadable(TcpClientTransport *self)
 {
     MessageSink sink = { self, dispatchMessage };
 
+    if (HostResolver_IsPending(&self->resolver)) {
+        connectResolvedHost(self);
+        return;
+    }
     if (!TcpChannel_IsBound(&self->channel)) {
         return;
     }
@@ -118,23 +135,18 @@ static bool portConnect(void *context)
 {
     TcpClientTransport *self = context;
     int32_t connected_fd;
-    bool connection_started;
 
-    if (TcpChannel_IsBound(&self->channel)) {
+    if (TcpChannel_IsBound(&self->channel) || HostResolver_IsPending(&self->resolver)) {
         return true;
     }
-
-    if (self->unix_socket) {
-        connection_started = connectUnix(self, &connected_fd);
-    } else {
-        connection_started = connectTcp(self, &connected_fd);
+    if (!self->unix_socket) {
+        return resolveHost(self);
     }
-    if (!connection_started) {
+    if (!connectUnix(self, &connected_fd)) {
         return false;
     }
 
-    TcpChannel_Bind(&self->channel, connected_fd);
-    self->connecting = true;
+    bindConnecting(self, connected_fd);
 
     return true;
 }
@@ -143,6 +155,7 @@ static void portDisconnect(void *context)
 {
     TcpClientTransport *self = context;
 
+    HostResolver_Release(&self->resolver);
     closeConnection(self, false);
 }
 
@@ -202,23 +215,44 @@ static void initTransportBase(TcpClientTransport *self, const TransportEvents *e
     TcpChannel_Unbind(&self->channel);
 }
 
-static bool connectTcp(TcpClientTransport *self, int32_t *connected_fd)
+static bool resolveHost(TcpClientTransport *self)
 {
     struct addrinfo hints;
-    struct addrinfo *resolved;
-    struct addrinfo *candidate;
-    int32_t tcp_fd;
-    int32_t connect_result;
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(self->host, self->port_text, &hints, &resolved) != 0) {
-        return false;
+
+    return HostResolver_Start(&self->resolver, self->host, self->port_text, &hints);
+}
+
+static void connectResolvedHost(TcpClientTransport *self)
+{
+    const struct addrinfo *addresses;
+    int32_t tcp_fd;
+
+    if (!HostResolver_IsFinished(&self->resolver)) {
+        return;
     }
 
-    tcp_fd = -1;
-    for(candidate=resolved; candidate!=NULL; candidate=candidate->ai_next) {
+    addresses = HostResolver_Addresses(&self->resolver);
+    tcp_fd = connectFirstAddress(addresses);
+    HostResolver_Release(&self->resolver);
+    if (tcp_fd < 0) {
+        self->events.on_disconnected(self->events.context, Clock_MonotonicUs());
+        return;
+    }
+
+    bindConnecting(self, tcp_fd);
+}
+
+static int32_t connectFirstAddress(const struct addrinfo *addresses)
+{
+    const struct addrinfo *candidate;
+    int32_t tcp_fd;
+    int32_t connect_result;
+
+    for(candidate=addresses; candidate!=NULL; candidate=candidate->ai_next) {
         tcp_fd = socket(candidate->ai_family, candidate->ai_socktype | SOCK_NONBLOCK, 0);
         if (tcp_fd < 0) {
             continue;
@@ -226,19 +260,18 @@ static bool connectTcp(TcpClientTransport *self, int32_t *connected_fd)
         TcpKeepalive_Enable(tcp_fd);
         connect_result = connect(tcp_fd, candidate->ai_addr, candidate->ai_addrlen);
         if (connect_result == 0 || errno == EINPROGRESS) {
-            break;
+            return tcp_fd;
         }
         close(tcp_fd);
-        tcp_fd = -1;
-    }
-    freeaddrinfo(resolved);
-    if (tcp_fd < 0) {
-        return false;
     }
 
-    *connected_fd = tcp_fd;
+    return TCP_CHANNEL_NO_SOCKET;
+}
 
-    return true;
+static void bindConnecting(TcpClientTransport *self, int32_t connected_fd)
+{
+    TcpChannel_Bind(&self->channel, connected_fd);
+    self->connecting = true;
 }
 
 static bool connectUnix(TcpClientTransport *self, int32_t *connected_fd)
