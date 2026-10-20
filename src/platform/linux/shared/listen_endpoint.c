@@ -8,11 +8,14 @@
 #include <unistd.h>
 
 #define V4_MAPPED_OFFSET 12
+#define IPV4_NETWORK_SHIFT 24
+#define IPV4_LOOPBACK_NETWORK 127
 
 static bool buildSockaddrIn6(const char *bind_address, const char *port, struct sockaddr_storage *out, socklen_t *out_length);
 static bool buildSockaddrIn(const char *bind_address, const char *port, struct sockaddr_storage *out, socklen_t *out_length);
 static bool isNativeIpv6(const struct sockaddr_storage *address);
 static uint16_t portOf(const struct sockaddr_storage *address);
+static bool isLoopbackIpv4(const struct in_addr *address);
 static void formatAddress(int32_t family, const void *address, char *out, size_t size);
 
 int32_t ListenEndpoint_OpenSocket(int32_t socktype, int32_t *address_family)
@@ -81,6 +84,25 @@ void ListenEndpoint_FormatHost(const struct sockaddr_storage *address, char *out
     formatAddress(AF_INET, &in->sin_addr, out, size);
 }
 
+bool ListenEndpoint_IsLoopback(const char *bind_address)
+{
+    struct in6_addr v6;
+    struct in_addr v4;
+
+    if (inet_pton(AF_INET, bind_address, &v4) == 1) {
+        return isLoopbackIpv4(&v4);
+    }
+    if (inet_pton(AF_INET6, bind_address, &v6) != 1) {
+        return false;
+    }
+    if (IN6_IS_ADDR_V4MAPPED(&v6)) {
+        memcpy(&v4, &v6.s6_addr[V4_MAPPED_OFFSET], sizeof(v4));
+        return isLoopbackIpv4(&v4);
+    }
+
+    return IN6_IS_ADDR_LOOPBACK(&v6);
+}
+
 static bool buildSockaddrIn6(const char *bind_address, const char *port, struct sockaddr_storage *out, socklen_t *out_length)
 {
     struct sockaddr_in6 *address = (struct sockaddr_in6 *)out;
@@ -142,6 +164,11 @@ static uint16_t portOf(const struct sockaddr_storage *address)
     }
 
     return ntohs(in->sin_port);
+}
+
+static bool isLoopbackIpv4(const struct in_addr *address)
+{
+    return (ntohl(address->s_addr) >> IPV4_NETWORK_SHIFT) == IPV4_LOOPBACK_NETWORK;
 }
 
 static void formatAddress(int32_t family, const void *address, char *out, size_t size)

@@ -113,11 +113,13 @@ an unknown agent at REGISTER.
 ## Plaintext transports are network-trusted
 
 Plain `tcp://` and the unix socket carry no identity: no pinning, no
-allowlist, no ACLs — peers there are trusted with full read and write.
+allowlist, no ACLs — peers there are trusted with full read, write and
+interface configuration, and can register under any agent name.
 
 - Plain tcp binds 127.0.0.1 by default. Expose it
   (`--listen tcp://0.0.0.0:7228`) only on a trusted network or VPN; the hub
-  warns when you do.
+  warns at startup whenever plain tcp binds anything but a loopback address,
+  with or without `--require-known-peers`.
 - The unix socket's access control is its filesystem permissions; it is also
   the only place the admin role is accepted (an admin HELLO over TCP or QUIC
   is disconnected).
