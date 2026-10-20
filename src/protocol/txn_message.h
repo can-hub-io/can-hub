@@ -8,7 +8,7 @@
 
 #define TXN_BEGIN_BODY_SIZE 268
 #define TXN_BEGIN_ACK_BODY_SIZE 8
-#define TXN_TEMPLATE_BODY_SIZE 104
+#define TXN_TEMPLATE_BODY_SIZE 108
 #define TXN_PROGRESS_BODY_SIZE 12
 #define TXN_STATUS_BODY_SIZE 112
 #define TXN_ABORT_BODY_SIZE 4
@@ -142,6 +142,7 @@ typedef struct {
     uint8_t patterns_present;
     uint32_t timeout_ms;
     uint32_t gap_us;
+    uint32_t extend_timeout_ms;
     uint8_t type;
     TxnPattern patterns[kTXN_PATTERN_MAX];
     TxnIsotpParameters isotp;

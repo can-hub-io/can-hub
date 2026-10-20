@@ -2,6 +2,9 @@
 
 #include <string.h>
 
+static void isotpToWire(const CanHubTxnIsotp *isotp, TxnIsotpParameters *parameters);
+static uint32_t recordBytes(const TxnStep *records, uint8_t count);
+
 /* ---------- public ---------- */
 
 bool CanHubTransactions_BeginToWire(const CanHubTxnBegin *begin, TxnBeginMessage *message)
@@ -41,6 +44,9 @@ bool CanHubTransactions_TemplateToWire(const CanHubTxnTemplate *template_definit
     message->patterns_present = template_definition->patterns_present;
     message->timeout_ms = template_definition->timeout_ms;
     message->gap_us = template_definition->gap_us;
+    message->extend_timeout_ms = template_definition->extend_timeout_ms;
+    message->type = template_definition->type;
+    isotpToWire(&template_definition->isotp, &message->isotp);
     for(i=0; i<CANHUB_TXN_PATTERNS; i++) {
         message->patterns[i].can_id = template_definition->patterns[i].can_id;
         message->patterns[i].can_mask = template_definition->patterns[i].can_mask;
@@ -63,6 +69,50 @@ void CanHubTransactions_StepToWire(const CanHubTxnStep *step, TxnStep *wire_step
     if (step->length <= CANHUB_FRAME_PAYLOAD_MAX) {
         memcpy(wire_step->payload, step->payload, step->length);
     }
+}
+
+uint8_t CanHubTransactions_MessageToWire(const CanHubTxnMessage *message, TxnStep *records)
+{
+    uint16_t offset = 0;
+    uint16_t piece;
+    uint8_t count = 0;
+
+    if (message->struct_size != sizeof(*message) || message->data == NULL || message->length == 0) {
+        return 0;
+    }
+    if (message->length > CANHUB_ISOTP_MESSAGE_MAX || message->template_id >= CANHUB_TXN_TEMPLATES_MAX) {
+        return 0;
+    }
+    if ((message->flags & ~CANHUB_TXN_STEP_EXPECT_VALUE) != 0) {
+        return 0;
+    }
+
+    while (offset < message->length) {
+        piece = (uint16_t)(message->length - offset);
+        if (piece > CANHUB_TRANSACTIONS_MESSAGE_RECORD_BYTES) {
+            piece = CANHUB_TRANSACTIONS_MESSAGE_RECORD_BYTES;
+        }
+        memset(&records[count], 0, sizeof(records[count]));
+        records[count].template_id = message->template_id;
+        records[count].can_id = message->can_id;
+        records[count].flags = TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_CONTINUED;
+        records[count].payload_length = (uint8_t)piece;
+        memcpy(records[count].payload, message->data + offset, piece);
+        offset = (uint16_t)(offset + piece);
+        count++;
+    }
+
+    records[count - 1].flags = (uint8_t)(TXN_STEP_FLAG_MESSAGE | message->flags);
+    records[count - 1].expect_value = message->expect_value;
+
+    return count;
+}
+
+bool CanHubTransactions_HasCreditFor(const TransactionSender *sender, const TxnStep *records, uint8_t count)
+{
+    uint32_t held_bytes = sender->has_held ? (uint32_t)TxnStep_RecordSize(&sender->held) : 0;
+
+    return TransactionSender_BytesInFlight(sender) + held_bytes + recordBytes(records, count) <= sender->window_bytes;
 }
 
 void CanHubTransactions_ResultFromWire(const TxnStatusMessage *status, CanHubTxnResult *result)
@@ -121,4 +171,29 @@ const char *CanHubTransactions_BeginDetail(uint8_t begin_status)
     }
 
     return "transaction refused: invalid request";
+}
+
+/* ---------- private ---------- */
+
+static void isotpToWire(const CanHubTxnIsotp *isotp, TxnIsotpParameters *parameters)
+{
+    parameters->response_id = isotp->response_id;
+    parameters->flags = isotp->flags;
+    parameters->tx_address = isotp->tx_address;
+    parameters->rx_address = isotp->rx_address;
+    parameters->padding = isotp->padding;
+    parameters->tx_data_length = isotp->tx_data_length;
+    parameters->block_size = isotp->block_size;
+    parameters->st_min = isotp->st_min;
+}
+
+static uint32_t recordBytes(const TxnStep *records, uint8_t count)
+{
+    uint32_t bytes = 0;
+    uint8_t i;
+
+    for(i=0; i<count; i++) {
+        bytes += (uint32_t)TxnStep_RecordSize(&records[i]);
+    }
+    return bytes;
 }

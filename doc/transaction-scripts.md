@@ -279,5 +279,6 @@ a CAN FD frame.
 A script that breaks a rule is refused before anything is sent, with the line
 and the reason.
 
-Multi-frame ISO-TP (UDS TransferData) is not part of the language yet: it needs
-the native ISO-TP step of [#95](https://github.com/can-hub-io/can-hub/issues/95).
+The language matches frames. ISO-TP messages and UDS requests, where the answer
+follows fixed rules instead of conditions, go through the C and Python APIs
+([libcanhub](libcanhub.md#iso-tp-steps), [python](../python/README.md#iso-tp-steps)).

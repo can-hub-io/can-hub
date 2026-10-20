@@ -21,7 +21,7 @@ from lib import (
     AgentConfig, CanAgent, CanClient, CanCli, CanHub, ClientConfig, HubConfig,
 )
 from lib.binaries import BIN_DIR, binary
-from lib.rows import normalise_spec, parse_candump, parse_candump_specs
+from lib.rows import FD_SEPARATOR, normalise_spec, parse_candump, parse_candump_specs
 from lib.silent_connections import SilentConnections
 
 CONSUME_SCRIPT = "/work/test/e2e/scripts/consume.py"
@@ -31,6 +31,7 @@ LATENCY_SEND_SCRIPT = "/work/test/e2e/scripts/latency_send.py"
 BENCH_SEND_SCRIPT = "/work/test/e2e/scripts/bench_send.py"
 AGENT_LOST_HUB = "connection lost, reconnecting in"
 SOCKETCAND_COMMANDS_SCRIPT = "/work/test/e2e/scripts/socketcand_commands.py"
+FD_FLAGS_DIGITS = 1
 
 
 @library(scope="GLOBAL")
@@ -770,6 +771,13 @@ class BenchKeywords:
     @keyword("Frames With Id ${can_id} Captured By ${process}")
     def frames_with_id_captured_by(self, can_id, process):
         return sum(1 for frame in parse_candump(process.read_log()) if frame.can_id == can_id.upper())
+
+    @keyword("CAN FD Frames Of ${length} Bytes With Id ${can_id} Captured By ${process}")
+    def fd_frames_captured_by(self, length, can_id, process):
+        prefix = f"{can_id.upper()}{FD_SEPARATOR}"
+        hex_digits = 2 * int(length)
+        return sum(1 for spec in parse_candump_specs(process.read_log())
+                   if spec.startswith(prefix) and len(spec) - len(prefix) - FD_FLAGS_DIGITS == hex_digits)
 
     @keyword("Setup Bench ${bench} With The Python Package On ${server}")
     def setup_bench_with_python_package(self, bench, server):

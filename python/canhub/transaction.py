@@ -18,7 +18,6 @@ Payload values are bytes: a pattern matches the first 8 payload bytes under
 """
 
 import ctypes
-import itertools
 import os
 import time
 from dataclasses import dataclass
@@ -91,6 +90,28 @@ class Origin:
 
 
 @dataclass(frozen=True)
+class Isotp:
+    """Makes a template's steps ISO-TP messages (begin with ``isotp=True``):
+    the agent segments each step's data (up to 4095 bytes) and reassembles the
+    answer arriving on ``response_id``, which the patterns then match without
+    the protocol bytes. ``tx_address``/``rx_address`` add the address byte of
+    extended or mixed addressing; ``fd`` sends CAN FD frames of
+    ``data_length`` bytes; ``block_size`` and ``st_min`` (raw ISO 15765-2
+    value) go in the flow control the agent answers with."""
+
+    response_id: int
+    is_extended_id: bool = False
+    padding: Optional[int] = 0xCC
+    tx_address: Optional[int] = None
+    rx_address: Optional[int] = None
+    fd: bool = False
+    data_length: int = native.FRAME_PAYLOAD_MAX
+    bitrate_switch: bool = False
+    block_size: int = 0
+    st_min: int = 0
+
+
+@dataclass(frozen=True)
 class Template:
     """How a step waits: up to 16 per transaction, each defined once."""
 
@@ -100,9 +121,11 @@ class Template:
     mode: Advance = Advance.NONE
     count: int = 1
     timeout: float = 1.0
+    extend_timeout: Optional[float] = None
     gap: float = 0.0
     soft: bool = False
     abort_on_mismatch: bool = False
+    isotp: Optional[Isotp] = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +192,7 @@ class Transaction:
     def __init__(self, bus, roster: Iterable[int]):
         self._bus = bus
         self._roster = tuple(roster)
+        self._isotp_templates = set()
         self._ended = False
         self._finished = False
 
@@ -191,16 +215,26 @@ class Transaction:
         with self._bus._lock:
             result = native.lib.canhub_txn_template(self._bus._session, ctypes.byref(definition), _timeout_ms(timeout))
         self._check(result)
+        if template.isotp is not None:
+            self._isotp_templates.add(template_id)
 
     def send(self, steps: Iterable[Step]) -> int:
         """Hand every step over, waiting for the agent's window as needed, the
-        way a blocking write does; returns how many were handed over."""
+        way a blocking write does; returns how many were handed over. A step
+        of an ISO-TP template carries its whole message in ``data``; without
+        data it waits for a message without sending one."""
         sent = 0
 
-        for chunk in _chunks(steps, SEND_CHUNK_STEPS):
-            native_steps = (native.CanHubTxnStep * len(chunk))(*[to_native_step(step) for step in chunk])
-            self._send_chunk(native_steps, len(chunk))
-            sent += len(chunk)
+        for batch in _batches(steps, self._isotp_templates, SEND_CHUNK_STEPS):
+            if isinstance(batch, Step):
+                self._send_message(batch)
+                sent += 1
+                continue
+            native_steps = (native.CanHubTxnStep * len(batch))(
+                *[to_native_step(step, step.template in self._isotp_templates) for step in batch]
+            )
+            self._send_chunk(native_steps, len(batch))
+            sent += len(batch)
         return sent
 
     def end(self, timeout: Optional[float] = None) -> None:
@@ -259,6 +293,16 @@ class Transaction:
             self._check(result)
             taken += result
 
+    def _send_message(self, step: Step) -> None:
+        message, data = to_native_message(step)
+        result = native.ERR_TIMEOUT
+
+        while result == native.ERR_TIMEOUT:
+            with self._bus._lock:
+                result = native.lib.canhub_txn_send_message(self._bus._session, ctypes.byref(message), SEND_SLICE_MS)
+        self._check(result)
+        del data
+
     def _check(self, result: int) -> None:
         if result == native.ERR_TXN_ABORTED:
             raise TransactionAborted(self._collect_result())
@@ -274,9 +318,11 @@ class Transaction:
         return from_native_result(report, self._roster)
 
 
-def begin(bus, roster: Iterable[int], origin: Optional[Origin], exclusive: bool, timeout: float) -> Transaction:
+def begin(
+    bus, roster: Iterable[int], origin: Optional[Origin], exclusive: bool, isotp: bool, timeout: float
+) -> Transaction:
     members = tuple(roster)
-    request = to_native_begin(members, origin, exclusive)
+    request = to_native_begin(members, origin, exclusive, isotp)
     with bus._lock:
         result = native.lib.canhub_txn_begin(bus._session, ctypes.byref(request), int(timeout * MILLISECONDS_PER_SECOND))
     if result != native.OK:
@@ -321,7 +367,7 @@ def run_script(
     raise CanOperationError(error)
 
 
-def to_native_begin(roster, origin: Optional[Origin], exclusive: bool) -> "native.CanHubTxnBegin":
+def to_native_begin(roster, origin: Optional[Origin], exclusive: bool, isotp: bool = False) -> "native.CanHubTxnBegin":
     if len(roster) > native.TXN_ROSTER_MAX:
         raise ValueError(f"a roster holds at most {native.TXN_ROSTER_MAX} origins")
     if roster and origin is None:
@@ -330,6 +376,8 @@ def to_native_begin(roster, origin: Optional[Origin], exclusive: bool) -> "nativ
     request = native.CanHubTxnBegin()
     request.struct_size = ctypes.sizeof(request)
     request.flags = native.TXN_FLAG_EXCLUSIVE if exclusive else 0
+    if isotp:
+        request.flags |= native.TXN_FLAG_ISOTP
     if origin is not None:
         request.origin_source = native.TXN_ORIGIN_CAN_ID if origin.payload_offset is None else native.TXN_ORIGIN_PAYLOAD
         request.origin_shift = origin.shift
@@ -351,6 +399,8 @@ def to_native_template(template_id: int, template: Template) -> "native.CanHubTx
     definition.advance_mode = int(template.mode)
     definition.count_k = template.count
     definition.timeout_ms = int(round(template.timeout * MILLISECONDS_PER_SECOND))
+    if template.extend_timeout is not None:
+        definition.extend_timeout_ms = int(round(template.extend_timeout * MILLISECONDS_PER_SECOND))
     definition.gap_us = int(round(template.gap * MICROSECONDS_PER_SECOND))
     if template.soft:
         definition.flags |= native.TXN_TEMPLATE_SOFT
@@ -364,7 +414,31 @@ def to_native_template(template_id: int, template: Template) -> "native.CanHubTx
         if pattern is not None:
             definition.patterns_present |= 1 << slot
             definition.patterns[slot] = to_native_pattern(pattern)
+    if template.isotp is not None:
+        definition.type = native.TXN_TYPE_ISOTP
+        definition.isotp = to_native_isotp(template.isotp)
     return definition
+
+
+def to_native_isotp(isotp: Isotp) -> "native.CanHubTxnIsotp":
+    parameters = native.CanHubTxnIsotp()
+    parameters.response_id = _wire_id(isotp.response_id, isotp.is_extended_id)
+    parameters.tx_data_length = native.FRAME_PAYLOAD_MAX_CLASSIC
+    parameters.block_size = isotp.block_size
+    parameters.st_min = isotp.st_min
+    if isotp.padding is not None:
+        parameters.flags |= native.ISOTP_FLAG_PADDING
+        parameters.padding = isotp.padding
+    if isotp.tx_address is not None or isotp.rx_address is not None:
+        parameters.flags |= native.ISOTP_FLAG_ADDRESS_BYTE
+        parameters.tx_address = isotp.tx_address if isotp.tx_address is not None else isotp.rx_address
+        parameters.rx_address = isotp.rx_address if isotp.rx_address is not None else isotp.tx_address
+    if isotp.fd:
+        parameters.flags |= native.ISOTP_FLAG_FD
+        parameters.tx_data_length = isotp.data_length
+    if isotp.bitrate_switch:
+        parameters.flags |= native.ISOTP_FLAG_BIT_RATE_SWITCH
+    return parameters
 
 
 def to_native_pattern(pattern: Pattern) -> "native.CanHubTxnPattern":
@@ -376,13 +450,13 @@ def to_native_pattern(pattern: Pattern) -> "native.CanHubTxnPattern":
     return native_pattern
 
 
-def to_native_step(step: Step) -> "native.CanHubTxnStep":
+def to_native_step(step: Step, isotp: bool = False) -> "native.CanHubTxnStep":
     data = bytes(step.data)
     native_step = native.CanHubTxnStep()
     native_step.template_id = step.template
-    if step.arbitration_id is None:
+    if step.arbitration_id is None or isotp:
         native_step.flags |= native.TXN_STEP_EXPECT_ONLY
-    else:
+    if step.arbitration_id is not None:
         native_step.can_id = _wire_id(step.arbitration_id, step.is_extended_id)
     if step.expect is not None:
         native_step.flags |= native.TXN_STEP_EXPECT_VALUE
@@ -394,6 +468,27 @@ def to_native_step(step: Step) -> "native.CanHubTxnStep":
     native_step.length = len(data)
     native_step.payload[: len(data)] = data
     return native_step
+
+
+def to_native_message(step: Step):
+    """The native ISO-TP message of a step, with the buffer that must outlive it."""
+    data = bytes(step.data)
+    if step.arbitration_id is None:
+        raise ValueError("an ISO-TP step that sends needs arbitration_id")
+    if len(data) > native.ISOTP_MESSAGE_MAX:
+        raise ValueError(f"an ISO-TP message holds at most {native.ISOTP_MESSAGE_MAX} bytes")
+
+    buffer = ctypes.create_string_buffer(data, len(data))
+    message = native.CanHubTxnMessage()
+    message.struct_size = ctypes.sizeof(message)
+    message.can_id = _wire_id(step.arbitration_id, step.is_extended_id)
+    message.template_id = step.template
+    message.length = len(data)
+    message.data = ctypes.cast(buffer, ctypes.c_void_p)
+    if step.expect is not None:
+        message.flags |= native.TXN_STEP_EXPECT_VALUE
+        message.expect_value = _payload_word(step.expect)
+    return message, buffer
 
 
 def from_native_progress(progress: "native.CanHubTxnProgress") -> TransactionProgress:
@@ -448,13 +543,22 @@ def _payload_word(data: bytes) -> int:
     return int.from_bytes(bytes(data).ljust(PATTERN_PAYLOAD_BYTES, b"\0"), "little")
 
 
-def _chunks(steps: Iterable[Step], size: int) -> Iterator[list]:
-    iterator = iter(steps)
-    while True:
-        chunk = list(itertools.islice(iterator, size))
-        if not chunk:
-            return
-        yield chunk
+def _batches(steps: Iterable[Step], isotp_templates, size: int) -> Iterator:
+    """Runs of up to ``size`` frame steps, and each ISO-TP message on its own."""
+    batch = []
+    for step in steps:
+        if step.template in isotp_templates and step.data:
+            if batch:
+                yield batch
+                batch = []
+            yield step
+            continue
+        batch.append(step)
+        if len(batch) == size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
 
 
 def _timeout_ms(timeout: Optional[float]) -> int:

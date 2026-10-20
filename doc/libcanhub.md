@@ -165,6 +165,60 @@ if (canhub_txn_wait(session, &result, -1) == CANHUB_ERR_TXN_ABORTED) {
 | `canhub_txn_progress(session, progress)` | steps sent and completed, record bytes in flight, window |
 | `canhub_txn_abort(session)` | cancel; `canhub_txn_wait` then reports the reason cancelled |
 
+### ISO-TP steps
+
+A template of type `CANHUB_TXN_TYPE_ISOTP` makes each of its steps one ISO-TP
+message of up to 4095 bytes that the agent segments, honouring the ECU's flow
+control, and whose answer it reassembles before matching the patterns against
+it ([protocol](protocol.md#transactions), "ISO-TP steps"). Begin with
+`CANHUB_TXN_FLAG_ISOTP` and hand each message over with
+`canhub_txn_send_message`, which waits until the agent's window takes it whole:
+
+```c
+CanHubTxnTemplate transfer = { 0 };               // 76 <counter> on 0x7E8, abort on 7F, 7F xx 78 waits up to 5 s
+transfer.struct_size = sizeof(transfer);
+transfer.template_id = 1;
+transfer.type = CANHUB_TXN_TYPE_ISOTP;
+transfer.advance_mode = CANHUB_TXN_ADVANCE_COUNT;
+transfer.count_k = 1;
+transfer.timeout_ms = 50;                         // P2
+transfer.extend_timeout_ms = 5000;                // P2*
+transfer.patterns_present = (1u << CANHUB_TXN_PATTERN_ADVANCE) | (1u << CANHUB_TXN_PATTERN_ABORT)
+                          | (1u << CANHUB_TXN_PATTERN_EXTEND);
+transfer.patterns[CANHUB_TXN_PATTERN_ADVANCE] = (CanHubTxnPattern){ 0x7E8, 0x7FF, 0xFFFF, 0x0076 };
+transfer.patterns[CANHUB_TXN_PATTERN_ABORT] = (CanHubTxnPattern){ 0x7E8, 0x7FF, 0xFF, 0x7F };
+transfer.patterns[CANHUB_TXN_PATTERN_EXTEND] = (CanHubTxnPattern){ 0x7E8, 0x7FF, 0xFF00FF, 0x78007F };
+transfer.isotp.response_id = 0x7E8;
+transfer.isotp.flags = CANHUB_ISOTP_FLAG_PADDING;
+transfer.isotp.padding = 0xCC;
+transfer.isotp.tx_data_length = 8;
+canhub_txn_template(session, &transfer, 5000);
+
+CanHubTxnMessage block = { 0 };                   // 36 <counter> <4093 bytes>, answered 76 <counter>
+block.struct_size = sizeof(block);
+block.can_id = 0x7E0;
+block.template_id = 1;
+block.flags = CANHUB_TXN_STEP_EXPECT_VALUE;
+block.expect_value = 0x76 | ((uint64_t)counter << 8);
+block.data = request;
+block.length = request_length;
+canhub_txn_send_message(session, &block, -1);
+```
+
+| `CanHubTxnIsotp` | |
+|---|---|
+| `response_id` | where the ECU answers (as a frame id, EFF flag included) |
+| `flags` | `CANHUB_ISOTP_FLAG_PADDING` (fill frames with `padding`), `_ADDRESS_BYTE` (extended or mixed addressing: frames start with `tx_address`, answers with `rx_address`), `_FD` (CAN FD frames of `tx_data_length` bytes), `_BIT_RATE_SWITCH` |
+| `block_size`, `st_min` | the flow control the agent answers a multi-frame answer with |
+
+`extend_timeout_ms` works for any template: after an extend match (a response
+pending) the step waits that long instead of `timeout_ms`. A step of an ISO-TP
+template without a message (`canhub_txn_send` with
+`CANHUB_TXN_STEP_EXPECT_ONLY`) waits for one; its `can_id` is the request id,
+where the flow control for a multi-frame answer goes. Transport failures abort
+with `CANHUB_TXN_REASON_FLOW_CONTROL_TIMEOUT`, `_CONSECUTIVE_FRAME_TIMEOUT`,
+`_OVERFLOW`, `_SEQUENCE_ERROR` or `_WAIT_LIMIT`.
+
 ### Scripts
 
 `canhub_txn_run_script` runs a [transaction script](transaction-scripts.md)

@@ -247,6 +247,7 @@ describe("txn_template_message", []() {
         expect(decoded.isotp.tx_data_length).toBe(64);
         expect(decoded.isotp.block_size).toBe(8);
         expect(decoded.isotp.st_min).toBe(0xF5);
+        expect(decoded.extend_timeout_ms).toBe((uint32_t)5000);
     });
 
     it("refuses to encode a template id beyond the table", []() {
@@ -487,6 +488,7 @@ static TxnTemplateMessage isotpTemplate(void)
     template_message.isotp.tx_data_length = 64;
     template_message.isotp.block_size = 8;
     template_message.isotp.st_min = 0xF5;
+    template_message.extend_timeout_ms = 5000;
     return template_message;
 }
 

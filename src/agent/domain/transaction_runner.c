@@ -64,6 +64,7 @@ static void keepRxFrame(TransactionRunner *self, const FrameMessage *frame);
 static const TxnTemplateMessage *currentTemplate(const TransactionRunner *self);
 static uint64_t templateTimeoutUs(const TxnTemplateMessage *template_message);
 static uint64_t transmitTimeoutUs(const TxnTemplateMessage *template_message);
+static uint64_t extendTimeoutUs(const TxnTemplateMessage *template_message);
 static void prepareStatus(const TransactionRunner *self, TxnStatusMessage *status, uint8_t state, uint8_t reason);
 static void finish(TransactionRunner *self, const TxnStatusMessage *status);
 static void abortWith(TransactionRunner *self, uint8_t reason, uint32_t failing_seq);
@@ -573,7 +574,7 @@ static bool settleWait(TransactionRunner *self, uint64_t now_us)
     }
     if (self->current.extend_requested) {
         self->current.extend_requested = false;
-        self->current.deadline_us = now_us + templateTimeoutUs(template_message);
+        self->current.deadline_us = now_us + extendTimeoutUs(template_message);
     }
     if (now_us < self->current.deadline_us) {
         return false;
@@ -846,6 +847,14 @@ static uint64_t transmitTimeoutUs(const TxnTemplateMessage *template_message)
         return (uint64_t)TRANSACTION_DEFAULT_TX_TIMEOUT_MS * MICROSECONDS_PER_MILLISECOND;
     }
     return templateTimeoutUs(template_message);
+}
+
+static uint64_t extendTimeoutUs(const TxnTemplateMessage *template_message)
+{
+    if (template_message->extend_timeout_ms == 0) {
+        return templateTimeoutUs(template_message);
+    }
+    return (uint64_t)template_message->extend_timeout_ms * MICROSECONDS_PER_MILLISECOND;
 }
 
 static void prepareStatus(const TransactionRunner *self, TxnStatusMessage *status, uint8_t state, uint8_t reason)

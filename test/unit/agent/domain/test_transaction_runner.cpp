@@ -479,6 +479,30 @@ describe("transaction_runner", []() {
             expect(last_status.state).toBe((uint8_t)kTXN_STATE_DONE);
         });
 
+        it("waits the extended time after a response pending", []() {
+            TxnTemplateMessage template_message;
+            TxnStep request;
+            bool active_before_extended_timeout;
+
+            resetRunner(RING_CAPACITY);
+            beginWithIsotp(0);
+            template_message = isotpTemplate();
+            template_message.extend_timeout_ms = 5 * TIMEOUT_MS;
+            defineTemplate(&template_message);
+            request = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_LAST, 3);
+            pushSteps(&request, 1, 0);
+
+            TransactionRunner_Tick(&runner, 100);
+            answerBytes({ 0x03, MESSAGE_NEGATIVE, 0x36, 0x78 });
+            TransactionRunner_Tick(&runner, 200);
+            TransactionRunner_Tick(&runner, 200 + 4 * TIMEOUT_US);
+            active_before_extended_timeout = TransactionRunner_IsActive(&runner);
+            TransactionRunner_Tick(&runner, 200 + 5 * TIMEOUT_US);
+
+            expect(active_before_extended_timeout).toBe(true);
+            expect(last_status.reason).toBe((uint8_t)kTXN_REASON_TIMEOUT);
+        });
+
         it("reassembles a multi-frame answer, answering it with flow control", []() {
             TxnStep request;
 

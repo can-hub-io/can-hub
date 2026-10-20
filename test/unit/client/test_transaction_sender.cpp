@@ -11,12 +11,14 @@ extern "C" {
 #define CLASSIC_RECORD_SIZE 16
 #define TWO_RECORDS_WINDOW (2 * CLASSIC_RECORD_SIZE)
 #define LARGE_WINDOW (48 * 1024)
+#define MESSAGE_RECORD_PAYLOAD 100
 #define RECORDS_PER_BATCH (TXN_STEPS_RECORD_BYTES_MAX / CLASSIC_RECORD_SIZE)
 
 static TransactionSender sender;
 
 static void grant(uint32_t window_bytes);
 static TxnStep classicStep(uint32_t can_id);
+static TxnStep messageRecord(uint8_t flags);
 static uint32_t offerUntilStopped(uint32_t count, TTRANSACTION_OFFER *stopped_by);
 static TxnStepsMessage pendingBatch(void);
 static TxnStep decodedStep(const TxnStepsMessage *batch, uint8_t index);
@@ -86,6 +88,43 @@ describe("transaction_sender", []() {
         expect(ended).toBe(kTRANSACTION_OFFER_ACCEPTED);
         expect(sent.step_count).toBe(1);
         expect(decodedStep(&sent, 0).flags).toBe((uint8_t)TXN_STEP_FLAG_LAST);
+    });
+
+    it("numbers a message spread over records as one step", []() {
+        TxnStep records[3];
+        TxnStep after;
+        TxnStepsMessage first;
+        TxnStepsMessage second;
+        uint8_t i;
+
+        grant(LARGE_WINDOW);
+        records[0] = messageRecord(TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_CONTINUED);
+        records[1] = messageRecord(TXN_STEP_FLAG_MESSAGE);
+        records[2] = classicStep(0x200);
+        for(i=0; i<3; i++) {
+            TransactionSender_Offer(&sender, &records[i]);
+        }
+        first = pendingBatch();
+        TransactionSender_BatchSent(&sender);
+        after = classicStep(0x300);
+        TransactionSender_Offer(&sender, &after);
+        second = pendingBatch();
+
+        expect(first.step_count).toBe(2);
+        expect(second.first_seq).toBe((uint32_t)1);
+    });
+
+    it("refuses to end on a record that leaves its message unfinished", []() {
+        TxnStep record;
+        TTRANSACTION_OFFER ended;
+
+        grant(LARGE_WINDOW);
+        record = messageRecord(TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_CONTINUED);
+        TransactionSender_Offer(&sender, &record);
+
+        ended = TransactionSender_End(&sender);
+
+        expect(ended).toBe(kTRANSACTION_OFFER_REJECTED);
     });
 
     it("refuses to end a transaction that has sent nothing", []() {
@@ -204,6 +243,17 @@ static TxnStep classicStep(uint32_t can_id)
     memset(&step, 0, sizeof(step));
     step.can_id = can_id;
     step.payload_length = FRAME_PAYLOAD_MAX_CLASSIC;
+    return step;
+}
+
+static TxnStep messageRecord(uint8_t flags)
+{
+    TxnStep step;
+
+    memset(&step, 0, sizeof(step));
+    step.flags = flags;
+    step.can_id = 0x7E0;
+    step.payload_length = MESSAGE_RECORD_PAYLOAD;
     return step;
 }
 

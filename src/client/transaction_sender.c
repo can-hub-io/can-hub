@@ -91,6 +91,9 @@ TTRANSACTION_OFFER TransactionSender_End(TransactionSender *self)
     if (self->state != kTRANSACTION_SENDER_RUNNING || self->ended || !self->has_held) {
         return kTRANSACTION_OFFER_REJECTED;
     }
+    if (self->held.flags & TXN_STEP_FLAG_CONTINUED) {
+        return kTRANSACTION_OFFER_REJECTED;
+    }
 
     result = appendHeld(self, TXN_STEP_FLAG_LAST);
     if (result == kTRANSACTION_OFFER_ACCEPTED) {
@@ -148,7 +151,9 @@ static TTRANSACTION_OFFER appendHeld(TransactionSender *self, uint8_t extra_flag
     }
 
     self->sent_bytes += size;
-    self->next_seq++;
+    if ((step.flags & TXN_STEP_FLAG_CONTINUED) == 0) {
+        self->next_seq++;
+    }
     self->has_held = false;
 
     return kTRANSACTION_OFFER_ACCEPTED;

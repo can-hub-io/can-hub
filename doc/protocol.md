@@ -893,9 +893,11 @@ does not wait, `timeout_ms` bounds those retries (an agent default when zero).
   payload is a mismatch: it aborts the transaction (reason value mismatch,
   `expected` and `got` reported) if the template has the mismatch-abort flag, and
   is ignored otherwise;
-- `timeout_ms` bounds the wait from the step's start or the last extend; it must
-  be non-zero for a waiting mode. On expiry the step aborts the transaction
-  (reason timeout), or completes if the template has the soft flag;
+- `timeout_ms` bounds the wait from the step's start; it must be non-zero for a
+  waiting mode. After an extend match the wait restarts with
+  `extend_timeout_ms` instead (the UDS P2* time after a response pending), or
+  `timeout_ms` again when it is zero. On expiry the step aborts the
+  transaction (reason timeout), or completes if the template has the soft flag;
 - `gap_us` is the minimum delay between this step's frame and the next step's.
 
 **ISO-TP steps.** A template of `type` 1 makes each of its steps one ISO
@@ -1019,7 +1021,7 @@ TXN_BEGIN_ACK (total 12)
 @6   txn_id u16
 @8   window u32 (step record bytes the client may have in flight)
 
-TXN_TEMPLATE (total 108)
+TXN_TEMPLATE (total 112)
 @4   channel u8
 @5   template_id u8 (0-15)
 @6   txn_id u16
@@ -1046,6 +1048,7 @@ TXN_TEMPLATE (total 108)
 @105 isotp_block_size u8 (0: the peer sends the whole answer without waiting)
 @106 isotp_st_min u8 (ISO 15765-2 encoding: 0-127 ms, 0xF1-0xF9 100-900 us)
 @107 reserved u8
+@108 extend_timeout_ms u32 (0: timeout_ms again after an extend)
 
 TXN_STEPS (total 16 + records, records at most 400 bytes)
 @4   channel u8

@@ -295,6 +295,19 @@ add_unit_test(test_step_ring
         ${ROOT_SRC_DIR}/agent/domain/step_ring.c
 )
 
+add_unit_test(test_canhub_transactions
+    SOURCES
+        platform/test_canhub_transactions.cpp
+        ${ROOT_SRC_DIR}/platform/linux/libcanhub/canhub_transactions.c
+        ${ROOT_SRC_DIR}/client/transaction_sender.c
+        ${ROOT_SRC_DIR}/protocol/txn_steps_message.c
+        ${ROOT_SRC_DIR}/protocol/txn_message.c
+        ${ROOT_SRC_DIR}/protocol/frame_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+target_include_directories(test_canhub_transactions PRIVATE ${ROOT_SRC_DIR}/../include)
+
 add_unit_test(test_isotp_link
     SOURCES
         agent/domain/test_isotp_link.cpp
