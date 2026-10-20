@@ -56,5 +56,8 @@ class CanClient:
     def dumped_frames(self):
         return parse_client_dump(self.process.read_log())
 
+    def pause(self) -> None:
+        self.process.pause()
+
     def stop(self) -> None:
         self.process.stop()

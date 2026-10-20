@@ -93,6 +93,7 @@ static void onStreamFinished(void *context, int64_t stream_id);
 static void onStreamClosed(void *context, int64_t stream_id);
 static void openReliableChannel(QuicServerPeer *peer, uint8_t channel);
 static void closeReliableChannel(QuicServerPeer *peer, uint8_t channel);
+static void reopenClosedChannels(QuicServerPeer *peer);
 static void receiveControlData(QuicServerPeer *peer, const uint8_t *data, size_t size);
 static bool serverFrameSink(void *context, const uint8_t *frame, size_t size);
 static void retryStalledReliableStreams(QuicServerTransport *self);
@@ -284,6 +285,9 @@ static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, cons
     }
 
     reliable = QuicReliableStreams_FindByChannel(&peer->reliable_streams, channel);
+    if (reliable == NULL && QuicReliableStreams_AwaitsReopen(&peer->reliable_streams, channel)) {
+        return false;
+    }
     if (reliable == NULL) {
         return stageDatagram(self, peer, data, size);
     }
@@ -308,8 +312,11 @@ static bool portFrameFits(void *context, uint32_t peer_id, uint8_t channel, size
     }
 
     reliable = QuicReliableStreams_FindByChannel(&peer->reliable_streams, channel);
+    if (reliable == NULL) {
+        return !QuicReliableStreams_AwaitsReopen(&peer->reliable_streams, channel);
+    }
 
-    return reliable == NULL || QuicControlChannel_CanQueue(&reliable->stream, size);
+    return QuicControlChannel_CanQueue(&reliable->stream, size);
 }
 
 static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable)
@@ -333,12 +340,25 @@ static void openReliableChannel(QuicServerPeer *peer, uint8_t channel)
     if (QuicReliableStreams_FindByChannel(&peer->reliable_streams, channel) != NULL) {
         return;
     }
+    if (QuicReliableStreams_DeferReopen(&peer->reliable_streams, channel)) {
+        LOG_INFO("peer %u reliable channel %u reopens once its previous stream closes", peer->peer_id, channel);
+        return;
+    }
     if (QuicReliableStreams_Open(&peer->reliable_streams, &peer->connection, channel) == NULL) {
         LOG_WARN("peer %u reliable channel %u could not open a stream", peer->peer_id, channel);
         return;
     }
 
     LOG_INFO("peer %u reliable channel %u opened", peer->peer_id, channel);
+}
+
+static void reopenClosedChannels(QuicServerPeer *peer)
+{
+    uint8_t channel;
+
+    while (QuicReliableStreams_TakeReopenable(&peer->reliable_streams, &channel)) {
+        openReliableChannel(peer, channel);
+    }
 }
 
 static void closeReliableChannel(QuicServerPeer *peer, uint8_t channel)
@@ -751,6 +771,7 @@ static void retryStalledReliableStreams(QuicServerTransport *self)
     for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
         if (QuicConnection_IsOpen(&self->peers[i].connection)) {
             QuicReliableStreams_RetryDrain(&self->peers[i].reliable_streams, &self->peers[i].connection, serverFrameSink, &self->peers[i]);
+            reopenClosedChannels(&self->peers[i]);
         }
     }
     for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {

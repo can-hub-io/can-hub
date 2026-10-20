@@ -61,6 +61,7 @@ static void reconnectReliableAgent(void);
 static const RegisterMessage bus_registration = { "bus7", 1, { "can0" } };
 
 static uint8_t injectFrom(uint32_t client_peer_id, uint8_t channel);
+static bool writeFrom(uint32_t client_peer_id, uint8_t channel);
 static void sendEchoFromAgent(uint32_t agent_peer_id, uint8_t token);
 static FrameMessage relayedFrameAt(uint16_t index);
 static void connectPeerFrom(uint32_t peer_id, const char *host);
@@ -706,27 +707,50 @@ describe("broker", []() {
             openSubscribersBehindOneFullReliableClient();
         });
 
-        it("sends a frame nowhere while one of its reliable routes is full", []() {
+        it("keeps relaying to every other subscriber while a reliable one is full", []() {
             bool accepted;
-
-            accepted = sendAgentFrame();
-
-            expect(accepted).toBe(false);
-            expect(transport.frame_count).toBe(0);
-        });
-
-        it("delivers the redelivered frame exactly once to every route", []() {
-            bool accepted;
-
-            sendAgentFrame();
-            transport.full_peer = 0;
 
             accepted = sendAgentFrame();
 
             expect(accepted).toBe(true);
             expect(framesTo(CLIENT_PEER)).toBe((uint8_t)1);
-            expect(framesTo(CLIENT_PEER + 1)).toBe((uint8_t)1);
+            expect(framesTo(CLIENT_PEER + 1)).toBe((uint8_t)0);
             expect(framesTo(CLIENT_PEER + 2)).toBe((uint8_t)1);
+        });
+
+        it("disconnects a reliable subscriber that cannot take a frame", []() {
+            ErrorMessage error;
+            uint8_t error_type;
+
+            HubTransportPortMock_Reset(&transport);
+            transport.full_peer = CLIENT_PEER + 1;
+
+            sendAgentFrame();
+            error_type = lastReply(&error, ErrorMessage_Decode);
+
+            expect(error_type).toBe(kMESSAGE_TYPE_ERROR);
+            expect(error.code).toBe((uint16_t)kERROR_CODE_SLOW_CONSUMER);
+            expect(transport.close_count).toBe(1);
+            expect(transport.last_closed_peer).toBe((uint32_t)(CLIENT_PEER + 1));
+        });
+
+        it("holds a client's frame while the agent's reliable leg is full", []() {
+            uint32_t interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            uint8_t channel;
+            bool held;
+            bool accepted;
+
+            transport.full_peer = 0;
+            channel = BrokerDriver_OpenInterface(&events, &transport, CLIENT_PEER, interface_id, OPEN_FLAG_RELIABLE | OPEN_FLAG_WANT_WRITE);
+            transport.full_peer = AGENT_PEER;
+            held = !writeFrom(CLIENT_PEER, channel);
+            transport.full_peer = 0;
+            accepted = writeFrom(CLIENT_PEER, channel);
+
+            expect(held).toBe(true);
+            expect(accepted).toBe(true);
+            expect(framesTo(AGENT_PEER)).toBe((uint8_t)1);
+            expect(transport.close_count).toBe(0);
         });
     });
 
@@ -2524,6 +2548,15 @@ static uint8_t injectFrom(uint32_t client_peer_id, uint8_t channel)
     transport.frame_count = 0;
 
     return (uint8_t)((relayed.route_flags & FRAME_ROUTE_TOKEN_MASK) >> FRAME_ROUTE_TOKEN_SHIFT);
+}
+
+static bool writeFrom(uint32_t client_peer_id, uint8_t channel)
+{
+    FrameMessage written = { 0x456, 2000, channel, 1, 0, 0, { 0x55 } };
+    uint8_t encoded[128];
+    size_t encoded_size = FrameMessage_Encode(&written, encoded, sizeof(encoded));
+
+    return events.on_peer_frame(events.context, client_peer_id, encoded, encoded_size);
 }
 
 static void sendEchoFromAgent(uint32_t agent_peer_id, uint8_t token)

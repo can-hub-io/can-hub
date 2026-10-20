@@ -59,8 +59,12 @@ class Process:
                 return int(line.split()[1])
         return 0
 
+    def pause(self) -> None:
+        self._popen.send_signal(signal.SIGSTOP)
+
     def stop(self, sig: int = signal.SIGTERM, timeout: float = 3.0) -> int:
         if self._popen.poll() is None:
+            self._popen.send_signal(signal.SIGCONT)
             self._popen.send_signal(sig)
             try:
                 self._popen.wait(timeout)

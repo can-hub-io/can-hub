@@ -158,6 +158,7 @@ static bool routeTakesFrame(
 );
 static size_t frameWireSize(const FrameMessage *frame);
 static bool forwardFrame(Broker *self, const FrameRoute *route, const FrameMessage *frame, uint8_t route_flags);
+static bool disconnectSlowConsumer(Broker *self, const HubPeer *destination);
 static uint64_t frameWireBits(const uint8_t *wire, uint16_t size);
 static void enqueueFrame(Broker *self, HubPeer *peer, uint8_t channel, const uint8_t *data, size_t size);
 static void drainPeer(Broker *self, HubPeer *peer);
@@ -525,7 +526,7 @@ static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame)
 
     self->metrics.frames_dropped += routes_dropped;
 
-    if (!reliableRoutesFit(self, routes, route_count, frame, echo_originator_peer_id)) {
+    if (peer->role != kHUB_PEER_ROLE_AGENT && !reliableRoutesFit(self, routes, route_count, frame, echo_originator_peer_id)) {
         return false;
     }
 
@@ -2288,10 +2289,8 @@ static bool forwardFrame(Broker *self, const FrameRoute *route, const FrameMessa
     }
 
     if (route->reliable) {
-        /* A full destination ring is backpressure, not loss: report not-accepted so
-         * the receiver withholds the sender's credit and retries, never dropping. */
         if (!self->transport->send_frame(self->transport->context, route->peer_id, route->channel, forwarded, size)) {
-            return false;
+            return disconnectSlowConsumer(self, destination);
         }
         countForwarded(self, destination, route->channel);
         return true;
@@ -2318,6 +2317,20 @@ static bool forwardFrame(Broker *self, const FrameRoute *route, const FrameMessa
     }
 
     enqueueFrame(self, destination, route->channel, forwarded, size);
+
+    return true;
+}
+
+static bool disconnectSlowConsumer(Broker *self, const HubPeer *destination)
+{
+    uint32_t peer_id = destination->peer_id;
+
+    if (destination->role != kHUB_PEER_ROLE_CLIENT) {
+        return false;
+    }
+
+    sendError(self, peer_id, kERROR_CODE_SLOW_CONSUMER, "reliable channel stalled");
+    disconnectPeer(self, peer_id);
 
     return true;
 }

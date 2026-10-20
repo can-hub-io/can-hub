@@ -7,6 +7,9 @@ static void beginClosing(QuicReliableStream *reliable);
 static void releaseStream(QuicReliableStream *reliable);
 static bool attachStorage(QuicReliableStream *reliable);
 static void drainAndCredit(QuicReliableStream *reliable, QuicConnection *connection, QuicReliableFrameSink sink, void *context);
+static bool isClosing(const QuicReliableStreamSet *self, uint8_t channel);
+static bool findReopen(const QuicReliableStreamSet *self, uint8_t channel, uint8_t *index);
+static void forgetReopen(QuicReliableStreamSet *self, uint8_t channel);
 
 /* ---------- public ---------- */
 
@@ -17,6 +20,7 @@ void QuicReliableStreams_Reset(QuicReliableStreamSet *self)
     for(i=0; i<QUIC_RELIABLE_STREAMS_MAX; i++) {
         releaseStream(&self->streams[i]);
     }
+    self->reopen_count = 0;
 }
 
 QuicReliableStream *QuicReliableStreams_FindByChannel(QuicReliableStreamSet *self, uint8_t channel)
@@ -104,6 +108,7 @@ QuicReliableStream *QuicReliableStreams_Close(QuicReliableStreamSet *self, uint8
 {
     QuicReliableStream *reliable = QuicReliableStreams_FindByChannel(self, channel);
 
+    forgetReopen(self, channel);
     if (reliable == NULL) {
         return NULL;
     }
@@ -111,6 +116,40 @@ QuicReliableStream *QuicReliableStreams_Close(QuicReliableStreamSet *self, uint8
     beginClosing(reliable);
 
     return reliable;
+}
+
+bool QuicReliableStreams_DeferReopen(QuicReliableStreamSet *self, uint8_t channel)
+{
+    if (!isClosing(self, channel)) {
+        return false;
+    }
+    if (!QuicReliableStreams_AwaitsReopen(self, channel) && self->reopen_count < QUIC_RELIABLE_STREAMS_MAX) {
+        self->reopen_channels[self->reopen_count++] = channel;
+    }
+
+    return true;
+}
+
+bool QuicReliableStreams_AwaitsReopen(const QuicReliableStreamSet *self, uint8_t channel)
+{
+    uint8_t index;
+
+    return findReopen(self, channel, &index);
+}
+
+bool QuicReliableStreams_TakeReopenable(QuicReliableStreamSet *self, uint8_t *channel)
+{
+    uint8_t i;
+
+    for(i=0; i<self->reopen_count; i++) {
+        if (!isClosing(self, self->reopen_channels[i])) {
+            *channel = self->reopen_channels[i];
+            forgetReopen(self, *channel);
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void QuicReliableStreams_Finish(QuicReliableStreamSet *self, int64_t stream_id)
@@ -279,4 +318,45 @@ static void drainAndCredit(QuicReliableStream *reliable, QuicConnection *connect
     if (credited > 0) {
         QuicConnection_ExtendStreamCredit(connection, reliable->stream.stream_id, credited);
     }
+}
+
+static bool isClosing(const QuicReliableStreamSet *self, uint8_t channel)
+{
+    const QuicReliableStream *reliable;
+    uint8_t i;
+
+    for(i=0; i<QUIC_RELIABLE_STREAMS_MAX; i++) {
+        reliable = &self->streams[i];
+        if (reliable->in_use && reliable->closing && reliable->has_channel && reliable->channel == channel) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool findReopen(const QuicReliableStreamSet *self, uint8_t channel, uint8_t *index)
+{
+    uint8_t i;
+
+    for(i=0; i<self->reopen_count; i++) {
+        if (self->reopen_channels[i] == channel) {
+            *index = i;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void forgetReopen(QuicReliableStreamSet *self, uint8_t channel)
+{
+    uint8_t index;
+
+    if (!findReopen(self, channel, &index)) {
+        return;
+    }
+
+    self->reopen_count--;
+    self->reopen_channels[index] = self->reopen_channels[self->reopen_count];
 }
