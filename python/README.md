@@ -163,6 +163,35 @@ with bus.transaction(exclusive=True, isotp=True) as transaction:
 and `block_size`/`st_min` are the flow control the agent answers with. Each
 message is handed over whole, as the agent's window takes it.
 
+### UDS
+
+`bus.uds()` runs UDS requests (ISO 14229) at the agent as one transaction, the
+answers checked by the UDS rules: a positive answer starts with the service id
++ 0x40, a negative one (`7F <service> <code>`) raises `UdsNegativeResponse`,
+`7F <service> 78` makes the request wait `p2_extended`, and a request whose
+sub-function carries the suppress-positive-response bit (`3E 80`) does not
+wait:
+
+```python
+from canhub import Isotp, UdsNegativeResponse
+
+try:
+    with bus.uds(0x7E0, Isotp(0x7E8), p2=0.15, p2_extended=5.0, exclusive=True) as ecu:
+        ecu.request(b"\x10\x02")                                   # expects 50
+        ecu.request(b"\x31\x01\xff\x00", expect=b"\x71\x01\xff\x00")  # checks the start of the answer
+        ecu.request(b"\x34\x00\x44" + address + size)
+        ecu.transfer(firmware, block_size=4093)                    # 36 <counter> <block>, answered 76 <counter>
+        ecu.request(b"\x37")
+except UdsNegativeResponse as refused:
+    print(hex(refused.service), hex(refused.code))
+```
+
+SecurityAccess needs the manufacturer's seed/key algorithm, which runs on the
+client between two exchanges; do it beforehand. python-can-isotp and udsoncan
+also work over `CanHubBus` as over any python-can bus, but then the client
+does the segmentation and every frame crosses the network; `bus.uds()` keeps
+it at the agent.
+
 ## Listing interfaces
 
 `CanHubBus.list_interfaces()` asks a hub for the interfaces it exports. Each

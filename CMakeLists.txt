@@ -122,6 +122,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/platform/linux/libcanhub/canhub_settings.c
         src/platform/linux/libcanhub/canhub_transactions.c
         src/platform/linux/libcanhub/canhub_script.c
+        src/platform/linux/libcanhub/canhub_uds.c
         src/client/txn_script/checksum.c
         src/client/txn_script/script.c
         src/client/txn_script/script_error.c
@@ -353,6 +354,7 @@ set(LIBCANHUB_API_SOURCES
     src/platform/linux/libcanhub/canhub_settings.c
     src/platform/linux/libcanhub/canhub_transactions.c
     src/platform/linux/libcanhub/canhub_script.c
+    src/platform/linux/libcanhub/canhub_uds.c
     ${TXN_SCRIPT_SOURCES}
 )
 
