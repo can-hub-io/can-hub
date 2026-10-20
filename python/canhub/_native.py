@@ -65,6 +65,7 @@ TXN_PATTERN_EXTEND = 2
 TXN_STEP_EXPECT_VALUE = 1 << 0
 TXN_STEP_EXPECT_ONLY = 1 << 1
 TXN_DONE = 0
+SCRIPT_NAME_MAX = 32
 
 SETTING_BITRATE = 1 << 0
 SETTING_SAMPLE_POINT = 1 << 1
@@ -228,6 +229,21 @@ class CanHubTxnResult(Structure):
     ]
 
 
+class CanHubScriptOutcome(Structure):
+    _fields_ = [
+        ("struct_size", c_uint32),
+        ("result", CanHubTxnResult),
+        ("total_steps", c_uint32),
+        ("error_line", c_uint32),
+        ("roster_count", c_uint32),
+        ("roster", c_uint32 * TXN_ROSTER_MAX),
+        ("roster_name", c_char * SCRIPT_NAME_MAX),
+    ]
+
+
+ScriptProgress = ctypes.CFUNCTYPE(c_int32, c_void_p, POINTER(CanHubTxnProgress), c_uint32)
+
+
 class CanHubConnectConfig(Structure):
     _fields_ = [
         ("struct_size", c_uint32),
@@ -316,6 +332,9 @@ lib.canhub_txn_progress.argtypes = [c_void_p, POINTER(CanHubTxnProgress)]
 
 lib.canhub_txn_abort.restype = c_int32
 lib.canhub_txn_abort.argtypes = [c_void_p]
+
+lib.canhub_txn_run_script.restype = c_int32
+lib.canhub_txn_run_script.argtypes = [c_void_p, c_char_p, POINTER(CanHubScriptOutcome), ScriptProgress, c_void_p]
 
 
 def last_error(session):

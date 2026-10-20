@@ -83,6 +83,28 @@ can-hub-client configure truck42/can0 bitrate 500000 sample-point 0.875 fd on db
 one step; both print the settings the bus holds afterwards. On tls/quic it
 needs an `rwa` grant on the interface ([security](security.md#client-acls)).
 
+## txn — run a transaction script
+
+```sh
+can-hub-client --connect quic://hub.example.com:7227 txn truck42/can0 flash.txn
+```
+
+Runs a [transaction script](transaction-scripts.md) at the agent: the script
+is checked before anything is sent, files it reads resolve against its
+directory, and its steps stream as the agent's window allows. On a terminal it
+shows steps done, rate and time left; Ctrl-C cancels the transaction at the
+agent. It prints the outcome and exits with:
+
+| Exit | Output |
+|---|---|
+| 0 | `done steps=272 ms=1840` |
+| 1 | `flash.txn:5: no template has this name`, or why it could not connect or open |
+| 2 | `aborted reason=timeout step=16 completed=16 missing node=[5]` |
+
+`missing` lists, by the script's loop variable, who did not answer a template
+`for` when the reason is `timeout`. Needs a write grant, and a reliable channel
+(quic, or the stream transports).
+
 ## attach — mirror into a local vcan
 
 ```sh

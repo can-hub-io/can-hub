@@ -14,6 +14,7 @@ __all__ = [
     "InterfaceSettings",
     "Origin",
     "Pattern",
+    "ScriptError",
     "Step",
     "Template",
     "Transaction",
@@ -22,7 +23,7 @@ __all__ = [
     "identity_fingerprint",
 ]
 
-TRANSACTION_NAMES = {"Advance", "Origin", "Pattern", "Step", "Template", "Transaction", "TransactionAborted", "TransactionResult"}
+TRANSACTION_NAMES = {"Advance", "Origin", "Pattern", "ScriptError", "Step", "Template", "Transaction", "TransactionAborted", "TransactionResult"}
 
 
 def __getattr__(name):

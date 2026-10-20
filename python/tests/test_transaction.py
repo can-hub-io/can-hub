@@ -10,6 +10,7 @@ from canhub.transaction import (
     Advance,
     Origin,
     Pattern,
+    ScriptError,
     Step,
     Template,
     TransactionAborted,
@@ -22,6 +23,8 @@ from canhub.transaction import (
 SESSION = 0x1234
 STANDARD_ID_PATTERN_MASK = 0x7FF | native.CAN_ID_FLAG_EFF
 REASON_TIMEOUT = 1
+SCRIPT_PATH = "flash.txn"
+SCRIPT_TOTAL_STEPS = 40
 
 
 class TestToNativeTemplate:
@@ -166,6 +169,104 @@ class TestTransaction:
             bus.transaction()
 
 
+class TestRunScript:
+    def test_it_reports_who_answered_from_the_script_roster(self, monkeypatch):
+        bus, runner = given_bus_on_script_runner(monkeypatch)
+        runner.roster = [0x10, 0x11, 0x12]
+        runner.seen_bitmap = 0b101
+
+        result = bus.run_script(SCRIPT_PATH)
+
+        assert runner.script_path == SCRIPT_PATH.encode()
+        assert result.done
+        assert result.answered == {0x10, 0x12}
+        assert result.missing == {0x11}
+
+    def test_it_raises_the_script_error_with_its_line(self, monkeypatch):
+        bus, runner = given_bus_on_script_runner(monkeypatch)
+        runner.status = native.ERR_ARGUMENT
+        runner.error_line = 7
+
+        with pytest.raises(ScriptError) as failure:
+            bus.run_script(SCRIPT_PATH)
+
+        assert failure.value.line == 7
+        assert str(failure.value) == "flash.txn:7: unknown template"
+
+    def test_it_raises_with_the_report_when_the_agent_aborts(self, monkeypatch):
+        bus, runner = given_bus_on_script_runner(monkeypatch)
+        runner.status = native.ERR_TXN_ABORTED
+        runner.reason = REASON_TIMEOUT
+
+        with pytest.raises(TransactionAborted) as aborted:
+            bus.run_script(SCRIPT_PATH)
+
+        assert aborted.value.result.reason == "timeout"
+
+    def test_it_passes_progress_with_the_total_steps(self, monkeypatch):
+        bus, runner = given_bus_on_script_runner(monkeypatch)
+        reports = []
+
+        bus.run_script(SCRIPT_PATH, progress=lambda progress, total: reports.append((progress.completed_steps, total)))
+
+        assert reports == [(runner.completed_steps, SCRIPT_TOTAL_STEPS)]
+        assert runner.kept_going
+
+    def test_it_cancels_when_progress_returns_false(self, monkeypatch):
+        bus, runner = given_bus_on_script_runner(monkeypatch)
+
+        bus.run_script(SCRIPT_PATH, progress=lambda progress, total: False)
+
+        assert not runner.kept_going
+
+    def test_it_cancels_and_reraises_what_progress_raised(self, monkeypatch):
+        bus, runner = given_bus_on_script_runner(monkeypatch)
+
+        with pytest.raises(KeyboardInterrupt):
+            bus.run_script(SCRIPT_PATH, progress=interrupt)
+
+        assert not runner.kept_going
+
+
+class ScriptRunner:
+    def __init__(self):
+        self.status = native.OK
+        self.roster = []
+        self.seen_bitmap = 0
+        self.reason = 0
+        self.error_line = 0
+        self.completed_steps = 12
+        self.script_path = None
+        self.kept_going = None
+
+    def run(self, session, script_path, outcome, on_progress, context):
+        report = ctypes.cast(outcome, ctypes.POINTER(native.CanHubScriptOutcome)).contents
+        progress = native.CanHubTxnProgress(completed_steps=self.completed_steps)
+        self.script_path = script_path
+        self.kept_going = on_progress(context, ctypes.pointer(progress), SCRIPT_TOTAL_STEPS) != 0
+        report.total_steps = SCRIPT_TOTAL_STEPS
+        report.error_line = self.error_line
+        report.roster_count = len(self.roster)
+        report.roster[: len(self.roster)] = self.roster
+        report.result.seen_bitmap = self.seen_bitmap
+        report.result.reason = self.reason
+        return self.status
+
+    def last_error(self, session):
+        return b"flash.txn:7: unknown template"
+
+
+def given_bus_on_script_runner(monkeypatch):
+    runner = ScriptRunner()
+    monkeypatch.setattr(native.lib, "canhub_txn_run_script", runner.run)
+    monkeypatch.setattr(native.lib, "canhub_last_error", runner.last_error)
+    return given_bus(), runner
+
+
+def interrupt(progress, total_steps):
+    raise KeyboardInterrupt
+
+
 class TransactionHub:
     def __init__(self):
         self.sent_ids = []
@@ -206,11 +307,15 @@ def given_bus_on_transaction_hub(monkeypatch):
     monkeypatch.setattr(native.lib, "canhub_txn_end", hub.end)
     monkeypatch.setattr(native.lib, "canhub_txn_wait", hub.wait)
     monkeypatch.setattr(native.lib, "canhub_txn_abort", hub.abort)
+    return given_bus(), hub
+
+
+def given_bus():
     bus = CanHubBus.__new__(CanHubBus)
     bus._lock = _FairLock()
     bus._session = SESSION
     bus._writable = True
-    return bus, hub
+    return bus
 
 
 def given_transaction(bus):

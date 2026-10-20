@@ -1,0 +1,5 @@
+template response
+    success  id == 0x7E8
+    timeout  50ms
+
+send 0x7E0 data 02 10 03 expect reply

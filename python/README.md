@@ -111,6 +111,24 @@ result names who answered (`answered`) and who did not (`missing`).
 `exclusive=True` keeps other clients' frames off the bus meanwhile; their
 `send()` raises `CanOperationError`.
 
+A [transaction script](../doc/transaction-scripts.md) describes the same in a
+file, and runs as it does from `can-hub-client txn`:
+
+```python
+from canhub import ScriptError, TransactionAborted
+
+try:
+    result = bus.run_script("flash.txn", progress=lambda progress, total: print(progress.completed_steps, total))
+except ScriptError as error:
+    print(error.line, error)                      # flash.txn:5: no template has this name
+except TransactionAborted as aborted:
+    print(aborted.result.reason, sorted(aborted.result.missing))
+```
+
+`progress(progress, total_steps)` runs a few times a second; returning `False`
+cancels the transaction, and an exception raised in it (Ctrl-C included)
+cancels it and propagates. It must not use the bus.
+
 ## Listing interfaces
 
 `CanHubBus.list_interfaces()` asks a hub for the interfaces it exports. Each

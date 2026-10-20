@@ -4,14 +4,14 @@ import ctypes
 import os
 import threading
 import time
-from typing import Iterable, List, Optional, Tuple
+from typing import Callable, Iterable, List, Optional, Tuple
 
 from can import BusABC, CanInitializationError, CanOperationError, Message
 
 from . import _native as native
 from . import settings as interface_settings
 from .settings import InterfaceSettings
-from .transaction import Origin, Transaction
+from .transaction import Origin, Transaction, TransactionProgress, TransactionResult
 from . import transaction as transactions
 
 DEFAULT_TIMEOUT_MS = 5000
@@ -235,6 +235,22 @@ class CanHubBus(BusABC):
             return transactions.begin(self, roster, origin, exclusive, timeout)
         except ValueError as error:
             raise CanOperationError(str(error)) from error
+
+    def run_script(
+        self,
+        script_path: str,
+        progress: Optional[Callable[[TransactionProgress, int], Optional[bool]]] = None,
+    ) -> TransactionResult:
+        """Run a transaction script (doc/transaction-scripts.md) on this bus,
+        opened with ``reliable=True``; files it reads resolve against the
+        script's directory. ``progress(progress, total_steps)`` runs a few
+        times a second and cancels the transaction by returning ``False``; it
+        must not use the bus. Raises :class:`ScriptError` for a script that
+        does not compile and :class:`TransactionAborted` with the report.
+        """
+        if not self._writable:
+            raise CanOperationError("bus is read-only (write denied by the hub ACL)")
+        return transactions.run_script(self, script_path, progress)
 
     def drop_counters(self) -> dict:
         with self._lock:

@@ -9,16 +9,21 @@ see doc/protocol.md "Transactions"). Open the bus with ``reliable=True``::
         txn.send(steps)           # any iterable, a generator included
         result = txn.wait()       # raises TransactionAborted with the report
 
+or describe it in a script (doc/transaction-scripts.md) and run that::
+
+    result = bus.run_script("flash.txn", progress=lambda progress, total: print(progress.completed_steps, total))
+
 Payload values are bytes: a pattern matches the first 8 payload bytes under
 ``data_mask`` (``None`` = every byte given in ``data``).
 """
 
 import ctypes
 import itertools
+import os
 import time
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import FrozenSet, Iterable, Iterator, Optional
+from typing import Callable, FrozenSet, Iterable, Iterator, Optional
 
 from can import CanOperationError, Message
 
@@ -143,6 +148,15 @@ class TransactionAborted(CanOperationError):
         self.result = result
 
 
+class ScriptError(CanOperationError):
+    """The script does not compile or cannot be read; ``line`` is 0 when the
+    failure is not tied to a line."""
+
+    def __init__(self, message: str, line: int):
+        super().__init__(message)
+        self.line = line
+
+
 class Transaction:
     """A transaction granted on one bus; use as a context manager so an
     exception or Ctrl-C cancels it at the agent."""
@@ -227,9 +241,7 @@ class Transaction:
         progress.struct_size = ctypes.sizeof(progress)
         with self._bus._lock:
             native.lib.canhub_txn_progress(self._bus._session, ctypes.byref(progress))
-        return TransactionProgress(
-            progress.sent_steps, progress.completed_steps, progress.bytes_in_flight, progress.window_bytes
-        )
+        return from_native_progress(progress)
 
     def _send_chunk(self, native_steps, count: int) -> None:
         step_size = ctypes.sizeof(native.CanHubTxnStep)
@@ -265,6 +277,43 @@ def begin(bus, roster: Iterable[int], origin: Optional[Origin], exclusive: bool,
     if result != native.OK:
         raise CanOperationError(native.last_error(bus._session))
     return Transaction(bus, members)
+
+
+def run_script(
+    bus, script_path: str, progress: Optional[Callable[[TransactionProgress, int], Optional[bool]]]
+) -> TransactionResult:
+    outcome = native.CanHubScriptOutcome()
+    outcome.struct_size = ctypes.sizeof(outcome)
+    interruption = []
+
+    def report(context, native_progress, total_steps):
+        if progress is None:
+            return 1
+        try:
+            keep_going = progress(from_native_progress(native_progress.contents), total_steps) is not False
+        except BaseException as error:
+            interruption.append(error)
+            return 0
+        return 1 if keep_going else 0
+
+    callback = native.ScriptProgress(report)
+    with bus._lock:
+        status = native.lib.canhub_txn_run_script(
+            bus._session, os.fsencode(script_path), ctypes.byref(outcome), callback, None
+        )
+        error = "" if status in (native.OK, native.ERR_TXN_ABORTED) else native.last_error(bus._session)
+    if interruption:
+        raise interruption[0]
+
+    roster = tuple(outcome.roster[: outcome.roster_count])
+    result = from_native_result(outcome.result, roster)
+    if status == native.OK:
+        return result
+    if status == native.ERR_TXN_ABORTED:
+        raise TransactionAborted(result)
+    if status == native.ERR_ARGUMENT:
+        raise ScriptError(error, outcome.error_line)
+    raise CanOperationError(error)
 
 
 def to_native_begin(roster, origin: Optional[Origin], exclusive: bool) -> "native.CanHubTxnBegin":
@@ -340,6 +389,10 @@ def to_native_step(step: Step) -> "native.CanHubTxnStep":
     native_step.length = len(data)
     native_step.payload[: len(data)] = data
     return native_step
+
+
+def from_native_progress(progress: "native.CanHubTxnProgress") -> TransactionProgress:
+    return TransactionProgress(progress.sent_steps, progress.completed_steps, progress.bytes_in_flight, progress.window_bytes)
 
 
 def from_native_result(report: "native.CanHubTxnResult", roster) -> TransactionResult:

@@ -105,19 +105,15 @@ static bool enterFor(ScriptGenerator *self, uint16_t index, ScriptError *error, 
         return true;
     }
 
-    self->depth++;
-    rebuildBindings(self);
     if (!loadChunk(self, frame, error)) {
-        self->depth--;
-        rebuildBindings(self);
         return false;
     }
     if (frame->chunk_size == 0) {
-        self->depth--;
-        rebuildBindings(self);
         return true;
     }
 
+    self->depth++;
+    rebuildBindings(self);
     *entered = true;
     return true;
 }
