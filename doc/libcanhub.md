@@ -113,8 +113,10 @@ backend does exactly that. Separate sessions are independent.
 
 `canhub_connect` returns NULL for every failure, so there is no session to
 ask. `canhub_last_error(NULL)` returns the reason for the last failed
-connect on the calling thread — bad url, unreadable identity, unreachable
-hub, handshake timeout.
+connect on the calling thread — bad url, unreadable identity, a hub host
+that does not resolve, unreachable hub, timeout. The hub host resolves on a
+short-lived thread of its own, so `connect_timeout_ms` also bounds a slow
+resolver.
 
 ## Example
 

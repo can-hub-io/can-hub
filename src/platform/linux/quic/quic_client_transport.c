@@ -14,6 +14,9 @@ static void portDisconnect(void *context);
 static bool portSendControl(void *context, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, uint8_t channel, const uint8_t *data, size_t size);
 static void portSetChannelMode(void *context, uint8_t channel, bool reliable);
+static bool resolveHost(QuicClientTransport *self);
+static void connectResolvedHost(QuicClientTransport *self);
+static bool openConnection(QuicClientTransport *self, const struct addrinfo *addresses);
 static void teardown(QuicClientTransport *self, bool notify);
 static bool flushEgress(QuicClientTransport *self);
 static bool deferFlush(QuicClientTransport *self);
@@ -76,8 +79,17 @@ TransportPort *QuicClientTransport_Port(QuicClientTransport *self)
     return &self->port;
 }
 
+const HostResolver *QuicClientTransport_Resolver(const QuicClientTransport *self)
+{
+    return &self->resolver;
+}
+
 int32_t QuicClientTransport_UdpFd(const QuicClientTransport *self)
 {
+    if (HostResolver_IsPending(&self->resolver)) {
+        return HostResolver_Fd(&self->resolver);
+    }
+
     return self->udp.udp_fd;
 }
 
@@ -92,6 +104,10 @@ void QuicClientTransport_OnUdpReadable(QuicClientTransport *self)
     ngtcp2_path path;
     ssize_t bytes_received;
 
+    if (HostResolver_IsPending(&self->resolver)) {
+        connectResolvedHost(self);
+        return;
+    }
     if (!QuicConnection_IsOpen(&self->connection)) {
         return;
     }
@@ -168,30 +184,12 @@ void QuicClientTransport_Uncork(QuicClientTransport *self)
 static bool portConnect(void *context)
 {
     QuicClientTransport *self = context;
-    ngtcp2_path path;
 
-    if (QuicConnection_IsOpen(&self->connection)) {
+    if (QuicConnection_IsOpen(&self->connection) || HostResolver_IsPending(&self->resolver)) {
         return true;
     }
-    if (!QuicUdpEndpoint_ConnectTo(&self->udp, self->server.host, self->server.port_text)) {
-        return false;
-    }
-    if (!QuicClientSecurity_Init(&self->security, self->server.host, QuicConnection_Ref(&self->connection), &self->security_config)) {
-        return false;
-    }
 
-    QuicUdpEndpoint_MakePath(&self->udp, &path);
-    if (!QuicConnection_Open(&self->connection, &self->security.tls_context, &path)) {
-        QuicClientSecurity_Free(&self->security);
-        return false;
-    }
-    if (!QuicClientSecurity_AttachConnection(&self->security, QuicConnection_Handle(&self->connection))) {
-        QuicConnection_Close(&self->connection);
-        QuicClientSecurity_Free(&self->security);
-        return false;
-    }
-
-    return flushEgress(self);
+    return resolveHost(self);
 }
 
 static void portDisconnect(void *context)
@@ -200,6 +198,7 @@ static void portDisconnect(void *context)
     uint8_t packet[UDP_PACKET_BUFFER_SIZE];
     ngtcp2_ssize written;
 
+    HostResolver_Release(&self->resolver);
     if (self->dispatching) {
         self->disconnect_pending = true;
         return;
@@ -273,6 +272,60 @@ static void portSetChannelMode(void *context, uint8_t channel, bool reliable)
 }
 
 /* ---------- private: lifecycle ---------- */
+
+static bool resolveHost(QuicClientTransport *self)
+{
+    struct addrinfo hints;
+
+    QuicUdpEndpoint_AddressHints(&self->udp, &hints);
+
+    return HostResolver_Start(&self->resolver, self->server.host, self->server.port_text, &hints);
+}
+
+static void connectResolvedHost(QuicClientTransport *self)
+{
+    const struct addrinfo *addresses;
+    bool opened;
+
+    if (!HostResolver_IsFinished(&self->resolver)) {
+        return;
+    }
+
+    addresses = HostResolver_Addresses(&self->resolver);
+    opened = openConnection(self, addresses);
+    HostResolver_Release(&self->resolver);
+    if (!opened) {
+        self->events.on_disconnected(self->events.context, Clock_MonotonicUs());
+        return;
+    }
+
+    flushEgress(self);
+}
+
+static bool openConnection(QuicClientTransport *self, const struct addrinfo *addresses)
+{
+    ngtcp2_path path;
+
+    if (!QuicUdpEndpoint_ConnectTo(&self->udp, addresses)) {
+        return false;
+    }
+    if (!QuicClientSecurity_Init(&self->security, self->server.host, QuicConnection_Ref(&self->connection), &self->security_config)) {
+        return false;
+    }
+
+    QuicUdpEndpoint_MakePath(&self->udp, &path);
+    if (!QuicConnection_Open(&self->connection, &self->security.tls_context, &path)) {
+        QuicClientSecurity_Free(&self->security);
+        return false;
+    }
+    if (!QuicClientSecurity_AttachConnection(&self->security, QuicConnection_Handle(&self->connection))) {
+        QuicConnection_Close(&self->connection);
+        QuicClientSecurity_Free(&self->security);
+        return false;
+    }
+
+    return true;
+}
 
 static void teardown(QuicClientTransport *self, bool notify)
 {

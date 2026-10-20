@@ -34,7 +34,7 @@
 #define NO_CONNECT_ERROR "no connect failure recorded"
 #define FRAME_RING_SIZE 512
 
-#define STREAM_SLOT 0
+#define HUB_SLOT 0
 #define TAG_STREAM 1
 #define TAG_QUIC_UDP 2
 #define TAG_QUIC_TIMER 3
@@ -77,9 +77,11 @@ static bool initTransport(CanHubSession *self, const char *host, const char *por
 static bool prepareSecurityMaterial(CanHubSession *self, const CanHubConnectConfig *config, const char *host, const char *port_text);
 static bool prepareIdentity(CanHubSession *self, const CanHubConnectConfig *config);
 static bool waitForConnection(CanHubSession *self, int32_t timeout_ms);
+static const char *connectTimeoutReason(const CanHubSession *self);
+static const HostResolver *hubResolver(const CanHubSession *self);
 static void pumpOnce(CanHubSession *self, int32_t timeout_ms);
 static void dispatchEvent(CanHubSession *self, const struct epoll_event *event);
-static void syncStreamSlot(CanHubSession *self);
+static void syncHubConnection(CanHubSession *self);
 static uint64_t deadlineFrom(int32_t timeout_ms);
 static int32_t remainingMs(uint64_t deadline_us);
 static int32_t openResultFromStatus(uint8_t status);
@@ -166,7 +168,7 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
         }
     }
     if (!initTransport(self, host, port_text, &transport_events)) {
-        setConnectError("could not resolve the host or create the socket");
+        setConnectError("could not create the socket");
         free(self);
         return NULL;
     }
@@ -179,7 +181,6 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
         return NULL;
     }
     if (self->scheme == kCONNECT_SCHEME_QUIC) {
-        EpollRegistry_AddStatic(&self->poll_registry, QuicClientTransport_UdpFd(&self->quic_transport), TAG_QUIC_UDP);
         EpollRegistry_AddStatic(&self->poll_registry, QuicClientTransport_TimerFd(&self->quic_transport), TAG_QUIC_TIMER);
     }
 
@@ -559,12 +560,16 @@ static bool waitForConnection(CanHubSession *self, int32_t timeout_ms)
 
     while (Client_State(&self->client) == kCLIENT_DISCONNECTED && !self->disconnected) {
         if (timeout_ms >= 0 && remainingMs(deadline) == 0) {
-            setConnectError("the handshake timed out");
+            setConnectError(connectTimeoutReason(self));
             return false;
         }
         pumpOnce(self, remainingMs(deadline));
     }
 
+    if (self->disconnected && HostResolver_HostUnresolved(hubResolver(self))) {
+        setConnectError("could not resolve the hub host");
+        return false;
+    }
     if (self->disconnected) {
         setConnectError("the hub refused or closed the connection");
         return false;
@@ -573,13 +578,34 @@ static bool waitForConnection(CanHubSession *self, int32_t timeout_ms)
     return true;
 }
 
+static const char *connectTimeoutReason(const CanHubSession *self)
+{
+    if (HostResolver_IsPending(hubResolver(self))) {
+        return "timed out resolving the hub host";
+    }
+
+    return "the handshake timed out";
+}
+
+static const HostResolver *hubResolver(const CanHubSession *self)
+{
+    if (self->scheme == kCONNECT_SCHEME_QUIC) {
+        return QuicClientTransport_Resolver(&self->quic_transport);
+    }
+    if (self->scheme == kCONNECT_SCHEME_TLS) {
+        return TlsClientTransport_Resolver(&self->tls_transport);
+    }
+
+    return TcpClientTransport_Resolver(&self->tcp_transport);
+}
+
 static void pumpOnce(CanHubSession *self, int32_t timeout_ms)
 {
     struct epoll_event events[MAX_EPOLL_EVENTS];
     int32_t event_count;
     int32_t i;
 
-    syncStreamSlot(self);
+    syncHubConnection(self);
     event_count = EpollRegistry_Wait(&self->poll_registry, events, MAX_EPOLL_EVENTS, timeout_ms);
     for(i=0; i<event_count; i++) {
         dispatchEvent(self, &events[i]);
@@ -621,12 +647,14 @@ static void dispatchEvent(CanHubSession *self, const struct epoll_event *event)
     }
 }
 
-static void syncStreamSlot(CanHubSession *self)
+static void syncHubConnection(CanHubSession *self)
 {
     int32_t current_fd;
     uint32_t wanted_mask = EPOLLIN;
 
     if (self->scheme == kCONNECT_SCHEME_QUIC) {
+        current_fd = QuicClientTransport_UdpFd(&self->quic_transport);
+        EpollRegistry_SyncSlot(&self->poll_registry, HUB_SLOT, current_fd, wanted_mask, TAG_QUIC_UDP);
         return;
     }
     if (self->scheme == kCONNECT_SCHEME_TLS) {
@@ -640,7 +668,7 @@ static void syncStreamSlot(CanHubSession *self)
             wanted_mask |= EPOLLOUT;
         }
     }
-    EpollRegistry_SyncSlot(&self->poll_registry, STREAM_SLOT, current_fd, wanted_mask, TAG_STREAM);
+    EpollRegistry_SyncSlot(&self->poll_registry, HUB_SLOT, current_fd, wanted_mask, TAG_STREAM);
 }
 
 static uint64_t deadlineFrom(int32_t timeout_ms)

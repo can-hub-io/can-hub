@@ -268,6 +268,14 @@ class BenchKeywords:
     def drop_udp_from_source_port(self, port, server):
         server.exec("iptables", "-A", "INPUT", "-p", "udp", "--sport", str(port), "-j", "DROP")
 
+    @keyword("Silence DNS On ${server}")
+    def silence_dns_on(self, server):
+        server.silence_dns()
+
+    @keyword("Restore DNS On ${server}")
+    def restore_dns_on(self, server):
+        server.restore_dns()
+
     @keyword("Open ${count} Silent TCP Connections From ${server} To ${host} Port ${port}")
     def open_silent_connections(self, count, server, host, port, timeout=15):
         return SilentConnections.open(server, host, int(port), int(count), float(timeout))

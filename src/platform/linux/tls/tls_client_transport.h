@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "platform/linux/shared/host_resolver.h"
 #include "platform/linux/tls/tls_channel.h"
 #include "platform/linux/tls/tls_client_security.h"
 #include "agent/ports/transport_events.h"
@@ -19,7 +20,8 @@
  * TOFU pin of the hub is enforced (handshake fails on mismatch). The
  * connection fd is created per connect — the platform loop must re-register
  * it after each reconnect and watch EPOLLOUT while the channel wants to
- * write.
+ * write. While the host name resolves, Fd() is the resolver's and readable
+ * once the addresses are in.
  */
 typedef struct {
     TransportPort port;
@@ -28,6 +30,7 @@ typedef struct {
     char host[TLS_CLIENT_HOST_MAX];
     char port_text[TLS_CLIENT_PORT_TEXT_MAX];
     TlsChannel channel;
+    HostResolver resolver;
     int32_t fd;
     bool connecting;
     bool announced;
@@ -41,6 +44,7 @@ bool TlsClientTransport_Init(
     const TlsClientSecurityConfig *security_config
 );
 TransportPort *TlsClientTransport_Port(TlsClientTransport *self);
+const HostResolver *TlsClientTransport_Resolver(const TlsClientTransport *self);
 int32_t TlsClientTransport_Fd(const TlsClientTransport *self);
 bool TlsClientTransport_WantsWritable(const TlsClientTransport *self);
 void TlsClientTransport_OnReadable(TlsClientTransport *self);

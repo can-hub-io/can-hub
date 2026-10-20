@@ -40,25 +40,23 @@ bool QuicUdpEndpoint_ReopenSocket(QuicUdpEndpoint *self)
     return self->udp_fd >= 0;
 }
 
-bool QuicUdpEndpoint_ConnectTo(QuicUdpEndpoint *self, const char *host, const char *port)
+void QuicUdpEndpoint_AddressHints(const QuicUdpEndpoint *self, struct addrinfo *hints)
 {
-    struct addrinfo hints;
-    struct addrinfo *resolved;
-    struct addrinfo *candidate;
+    memset(hints, 0, sizeof(*hints));
+    hints->ai_family = self->address_family;
+    hints->ai_socktype = SOCK_DGRAM;
+    if (self->address_family == AF_INET6) {
+        hints->ai_flags = AI_V4MAPPED | AI_ALL;
+    }
+}
+
+bool QuicUdpEndpoint_ConnectTo(QuicUdpEndpoint *self, const struct addrinfo *addresses)
+{
+    const struct addrinfo *candidate;
     bool connected;
 
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = self->address_family;
-    hints.ai_socktype = SOCK_DGRAM;
-    if (self->address_family == AF_INET6) {
-        hints.ai_flags = AI_V4MAPPED | AI_ALL;
-    }
-    if (getaddrinfo(host, port, &hints, &resolved) != 0) {
-        return false;
-    }
-
     connected = false;
-    for(candidate=resolved; candidate!=NULL; candidate=candidate->ai_next) {
+    for(candidate=addresses; candidate!=NULL; candidate=candidate->ai_next) {
         if (connect(self->udp_fd, candidate->ai_addr, candidate->ai_addrlen) < 0) {
             continue;
         }
@@ -67,7 +65,6 @@ bool QuicUdpEndpoint_ConnectTo(QuicUdpEndpoint *self, const char *host, const ch
         connected = true;
         break;
     }
-    freeaddrinfo(resolved);
     if (!connected) {
         return false;
     }

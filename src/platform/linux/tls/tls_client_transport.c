@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 
 #include "platform/linux/clock/clock.h"
+#include "platform/linux/shared/host_resolver.h"
 #include "platform/linux/shared/log.h"
 #include "platform/linux/shared/tcp_keepalive.h"
 #include "protocol/message_header.h"
@@ -22,7 +23,10 @@ static void portDisconnect(void *context);
 static bool portSendControl(void *context, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, uint8_t channel, const uint8_t *data, size_t size);
 static void portSetChannelMode(void *context, uint8_t channel, bool reliable);
-static bool connectTcp(TlsClientTransport *self, int32_t *connected_fd);
+static bool resolveHost(TlsClientTransport *self);
+static void connectResolvedHost(TlsClientTransport *self);
+static int32_t connectFirstAddress(const struct addrinfo *addresses);
+static bool startHandshake(TlsClientTransport *self, int32_t connected_fd);
 static void pumpHandshake(TlsClientTransport *self);
 static void announceWhenEstablished(TlsClientTransport *self);
 static bool pumpCiphertextOut(TlsClientTransport *self);
@@ -65,8 +69,17 @@ TransportPort *TlsClientTransport_Port(TlsClientTransport *self)
     return &self->port;
 }
 
+const HostResolver *TlsClientTransport_Resolver(const TlsClientTransport *self)
+{
+    return &self->resolver;
+}
+
 int32_t TlsClientTransport_Fd(const TlsClientTransport *self)
 {
+    if (HostResolver_IsPending(&self->resolver)) {
+        return HostResolver_Fd(&self->resolver);
+    }
+
     return self->fd;
 }
 
@@ -81,6 +94,10 @@ bool TlsClientTransport_WantsWritable(const TlsClientTransport *self)
 
 void TlsClientTransport_OnReadable(TlsClientTransport *self)
 {
+    if (HostResolver_IsPending(&self->resolver)) {
+        connectResolvedHost(self);
+        return;
+    }
     if (!TlsChannel_IsBound(&self->channel)) {
         return;
     }
@@ -132,33 +149,19 @@ void TlsClientTransport_OnWritable(TlsClientTransport *self)
 static bool portConnect(void *context)
 {
     TlsClientTransport *self = context;
-    ptls_t *tls;
-    int32_t connected_fd;
 
-    if (TlsChannel_IsBound(&self->channel)) {
+    if (TlsChannel_IsBound(&self->channel) || HostResolver_IsPending(&self->resolver)) {
         return true;
     }
 
-    if (!connectTcp(self, &connected_fd)) {
-        return false;
-    }
-    if (!TlsClientSecurity_NewSession(&self->security, self->host, &tls)) {
-        close(connected_fd);
-        return false;
-    }
-
-    TlsChannel_Bind(&self->channel, tls, TlsClientSecurity_HandshakeProperties(&self->security));
-    self->fd = connected_fd;
-    self->connecting = true;
-    self->announced = false;
-
-    return true;
+    return resolveHost(self);
 }
 
 static void portDisconnect(void *context)
 {
     TlsClientTransport *self = context;
 
+    HostResolver_Release(&self->resolver);
     closeConnection(self, false);
 }
 
@@ -205,24 +208,42 @@ static void portSetChannelMode(void *context, uint8_t channel, bool reliable)
 
 /* ---------- private ---------- */
 
-static bool connectTcp(TlsClientTransport *self, int32_t *connected_fd)
+static bool resolveHost(TlsClientTransport *self)
 {
     struct addrinfo hints;
-    struct addrinfo *resolved;
-    struct addrinfo *candidate;
-    int32_t tcp_fd;
-    int32_t connect_result;
-    int32_t nodelay = 1;
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(self->host, self->port_text, &hints, &resolved) != 0) {
-        return false;
+
+    return HostResolver_Start(&self->resolver, self->host, self->port_text, &hints);
+}
+
+static void connectResolvedHost(TlsClientTransport *self)
+{
+    const struct addrinfo *addresses;
+    int32_t tcp_fd;
+
+    if (!HostResolver_IsFinished(&self->resolver)) {
+        return;
     }
 
-    tcp_fd = -1;
-    for(candidate=resolved; candidate!=NULL; candidate=candidate->ai_next) {
+    addresses = HostResolver_Addresses(&self->resolver);
+    tcp_fd = connectFirstAddress(addresses);
+    HostResolver_Release(&self->resolver);
+    if (tcp_fd < 0 || !startHandshake(self, tcp_fd)) {
+        self->events.on_disconnected(self->events.context, Clock_MonotonicUs());
+    }
+}
+
+static int32_t connectFirstAddress(const struct addrinfo *addresses)
+{
+    const struct addrinfo *candidate;
+    int32_t tcp_fd;
+    int32_t connect_result;
+    int32_t nodelay = 1;
+
+    for(candidate=addresses; candidate!=NULL; candidate=candidate->ai_next) {
         tcp_fd = socket(candidate->ai_family, candidate->ai_socktype | SOCK_NONBLOCK, 0);
         if (tcp_fd < 0) {
             continue;
@@ -231,17 +252,27 @@ static bool connectTcp(TlsClientTransport *self, int32_t *connected_fd)
         TcpKeepalive_Enable(tcp_fd);
         connect_result = connect(tcp_fd, candidate->ai_addr, candidate->ai_addrlen);
         if (connect_result == 0 || errno == EINPROGRESS) {
-            break;
+            return tcp_fd;
         }
         close(tcp_fd);
-        tcp_fd = -1;
     }
-    freeaddrinfo(resolved);
-    if (tcp_fd < 0) {
+
+    return TLS_CHANNEL_NO_SOCKET;
+}
+
+static bool startHandshake(TlsClientTransport *self, int32_t connected_fd)
+{
+    ptls_t *tls;
+
+    if (!TlsClientSecurity_NewSession(&self->security, self->host, &tls)) {
+        close(connected_fd);
         return false;
     }
 
-    *connected_fd = tcp_fd;
+    TlsChannel_Bind(&self->channel, tls, TlsClientSecurity_HandshakeProperties(&self->security));
+    self->fd = connected_fd;
+    self->connecting = true;
+    self->announced = false;
 
     return true;
 }

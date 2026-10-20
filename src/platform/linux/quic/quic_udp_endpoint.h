@@ -6,6 +6,7 @@
 
 #include <ngtcp2/ngtcp2.h>
 
+#include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 
@@ -29,7 +30,8 @@ typedef struct {
 
 bool QuicUdpEndpoint_Open(QuicUdpEndpoint *self);
 bool QuicUdpEndpoint_ReopenSocket(QuicUdpEndpoint *self);
-bool QuicUdpEndpoint_ConnectTo(QuicUdpEndpoint *self, const char *host, const char *port);
+void QuicUdpEndpoint_AddressHints(const QuicUdpEndpoint *self, struct addrinfo *hints);
+bool QuicUdpEndpoint_ConnectTo(QuicUdpEndpoint *self, const struct addrinfo *addresses);
 ssize_t QuicUdpEndpoint_Send(QuicUdpEndpoint *self, const uint8_t *data, size_t size);
 void QuicUdpEndpoint_SendSegmented(QuicUdpEndpoint *self, const uint8_t *data, size_t size, size_t segment_size);
 ssize_t QuicUdpEndpoint_Receive(QuicUdpEndpoint *self, uint8_t *buffer, size_t buffer_size);

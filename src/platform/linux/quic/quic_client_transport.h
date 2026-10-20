@@ -10,6 +10,7 @@
 #include "platform/linux/quic/quic_datagram_backlog.h"
 #include "platform/linux/quic/quic_reliable_streams.h"
 #include "platform/linux/quic/quic_udp_endpoint.h"
+#include "platform/linux/shared/host_resolver.h"
 #include "agent/ports/transport_events.h"
 #include "agent/ports/transport_port.h"
 
@@ -22,6 +23,8 @@
  * Control plane on one bidirectional stream (QuicControlChannel), data plane
  * on QUIC datagrams. The platform loop polls UdpFd/TimerFd and calls
  * OnUdpReadable/OnTimer; transport events are pushed via QuicTransportEvents.
+ * While the host name resolves, UdpFd() is the resolver's and readable once
+ * the addresses are in, so the loop must re-register it on every iteration.
  */
 
 typedef struct {
@@ -34,6 +37,7 @@ typedef struct {
     TransportEvents events;
     QuicServerEndpoint server;
     QuicUdpEndpoint udp;
+    HostResolver resolver;
     QuicClientSecurity security;
     QuicClientSecurityConfig security_config;
     QuicControlChannel control;
@@ -56,6 +60,7 @@ bool QuicClientTransport_Init(
     const QuicClientSecurityConfig *security_config
 );
 TransportPort *QuicClientTransport_Port(QuicClientTransport *self);
+const HostResolver *QuicClientTransport_Resolver(const QuicClientTransport *self);
 int32_t QuicClientTransport_UdpFd(const QuicClientTransport *self);
 int32_t QuicClientTransport_TimerFd(const QuicClientTransport *self);
 void QuicClientTransport_OnUdpReadable(QuicClientTransport *self);

@@ -8,6 +8,8 @@ endif()
 
 set(CEST_DIR ${CMAKE_SOURCE_DIR}/vendor)
 
+find_package(Threads REQUIRED)
+
 # add_unit_test(<name> SOURCES <test.cpp> [real_src.c ...])
 #
 # Registers a cest executable. Includes: cest + src/.
@@ -189,6 +191,14 @@ add_unit_test(test_tcp_keepalive
         platform/test_tcp_keepalive.cpp
         ${ROOT_SRC_DIR}/platform/linux/shared/tcp_keepalive.c
 )
+
+add_unit_test(test_host_resolver
+    SOURCES
+        platform/test_host_resolver.cpp
+        ${ROOT_SRC_DIR}/platform/linux/shared/host_resolver.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/log.c
+)
+target_link_libraries(test_host_resolver PRIVATE Threads::Threads)
 
 add_unit_test(test_quic_datagram_backlog
     SOURCES

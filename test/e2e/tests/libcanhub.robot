@@ -1,7 +1,8 @@
 *** Settings ***
 Documentation     libcanhub C ABI driven through the canhub-dump example:
 ...               list, blocking recv from the bus, send onto the bus, and
-...               the connect failures reported through canhub_last_error(NULL).
+...               the connect failures reported through canhub_last_error(NULL),
+...               a silent resolver included: it never outlasts the connect timeout.
 Library           BenchKeywords
 Variables         bench_variables.py
 Suite Setup       Start Bus Hub And Agent
@@ -44,6 +45,20 @@ Library Explains A Failed Connection
 
     Should Not Be True    ${result.ok}
     Should Contain    ${result.stderr}    the hub refused or closed the connection
+
+Library Explains A Hub Host That Does Not Resolve
+    ${result}=    Run Binary canhub-dump On ${LOCAL_SERVER}    tcp://hub.invalid:7228    list
+
+    Should Not Be True    ${result.ok}
+    Should Contain    ${result.stderr}    could not resolve the hub host
+
+Library Gives Up On A Silent Resolver Within Its Connect Timeout
+    [Setup]    Silence DNS On ${LAN_SERVER}
+    [Teardown]    Restore DNS On ${LAN_SERVER}
+    ${result}=    Run Binary canhub-dump On ${LAN_SERVER}    tcp://hub.unanswered:7228    list
+
+    Should Not Be True    ${result.ok}
+    Should Contain    ${result.stderr}    timed out resolving the hub host
 
 Library Explains A Malformed Url
     ${result}=    Run Binary canhub-dump On ${LOCAL_SERVER}    not-a-url    list
