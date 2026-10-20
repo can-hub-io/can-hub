@@ -1,5 +1,6 @@
 #include <cest>
 #include <cstring>
+#include <initializer_list>
 
 extern "C" {
 #include "agent/domain/transaction_runner.h"
@@ -38,6 +39,14 @@ extern "C" {
 #define BATCH_FRAMES 16
 #define NODES 32
 #define BATCH_CRC 0xC0DE
+#define ISOTP_TEMPLATE 4
+#define GENERIC_TEMPLATE 5
+#define FIRST_BYTE_MASK 0xFF
+#define MESSAGE_POSITIVE 0x76
+#define MESSAGE_NEGATIVE 0x7F
+#define MESSAGE_PENDING_MASK 0xFF00FF
+#define MESSAGE_PENDING 0x78007F
+#define HALF_MESSAGE 10
 
 static TransactionRunner runner;
 static uint8_t ring_storage[RING_CAPACITY];
@@ -56,15 +65,19 @@ static TxnBeginAckMessage beginWithNodeRoster(uint64_t now_us);
 static TxnTemplateMessage responseTemplate(void);
 static TxnTemplateMessage transmitOnlyTemplate(uint8_t template_id, uint32_t gap_us);
 static TxnTemplateMessage batchAckTemplate(void);
+static TxnTemplateMessage isotpTemplate(void);
+static TxnBeginAckMessage beginWithIsotp(uint64_t now_us);
 static void defineTemplate(const TxnTemplateMessage *template_message);
 static TxnStep requestStep(uint8_t service);
 static TxnStep transmitOnlyStep(uint8_t template_id, uint32_t can_id);
 static TxnStep expectOnlyStep(uint8_t template_id);
+static TxnStep messageRecord(uint8_t template_id, uint8_t flags, uint8_t length);
 static void pushSteps(const TxnStep *steps, uint8_t step_count, uint32_t first_seq);
 static void pushStepsOfTransaction(uint16_t other_txn_id, const TxnStep *steps, uint8_t step_count, uint32_t first_seq);
 static void answer(uint32_t can_id, uint8_t byte0, uint8_t byte1, uint8_t byte2, uint8_t byte3);
 static void answerFromNode(uint8_t node, uint16_t crc);
 static void answerEcho(uint32_t can_id);
+static void answerBytes(std::initializer_list<uint8_t> bytes);
 static bool transmitFrame(void *context, uint8_t interface_index, const FrameMessage *frame);
 static void recordProgress(void *context, const TxnProgressMessage *progress);
 static void recordStatus(void *context, const TxnStatusMessage *status);
@@ -401,6 +414,137 @@ describe("transaction_runner", []() {
         });
     });
 
+    describe("iso-tp steps", []() {
+        beforeEach([]() {
+            TxnTemplateMessage template_message;
+
+            resetRunner(RING_CAPACITY);
+            beginWithIsotp(0);
+            template_message = isotpTemplate();
+            defineTemplate(&template_message);
+        });
+
+        it("sends a message gathered from its records as one ISO-TP transfer", []() {
+            TxnStep records[2];
+
+            records[0] = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_CONTINUED, HALF_MESSAGE);
+            records[1] = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE, HALF_MESSAGE);
+            pushSteps(records, 2, 0);
+
+            TransactionRunner_Tick(&runner, 100);
+            answerBytes({ 0x30, 0x00, 0x00 });
+            TransactionRunner_Tick(&runner, 200);
+
+            expect(transmit_count).toBe((uint32_t)3);
+            expect(transmitted[0].can_id).toBe((uint32_t)REQUEST_ID);
+            expect(transmitted[0].payload[0]).toBe(0x10);
+            expect(transmitted[0].payload[1]).toBe(2 * HALF_MESSAGE);
+            expect(transmitted[2].payload[0]).toBe(0x22);
+        });
+
+        it("times the answer from the end of the transfer", []() {
+            TxnStep records[2];
+
+            records[0] = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_CONTINUED, HALF_MESSAGE);
+            records[1] = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_LAST, HALF_MESSAGE);
+            pushSteps(records, 2, 0);
+
+            TransactionRunner_Tick(&runner, 100);
+            answerBytes({ 0x30, 0x00, 0x00 });
+            TransactionRunner_Tick(&runner, 40100);
+            TransactionRunner_Tick(&runner, 80100);
+            answerBytes({ 0x02, MESSAGE_POSITIVE, 0x01 });
+            TransactionRunner_Tick(&runner, 80200);
+
+            expect(last_status.state).toBe((uint8_t)kTXN_STATE_DONE);
+            expect(last_status.completed_steps).toBe((uint32_t)1);
+        });
+
+        it("keeps waiting after a response pending message", []() {
+            TxnStep request;
+            bool active_after_first_timeout;
+
+            request = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_LAST, 3);
+            pushSteps(&request, 1, 0);
+
+            TransactionRunner_Tick(&runner, 100);
+            answerBytes({ 0x03, MESSAGE_NEGATIVE, 0x36, 0x78 });
+            TransactionRunner_Tick(&runner, 40100);
+            TransactionRunner_Tick(&runner, 60100);
+            active_after_first_timeout = TransactionRunner_IsActive(&runner);
+            answerBytes({ 0x02, MESSAGE_POSITIVE, 0x01 });
+            TransactionRunner_Tick(&runner, 60200);
+
+            expect(active_after_first_timeout).toBe(true);
+            expect(last_status.state).toBe((uint8_t)kTXN_STATE_DONE);
+        });
+
+        it("reassembles a multi-frame answer, answering it with flow control", []() {
+            TxnStep request;
+
+            request = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_LAST, 3);
+            pushSteps(&request, 1, 0);
+
+            TransactionRunner_Tick(&runner, 100);
+            answerBytes({ 0x10, 0x0A, MESSAGE_POSITIVE, 0x01, 0x02, 0x03, 0x04, 0x05 });
+            TransactionRunner_Tick(&runner, 200);
+            answerBytes({ 0x21, 0x06, 0x07, 0x08, 0x09 });
+            TransactionRunner_Tick(&runner, 300);
+
+            expect(transmit_count).toBe((uint32_t)2);
+            expect(transmitted[1].can_id).toBe((uint32_t)REQUEST_ID);
+            expect(transmitted[1].payload[0]).toBe(0x30);
+            expect(last_status.state).toBe((uint8_t)kTXN_STATE_DONE);
+        });
+
+        it("aborts with the ISO-TP reason when the flow control never comes", []() {
+            TxnStep records[2];
+
+            records[0] = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_CONTINUED, HALF_MESSAGE);
+            records[1] = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE, HALF_MESSAGE);
+            pushSteps(records, 2, 0);
+
+            TransactionRunner_Tick(&runner, 100);
+            TransactionRunner_Tick(&runner, 100 + ISOTP_TIMEOUT_US);
+
+            expect(last_status.state).toBe((uint8_t)kTXN_STATE_ABORTED);
+            expect(last_status.reason).toBe((uint8_t)kTXN_REASON_FLOW_CONTROL_TIMEOUT);
+        });
+
+        it("counts a message spread over records as one step", []() {
+            TxnStep first_message[2];
+            TxnStep second_message;
+
+            first_message[0] = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_CONTINUED, 2);
+            first_message[1] = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE, 1);
+            second_message = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_LAST, 3);
+            pushSteps(first_message, 2, 0);
+            pushSteps(&second_message, 1, 1);
+
+            TransactionRunner_Tick(&runner, 100);
+            answerBytes({ 0x02, MESSAGE_POSITIVE, 0x01 });
+            TransactionRunner_Tick(&runner, 200);
+            answerBytes({ 0x02, MESSAGE_POSITIVE, 0x02 });
+            TransactionRunner_Tick(&runner, 300);
+
+            expect(last_status.state).toBe((uint8_t)kTXN_STATE_DONE);
+            expect(last_status.completed_steps).toBe((uint32_t)2);
+        });
+
+        it("aborts on a message record naming a template that sends frames", []() {
+            TxnTemplateMessage generic;
+            TxnStep record;
+
+            generic = transmitOnlyTemplate(GENERIC_TEMPLATE, 0);
+            defineTemplate(&generic);
+            record = messageRecord(GENERIC_TEMPLATE, TXN_STEP_FLAG_MESSAGE, 3);
+
+            pushSteps(&record, 1, 0);
+
+            expect(last_status.reason).toBe((uint8_t)kTXN_REASON_INVALID_STEP);
+        });
+    });
+
     describe("transmit", []() {
         beforeEach([]() {
             resetRunner(RING_CAPACITY);
@@ -697,6 +841,38 @@ static TxnTemplateMessage batchAckTemplate(void)
     return template_message;
 }
 
+static TxnTemplateMessage isotpTemplate(void)
+{
+    TxnTemplateMessage template_message = { 0 };
+
+    template_message.channel = CHANNEL;
+    template_message.template_id = ISOTP_TEMPLATE;
+    template_message.txn_id = txn_id;
+    template_message.type = kTXN_TEMPLATE_TYPE_ISOTP;
+    template_message.advance_mode = kTXN_ADVANCE_MODE_COUNT;
+    template_message.count_k = 1;
+    template_message.patterns_present = (1u << kTXN_PATTERN_ADVANCE) | (1u << kTXN_PATTERN_ABORT) | (1u << kTXN_PATTERN_EXTEND);
+    template_message.timeout_ms = TIMEOUT_MS;
+    template_message.patterns[kTXN_PATTERN_ADVANCE] = { RESPONSE_ID, ID_MASK, FIRST_BYTE_MASK, MESSAGE_POSITIVE };
+    template_message.patterns[kTXN_PATTERN_ABORT] = { RESPONSE_ID, ID_MASK, FIRST_BYTE_MASK, MESSAGE_NEGATIVE };
+    template_message.patterns[kTXN_PATTERN_EXTEND] = { RESPONSE_ID, ID_MASK, MESSAGE_PENDING_MASK, MESSAGE_PENDING };
+    template_message.isotp.response_id = RESPONSE_ID;
+    template_message.isotp.tx_data_length = FRAME_PAYLOAD_MAX_CLASSIC;
+    return template_message;
+}
+
+static TxnBeginAckMessage beginWithIsotp(uint64_t now_us)
+{
+    TxnBeginMessage begin = { 0 };
+    TxnBeginAckMessage ack;
+
+    begin.channel = CHANNEL;
+    begin.flags = TXN_BEGIN_FLAG_ISOTP;
+    TransactionRunner_Begin(&runner, &begin, INTERFACE_INDEX, now_us, &ack);
+    txn_id = ack.txn_id;
+    return ack;
+}
+
 static void defineTemplate(const TxnTemplateMessage *template_message)
 {
     TransactionRunner_DefineTemplate(&runner, template_message);
@@ -730,6 +906,21 @@ static TxnStep expectOnlyStep(uint8_t template_id)
 
     step.template_id = template_id;
     step.flags = TXN_STEP_FLAG_EXPECT_ONLY;
+    return step;
+}
+
+static TxnStep messageRecord(uint8_t template_id, uint8_t flags, uint8_t length)
+{
+    TxnStep step = { 0 };
+    uint8_t i;
+
+    step.template_id = template_id;
+    step.flags = flags;
+    step.can_id = REQUEST_ID;
+    step.payload_length = length;
+    for(i=0; i<length; i++) {
+        step.payload[i] = (uint8_t)(0x36 + i);
+    }
     return step;
 }
 
@@ -782,6 +973,16 @@ static void answerEcho(uint32_t can_id)
     frame.payload_length = 2;
     frame.payload[1] = 0x76;
     frame.route_flags = FRAME_ROUTE_FLAG_ECHO;
+    TransactionRunner_OnFrame(&runner, INTERFACE_INDEX, &frame);
+}
+
+static void answerBytes(std::initializer_list<uint8_t> bytes)
+{
+    FrameMessage frame = { 0 };
+
+    frame.can_id = RESPONSE_ID;
+    frame.payload_length = (uint8_t)bytes.size();
+    memcpy(frame.payload, bytes.begin(), bytes.size());
     TransactionRunner_OnFrame(&runner, INTERFACE_INDEX, &frame);
 }
 

@@ -915,7 +915,8 @@ Then:
   timeout and the agent keeps listening;
 - `timeout_ms` runs from the moment the last frame of the request is sent (the
   UDS P2 time), and `gap_us` from then too. An expect-only step waits for a
-  message without sending one;
+  message without sending one; its `can_id` is still the request id, where
+  the flow control for a multi-frame answer goes;
 - the frames themselves travel the normal paths: subscribers see the segments
   and the flow control on the bus as they see any traffic;
 - `isotp_flags` bit 0 (padding): every frame the agent sends is filled to its
@@ -943,10 +944,12 @@ the next ones: every record but the last of the step carries the **continued**
 flag (bit 4), and names the same `template_id` and `can_id`; only the last one
 may carry the expect value or the last-step flag. A continued record is not a
 step: sequence numbers count steps, so a batch may start or end inside one, and
-`first_seq` is the sequence number of the step its first record belongs to. A
-message record naming a generic template, a frame record naming an ISO-TP one, a
-message over 4095 bytes or a step whose records do not fit in the window abort
-the transaction (reason invalid step).
+`first_seq` is the sequence number of the step its first record belongs to. The
+agent copies each record of a message out of the ring as the step reaches it and
+releases its bytes at once, so a message never has to fit in the window whole. A
+message record naming a generic template, a frame record naming an ISO-TP one or
+a message over 4095 bytes abort the transaction (reason invalid step). The
+advance modes of an ISO-TP template are none and count.
 
 **Roster.** TXN_BEGIN carries up to 64 expected origins and how to extract a
 frame's origin: from the CAN id (X = id bits 0-28) or from the payload (X = the
@@ -1055,7 +1058,8 @@ TXN_STEPS (total 16 + records, records at most 400 bytes)
        +2  payload_length u8 (0-8 classic, 0-64 FD; 0 for expect-only;
                               1-255 for a message record)
        +3  frame_flags u8 (as FRAME)
-       +4  can_id u32 (as FRAME; 0 for expect-only)
+       +4  can_id u32 (as FRAME; 0 for expect-only, except for ISO-TP: the
+                       request id)
        +8  payload, zero-padded to a multiple of 8 bytes
        then expect_value u64, if flag bit 0
 

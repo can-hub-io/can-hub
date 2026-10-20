@@ -191,6 +191,7 @@ set(AGENT_SOURCES
     src/agent/domain/echo_correlator.c
     src/agent/domain/step_ring.c
     src/agent/domain/transaction_runner.c
+    src/agent/domain/isotp_link.c
     src/shared/reconnect_backoff.c
     src/agent/domain/tx_pacer.c
     src/platform/linux/clock/clock.c

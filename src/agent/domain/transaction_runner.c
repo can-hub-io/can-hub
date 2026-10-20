@@ -11,19 +11,31 @@
 
 static bool isBeginValid(const TxnBeginMessage *begin);
 static bool isTemplateValid(const TransactionRunner *self, const TxnTemplateMessage *template_message);
+static bool isTypeValid(const TxnTemplateMessage *template_message);
+static bool fitsTemplate(const TxnStep *step, const TxnTemplateMessage *template_message);
 static bool isWaitingMode(uint8_t advance_mode);
 static bool isTemplateDefined(const TransactionRunner *self, uint8_t template_id);
 static bool isPatternPresent(const TxnTemplateMessage *template_message, uint8_t pattern);
-static bool pushRecord(TransactionRunner *self, const uint8_t *record, size_t available, uint32_t seq, size_t *record_size);
+static bool pushRecord(TransactionRunner *self, const TxnStep *step, const uint8_t *record, size_t record_size, uint32_t seq);
 static bool runOnce(TransactionRunner *self, uint64_t now_us);
 static bool loadNextStep(TransactionRunner *self, uint64_t now_us);
 static bool transmitStep(TransactionRunner *self, uint64_t now_us);
+static bool transmitMessage(TransactionRunner *self, uint64_t now_us);
+static bool finishTransmit(TransactionRunner *self, uint64_t now_us);
+static bool gatherMessage(TransactionRunner *self);
+static bool tickIsotp(TransactionRunner *self, uint64_t now_us);
+static void feedIsotp(TransactionRunner *self, const FrameMessage *frame);
+static bool isIsotpStep(const TransactionRunner *self);
+static bool transmitIsotpFrame(void *context, const FrameMessage *frame);
+static void releaseRecord(TransactionRunner *self);
 static bool settleWait(TransactionRunner *self, uint64_t now_us);
 static void startWait(TransactionRunner *self, uint64_t now_us);
 static void completeStep(TransactionRunner *self);
 static void flushProgress(TransactionRunner *self, uint64_t now_us);
 static void reportProgress(TransactionRunner *self);
-static bool isListening(const TransactionRunner *self, uint8_t interface_index, const FrameMessage *frame);
+static bool isOnBus(const TransactionRunner *self, uint8_t interface_index, const FrameMessage *frame);
+static bool isWaiting(const TransactionRunner *self);
+static void matchFrame(TransactionRunner *self, const FrameMessage *frame);
 static void recordAnswer(TransactionRunner *self, const FrameMessage *frame);
 static void recordRosterAnswer(TransactionRunner *self, const FrameMessage *frame);
 static bool findRosterIndex(const TransactionRunner *self, uint32_t origin, uint8_t *roster_index);
@@ -61,8 +73,11 @@ static uint64_t transmitReadyUs(const TransactionRunner *self);
 
 void TransactionRunner_Init(TransactionRunner *self, TransactionRunnerPort port, uint8_t *ring_storage, uint32_t ring_capacity)
 {
+    IsotpLinkPort isotp_port = { self, transmitIsotpFrame };
+
     memset(self, 0, sizeof(*self));
     self->port = port;
+    IsotpLink_Init(&self->isotp, isotp_port);
     StepRing_Init(&self->ring, ring_storage, ring_capacity);
     self->window_bytes = ring_capacity - TXN_STEP_RECORD_SIZE_MAX;
 }
@@ -81,10 +96,6 @@ void TransactionRunner_Begin(
 
     if (self->active) {
         ack->status = kTXN_BEGIN_STATUS_BUSY;
-        return;
-    }
-    if (begin->flags & TXN_BEGIN_FLAG_ISOTP) {
-        ack->status = kTXN_BEGIN_STATUS_UNSUPPORTED;
         return;
     }
     if (!isBeginValid(begin)) {
@@ -112,6 +123,7 @@ void TransactionRunner_Begin(
     self->starve_deadline_us = now_us + TRANSACTION_STARVATION_TIMEOUT_US;
     self->next_transmit_us = 0;
     self->last_tick_us = now_us;
+    self->message_length = 0;
     memset(&self->current, 0, sizeof(self->current));
     StepRing_Clear(&self->ring);
 
@@ -136,8 +148,11 @@ void TransactionRunner_DefineTemplate(TransactionRunner *self, const TxnTemplate
 
 void TransactionRunner_PushSteps(TransactionRunner *self, const TxnStepsMessage *steps)
 {
+    TxnStep step;
+    const uint8_t *record;
     size_t offset = 0;
     size_t record_size;
+    uint32_t seq = steps->first_seq;
     uint8_t i;
 
     if (!self->active || steps->txn_id != self->txn_id) {
@@ -149,37 +164,30 @@ void TransactionRunner_PushSteps(TransactionRunner *self, const TxnStepsMessage 
     }
 
     for(i=0; i<steps->step_count; i++) {
-        if (!pushRecord(self, steps->records + offset, steps->records_size - offset, steps->first_seq + i, &record_size)) {
+        record = steps->records + offset;
+        record_size = TxnStep_Decode(&step, record, steps->records_size - offset);
+        if (!pushRecord(self, &step, record, record_size, seq)) {
             return;
         }
         offset += record_size;
+        if ((step.flags & TXN_STEP_FLAG_CONTINUED) == 0) {
+            seq++;
+        }
     }
-    self->next_seq += steps->step_count;
+    self->next_seq = seq;
 }
 
 void TransactionRunner_OnFrame(TransactionRunner *self, uint8_t interface_index, const FrameMessage *frame)
 {
-    const TxnTemplateMessage *template_message;
-    uint64_t payload_word;
-
-    if (!isListening(self, interface_index, frame)) {
+    if (!isOnBus(self, interface_index, frame)) {
         return;
     }
-
-    template_message = currentTemplate(self);
-    payload_word = payloadWord(frame);
-
-    if (matchesTemplatePattern(template_message, kTXN_PATTERN_EXTEND, frame, payload_word)) {
-        keepRxFrame(self, frame);
-        self->current.extend_requested = true;
+    if (isIsotpStep(self)) {
+        feedIsotp(self, frame);
         return;
     }
-    if (matchesTemplatePattern(template_message, kTXN_PATTERN_ABORT, frame, payload_word)) {
-        abortOnFrame(self, kTXN_REASON_ABORT_MATCH, frame, 0, payload_word);
-        return;
-    }
-    if (isPatternPresent(template_message, kTXN_PATTERN_ADVANCE)) {
-        matchAdvance(self, template_message, frame, payload_word);
+    if (isWaiting(self)) {
+        matchFrame(self, frame);
     }
 }
 
@@ -237,10 +245,17 @@ uint64_t TransactionRunner_NextWakeUs(const TransactionRunner *self)
         }
         return earliestWake(wake_us, self->starve_deadline_us);
     }
+    if (self->current.phase == kTRANSACTION_PHASE_TRANSMIT && self->current.message_started) {
+        return earliestWake(wake_us, IsotpLink_NextWakeUs(&self->isotp));
+    }
     if (self->current.phase == kTRANSACTION_PHASE_TRANSMIT) {
         return earliestWake(wake_us, transmitReadyUs(self));
     }
-    return earliestWake(wake_us, self->current.deadline_us);
+    wake_us = earliestWake(wake_us, self->current.deadline_us);
+    if (isIsotpStep(self)) {
+        wake_us = earliestWake(wake_us, IsotpLink_NextWakeUs(&self->isotp));
+    }
+    return wake_us;
 }
 
 /* ---------- private ---------- */
@@ -266,7 +281,7 @@ static bool isTemplateValid(const TransactionRunner *self, const TxnTemplateMess
     if (isTemplateDefined(self, template_message->template_id)) {
         return false;
     }
-    if (mode >= kTXN_ADVANCE_MODE_MAX || template_message->type != kTXN_TEMPLATE_TYPE_GENERIC) {
+    if (mode >= kTXN_ADVANCE_MODE_MAX || !isTypeValid(template_message)) {
         return false;
     }
     if (isWaitingMode(mode) && template_message->timeout_ms == 0) {
@@ -279,6 +294,33 @@ static bool isTemplateValid(const TransactionRunner *self, const TxnTemplateMess
         return false;
     }
     return mode != kTXN_ADVANCE_MODE_ROSTER_K || template_message->count_k <= self->roster_count;
+}
+
+static bool isTypeValid(const TxnTemplateMessage *template_message)
+{
+    const TxnIsotpParameters *isotp = &template_message->isotp;
+    uint8_t mode = template_message->advance_mode;
+
+    if (template_message->type == kTXN_TEMPLATE_TYPE_GENERIC) {
+        return true;
+    }
+    if (template_message->type != kTXN_TEMPLATE_TYPE_ISOTP) {
+        return false;
+    }
+    if ((isotp->flags & ~TXN_ISOTP_FLAG_PADDING) != 0 || isotp->tx_data_length != FRAME_PAYLOAD_MAX_CLASSIC) {
+        return false;
+    }
+    return mode == kTXN_ADVANCE_MODE_NONE || mode == kTXN_ADVANCE_MODE_COUNT;
+}
+
+static bool fitsTemplate(const TxnStep *step, const TxnTemplateMessage *template_message)
+{
+    bool message = (step->flags & TXN_STEP_FLAG_MESSAGE) != 0;
+
+    if (template_message->type == kTXN_TEMPLATE_TYPE_ISOTP) {
+        return message || (step->flags & TXN_STEP_FLAG_EXPECT_ONLY) != 0;
+    }
+    return !message;
 }
 
 static bool isWaitingMode(uint8_t advance_mode)
@@ -296,28 +338,32 @@ static bool isPatternPresent(const TxnTemplateMessage *template_message, uint8_t
     return (template_message->patterns_present & (1u << pattern)) != 0;
 }
 
-static bool pushRecord(TransactionRunner *self, const uint8_t *record, size_t available, uint32_t seq, size_t *record_size)
+static bool pushRecord(TransactionRunner *self, const TxnStep *step, const uint8_t *record, size_t record_size, uint32_t seq)
 {
-    TxnStep step;
+    const TxnTemplateMessage *template_message;
     uint32_t in_flight;
 
-    *record_size = TxnStep_Decode(&step, record, available);
-    if (*record_size == 0 || !isTemplateDefined(self, step.template_id) || (step.flags & TXN_STEP_FLAG_MESSAGE)) {
+    if (record_size == 0 || !isTemplateDefined(self, step->template_id)) {
         abortWith(self, kTXN_REASON_INVALID_STEP, seq);
         return false;
     }
-    if ((step.flags & TXN_STEP_FLAG_EXPECT_ONLY) && !isWaitingMode(self->templates[step.template_id].advance_mode)) {
+    template_message = &self->templates[step->template_id];
+    if (!fitsTemplate(step, template_message)) {
+        abortWith(self, kTXN_REASON_INVALID_STEP, seq);
+        return false;
+    }
+    if ((step->flags & TXN_STEP_FLAG_EXPECT_ONLY) && !isWaitingMode(template_message->advance_mode)) {
         abortWith(self, kTXN_REASON_INVALID_STEP, seq);
         return false;
     }
 
     in_flight = self->pushed_bytes - self->consumed_bytes;
-    if (in_flight + *record_size > self->window_bytes || !StepRing_Push(&self->ring, record, (uint32_t)*record_size)) {
+    if (in_flight + record_size > self->window_bytes || !StepRing_Push(&self->ring, record, (uint32_t)record_size)) {
         abortWith(self, kTXN_REASON_OVERRUN, seq);
         return false;
     }
 
-    self->pushed_bytes += (uint32_t)*record_size;
+    self->pushed_bytes += (uint32_t)record_size;
 
     return true;
 }
@@ -354,6 +400,12 @@ static bool loadNextStep(TransactionRunner *self, uint64_t now_us)
     self->current.record_size = (uint32_t)TxnStep_Decode(&self->current.step, record, available);
     self->starve_deadline_us = 0;
 
+    if ((self->current.step.flags & TXN_STEP_FLAG_MESSAGE) && !gatherMessage(self)) {
+        return self->active;
+    }
+    if (currentTemplate(self)->type == kTXN_TEMPLATE_TYPE_ISOTP) {
+        IsotpLink_Open(&self->isotp, self->current.step.can_id, self->channel, &currentTemplate(self)->isotp);
+    }
     if (self->current.step.flags & TXN_STEP_FLAG_EXPECT_ONLY) {
         startWait(self, now_us);
     } else {
@@ -370,6 +422,9 @@ static bool transmitStep(TransactionRunner *self, uint64_t now_us)
 
     if (now_us < self->next_transmit_us || now_us < self->current.retry_at_us) {
         return false;
+    }
+    if (isIsotpStep(self)) {
+        return transmitMessage(self, now_us);
     }
     if (self->current.deadline_us == 0) {
         self->current.deadline_us = now_us + transmitTimeoutUs(template_message);
@@ -391,6 +446,33 @@ static bool transmitStep(TransactionRunner *self, uint64_t now_us)
         return false;
     }
 
+    return finishTransmit(self, now_us);
+}
+
+static bool transmitMessage(TransactionRunner *self, uint64_t now_us)
+{
+    uint8_t event;
+
+    if (!self->current.message_started) {
+        IsotpLink_Send(&self->isotp, self->message, self->message_length, now_us);
+        self->current.message_started = true;
+    }
+
+    event = IsotpLink_Tick(&self->isotp, now_us);
+    if (event == kISOTP_EVENT_FAILED) {
+        abortWith(self, IsotpLink_FailureReason(&self->isotp), self->completed_steps);
+        return false;
+    }
+    if (event != kISOTP_EVENT_SENT) {
+        return false;
+    }
+    return finishTransmit(self, now_us);
+}
+
+static bool finishTransmit(TransactionRunner *self, uint64_t now_us)
+{
+    const TxnTemplateMessage *template_message = currentTemplate(self);
+
     self->next_transmit_us = now_us + template_message->gap_us;
     if (!isWaitingMode(template_message->advance_mode)) {
         completeStep(self);
@@ -402,10 +484,79 @@ static bool transmitStep(TransactionRunner *self, uint64_t now_us)
     return true;
 }
 
+static bool gatherMessage(TransactionRunner *self)
+{
+    const TxnStep *step = &self->current.step;
+
+    if (self->message_length + step->payload_length > TXN_ISOTP_MESSAGE_SIZE_MAX) {
+        abortWith(self, kTXN_REASON_INVALID_STEP, self->completed_steps);
+        return false;
+    }
+
+    memcpy(self->message + self->message_length, step->payload, step->payload_length);
+    self->message_length = (uint16_t)(self->message_length + step->payload_length);
+    if ((step->flags & TXN_STEP_FLAG_CONTINUED) == 0) {
+        return true;
+    }
+
+    releaseRecord(self);
+    return false;
+}
+
+static bool tickIsotp(TransactionRunner *self, uint64_t now_us)
+{
+    if (IsotpLink_Tick(&self->isotp, now_us) != kISOTP_EVENT_FAILED) {
+        return true;
+    }
+    abortWith(self, IsotpLink_FailureReason(&self->isotp), self->completed_steps);
+    return false;
+}
+
+static void feedIsotp(TransactionRunner *self, const FrameMessage *frame)
+{
+    FrameMessage message_frame;
+    uint8_t event = IsotpLink_OnFrame(&self->isotp, frame, self->last_tick_us);
+
+    if (event == kISOTP_EVENT_FAILED) {
+        abortWith(self, IsotpLink_FailureReason(&self->isotp), self->completed_steps);
+        return;
+    }
+    if (event != kISOTP_EVENT_MESSAGE || !isWaiting(self)) {
+        return;
+    }
+
+    IsotpLink_MessageFrame(&self->isotp, &message_frame);
+    matchFrame(self, &message_frame);
+}
+
+static bool isIsotpStep(const TransactionRunner *self)
+{
+    if (self->current.phase == kTRANSACTION_PHASE_IDLE) {
+        return false;
+    }
+    return currentTemplate(self)->type == kTXN_TEMPLATE_TYPE_ISOTP;
+}
+
+static bool transmitIsotpFrame(void *context, const FrameMessage *frame)
+{
+    TransactionRunner *self = context;
+
+    return self->port.transmit(self->port.context, self->interface_index, frame);
+}
+
+static void releaseRecord(TransactionRunner *self)
+{
+    StepRing_Release(&self->ring, self->current.record_size);
+    self->consumed_bytes += self->current.record_size;
+}
+
 static bool settleWait(TransactionRunner *self, uint64_t now_us)
 {
     const TxnTemplateMessage *template_message = currentTemplate(self);
 
+    if (isIsotpStep(self) && !tickIsotp(self, now_us)) {
+        return false;
+    }
     if (self->current.satisfied) {
         completeStep(self);
         return true;
@@ -438,8 +589,8 @@ static void completeStep(TransactionRunner *self)
     TxnStatusMessage status;
     bool last = (self->current.step.flags & TXN_STEP_FLAG_LAST) != 0;
 
-    StepRing_Release(&self->ring, self->current.record_size);
-    self->consumed_bytes += self->current.record_size;
+    releaseRecord(self);
+    self->message_length = 0;
     self->completed_steps++;
     self->current.phase = kTRANSACTION_PHASE_IDLE;
 
@@ -485,15 +636,36 @@ static void reportProgress(TransactionRunner *self)
     self->port.report_progress(self->port.context, &progress);
 }
 
-static bool isListening(const TransactionRunner *self, uint8_t interface_index, const FrameMessage *frame)
+static bool isOnBus(const TransactionRunner *self, uint8_t interface_index, const FrameMessage *frame)
 {
     if (!self->active || interface_index != self->interface_index) {
         return false;
     }
-    if (self->current.phase != kTRANSACTION_PHASE_WAIT || self->current.satisfied) {
-        return false;
-    }
     return (frame->route_flags & FRAME_ROUTE_FLAG_ECHO) == 0;
+}
+
+static bool isWaiting(const TransactionRunner *self)
+{
+    return self->current.phase == kTRANSACTION_PHASE_WAIT && !self->current.satisfied;
+}
+
+static void matchFrame(TransactionRunner *self, const FrameMessage *frame)
+{
+    const TxnTemplateMessage *template_message = currentTemplate(self);
+    uint64_t payload_word = payloadWord(frame);
+
+    if (matchesTemplatePattern(template_message, kTXN_PATTERN_EXTEND, frame, payload_word)) {
+        keepRxFrame(self, frame);
+        self->current.extend_requested = true;
+        return;
+    }
+    if (matchesTemplatePattern(template_message, kTXN_PATTERN_ABORT, frame, payload_word)) {
+        abortOnFrame(self, kTXN_REASON_ABORT_MATCH, frame, 0, payload_word);
+        return;
+    }
+    if (isPatternPresent(template_message, kTXN_PATTERN_ADVANCE)) {
+        matchAdvance(self, template_message, frame, payload_word);
+    }
 }
 
 static void recordAnswer(TransactionRunner *self, const FrameMessage *frame)
