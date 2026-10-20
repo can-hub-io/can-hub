@@ -289,14 +289,35 @@ add_unit_test(test_identity_database
 )
 target_link_libraries(test_identity_database PRIVATE sqlite3)
 
+add_unit_test(test_step_ring
+    SOURCES
+        agent/domain/test_step_ring.cpp
+        ${ROOT_SRC_DIR}/agent/domain/step_ring.c
+)
+
+add_unit_test(test_transaction_runner
+    SOURCES
+        agent/domain/test_transaction_runner.cpp
+        ${ROOT_SRC_DIR}/agent/domain/transaction_runner.c
+        ${ROOT_SRC_DIR}/agent/domain/step_ring.c
+        ${ROOT_SRC_DIR}/protocol/txn_steps_message.c
+        ${ROOT_SRC_DIR}/protocol/frame_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+
 add_unit_test(test_agent
     SOURCES
         agent/test_agent.cpp
         ${ROOT_SRC_DIR}/agent/agent.c
         ${ROOT_SRC_DIR}/agent/domain/channel_map.c
         ${ROOT_SRC_DIR}/agent/domain/echo_correlator.c
+        ${ROOT_SRC_DIR}/agent/domain/step_ring.c
+        ${ROOT_SRC_DIR}/agent/domain/transaction_runner.c
         ${ROOT_SRC_DIR}/shared/reconnect_backoff.c
         ${ROOT_SRC_DIR}/agent/domain/tx_pacer.c
+        ${ROOT_SRC_DIR}/protocol/txn_message.c
+        ${ROOT_SRC_DIR}/protocol/txn_steps_message.c
         ${ROOT_SRC_DIR}/protocol/frame_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c
         ${ROOT_SRC_DIR}/protocol/ifconfig_message.c

@@ -7,10 +7,13 @@
 #include "protocol/ifconfig_message.h"
 #include "protocol/interface_status_message.h"
 #include "protocol/message_header.h"
+#include "protocol/txn_message.h"
+#include "protocol/txn_steps_message.h"
 #include "shared/bounded_string.h"
 
 #define MICROSECONDS_PER_MILLISECOND 1000
 #define PING_REPLY_FLAG 0x01
+#define AGENT_CAPABILITIES (HELLO_CAP_RELIABLE_CHANNELS | HELLO_CAP_TRANSACTIONS)
 #define TIMING_CONFLICT_DETAIL "give a bitrate or a time quantum and segments, not both"
 
 typedef void (*TControlHandler)(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
@@ -32,11 +35,26 @@ static void handlePing(Agent *self, const MessageHeader *header, const uint8_t *
 static void handleIfconfig(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
 static uint8_t applyIfconfig(Agent *self, const IfconfigMessage *request, uint8_t interface_index, char *detail);
 static bool interfaceIndexForName(const Agent *self, const char *interface_name, uint8_t *interface_index);
+static void handleTxnBegin(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
+static void handleTxnAbort(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
+static void handleTxnTemplate(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
+static void handleTxnSteps(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
+static bool isTransactionStreamMessage(uint8_t type);
+static void dispatchTransactionStreamMessage(Agent *self, const uint8_t *data, size_t size);
+static TransactionRunnerPort transactionRunnerPort(Agent *self);
+static bool transmitTransactionFrame(void *context, uint8_t interface_index, const FrameMessage *frame);
+static void reportTransactionProgress(void *context, const TxnProgressMessage *progress);
+static void reportTransactionStatus(void *context, const TxnStatusMessage *status);
+static void sendEncodedControl(Agent *self, const uint8_t *encoded, size_t encoded_size);
 
 static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
     [kMESSAGE_TYPE_REGISTER_ACK] = handleRegisterAck,
     [kMESSAGE_TYPE_PING] = handlePing,
     [kMESSAGE_TYPE_IFCONFIG] = handleIfconfig,
+    [kMESSAGE_TYPE_TXN_BEGIN] = handleTxnBegin,
+    [kMESSAGE_TYPE_TXN_ABORT] = handleTxnAbort,
+    [kMESSAGE_TYPE_TXN_TEMPLATE] = handleTxnTemplate,
+    [kMESSAGE_TYPE_TXN_STEPS] = handleTxnSteps,
 };
 
 /* ---------- public ---------- */
@@ -49,6 +67,7 @@ void Agent_Init(Agent *self, TransportPort *transport, CanPort *can, const Regis
     ChannelMap_Reset(&self->channel_map);
     EchoCorrelator_Reset(&self->echo);
     TxPacer_Reset(&self->tx_pacer);
+    TransactionRunner_Init(&self->transactions, transactionRunnerPort(self), self->transaction_ring, TXN_RING_BYTES);
     ReconnectBackoff_Init(&self->backoff, RECONNECT_DEFAULT_INITIAL_DELAY_MS, RECONNECT_DEFAULT_MAX_DELAY_MS);
     self->state = kAGENT_STATE_DISCONNECTED;
     self->next_connect_at_us = 0;
@@ -119,6 +138,7 @@ void Agent_OnDisconnected(Agent *self, uint64_t now_us)
 
     ChannelMap_Reset(&self->channel_map);
     EchoCorrelator_Reset(&self->echo);
+    TransactionRunner_Cancel(&self->transactions);
     self->state = kAGENT_STATE_DISCONNECTED;
     self->register_deadline_us = 0;
     scheduleReconnect(self, now_us);
@@ -155,6 +175,8 @@ bool Agent_OnCanFrame(Agent *self, uint8_t interface_index, const FrameMessage *
         return true;
     }
 
+    TransactionRunner_OnFrame(&self->transactions, interface_index, frame);
+
     if (frame->route_flags & FRAME_ROUTE_FLAG_ECHO) {
         outgoing.route_flags = FRAME_ROUTE_FLAG_ECHO;
         if (EchoCorrelator_PopMatch(&self->echo, interface_index, frame->can_id, &token)) {
@@ -176,8 +198,13 @@ void Agent_OnTransportFrame(Agent *self, const uint8_t *data, size_t size)
 {
     FrameStream stream;
     FrameMessage frame;
+    MessageHeader header;
 
     if (self->state != kAGENT_STATE_RUNNING) {
+        return;
+    }
+    if (MessageHeader_Decode(&header, data, size) && isTransactionStreamMessage(header.type)) {
+        dispatchTransactionStreamMessage(self, data, size);
         return;
     }
 
@@ -195,6 +222,14 @@ uint8_t Agent_State(const Agent *self)
 uint32_t Agent_PendingReconnectDelayMs(const Agent *self)
 {
     return self->pending_reconnect_delay_ms;
+}
+
+uint64_t Agent_NextWakeUs(const Agent *self)
+{
+    if (self->state != kAGENT_STATE_RUNNING) {
+        return 0;
+    }
+    return TransactionRunner_NextWakeUs(&self->transactions);
 }
 
 /* ---------- private ---------- */
@@ -250,6 +285,7 @@ static void tickRegistering(Agent *self, uint64_t now_us)
 
 static void tickRunning(Agent *self, uint64_t now_us)
 {
+    TransactionRunner_Tick(&self->transactions, now_us);
     if (now_us < self->next_status_at_us) {
         return;
     }
@@ -271,7 +307,7 @@ static void sendHelloAndRegister(Agent *self)
     uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size;
 
-    encoded_size = HelloMessage_Build(kPEER_ROLE_AGENT, NULL, HELLO_CAP_RELIABLE_CHANNELS, encoded, sizeof(encoded));
+    encoded_size = HelloMessage_Build(kPEER_ROLE_AGENT, NULL, AGENT_CAPABILITIES, encoded, sizeof(encoded));
     self->transport->send_control(self->transport->context, encoded, encoded_size);
 
     encoded_size = RegisterMessage_Encode(&self->registration, encoded, sizeof(encoded));
@@ -441,4 +477,136 @@ static void injectFrame(Agent *self, const FrameMessage *frame)
         EchoCorrelator_DropNewest(&self->echo, interface_index);
         self->tx_dropped[interface_index]++;
     }
+}
+
+static void handleTxnBegin(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us)
+{
+    TxnBeginMessage begin;
+    TxnBeginAckMessage ack;
+    uint8_t encoded[MESSAGE_HEADER_SIZE + TXN_BEGIN_ACK_BODY_SIZE];
+    uint8_t interface_index;
+
+    if (self->state != kAGENT_STATE_RUNNING) {
+        return;
+    }
+    if (!TxnBeginMessage_Decode(&begin, payload, header->length)) {
+        return;
+    }
+
+    if (ChannelMap_InterfaceForChannel(&self->channel_map, begin.channel, &interface_index)) {
+        TransactionRunner_Begin(&self->transactions, &begin, interface_index, now_us, &ack);
+    } else {
+        memset(&ack, 0, sizeof(ack));
+        ack.channel = begin.channel;
+        ack.status = kTXN_BEGIN_STATUS_INVALID;
+    }
+
+    sendEncodedControl(self, encoded, TxnBeginAckMessage_Encode(&ack, encoded, sizeof(encoded)));
+}
+
+static void handleTxnAbort(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us)
+{
+    TxnAbortMessage abort_message;
+
+    (void)now_us;
+
+    if (!TxnAbortMessage_Decode(&abort_message, payload, header->length)) {
+        return;
+    }
+
+    TransactionRunner_Abort(&self->transactions, abort_message.txn_id);
+}
+
+static void handleTxnTemplate(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us)
+{
+    TxnTemplateMessage template_message;
+
+    (void)now_us;
+
+    if (!TxnTemplateMessage_Decode(&template_message, payload, header->length)) {
+        return;
+    }
+
+    TransactionRunner_DefineTemplate(&self->transactions, &template_message);
+}
+
+static void handleTxnSteps(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us)
+{
+    TxnStepsMessage steps;
+
+    (void)now_us;
+
+    if (!TxnStepsMessage_Decode(&steps, payload, header->length)) {
+        return;
+    }
+
+    TransactionRunner_PushSteps(&self->transactions, &steps);
+}
+
+static bool isTransactionStreamMessage(uint8_t type)
+{
+    return type == kMESSAGE_TYPE_TXN_TEMPLATE || type == kMESSAGE_TYPE_TXN_STEPS;
+}
+
+static void dispatchTransactionStreamMessage(Agent *self, const uint8_t *data, size_t size)
+{
+    MessageHeader header;
+
+    MessageHeader_Decode(&header, data, size);
+    if (size < (size_t)MESSAGE_HEADER_SIZE + header.length) {
+        return;
+    }
+
+    control_handlers[header.type](self, &header, data + MESSAGE_HEADER_SIZE, 0);
+}
+
+static TransactionRunnerPort transactionRunnerPort(Agent *self)
+{
+    TransactionRunnerPort port = {
+        .context = self,
+        .transmit = transmitTransactionFrame,
+        .report_progress = reportTransactionProgress,
+        .report_status = reportTransactionStatus,
+    };
+
+    return port;
+}
+
+static bool transmitTransactionFrame(void *context, uint8_t interface_index, const FrameMessage *frame)
+{
+    Agent *self = context;
+
+    EchoCorrelator_Push(&self->echo, interface_index, FRAME_ROUTE_NO_TOKEN, frame->can_id);
+    if (self->can->write_frame(self->can->context, interface_index, frame)) {
+        return true;
+    }
+
+    EchoCorrelator_DropNewest(&self->echo, interface_index);
+
+    return false;
+}
+
+static void reportTransactionProgress(void *context, const TxnProgressMessage *progress)
+{
+    Agent *self = context;
+    uint8_t encoded[MESSAGE_HEADER_SIZE + TXN_PROGRESS_BODY_SIZE];
+
+    sendEncodedControl(self, encoded, TxnProgressMessage_Encode(progress, encoded, sizeof(encoded)));
+}
+
+static void reportTransactionStatus(void *context, const TxnStatusMessage *status)
+{
+    Agent *self = context;
+    uint8_t encoded[MESSAGE_HEADER_SIZE + TXN_STATUS_BODY_SIZE];
+
+    sendEncodedControl(self, encoded, TxnStatusMessage_Encode(status, encoded, sizeof(encoded)));
+}
+
+static void sendEncodedControl(Agent *self, const uint8_t *encoded, size_t encoded_size)
+{
+    if (encoded_size == 0) {
+        return;
+    }
+
+    self->transport->send_control(self->transport->context, encoded, encoded_size);
 }

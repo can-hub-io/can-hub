@@ -10,6 +10,8 @@ extern "C" {
 #include "protocol/ifconfig_message.h"
 #include "protocol/interface_status_message.h"
 #include "protocol/message_header.h"
+#include "protocol/txn_message.h"
+#include "protocol/txn_steps_message.h"
 #include "transport_port_mock.h"
 }
 
@@ -22,9 +24,21 @@ static IfconfigReplyMessage ifconfig_reply;
 static uint8_t ifconfig_reply_type;
 
 #define IFCONFIG_REQUEST_ID 77
+#define TXN_CHANNEL 7
+#define UNASSIGNED_CHANNEL 99
+#define REQUEST_ID 0x7E0
+#define RESPONSE_ID 0x7E8
+#define ID_MASK 0x7FF
+#define TXN_TIMEOUT_MS 50
 
 static InterfaceSettings bitrateSettings(uint32_t bitrate);
 static void sendIfconfig(const char *interface_name, uint8_t op, const InterfaceSettings *settings);
+static void enterRunning(void);
+static TxnBeginAckMessage sendTxnBegin(uint8_t channel);
+static size_t encodeResponseTemplate(uint16_t txn_id, uint8_t *buffer, size_t buffer_size);
+static size_t encodeLastRequestStep(uint16_t txn_id, uint8_t *buffer, size_t buffer_size);
+static uint8_t lastControlType(void);
+static TxnStatusMessage lastTxnStatus(void);
 
 describe("agent", []() {
     describe("disconnected", []() {
@@ -188,16 +202,7 @@ describe("agent", []() {
 
     describe("running", []() {
         beforeEach([]() {
-            uint8_t encoded[64];
-            size_t encoded_size;
-
-            TransportPortMock_Reset(&transport);
-            CanPortMock_Reset(&can);
-            Agent_Init(&agent, &transport.port, &can.port, &registration);
-            Agent_Tick(&agent, 0);
-            Agent_OnConnected(&agent);
-            encoded_size = RegisterAckMessage_Encode(&ack_ok, encoded, sizeof(encoded));
-            Agent_OnControlMessage(&agent, encoded, encoded_size, 0);
+            enterRunning();
         });
 
         it("forwards can frames with the assigned channel", []() {
@@ -437,6 +442,106 @@ describe("agent", []() {
         });
     });
 
+    describe("transactions", []() {
+        beforeEach([]() {
+            enterRunning();
+        });
+
+        it("advertises transactions in its hello", []() {
+            HelloMessage hello;
+
+            HelloMessage_Decode(&hello, transport.control_log[0] + MESSAGE_HEADER_SIZE, transport.control_sizes[0] - MESSAGE_HEADER_SIZE);
+
+            expect((hello.capabilities & HELLO_CAP_TRANSACTIONS) != 0).toBe(true);
+        });
+
+        it("answers a begin on an assigned channel with its ring window", []() {
+            TxnBeginAckMessage ack;
+
+            ack = sendTxnBegin(TXN_CHANNEL);
+
+            expect(lastControlType()).toBe(kMESSAGE_TYPE_TXN_BEGIN_ACK);
+            expect(ack.status).toBe((uint8_t)kTXN_BEGIN_STATUS_OK);
+            expect(ack.channel).toBe(TXN_CHANNEL);
+            expect(ack.window_bytes).toBe((uint32_t)(TXN_RING_BYTES - TXN_STEP_RECORD_SIZE_MAX));
+        });
+
+        it("rejects a begin on a channel it was never assigned", []() {
+            TxnBeginAckMessage ack;
+
+            ack = sendTxnBegin(UNASSIGNED_CHANNEL);
+
+            expect(ack.status).toBe((uint8_t)kTXN_BEGIN_STATUS_INVALID);
+        });
+
+        it("runs steps that arrive on the channel's reliable stream", []() {
+            TxnBeginAckMessage ack;
+            uint8_t encoded[MESSAGE_HEADER_SIZE + TXN_STEPS_BODY_SIZE_MAX];
+            size_t encoded_size;
+
+            ack = sendTxnBegin(TXN_CHANNEL);
+            encoded_size = encodeResponseTemplate(ack.txn_id, encoded, sizeof(encoded));
+            Agent_OnTransportFrame(&agent, encoded, encoded_size);
+            encoded_size = encodeLastRequestStep(ack.txn_id, encoded, sizeof(encoded));
+            Agent_OnTransportFrame(&agent, encoded, encoded_size);
+
+            Agent_Tick(&agent, 10);
+
+            expect(can.write_count).toBe(1);
+            expect(can.last_interface_index).toBe(0);
+            expect(can.last_frame.can_id).toBe((uint32_t)REQUEST_ID);
+            expect(Agent_NextWakeUs(&agent)).toBe((uint64_t)(10 + TXN_TIMEOUT_MS * 1000));
+        });
+
+        it("runs steps that arrive on the control stream", []() {
+            TxnBeginAckMessage ack;
+            uint8_t encoded[MESSAGE_HEADER_SIZE + TXN_STEPS_BODY_SIZE_MAX];
+            size_t encoded_size;
+
+            ack = sendTxnBegin(TXN_CHANNEL);
+            encoded_size = encodeResponseTemplate(ack.txn_id, encoded, sizeof(encoded));
+            Agent_OnControlMessage(&agent, encoded, encoded_size, 0);
+            encoded_size = encodeLastRequestStep(ack.txn_id, encoded, sizeof(encoded));
+            Agent_OnControlMessage(&agent, encoded, encoded_size, 0);
+
+            Agent_Tick(&agent, 10);
+
+            expect(can.write_count).toBe(1);
+        });
+
+        it("reports the outcome on the control stream once the answer arrives", []() {
+            FrameMessage response = { RESPONSE_ID, 0, 0, 2, 0, 0, { 0x01, 0x76 } };
+            TxnBeginAckMessage ack;
+            TxnStatusMessage status;
+            uint8_t encoded[MESSAGE_HEADER_SIZE + TXN_STEPS_BODY_SIZE_MAX];
+            size_t encoded_size;
+
+            ack = sendTxnBegin(TXN_CHANNEL);
+            encoded_size = encodeResponseTemplate(ack.txn_id, encoded, sizeof(encoded));
+            Agent_OnTransportFrame(&agent, encoded, encoded_size);
+            encoded_size = encodeLastRequestStep(ack.txn_id, encoded, sizeof(encoded));
+            Agent_OnTransportFrame(&agent, encoded, encoded_size);
+            Agent_Tick(&agent, 10);
+
+            Agent_OnCanFrame(&agent, 0, &response);
+            Agent_Tick(&agent, 20);
+            status = lastTxnStatus();
+
+            expect(lastControlType()).toBe(kMESSAGE_TYPE_TXN_STATUS);
+            expect(status.state).toBe((uint8_t)kTXN_STATE_DONE);
+            expect(status.channel).toBe(TXN_CHANNEL);
+            expect(status.txn_id).toBe(ack.txn_id);
+        });
+
+        it("drops the transaction when the hub connection is lost", []() {
+            sendTxnBegin(TXN_CHANNEL);
+
+            Agent_OnDisconnected(&agent, 0);
+
+            expect(TransactionRunner_IsActive(&agent.transactions)).toBe(false);
+            expect(Agent_NextWakeUs(&agent)).toBe((uint64_t)0);
+        });
+    });
 });
 
 static InterfaceSettings bitrateSettings(uint32_t bitrate)
@@ -470,4 +575,85 @@ static void sendIfconfig(const char *interface_name, uint8_t op, const Interface
     MessageHeader_Decode(&header, transport.control_log[reply_index], transport.control_sizes[reply_index]);
     IfconfigReplyMessage_Decode(&ifconfig_reply, transport.control_log[reply_index] + MESSAGE_HEADER_SIZE, header.length);
     ifconfig_reply_type = header.type;
+}
+
+static void enterRunning(void)
+{
+    uint8_t encoded[64];
+    size_t encoded_size;
+
+    TransportPortMock_Reset(&transport);
+    CanPortMock_Reset(&can);
+    Agent_Init(&agent, &transport.port, &can.port, &registration);
+    Agent_Tick(&agent, 0);
+    Agent_OnConnected(&agent);
+    encoded_size = RegisterAckMessage_Encode(&ack_ok, encoded, sizeof(encoded));
+    Agent_OnControlMessage(&agent, encoded, encoded_size, 0);
+}
+
+static TxnBeginAckMessage sendTxnBegin(uint8_t channel)
+{
+    TxnBeginMessage begin;
+    TxnBeginAckMessage ack;
+    uint8_t encoded[MESSAGE_HEADER_SIZE + TXN_BEGIN_BODY_SIZE];
+    size_t encoded_size;
+    uint32_t reply_index;
+
+    memset(&begin, 0, sizeof(begin));
+    begin.channel = channel;
+    encoded_size = TxnBeginMessage_Encode(&begin, encoded, sizeof(encoded));
+    Agent_OnControlMessage(&agent, encoded, encoded_size, 0);
+
+    reply_index = (uint32_t)transport.control_count - 1;
+    TxnBeginAckMessage_Decode(&ack, transport.control_log[reply_index] + MESSAGE_HEADER_SIZE, transport.control_sizes[reply_index] - MESSAGE_HEADER_SIZE);
+    return ack;
+}
+
+static size_t encodeResponseTemplate(uint16_t txn_id, uint8_t *buffer, size_t buffer_size)
+{
+    TxnTemplateMessage template_message;
+
+    memset(&template_message, 0, sizeof(template_message));
+    template_message.channel = TXN_CHANNEL;
+    template_message.txn_id = txn_id;
+    template_message.advance_mode = kTXN_ADVANCE_MODE_COUNT;
+    template_message.count_k = 1;
+    template_message.patterns_present = 1u << kTXN_PATTERN_ADVANCE;
+    template_message.timeout_ms = TXN_TIMEOUT_MS;
+    template_message.patterns[kTXN_PATTERN_ADVANCE].can_id = RESPONSE_ID;
+    template_message.patterns[kTXN_PATTERN_ADVANCE].can_mask = ID_MASK;
+    return TxnTemplateMessage_Encode(&template_message, buffer, buffer_size);
+}
+
+static size_t encodeLastRequestStep(uint16_t txn_id, uint8_t *buffer, size_t buffer_size)
+{
+    TxnStepsMessage fixed_fields = { TXN_CHANNEL, 0, txn_id, 0, NULL, 0 };
+    TxnStepsWriter writer;
+    TxnStep step;
+
+    memset(&step, 0, sizeof(step));
+    step.flags = TXN_STEP_FLAG_LAST;
+    step.can_id = REQUEST_ID;
+    step.payload_length = 2;
+    step.payload[0] = 0x01;
+    step.payload[1] = 0x36;
+    TxnStepsWriter_Init(&writer, &fixed_fields, buffer, buffer_size);
+    TxnStepsWriter_Append(&writer, &step);
+    return TxnStepsWriter_Finish(&writer);
+}
+
+static uint8_t lastControlType(void)
+{
+    uint32_t last_index = (uint32_t)transport.control_count - 1;
+
+    return transport.control_log[last_index][0];
+}
+
+static TxnStatusMessage lastTxnStatus(void)
+{
+    TxnStatusMessage status;
+    uint32_t last_index = (uint32_t)transport.control_count - 1;
+
+    TxnStatusMessage_Decode(&status, transport.control_log[last_index] + MESSAGE_HEADER_SIZE, transport.control_sizes[last_index] - MESSAGE_HEADER_SIZE);
+    return status;
 }

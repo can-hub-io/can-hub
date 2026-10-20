@@ -24,3 +24,4 @@ TransportEvents AgentApp_TransportEvents(AgentApp *self);
 CanEvents AgentApp_CanEvents(AgentApp *self);
 void AgentApp_Tick(AgentApp *self, uint64_t now_us);
 uint32_t AgentApp_PendingReconnectDelayMs(const AgentApp *self);
+uint64_t AgentApp_NextWakeUs(const AgentApp *self);

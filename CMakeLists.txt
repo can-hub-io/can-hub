@@ -176,6 +176,8 @@ set(AGENT_SOURCES
     src/agent/agent_app.c
     src/agent/domain/channel_map.c
     src/agent/domain/echo_correlator.c
+    src/agent/domain/step_ring.c
+    src/agent/domain/transaction_runner.c
     src/shared/reconnect_backoff.c
     src/agent/domain/tx_pacer.c
     src/platform/linux/clock/clock.c

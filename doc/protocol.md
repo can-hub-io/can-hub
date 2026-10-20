@@ -818,8 +818,11 @@ between the client's and the agent's channel, as it does for FRAME.
    itself.
 2. The client sends the TXN_TEMPLATEs, then TXN_STEPS batches. Sequence numbers
    start at 0 and are contiguous: a batch whose `first_seq` is not the next
-   expected one aborts the transaction (reason invalid step). A template may be
-   redefined later; it applies to the steps after it in stream order.
+   expected one aborts the transaction (reason invalid step). A template is
+   defined once per transaction, before the first step that names it: a step
+   naming an undefined template, or a second definition of the same id, aborts
+   the transaction (reason invalid step). Steps already queued in the agent would
+   otherwise run with a template sent after them.
 3. The agent executes the steps and reports TXN_PROGRESS.
 4. The step flagged **last** completes the transaction: TXN_STATUS done. The
    first failure ends it instead: TXN_STATUS aborted, with the reason.
@@ -831,8 +834,10 @@ flight from a cancelled transaction) and are discarded.
 is expect-only, and then waits as its template says. The frame goes through the
 normal injection path: its bus echo reaches the other subscribers like any
 injected frame, and the frames the agent receives meanwhile are still forwarded
-to every subscriber — the runner only matches, it never hides traffic. A frame
-the bus queue refuses is retried until the step times out (reason tx failed).
+to every subscriber — the runner only matches, it never hides traffic. The bus
+echo of a frame the agent sent never matches a pattern. A frame the bus queue
+refuses is retried until the step times out (reason tx failed); for a step that
+does not wait, `timeout_ms` bounds those retries (an agent default when zero).
 
 **Templates.** A template (id 0-15) sets how a step waits:
 
@@ -845,8 +850,10 @@ the bus queue refuses is retried until the step times out (reason tx failed).
   `(P & payload_mask) == (payload_value & payload_mask)`, where P is the first 8
   payload bytes as a little-endian u64 (byte i at bits 8i-8i+7; missing bytes
   read as zero). `can_id` includes the EFF/RTR/ERR flag bits;
-- each received frame is checked against abort first (the transaction aborts,
-  reason abort match), then extend (the step timeout restarts), then advance;
+- each received frame is checked against extend first (the step timeout
+  restarts), then abort (the transaction aborts, reason abort match), then
+  advance. Extend goes first because it is the narrower answer: a UDS response
+  pending (`7F xx 78`) is also a negative response (`7F`);
 - a step with the expect-value flag replaces the advance pattern's
   `payload_value` with its own `expect_value` (a per-step answer such as a block
   counter or a batch CRC). A frame that matches the advance `can_id` but not the
@@ -876,9 +883,9 @@ keep `bytes sent - consumed_bytes <= window`; a batch that does not fit in the
 ring aborts the transaction (reason overrun). Client libraries keep the steps
 not yet sent locally and send them as credit returns, so an application may hand
 over a whole firmware image at once. The agent sends TXN_PROGRESS once the bytes
-released since the previous one reach a quarter of the window, and on its next
-tick when fewer are pending, so the pipe stays full without one message per
-step. Credit is explicit rather than left to the transport because over TCP/TLS
+released since the previous one reach a quarter of the window, or 10 ms after
+the first byte released since the previous one, so the pipe stays full without
+one message per step. Credit is explicit rather than left to the transport because over TCP/TLS
 the agent cannot stop reading the connection without stalling the control
 stream; over QUIC, stream flow control backs it up.
 
