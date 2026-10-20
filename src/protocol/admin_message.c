@@ -71,6 +71,18 @@
 #define INTERFACE_ENTRY_AGENT_NAME_OFFSET 16
 #define INTERFACE_ENTRY_INTERFACE_NAME_OFFSET 144
 #define INTERFACE_ENTRY_TX_DROPPED_OFFSET 160
+#define TXN_ENTRY_INTERFACE_ID_OFFSET 0
+#define TXN_ENTRY_CLIENT_PEER_ID_OFFSET 4
+#define TXN_ENTRY_AGENT_PEER_ID_OFFSET 8
+#define TXN_ENTRY_TXN_ID_OFFSET 12
+#define TXN_ENTRY_STATE_OFFSET 14
+#define TXN_ENTRY_FLAGS_OFFSET 15
+#define TXN_ENTRY_COMPLETED_STEPS_OFFSET 16
+#define TXN_ENTRY_BYTES_IN_FLIGHT_OFFSET 20
+#define TXN_ENTRY_AGE_OFFSET 24
+#define TXN_ENTRY_PROGRESS_AGE_OFFSET 28
+#define TXN_ENTRY_AGENT_NAME_OFFSET 32
+#define TXN_ENTRY_INTERFACE_NAME_OFFSET 160
 
 #define REJECTED_ENTRY_ROLE_OFFSET 0
 #define REJECTED_ENTRY_REASON_OFFSET 1
@@ -139,6 +151,9 @@ static void writeAclEntry(uint8_t *destination, const AdminAclListReplyEntry *en
 static void readAclEntry(const uint8_t *source, AdminAclListReplyEntry *entry);
 static void writeInterfaceEntry(uint8_t *destination, const AdminInterfacesReplyEntry *entry);
 static void readInterfaceEntry(const uint8_t *source, AdminInterfacesReplyEntry *entry);
+static bool areTxnEntryNamesTerminated(const AdminTxnsReplyEntry *entry);
+static void writeTxnEntry(uint8_t *destination, const AdminTxnsReplyEntry *entry);
+static void readTxnEntry(const uint8_t *source, AdminTxnsReplyEntry *entry);
 static bool isRejectedEntryTerminated(const AdminRejectedReplyEntry *entry);
 static void writeRejectedEntry(uint8_t *destination, const AdminRejectedReplyEntry *entry);
 static void readRejectedEntry(const uint8_t *source, AdminRejectedReplyEntry *entry);
@@ -1347,6 +1362,77 @@ bool AdminGroupListReplyMessage_Decode(AdminGroupListReplyMessage *self, const u
     return true;
 }
 
+size_t AdminTxnsMessage_Encode(const AdminTxnsMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    return encodeOffsetRequest(kMESSAGE_TYPE_ADMIN_TXNS, self->offset, buffer, buffer_size);
+}
+
+bool AdminTxnsMessage_Decode(AdminTxnsMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    if (payload_length < ADMIN_TXNS_BODY_SIZE) {
+        return false;
+    }
+
+    self->offset = Wire_ReadU16(payload + OFFSET_OFFSET);
+
+    return true;
+}
+
+size_t AdminTxnsReplyMessage_Encode(const AdminTxnsReplyMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t body_size;
+    size_t total_size;
+    uint8_t i;
+
+    if (self->count > ADMIN_TXNS_REPLY_ENTRIES_MAX) {
+        return 0;
+    }
+    for(i=0; i<self->count; i++) {
+        if (!areTxnEntryNamesTerminated(&self->entries[i])) {
+            return 0;
+        }
+    }
+
+    body_size = ADMIN_TXNS_REPLY_FIXED_FIELDS_SIZE + (size_t)self->count * ADMIN_TXNS_REPLY_ENTRY_SIZE;
+    total_size = encodeFixedBody(kMESSAGE_TYPE_ADMIN_TXNS_REPLY, body_size, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    body[COUNT_OFFSET] = self->count;
+    body[FLAGS_OFFSET] = self->flags;
+    for(i=0; i<self->count; i++) {
+        writeTxnEntry(body + ENTRIES_OFFSET + i * ADMIN_TXNS_REPLY_ENTRY_SIZE, &self->entries[i]);
+    }
+
+    return total_size;
+}
+
+bool AdminTxnsReplyMessage_Decode(AdminTxnsReplyMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    uint8_t i;
+
+    if (payload_length < ADMIN_TXNS_REPLY_FIXED_FIELDS_SIZE) {
+        return false;
+    }
+
+    self->count = payload[COUNT_OFFSET];
+    self->flags = payload[FLAGS_OFFSET];
+    if (self->count > ADMIN_TXNS_REPLY_ENTRIES_MAX) {
+        return false;
+    }
+    if (payload_length < ADMIN_TXNS_REPLY_FIXED_FIELDS_SIZE + (size_t)self->count * ADMIN_TXNS_REPLY_ENTRY_SIZE) {
+        return false;
+    }
+
+    for(i=0; i<self->count; i++) {
+        readTxnEntry(payload + ENTRIES_OFFSET + i * ADMIN_TXNS_REPLY_ENTRY_SIZE, &self->entries[i]);
+    }
+
+    return true;
+}
+
 /* ---------- private ---------- */
 
 static size_t encodeFixedBody(uint8_t type, size_t body_size, uint8_t *buffer, size_t buffer_size, uint8_t **body)
@@ -1816,4 +1902,46 @@ static bool readGroupEntry(const uint8_t *source, AdminGroupListReplyEntry *entr
     }
 
     return true;
+}
+
+static bool areTxnEntryNamesTerminated(const AdminTxnsReplyEntry *entry)
+{
+    if (!isNameTerminated(entry->agent_name)) {
+        return false;
+    }
+    return entry->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] == '\0';
+}
+
+static void writeTxnEntry(uint8_t *destination, const AdminTxnsReplyEntry *entry)
+{
+    Wire_WriteU32(destination + TXN_ENTRY_INTERFACE_ID_OFFSET, entry->interface_id);
+    Wire_WriteU32(destination + TXN_ENTRY_CLIENT_PEER_ID_OFFSET, entry->client_peer_id);
+    Wire_WriteU32(destination + TXN_ENTRY_AGENT_PEER_ID_OFFSET, entry->agent_peer_id);
+    Wire_WriteU16(destination + TXN_ENTRY_TXN_ID_OFFSET, entry->txn_id);
+    destination[TXN_ENTRY_STATE_OFFSET] = entry->state;
+    destination[TXN_ENTRY_FLAGS_OFFSET] = entry->flags;
+    Wire_WriteU32(destination + TXN_ENTRY_COMPLETED_STEPS_OFFSET, entry->completed_steps);
+    Wire_WriteU32(destination + TXN_ENTRY_BYTES_IN_FLIGHT_OFFSET, entry->bytes_in_flight);
+    Wire_WriteU32(destination + TXN_ENTRY_AGE_OFFSET, entry->age_ms);
+    Wire_WriteU32(destination + TXN_ENTRY_PROGRESS_AGE_OFFSET, entry->progress_age_ms);
+    memcpy(destination + TXN_ENTRY_AGENT_NAME_OFFSET, entry->agent_name, strlen(entry->agent_name));
+    memcpy(destination + TXN_ENTRY_INTERFACE_NAME_OFFSET, entry->interface_name, strlen(entry->interface_name));
+}
+
+static void readTxnEntry(const uint8_t *source, AdminTxnsReplyEntry *entry)
+{
+    entry->interface_id = Wire_ReadU32(source + TXN_ENTRY_INTERFACE_ID_OFFSET);
+    entry->client_peer_id = Wire_ReadU32(source + TXN_ENTRY_CLIENT_PEER_ID_OFFSET);
+    entry->agent_peer_id = Wire_ReadU32(source + TXN_ENTRY_AGENT_PEER_ID_OFFSET);
+    entry->txn_id = Wire_ReadU16(source + TXN_ENTRY_TXN_ID_OFFSET);
+    entry->state = source[TXN_ENTRY_STATE_OFFSET];
+    entry->flags = source[TXN_ENTRY_FLAGS_OFFSET];
+    entry->completed_steps = Wire_ReadU32(source + TXN_ENTRY_COMPLETED_STEPS_OFFSET);
+    entry->bytes_in_flight = Wire_ReadU32(source + TXN_ENTRY_BYTES_IN_FLIGHT_OFFSET);
+    entry->age_ms = Wire_ReadU32(source + TXN_ENTRY_AGE_OFFSET);
+    entry->progress_age_ms = Wire_ReadU32(source + TXN_ENTRY_PROGRESS_AGE_OFFSET);
+    memcpy(entry->agent_name, source + TXN_ENTRY_AGENT_NAME_OFFSET, REGISTER_AGENT_NAME_SIZE);
+    entry->agent_name[REGISTER_AGENT_NAME_SIZE - 1] = '\0';
+    memcpy(entry->interface_name, source + TXN_ENTRY_INTERFACE_NAME_OFFSET, REGISTER_INTERFACE_NAME_SIZE);
+    entry->interface_name[REGISTER_INTERFACE_NAME_SIZE - 1] = '\0';
 }

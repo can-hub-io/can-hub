@@ -45,6 +45,14 @@
 #define ADMIN_INTERFACES_REPLY_FIXED_FIELDS_SIZE 4
 #define ADMIN_INTERFACES_REPLY_ENTRIES_MAX 16
 #define ADMIN_INTERFACES_REPLY_ENTRY_SIZE 168
+#define ADMIN_TXNS_BODY_SIZE 4
+#define ADMIN_TXNS_REPLY_FIXED_FIELDS_SIZE 4
+#define ADMIN_TXNS_REPLY_ENTRIES_MAX 16
+#define ADMIN_TXNS_REPLY_ENTRY_SIZE 176
+#define ADMIN_TXN_STATE_PENDING 1
+#define ADMIN_TXN_STATE_ACTIVE 2
+#define ADMIN_TXN_FLAG_EXCLUSIVE (1u << 0)
+#define ADMIN_TXN_NO_PROGRESS UINT32_MAX
 #define ADMIN_REJECTED_BODY_SIZE 4
 #define ADMIN_REJECTED_REPLY_FIXED_FIELDS_SIZE 4
 #define ADMIN_REJECTED_REPLY_ENTRIES_MAX 15
@@ -295,6 +303,31 @@ typedef struct {
 
 typedef struct {
     uint16_t offset;
+} AdminTxnsMessage;
+
+typedef struct {
+    uint32_t interface_id;
+    uint32_t client_peer_id;
+    uint32_t agent_peer_id;
+    uint16_t txn_id;
+    uint8_t state;
+    uint8_t flags;
+    uint32_t completed_steps;
+    uint32_t bytes_in_flight;
+    uint32_t age_ms;
+    uint32_t progress_age_ms;
+    char agent_name[REGISTER_AGENT_NAME_SIZE];
+    char interface_name[REGISTER_INTERFACE_NAME_SIZE];
+} AdminTxnsReplyEntry;
+
+typedef struct {
+    uint8_t count;
+    uint8_t flags;
+    AdminTxnsReplyEntry entries[ADMIN_TXNS_REPLY_ENTRIES_MAX];
+} AdminTxnsReplyMessage;
+
+typedef struct {
+    uint16_t offset;
 } AdminRejectedMessage;
 
 typedef struct {
@@ -481,6 +514,12 @@ bool AdminAclListReplyMessage_Decode(AdminAclListReplyMessage *self, const uint8
 
 size_t AdminInterfacesMessage_Encode(const AdminInterfacesMessage *self, uint8_t *buffer, size_t buffer_size);
 bool AdminInterfacesMessage_Decode(AdminInterfacesMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminTxnsMessage_Encode(const AdminTxnsMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminTxnsMessage_Decode(AdminTxnsMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t AdminTxnsReplyMessage_Encode(const AdminTxnsReplyMessage *self, uint8_t *buffer, size_t buffer_size);
+bool AdminTxnsReplyMessage_Decode(AdminTxnsReplyMessage *self, const uint8_t *payload, size_t payload_length);
 
 size_t AdminInterfacesReplyMessage_Encode(const AdminInterfacesReplyMessage *self, uint8_t *buffer, size_t buffer_size);
 bool AdminInterfacesReplyMessage_Decode(AdminInterfacesReplyMessage *self, const uint8_t *payload, size_t payload_length);

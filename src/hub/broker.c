@@ -27,6 +27,10 @@ static_assert(
     "a full ADMIN_PEERS_REPLY page exceeds the control buffer"
 );
 static_assert(
+    CONTROL_BUFFER_SIZE >= ADMIN_PAGE_WIRE_SIZE(ADMIN_TXNS_REPLY_FIXED_FIELDS_SIZE, ADMIN_TXNS_REPLY_ENTRIES_MAX, ADMIN_TXNS_REPLY_ENTRY_SIZE),
+    "a full ADMIN_TXNS_REPLY page exceeds the control buffer"
+);
+static_assert(
     CONTROL_BUFFER_SIZE >= ADMIN_PAGE_WIRE_SIZE(ADMIN_REJECTED_REPLY_FIXED_FIELDS_SIZE, ADMIN_REJECTED_REPLY_ENTRIES_MAX, ADMIN_REJECTED_REPLY_ENTRY_SIZE),
     "a full ADMIN_REJECTED_REPLY page exceeds the control buffer"
 );
@@ -72,6 +76,7 @@ static void handleAdminKickPeer(Broker *self, HubPeer *peer, const MessageHeader
 static void handleAdminAgents(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminClients(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminInterfaces(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
+static void handleAdminTxns(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminPinAdd(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminAclSet(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
 static void handleAdminAclRevoke(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload);
@@ -239,6 +244,7 @@ static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
     [kMESSAGE_TYPE_ADMIN_AGENTS] = handleAdminAgents,
     [kMESSAGE_TYPE_ADMIN_CLIENTS] = handleAdminClients,
     [kMESSAGE_TYPE_ADMIN_INTERFACES] = handleAdminInterfaces,
+    [kMESSAGE_TYPE_ADMIN_TXNS] = handleAdminTxns,
     [kMESSAGE_TYPE_ADMIN_PIN_ADD] = handleAdminPinAdd,
     [kMESSAGE_TYPE_ADMIN_ACL_SET] = handleAdminAclSet,
     [kMESSAGE_TYPE_ADMIN_ACL_REVOKE] = handleAdminAclRevoke,
@@ -969,6 +975,23 @@ static void handleAdminInterfaces(Broker *self, HubPeer *peer, const MessageHead
 
     AdminViews_Interfaces(&self->registry, &self->directory, request.offset, &reply);
     sendControl(self, peer, encoded, AdminInterfacesReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
+}
+
+static void handleAdminTxns(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)
+{
+    AdminTxnsMessage request;
+    AdminTxnsReplyMessage reply;
+    uint8_t encoded[CONTROL_BUFFER_SIZE];
+
+    if (peer->role != kHUB_PEER_ROLE_ADMIN) {
+        return;
+    }
+    if (!AdminTxnsMessage_Decode(&request, payload, header->length)) {
+        return;
+    }
+
+    AdminViews_Transactions(&self->registry, &self->transactions, self->now_us, request.offset, &reply);
+    sendControl(self, peer, encoded, AdminTxnsReplyMessage_Encode(&reply, encoded, sizeof(encoded)));
 }
 
 static void handleAdminPinAdd(Broker *self, HubPeer *peer, const MessageHeader *header, const uint8_t *payload)

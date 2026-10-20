@@ -4,10 +4,19 @@
 
 #include "shared/bounded_string.h"
 
+#define MICROSECONDS_PER_MILLISECOND 1000
+
 static uint8_t interfaceMode(const InterfaceEntry *entry);
 static uint8_t countAgentInterfaces(const InterfaceRegistry *registry, uint32_t agent_peer_id);
 static uint8_t countSubscribers(const PeerDirectory *directory, uint32_t interface_id);
 static bool clientHasOpenChannels(const HubPeer *peer);
+static void fillTransactionEntry(
+    const InterfaceRegistry *registry,
+    const RelayedTransaction *transaction,
+    uint64_t now_us,
+    AdminTxnsReplyEntry *entry
+);
+static uint32_t elapsedMs(uint64_t since_us, uint64_t now_us);
 static bool appendClientRow(
     AdminClientsReplyMessage *reply,
     uint16_t *skipped,
@@ -171,6 +180,37 @@ void AdminViews_Interfaces(
     }
 }
 
+void AdminViews_Transactions(
+    const InterfaceRegistry *registry,
+    const TransactionTable *transactions,
+    uint64_t now_us,
+    uint16_t offset,
+    AdminTxnsReplyMessage *reply
+)
+{
+    const RelayedTransaction *transaction;
+    uint16_t skipped = 0;
+    uint16_t i;
+
+    memset(reply, 0, sizeof(*reply));
+
+    for(i=0; i<TRANSACTION_TABLE_MAX; i++) {
+        transaction = &transactions->entries[i];
+        if (transaction->state == kTRANSACTION_RELAY_STATE_FREE) {
+            continue;
+        }
+        if (skipped < offset) {
+            skipped++;
+            continue;
+        }
+        if (reply->count == ADMIN_TXNS_REPLY_ENTRIES_MAX) {
+            reply->flags |= ADMIN_REPLY_FLAG_MORE;
+            return;
+        }
+        fillTransactionEntry(registry, transaction, now_us, &reply->entries[reply->count++]);
+    }
+}
+
 /* ---------- private ---------- */
 
 static uint8_t countAgentInterfaces(const InterfaceRegistry *registry, uint32_t agent_peer_id)
@@ -262,4 +302,46 @@ static uint8_t interfaceMode(const InterfaceEntry *entry)
     }
 
     return entry->fd_capable ? ADMIN_INTERFACE_MODE_FD : ADMIN_INTERFACE_MODE_CLASSIC;
+}
+
+static void fillTransactionEntry(
+    const InterfaceRegistry *registry,
+    const RelayedTransaction *transaction,
+    uint64_t now_us,
+    AdminTxnsReplyEntry *entry
+)
+{
+    const InterfaceEntry *interface_entry = InterfaceRegistry_FindById(registry, transaction->interface_id);
+
+    entry->interface_id = transaction->interface_id;
+    entry->client_peer_id = transaction->client_peer_id;
+    entry->agent_peer_id = transaction->agent_peer_id;
+    entry->txn_id = transaction->txn_id;
+    entry->state = transaction->state == kTRANSACTION_RELAY_STATE_ACTIVE ? ADMIN_TXN_STATE_ACTIVE : ADMIN_TXN_STATE_PENDING;
+    entry->flags = transaction->exclusive ? ADMIN_TXN_FLAG_EXCLUSIVE : 0;
+    entry->completed_steps = transaction->completed_steps;
+    entry->bytes_in_flight = transaction->relayed_bytes - transaction->consumed_bytes;
+    entry->age_ms = elapsedMs(transaction->started_at_us, now_us);
+    entry->progress_age_ms = ADMIN_TXN_NO_PROGRESS;
+    if (transaction->last_progress_us != 0) {
+        entry->progress_age_ms = elapsedMs(transaction->last_progress_us, now_us);
+    }
+    if (interface_entry != NULL) {
+        memcpy(entry->agent_name, interface_entry->agent_name, REGISTER_AGENT_NAME_SIZE);
+        memcpy(entry->interface_name, interface_entry->interface_name, REGISTER_INTERFACE_NAME_SIZE);
+    }
+}
+
+static uint32_t elapsedMs(uint64_t since_us, uint64_t now_us)
+{
+    uint64_t elapsed_ms;
+
+    if (now_us <= since_us) {
+        return 0;
+    }
+    elapsed_ms = (now_us - since_us) / MICROSECONDS_PER_MILLISECOND;
+    if (elapsed_ms > UINT32_MAX) {
+        return UINT32_MAX;
+    }
+    return (uint32_t)elapsed_ms;
 }
