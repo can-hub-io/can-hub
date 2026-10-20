@@ -131,8 +131,8 @@ add_unit_test(test_admin_message
 
 add_unit_test(test_reconnect_backoff
     SOURCES
-        agent/domain/test_reconnect_backoff.cpp
-        ${ROOT_SRC_DIR}/agent/domain/reconnect_backoff.c
+        shared/test_reconnect_backoff.cpp
+        ${ROOT_SRC_DIR}/shared/reconnect_backoff.c
 )
 
 add_unit_test(test_channel_map
@@ -277,7 +277,7 @@ add_unit_test(test_agent
         ${ROOT_SRC_DIR}/agent/agent.c
         ${ROOT_SRC_DIR}/agent/domain/channel_map.c
         ${ROOT_SRC_DIR}/agent/domain/echo_correlator.c
-        ${ROOT_SRC_DIR}/agent/domain/reconnect_backoff.c
+        ${ROOT_SRC_DIR}/shared/reconnect_backoff.c
         ${ROOT_SRC_DIR}/agent/domain/tx_pacer.c
         ${ROOT_SRC_DIR}/protocol/frame_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c
@@ -474,6 +474,7 @@ add_unit_test(test_mirror_app
     SOURCES
         mirror/test_mirror_app.cpp
         ${ROOT_SRC_DIR}/mirror/mirror_app.c
+        ${ROOT_SRC_DIR}/shared/reconnect_backoff.c
         ${ROOT_SRC_DIR}/protocol/frame_message.c
         ${ROOT_SRC_DIR}/protocol/hello_message.c
         ${ROOT_SRC_DIR}/protocol/interface_name.c

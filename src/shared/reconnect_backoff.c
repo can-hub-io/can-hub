@@ -1,4 +1,4 @@
-#include "agent/domain/reconnect_backoff.h"
+#include "shared/reconnect_backoff.h"
 
 #define BACKOFF_FACTOR 2
 

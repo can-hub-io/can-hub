@@ -107,6 +107,14 @@ for them, `candump -e vcan0` or python-can's socketcan interface.
 Without a write grant it downgrades to read-only — frames still flow remote→local,
 local writes are refused at the hub.
 
+`attach` keeps running when it loses the hub: it reconnects with the agent's
+backoff (1 s doubling to 60 s), waits for an interface the hub does not list
+yet, and mirrors again once it is back; frames written to the vcan meanwhile
+are dropped. Name the interface as `<agent>/<interface>` for that: interface
+ids change when the hub restarts, so a mirror opened by id stops on a lost
+hub rather than reopen another bus. Only a refusal that waiting cannot change
+(no read grant) ends it.
+
 ## socketcand — bridge server
 
 ```sh

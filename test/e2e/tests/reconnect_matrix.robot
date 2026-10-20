@@ -8,11 +8,13 @@ Documentation     Reconnect matrix (#17): every agent transport recovers from a
 ...               timeout a crash leaves them to. A hub identity change
 ...               is covered by hub_pinning.robot and security.robot (one pinned
 ...               verifier for tls and quic), the tcp zombie by tcp_ghost.robot.
+...               An attach mirror reconnects too and mirrors both ways again.
 Library           BenchKeywords
 Variables         bench_variables.py
 Suite Setup       Setup Bench    ${BENCH}
 Suite Teardown    Teardown Bench    ${BENCH}
-Test Teardown     Run Keywords    Set Link Loss On ${WAN_SERVER} To 0    AND    Reset Bench    ${BENCH}
+Test Teardown     Run Keywords    Set Link Loss On ${WAN_SERVER} To 0    AND    Set Link Loss On ${LAN_SERVER} To 0
+...               AND    Reset Bench    ${BENCH}
 
 *** Test Cases ***
 QUIC Agent Recovers From A Network Drop
@@ -237,3 +239,43 @@ Socketcand Bridge Serves Again After A Hub Restart
     Send 20 Frames On ${WAN_SERVER} vcan0
     ${counts}=    Drain Result Of ${consumer}
     Should Be Equal As Integers    ${counts}[bridged/vcan0]    20
+
+Attach Mirrors Both Ways Again After A Hub Restart
+    ${hub_cfg}=    Benchmark Hub Configuration
+    ${hub}=    Start CAN HUB On ${LOCAL_SERVER} With ${hub_cfg}
+    ${agent}=    Start CAN Agent attach-hub On ${WAN_SERVER} Exporting vcan0 Into ${hub}    connect=quic://local:7227
+    Run CLI On Hub ${hub}    acl    add    *    attach-hub/vcan0    rw
+    ${attach_cfg}=    Client Configuration    attach    attach-hub/vcan0    mirror0    connect=quic://local:7227
+    ${attach}=    Start CAN Client On ${LAN_SERVER} With ${attach_cfg}
+    Wait Until 1 Channels Open On ${hub}
+    ${mirror_capture}=    Start Candump On ${LAN_SERVER}    mirror0
+    ${bus_capture}=    Start Candump On ${WAN_SERVER}    vcan0
+
+    ${hub}=    Restart ${hub}
+
+    Log Of ${attach} Should Contain mirroring interface attach-hub/vcan0 to mirror0 again    20
+    Inject CAN Frame On ${WAN_SERVER}    vcan0    321#CAFEBABE
+    Inject CAN Frame On ${LAN_SERVER}    mirror0    654#BEEF
+    Candump ${mirror_capture} Should Capture 321#CAFEBABE
+    Candump ${bus_capture} Should Capture 654#BEEF
+
+Attach Mirrors Both Ways Again After A Network Drop
+    ${hub_cfg}=    Benchmark Hub Configuration
+    ${hub}=    Start CAN HUB On ${LOCAL_SERVER} With ${hub_cfg}
+    ${agent}=    Start CAN Agent attach-drop On ${WAN_SERVER} Exporting vcan0 Into ${hub}    connect=quic://local:7227
+    Run CLI On Hub ${hub}    acl    add    *    attach-drop/vcan0    rw
+    ${attach_cfg}=    Client Configuration    attach    attach-drop/vcan0    mirror0    connect=quic://local:7227
+    ${attach}=    Start CAN Client On ${LAN_SERVER} With ${attach_cfg}
+    Wait Until 1 Channels Open On ${hub}
+    ${mirror_capture}=    Start Candump On ${LAN_SERVER}    mirror0
+    ${bus_capture}=    Start Candump On ${WAN_SERVER}    vcan0
+
+    Set Link Loss On ${LAN_SERVER} To 100
+    Log Of ${attach} Should Contain connection lost, reconnecting in    30
+    Set Link Loss On ${LAN_SERVER} To 0
+
+    Log Of ${attach} Should Contain mirroring interface attach-drop/vcan0 to mirror0 again    30
+    Inject CAN Frame On ${WAN_SERVER}    vcan0    321#CAFEBABE
+    Inject CAN Frame On ${LAN_SERVER}    mirror0    654#BEEF
+    Candump ${mirror_capture} Should Capture 321#CAFEBABE
+    Candump ${bus_capture} Should Capture 654#BEEF

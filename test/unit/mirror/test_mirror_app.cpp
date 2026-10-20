@@ -15,6 +15,10 @@ extern "C" {
 }
 
 #define TEST_INTERFACE_ID 7
+#define CONTROL_AT_US 1000
+#define LOST_AT_US 2000000
+#define FIRST_RETRY_US ((uint64_t)RECONNECT_DEFAULT_INITIAL_DELAY_MS * 1000)
+#define INTERFACE_RETRY_DUE_US ((uint64_t)MIRROR_INTERFACE_RETRY_MS * 1000 + CONTROL_AT_US)
 
 static MirrorApp mirror;
 static TransportPortMock hub;
@@ -27,6 +31,8 @@ static void feedOpenAck(uint8_t status, uint8_t channel);
 static void feedListReply(uint8_t flags, const char *agent, const char *iface, uint32_t interface_id);
 static void feedHubFrame(uint8_t channel, uint32_t can_id, uint8_t byte0, uint8_t byte1);
 static void feedHubError();
+static void loseHub(uint64_t now_us);
+static void pumpByName(const char *name);
 static void sendLocalFrame(uint32_t can_id, uint8_t byte0);
 static void decodeSentHello(uint8_t slot, HelloMessage *hello);
 static void decodeSentOpen(uint8_t slot, OpenMessage *open);
@@ -185,21 +191,129 @@ describe("mirror_app", []() {
         expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_FAILED);
     });
 
-    it("fails on disconnect", []() {
+    it("fails when a mirror opened by id loses the hub", []() {
         connect();
         feedOpenAck(OPEN_STATUS_OK, 5);
 
-        hub_events.on_disconnected(hub_events.context, 2000);
+        loseHub(LOST_AT_US);
 
         expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_FAILED);
     });
 
-    it("fails on a hub error message", []() {
+    it("keeps going on a hub error message, the disconnect that follows decides", []() {
         connect();
 
         feedHubError();
 
+        expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_OPENING);
+    });
+
+    it("fails when the hub denies reading the interface", []() {
+        connectByName("truck42/can0");
+        feedListReply(0, "truck42", "can0", TEST_INTERFACE_ID);
+
+        feedOpenAck(OPEN_STATUS_READ_DENIED, 0);
+
         expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_FAILED);
+    });
+
+    it("connects to the hub on its first tick", []() {
+        MirrorApp_Tick(&mirror, 0);
+
+        expect(hub.connect_calls).toBe(1);
+        expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_CONNECTING);
+    });
+
+    it("retries a first connection that fails, even when opened by id", []() {
+        hub.connect_result = false;
+
+        MirrorApp_Tick(&mirror, 0);
+
+        expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_DISCONNECTED);
+        expect(MirrorApp_PendingReconnectDelayMs(&mirror)).toBe((uint32_t)RECONNECT_DEFAULT_INITIAL_DELAY_MS);
+    });
+
+    it("waits out the backoff before reconnecting a lost hub", []() {
+        pumpByName("truck42/can0");
+        loseHub(LOST_AT_US);
+
+        MirrorApp_Tick(&mirror, LOST_AT_US + FIRST_RETRY_US - 1);
+
+        expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_DISCONNECTED);
+        expect(hub.connect_calls).toBe(0);
+    });
+
+    it("reconnects a lost hub once the backoff elapses", []() {
+        pumpByName("truck42/can0");
+        loseHub(LOST_AT_US);
+
+        MirrorApp_Tick(&mirror, LOST_AT_US + FIRST_RETRY_US);
+
+        expect(hub.connect_calls).toBe(1);
+        expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_CONNECTING);
+    });
+
+    it("keeps local frames off the hub while it is lost", []() {
+        pumpByName("truck42/can0");
+
+        loseHub(LOST_AT_US);
+        sendLocalFrame(0x321, 0xBE);
+
+        expect(hub.frame_count).toBe(0);
+    });
+
+    it("lists the name again and reopens it after reconnecting", []() {
+        pumpByName("truck42/can0");
+        loseHub(LOST_AT_US);
+        MirrorApp_Tick(&mirror, LOST_AT_US + FIRST_RETRY_US);
+        connect();
+
+        feedListReply(0, "truck42", "can0", TEST_INTERFACE_ID);
+        feedOpenAck(OPEN_STATUS_OK, 3);
+
+        expect(sentMessageType(4)).toBe((uint8_t)kMESSAGE_TYPE_LIST);
+        expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_PUMPING);
+        expect(MirrorApp_CanWrite(&mirror)).toBe(true);
+    });
+
+    it("starts the backoff over once it pumps again", []() {
+        pumpByName("truck42/can0");
+        loseHub(LOST_AT_US);
+        MirrorApp_Tick(&mirror, LOST_AT_US + FIRST_RETRY_US);
+        connect();
+        feedListReply(0, "truck42", "can0", TEST_INTERFACE_ID);
+        feedOpenAck(OPEN_STATUS_OK, 3);
+
+        loseHub(LOST_AT_US * 2);
+
+        expect(MirrorApp_PendingReconnectDelayMs(&mirror)).toBe((uint32_t)RECONNECT_DEFAULT_INITIAL_DELAY_MS);
+    });
+
+    it("waits for an interface the hub does not list yet", []() {
+        connectByName("truck42/can9");
+
+        feedListReply(0, "truck42", "can0", TEST_INTERFACE_ID);
+
+        expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_AWAITING_INTERFACE);
+    });
+
+    it("lists again for a missing interface once the retry period elapses", []() {
+        connectByName("truck42/can9");
+        feedListReply(0, "truck42", "can0", TEST_INTERFACE_ID);
+
+        MirrorApp_Tick(&mirror, INTERFACE_RETRY_DUE_US);
+
+        expect(sentMessageType(2)).toBe((uint8_t)kMESSAGE_TYPE_LIST);
+        expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_RESOLVING);
+    });
+
+    it("waits for a named interface whose open the hub rejects", []() {
+        connectByName("truck42/can0");
+        feedListReply(0, "truck42", "can0", TEST_INTERFACE_ID);
+
+        feedOpenAck(OPEN_STATUS_REJECTED, 0);
+
+        expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_AWAITING_INTERFACE);
     });
 
     it("resolves a namespaced name via LIST then opens", []() {
@@ -234,13 +348,6 @@ describe("mirror_app", []() {
         expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_PUMPING);
     });
 
-    it("fails when the namespaced name is not in the catalogue", []() {
-        connectByName("truck42/can9");
-
-        feedListReply(0, "truck42", "can0", TEST_INTERFACE_ID);
-
-        expect(MirrorApp_State(&mirror)).toBe((uint8_t)kMIRROR_FAILED);
-    });
 });
 
 static void connect()
@@ -267,7 +374,7 @@ static void feedListReply(uint8_t flags, const char *agent, const char *iface, u
     snprintf(reply.entries[0].agent_name, REGISTER_AGENT_NAME_SIZE, "%s", agent);
     snprintf(reply.entries[0].interface_name, REGISTER_INTERFACE_NAME_SIZE, "%s", iface);
     size = ListReplyMessage_Encode(&reply, wire, sizeof(wire));
-    hub_events.on_control(hub_events.context, wire, size, 1000);
+    hub_events.on_control(hub_events.context, wire, size, CONTROL_AT_US);
 }
 
 static void feedOpenAck(uint8_t status, uint8_t channel)
@@ -276,7 +383,7 @@ static void feedOpenAck(uint8_t status, uint8_t channel)
     uint8_t wire[64];
     size_t size = OpenAckMessage_Encode(&ack, wire, sizeof(wire));
 
-    hub_events.on_control(hub_events.context, wire, size, 1000);
+    hub_events.on_control(hub_events.context, wire, size, CONTROL_AT_US);
 }
 
 static void feedHubFrame(uint8_t channel, uint32_t can_id, uint8_t byte0, uint8_t byte1)
@@ -301,7 +408,23 @@ static void feedHubError()
     uint8_t wire[8];
     size_t size = MessageHeader_Encode(&header, wire, sizeof(wire));
 
-    hub_events.on_control(hub_events.context, wire, size, 1000);
+    hub_events.on_control(hub_events.context, wire, size, CONTROL_AT_US);
+}
+
+static void loseHub(uint64_t now_us)
+{
+    hub_events.on_disconnected(hub_events.context, now_us);
+}
+
+static void pumpByName(const char *name)
+{
+    char agent[REGISTER_AGENT_NAME_SIZE];
+    char iface[REGISTER_INTERFACE_NAME_SIZE];
+
+    InterfaceName_Split(name, agent, iface);
+    connectByName(name);
+    feedListReply(0, agent, iface, TEST_INTERFACE_ID);
+    feedOpenAck(OPEN_STATUS_OK, 5);
 }
 
 static void sendLocalFrame(uint32_t can_id, uint8_t byte0)
