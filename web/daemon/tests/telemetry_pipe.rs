@@ -15,6 +15,7 @@ const HELLO_SIZE: usize = 76;
 const HEADER_SIZE: usize = 4;
 const ADMIN_STATUS: u8 = 0x10;
 const ADMIN_INTERFACES: u8 = 0x20;
+const ADMIN_TXNS: u8 = 0x3C;
 
 fn status_reply(received: u64) -> Vec<u8> {
     let mut buffer = vec![0u8; 48];
@@ -40,6 +41,13 @@ fn interfaces_reply(frames_received: u64) -> Vec<u8> {
     buffer
 }
 
+fn txns_reply() -> Vec<u8> {
+    let mut buffer = vec![0u8; 8];
+    buffer[0] = 0x3D; // ADMIN_TXNS_REPLY, no transaction in flight
+    buffer[2..4].copy_from_slice(&4u16.to_le_bytes());
+    buffer
+}
+
 /// Serve one admin connection: read HELLO, then answer each request by type
 /// with replies parameterised by `received` (so successive connections report
 /// growing counters and the poll loop sees a positive rate).
@@ -48,15 +56,20 @@ async fn serve_connection(listener: &UnixListener, received: u64) {
     let mut hello = [0u8; HELLO_SIZE];
     stream.read_exact(&mut hello).await.unwrap();
 
-    // The poll loop sends ADMIN_STATUS then ADMIN_INTERFACES per tick.
-    for _ in 0..2 {
+    // The poll loop sends ADMIN_STATUS, ADMIN_INTERFACES and ADMIN_TXNS per tick.
+    for _ in 0..3 {
         let mut header = [0u8; HEADER_SIZE];
         if stream.read_exact(&mut header).await.is_err() {
+            return;
+        }
+        let mut payload = vec![0u8; u16::from_le_bytes([header[2], header[3]]) as usize];
+        if stream.read_exact(&mut payload).await.is_err() {
             return;
         }
         let reply = match header[0] {
             ADMIN_STATUS => status_reply(received),
             ADMIN_INTERFACES => interfaces_reply(received),
+            ADMIN_TXNS => txns_reply(),
             other => panic!("unexpected admin request type {other:#x}"),
         };
         stream.write_all(&reply).await.unwrap();
@@ -93,6 +106,8 @@ async fn poll_loop_broadcasts_rates() {
     assert_eq!(frame.interfaces.len(), 1);
     assert_eq!(frame.interfaces[0].interface_name, "can0");
     assert!(frame.interfaces[0].frames_per_s > 0.0);
+    assert_eq!(frame.transactions.active, 0);
+    assert!(frame.transactions_in_flight.is_empty());
 
     poller.abort();
     server.await.unwrap();

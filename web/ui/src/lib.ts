@@ -42,4 +42,10 @@ export function formatUptime(seconds: number): string {
   return `${Math.floor(seconds / 86400)}d${Math.floor((seconds % 86400) / 3600)}h`
 }
 
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 export const can = (permissions: string[], permission: string) => permissions.includes(permission)

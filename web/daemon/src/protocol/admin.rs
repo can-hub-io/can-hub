@@ -89,6 +89,39 @@ pub struct Status {
     pub frames_forwarded: u64,
     pub frames_dropped: u64,
     pub frames_unroutable: u64,
+    pub transactions: TransactionCounters,
+}
+
+/// Transaction counters of ADMIN_STATUS_REPLY (@48 on): cumulative since the
+/// hub started.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TransactionCounters {
+    pub started: u64,
+    pub completed: u64,
+    pub aborted: u64,
+    pub rejected: u64,
+    pub steps_completed: u64,
+    pub lease_frame_drops: u64,
+}
+
+/// One transaction the hub relays (ADMIN_TXNS_REPLY entry).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransactionEntry {
+    pub interface_id: u32,
+    /// 0 once its client left (cancelled as soon as the agent grants it).
+    pub client_peer_id: u32,
+    pub agent_peer_id: u32,
+    pub txn_id: u16,
+    /// 1 pending (waiting for the agent's grant), 2 active.
+    pub state: u8,
+    pub exclusive: bool,
+    pub completed_steps: u32,
+    pub bytes_in_flight: u32,
+    pub age_ms: u32,
+    /// None before the first TXN_PROGRESS.
+    pub progress_age_ms: Option<u32>,
+    pub agent_name: String,
+    pub interface_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -369,6 +402,10 @@ pub fn encode_rejected(offset: u16) -> [u8; 8] {
     encode_paginated(MessageType::AdminRejected, offset)
 }
 
+pub fn encode_txns(offset: u16) -> [u8; 8] {
+    encode_paginated(MessageType::AdminTxns, offset)
+}
+
 fn encode_paginated(message_type: MessageType, offset: u16) -> [u8; 8] {
     let mut out = [0u8; 8];
     Header::write(&mut out, message_type, 0, 4);
@@ -638,6 +675,51 @@ pub fn decode_status_reply(buffer: &[u8]) -> Result<Status, DecodeError> {
         frames_forwarded: read_u64(buffer, 24),
         frames_dropped: read_u64(buffer, 32),
         frames_unroutable: read_u64(buffer, 40),
+        transactions: decode_transaction_counters(buffer),
+    })
+}
+
+const STATUS_REPLY_WITH_TRANSACTIONS: usize = 96;
+
+/// The transaction counters, zero from a hub whose reply predates them.
+fn decode_transaction_counters(buffer: &[u8]) -> TransactionCounters {
+    if buffer.len() < STATUS_REPLY_WITH_TRANSACTIONS {
+        return TransactionCounters::default();
+    }
+    TransactionCounters {
+        started: read_u64(buffer, 48),
+        completed: read_u64(buffer, 56),
+        aborted: read_u64(buffer, 64),
+        rejected: read_u64(buffer, 72),
+        steps_completed: read_u64(buffer, 80),
+        lease_frame_drops: read_u64(buffer, 88),
+    }
+}
+
+const NO_PROGRESS_YET: u32 = 0xFFFF_FFFF;
+
+/// ADMIN_TXNS_REPLY (8 + count * 176). Entry layout (entry-relative):
+/// interface_id @0, client_peer_id @4, agent_peer_id @8, txn_id u16 @12,
+/// state @14, flags @15 (bit 0 exclusive), completed_steps @16,
+/// bytes_in_flight @20, age_ms @24, progress_age_ms @28, agent_name[128] @32,
+/// interface_name[16] @160.
+pub fn decode_txns_reply(buffer: &[u8]) -> Result<Page<TransactionEntry>, DecodeError> {
+    decode_page(buffer, MessageType::AdminTxnsReply, 176, |entry| {
+        let progress_age_ms = read_u32(entry, 28);
+        TransactionEntry {
+            interface_id: read_u32(entry, 0),
+            client_peer_id: read_u32(entry, 4),
+            agent_peer_id: read_u32(entry, 8),
+            txn_id: read_u16(entry, 12),
+            state: entry[14],
+            exclusive: entry[15] & 0x01 != 0,
+            completed_steps: read_u32(entry, 16),
+            bytes_in_flight: read_u32(entry, 20),
+            age_ms: read_u32(entry, 24),
+            progress_age_ms: (progress_age_ms != NO_PROGRESS_YET).then_some(progress_age_ms),
+            agent_name: read_fixed_str(entry, 32, AGENT_NAME_SIZE),
+            interface_name: read_fixed_str(entry, 160, INTERFACE_NAME_SIZE),
+        }
     })
 }
 
@@ -894,6 +976,53 @@ mod tests {
         assert_eq!(status.receive_overflows, 7);
         assert_eq!(status.frames_received, 1000);
         assert_eq!(status.frames_unroutable, 10);
+    }
+
+    #[test]
+    fn status_reply_carries_the_transaction_counters() {
+        let mut buffer = [0u8; 96];
+        Header::write(&mut buffer, MessageType::AdminStatusReply, 0, 92);
+        buffer[48..56].copy_from_slice(&5u64.to_le_bytes()); // started
+        buffer[56..64].copy_from_slice(&4u64.to_le_bytes()); // completed
+        buffer[64..72].copy_from_slice(&1u64.to_le_bytes()); // aborted
+        buffer[80..88].copy_from_slice(&20400u64.to_le_bytes()); // steps completed
+        buffer[88..96].copy_from_slice(&3u64.to_le_bytes()); // lease drops
+
+        let status = decode_status_reply(&buffer).unwrap();
+
+        assert_eq!(status.transactions.completed, 4);
+        assert_eq!(status.transactions.aborted, 1);
+        assert_eq!(status.transactions.steps_completed, 20400);
+        assert_eq!(status.transactions.lease_frame_drops, 3);
+    }
+
+    #[test]
+    fn txns_reply_decodes_an_active_exclusive_transaction() {
+        let mut buffer = vec![0u8; 8 + 176];
+        Header::write(&mut buffer, MessageType::AdminTxnsReply, 0, (4 + 176) as u16);
+        buffer[4] = 1; // count
+        let entry = &mut buffer[8..];
+        entry[0..4].copy_from_slice(&9u32.to_le_bytes()); // interface_id
+        entry[4..8].copy_from_slice(&3u32.to_le_bytes()); // client_peer_id
+        entry[12..14].copy_from_slice(&7u16.to_le_bytes()); // txn_id
+        entry[14] = 2; // active
+        entry[15] = 0x01; // exclusive
+        entry[16..20].copy_from_slice(&12840u32.to_le_bytes());
+        entry[28..32].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes()); // no progress yet
+        entry[32..39].copy_from_slice(b"truck42");
+        entry[160..164].copy_from_slice(b"can0");
+
+        let page = decode_txns_reply(&buffer).unwrap();
+        let transaction = &page.entries[0];
+
+        assert_eq!(transaction.interface_id, 9);
+        assert_eq!(transaction.client_peer_id, 3);
+        assert_eq!(transaction.state, 2);
+        assert!(transaction.exclusive);
+        assert_eq!(transaction.completed_steps, 12840);
+        assert_eq!(transaction.progress_age_ms, None);
+        assert_eq!(transaction.agent_name, "truck42");
+        assert_eq!(transaction.interface_name, "can0");
     }
 
     #[test]
