@@ -235,6 +235,10 @@ class BenchKeywords:
     def stop_can_client(self, client):
         client.stop()
 
+    @keyword("Pause CAN Client ${client}")
+    def pause_can_client(self, client):
+        client.pause()
+
     @keyword("Stop CAN Agent ${agent}")
     def stop_can_agent(self, agent):
         agent.stop()
@@ -484,9 +488,9 @@ class BenchKeywords:
             "lost": sent - len(set(sequences)),
             "out_of_order": out_of_order,
             "rate_fps": round(len(frames) / span) if span > 0 else 0,
-            "latency_avg_ms": round(statistics.fmean(ages_ms)),
-            "latency_p95_ms": round(sorted_ages[int(len(sorted_ages) * 0.95)]),
-            "jitter_ms": round(statistics.pstdev(ages_ms)),
+            "latency_avg_ms": round(statistics.fmean(ages_ms), 2),
+            "latency_p95_ms": round(sorted_ages[int(len(sorted_ages) * 0.95)], 2),
+            "jitter_ms": round(statistics.pstdev(ages_ms), 2),
         }
 
     @keyword("Run Scaled Benchmark ${scheme} Port ${port} Reliable ${reliable} Level ${level}")
@@ -596,9 +600,9 @@ class BenchKeywords:
             return {"count": 0, "avg_ms": 0, "max_ms": 0, "p95_ms": 0}
         return {
             "count": len(ages),
-            "avg_ms": round(sum(ages) / len(ages) * 1000),
-            "max_ms": round(ages[-1] * 1000),
-            "p95_ms": round(ages[int(len(ages) * 0.95)] * 1000),
+            "avg_ms": round(sum(ages) / len(ages) * 1000, 2),
+            "max_ms": round(ages[-1] * 1000, 2),
+            "p95_ms": round(ages[int(len(ages) * 0.95)] * 1000, 2),
         }
 
     @keyword("Shape CAN Sink On ${server} ${interface} To ${rate}")
@@ -675,6 +679,15 @@ class BenchKeywords:
     def start_echo_probe(self, count, server, channel, own_id="123", seconds=10, host="127.0.0.1", port="29536"):
         return server.exec("python3", ECHO_PROBE_SCRIPT, host, str(port), channel, str(count), own_id,
                            str(seconds), background=True, log_name="echo-probe")
+
+    @keyword("Wait Until Open Channels On ${hub} Drop To ${count}")
+    def wait_until_open_channels_drop_to(self, hub, count, timeout=8):
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            if len([r for r in hub.clients() if r.channel != "-"]) == int(count):
+                return
+            time.sleep(0.1)
+        raise AssertionError(f"expected exactly {count} open channels on the hub")
 
     @keyword("Wait Until ${count} Channels Open On ${hub}")
     def wait_until_channels_open(self, count, hub, timeout=8):
@@ -770,7 +783,7 @@ def _aggregate(per_client: list[dict], agents: int, interfaces: int) -> dict:
         "lost": sum(metric["lost"] for metric in per_client),
         "out_of_order": sum(metric["out_of_order"] for metric in per_client),
         "rate_fps": sum(metric["rate_fps"] for metric in per_client),
-        "latency_avg_ms": round(weighted_latency / received) if received else 0,
+        "latency_avg_ms": round(weighted_latency / received, 2) if received else 0,
         "latency_p95_ms": max((metric["latency_p95_ms"] for metric in per_client), default=0),
         "jitter_ms": max((metric["jitter_ms"] for metric in per_client), default=0),
     }

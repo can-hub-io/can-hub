@@ -51,6 +51,8 @@ typedef struct {
 
 typedef struct {
     QuicReliableStream streams[QUIC_RELIABLE_STREAMS_MAX];
+    uint8_t reopen_channels[QUIC_RELIABLE_STREAMS_MAX];
+    uint8_t reopen_count;
 } QuicReliableStreamSet;
 
 /* Returns false when the downstream cannot accept the frame right now; the
@@ -64,6 +66,9 @@ QuicReliableStream *QuicReliableStreams_FindById(QuicReliableStreamSet *self, in
 QuicReliableStream *QuicReliableStreams_Open(QuicReliableStreamSet *self, QuicConnection *connection, uint8_t channel);
 QuicReliableStream *QuicReliableStreams_Adopt(QuicReliableStreamSet *self, int64_t stream_id);
 QuicReliableStream *QuicReliableStreams_Close(QuicReliableStreamSet *self, uint8_t channel);
+bool QuicReliableStreams_DeferReopen(QuicReliableStreamSet *self, uint8_t channel);
+bool QuicReliableStreams_AwaitsReopen(const QuicReliableStreamSet *self, uint8_t channel);
+bool QuicReliableStreams_TakeReopenable(QuicReliableStreamSet *self, uint8_t *channel);
 void QuicReliableStreams_Finish(QuicReliableStreamSet *self, int64_t stream_id);
 void QuicReliableStreams_Release(QuicReliableStreamSet *self, int64_t stream_id);
 void QuicReliableStreams_Receive(

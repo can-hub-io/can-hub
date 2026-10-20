@@ -125,7 +125,7 @@ HELLO (total 76)
 
 ERROR (total 72)
 @4   code u16 (1 malformed message, 2 role rejected, 3 hub full,
-              4 hello timeout, 5 kicked)
+              4 hello timeout, 5 kicked, 6 slow consumer)
 @6   reserved u16
 @8   detail char[64]
 
@@ -733,11 +733,16 @@ window closes in turn — the flow paces itself to the bus with no datagram drop
 For a reliable channel this flow control *is* the rate-matching the lossy plane
 gets from explicit pacing credit (INTERFACE_STATUS).
 
-A frame is relayed to every route of the interface or to none: while any
-reliable route has no room, the hub leaves the frame on the source's stream and
-retries it later, so no route ever receives it twice. The cost is that the
-slowest reliable subscriber paces every subscriber of that interface, lossy ones
-included.
+Backpressure only paces writers. A client's frame has one route, to the agent
+that owns the interface: while that reliable leg has no room the hub leaves the
+frame on the client's stream and retries it later, pacing that writer to the bus.
+Frames from the bus are never held back: the bus keeps producing whatever the
+hub does, so pausing the agent would only make every subscriber wait for the
+slowest. The hub relays each one to every subscriber that has room, and a
+reliable subscriber that cannot take a frame (its stream buffer, 64 KiB, is full)
+is disconnected with ERROR 6 (slow consumer): skipping the frame would break its
+in-order, lossless contract. No other subscriber waits for it, lossy or
+reliable.
 
 **Lifecycle.** The hub drives teardown on both legs. CLOSE on a reliable channel
 finishes the client's stream; once no client holds the interface reliable (CLOSE
@@ -746,6 +751,14 @@ agent's uplink for that channel returns to the lossy datagram plane. Finishing
 is graceful: queued frames are sent, then a FIN; the peer answers with its own
 FIN and stops using the stream, and both sides free it once it is closed. The
 channel id is freed as usual.
+
+If a client opens the interface reliable again while the agent's old stream is
+still closing, the hub opens the new stream only once the old one is closed, so
+the agent's frames on both never interleave. Until then the agent leg takes no
+client frames (they wait on the client's stream). Reliability starts once the
+agent has the stream: frames the agent sends before that, on the first opening
+or a reopening, travel as datagrams like any lossy frame, and one of them may
+arrive after the first frames of the stream.
 
 **TCP / TLS fallback.** The fallback transports have no useful multistream: the
 whole connection is already one reliable, ordered byte stream shared by both

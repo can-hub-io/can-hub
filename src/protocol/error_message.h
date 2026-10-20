@@ -13,6 +13,7 @@ typedef enum terror_code_e {
     kERROR_CODE_HUB_FULL = 3,
     kERROR_CODE_HELLO_TIMEOUT = 4,
     kERROR_CODE_KICKED = 5,
+    kERROR_CODE_SLOW_CONSUMER = 6,
     kERROR_CODE_MAX,
 } TERROR_CODE;
 
