@@ -8,6 +8,7 @@ Keywords return Can* instances so tests read like:
 
 import json
 import re
+import signal
 import statistics
 import tempfile
 import time
@@ -106,9 +107,9 @@ class BenchKeywords:
         return hub
 
     @keyword("Start CAN Agent ${name} On ${server} Exporting ${interface} Into ${hub}")
-    def start_agent_exporting(self, name, server, interface, hub) -> CanAgent:
+    def start_agent_exporting(self, name, server, interface, hub, connect="quic://local:7227") -> CanAgent:
         server.make_vcan(interface)
-        config = AgentConfig(connect="quic://local:7227", name=name, interfaces=[interface],
+        config = AgentConfig(connect=connect, name=name, interfaces=[interface],
                              state_dir=self.fresh_state_directory("agent"))
         agent = CanAgent.start(server, config)
         agent.wait_registered(hub, timeout=8)
@@ -293,6 +294,10 @@ class BenchKeywords:
     def peer_id_of_agent(self, agent, hub) -> int:
         return agent.peer_id_on(hub)
 
+    @keyword("Wait Until Hub ${hub} Holds ${count} Client Peers")
+    def wait_until_hub_holds_clients(self, hub, count, timeout=10):
+        hub.wait_peers("client", int(count), float(timeout))
+
     @keyword("Wait Until Hub ${hub} Logged ${text} ${count} Times")
     def wait_until_hub_logged(self, hub, text, count: int, timeout: float = 10):
         hub.wait_logged(text, count, timeout)
@@ -305,6 +310,14 @@ class BenchKeywords:
                 return
             time.sleep(0.1)
         raise AssertionError(f"agent lost its hub fewer than {count} times\n{agent.process.read_log()}")
+
+    @keyword("Wait Until Agent ${agent} Has Registered ${count} Times")
+    def wait_until_agent_registered_times(self, agent, count, timeout=45):
+        agent.wait_registered_times(int(count), float(timeout))
+
+    @keyword("Hub ${hub} Should Hold Agent ${agent} Once")
+    def hub_should_hold_agent_once(self, hub, agent):
+        agent.assert_held_once_by(hub)
 
     @keyword("Wait Until Agent ${agent} Registered On ${hub}")
     def wait_until_agent_registered(self, agent, hub, timeout=5):
@@ -740,10 +753,13 @@ class BenchKeywords:
     def interfaces_listed_on(self, server, connect=None) -> list[str]:
         return [f"{row.agent}/{row.interface}" for row in CanClient.list(server, connect)]
 
-    @keyword("Restart ${hub}")
-    def restart_hub(self, hub) -> CanHub:
-        hub.stop()
-        return CanHub.start(hub.server, hub.config)
+    @keyword("Restart ${daemon}")
+    def restart(self, daemon):
+        return daemon.restarted()
+
+    @keyword("Crash And Restart ${daemon}")
+    def crash_and_restart(self, daemon):
+        return daemon.restarted(signal.SIGKILL)
 
     @keyword("Frames Captured By ${process}")
     def frames_captured_by(self, process):
