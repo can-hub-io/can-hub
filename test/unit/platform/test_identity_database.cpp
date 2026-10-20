@@ -11,7 +11,7 @@ extern "C" {
 #define OTHER_FINGERPRINT "0000000000000000000000000000000000000000000000000000000000000000"
 #define PIN_FILE_PATH "/tmp/can_hub_test_known_agents"
 #define DB_FILE_PATH "/tmp/can_hub_test_migrations.db"
-#define LATEST_SCHEMA_VERSION 5
+#define LATEST_SCHEMA_VERSION 6
 
 static IdentityDatabase database;
 static IdentityStorePort *port;
@@ -52,6 +52,51 @@ describe("identity_database", []() {
         expect(pinned).toBe(true);
         expect(found).toBe(true);
         expect((const char *)fingerprint).toBe(TRUCK_FINGERPRINT);
+    });
+
+    it("knows a fingerprint the admin enrolled", []() {
+        bool enrolled;
+        bool known;
+
+        enrolled = port->enroll(port->context, "truck42", TRUCK_FINGERPRINT);
+        known = port->knows(port->context, TRUCK_FINGERPRINT);
+
+        expect(enrolled).toBe(true);
+        expect(known).toBe(true);
+    });
+
+    it("does not know a fingerprint pinned on first contact", []() {
+        bool known;
+
+        port->pin(port->context, "truck42", TRUCK_FINGERPRINT);
+        known = port->knows(port->context, TRUCK_FINGERPRINT);
+
+        expect(known).toBe(false);
+    });
+
+    it("promotes a first-contact pin when the admin enrolls the same fingerprint", []() {
+        bool enrolled;
+        bool known;
+
+        port->pin(port->context, "truck42", TRUCK_FINGERPRINT);
+        enrolled = port->enroll(port->context, "truck42", TRUCK_FINGERPRINT);
+        known = port->knows(port->context, TRUCK_FINGERPRINT);
+
+        expect(enrolled).toBe(true);
+        expect(known).toBe(true);
+    });
+
+    it("refuses to enroll a name pinned to another fingerprint", []() {
+        char fingerprint[IDENTITY_FINGERPRINT_HEX_SIZE];
+        bool enrolled;
+
+        port->pin(port->context, "truck42", TRUCK_FINGERPRINT);
+        enrolled = port->enroll(port->context, "truck42", OTHER_FINGERPRINT);
+        port->lookup(port->context, "truck42", fingerprint);
+
+        expect(enrolled).toBe(false);
+        expect((const char *)fingerprint).toBe(TRUCK_FINGERPRINT);
+        expect(port->knows(port->context, OTHER_FINGERPRINT)).toBe(false);
     });
 
     it("rejects pinning an already pinned name", []() {
@@ -458,6 +503,30 @@ describe("identity_database migrations", []() {
         expect(readUserVersionFile(DB_FILE_PATH)).toBe(LATEST_SCHEMA_VERSION);
     });
 
+    it("trusts the pins a version 5 db already held as enrolled", []() {
+        IdentityDatabase migrated;
+        IdentityStorePort *migrated_port;
+        bool opened;
+        bool known;
+
+        executeRaw(
+            DB_FILE_PATH,
+            "CREATE TABLE agent_identities (name TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,"
+            " first_seen_at INTEGER NOT NULL DEFAULT 0);"
+            "INSERT INTO agent_identities (name, fingerprint) VALUES ('truck42', '" TRUCK_FINGERPRINT "');"
+            "PRAGMA user_version = 5"
+        );
+
+        opened = IdentityDatabase_Open(&migrated, DB_FILE_PATH);
+        migrated_port = IdentityDatabase_Port(&migrated);
+        known = migrated_port->knows(migrated_port->context, TRUCK_FINGERPRINT);
+        IdentityDatabase_Close(&migrated);
+
+        expect(opened).toBe(true);
+        expect(known).toBe(true);
+        expect(readUserVersionFile(DB_FILE_PATH)).toBe(LATEST_SCHEMA_VERSION);
+    });
+
     it("keeps the grants of a version 1 db and gives them no admin", []() {
         IdentityDatabase migrated;
         AuthorizationPort *acl;
@@ -467,6 +536,8 @@ describe("identity_database migrations", []() {
 
         executeRaw(
             DB_FILE_PATH,
+            "CREATE TABLE agent_identities (name TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,"
+            " first_seen_at INTEGER NOT NULL DEFAULT 0);"
             "CREATE TABLE client_acls (fingerprint TEXT NOT NULL, agent_name TEXT NOT NULL,"
             " interface_name TEXT NOT NULL, can_read INTEGER NOT NULL DEFAULT 1,"
             " can_write INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (fingerprint, agent_name, interface_name));"

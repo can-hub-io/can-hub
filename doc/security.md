@@ -91,9 +91,10 @@ the hub bounds that phase on every transport:
 - **One host, four at a time.** A source address may have at most four
   connections mid-handshake on each encrypted listener, and four peers awaiting
   HELLO hub-wide. Further attempts are refused until one completes or expires.
-- **Half the table stays for peers past the handshake.** Handshakes in flight
-  may fill at most half of each listener's table, and peers awaiting HELLO at
-  most half of the hub's.
+- **Handshakes have their own room.** Each encrypted listener holds 64
+  handshakes in flight on top of the 512 peers the hub admits, so a full hub
+  still has room to hear who is connecting. Peers awaiting HELLO may fill at
+  most half of the hub's table.
 - **Stalled handshakes expire.** TLS and QUIC handshakes are dropped after
   10 s, and a peer that has not sent HELLO after 5 s.
 - **QUIC Retry under pressure.** With eight or more QUIC handshakes in flight,
@@ -109,6 +110,31 @@ completes the handshake with a self-signed certificate and says HELLO holds its
 slot like any other: a connection that finished the handshake is not a trusted
 one. With `--require-known-peers` an unknown client is turned away at HELLO and
 an unknown agent at REGISTER.
+
+## Known peers displace unknown ones
+
+When the table is full, a known peer still gets in: the hub closes an unknown
+one to make room, with a `HUB_FULL` error that says so. An unknown peer arriving
+at a full table is turned away.
+
+Only an admin act makes a peer known. In TOFU mode anyone can be pinned on
+first contact by registering a new agent name, so such a pin proves nothing.
+
+- **Known** is a local peer, a plaintext peer (network-trusted, see below), a
+  fingerprint the admin enrolled with `can-hub-cli pins add`, or a fingerprint
+  an ACL rule names.
+- **Displaced first** is a peer that has not finished HELLO, or an agent that
+  has not registered. Then an unknown client with no open channel, then one
+  with open channels, and last an agent pinned on first contact. Within each
+  group, the most recently connected goes first.
+- **Never displaced:** enrolled agents, clients an ACL names, local and
+  plaintext peers.
+
+Pins that existed before this rule (schema version 6) count as enrolled.
+`pins add` on a name already pinned on first contact, with the same
+fingerprint, enrolls it. In TOFU mode legitimate and hostile clients look
+alike, so add an ACL rule for a client that must keep its slot. An enrollment
+or rule added while the peer is connected counts from its next connection.
 
 ## Plaintext transports are network-trusted
 

@@ -25,12 +25,22 @@ typedef enum thub_peer_role_e {
     kHUB_PEER_ROLE_MAX,
 } THUB_PEER_ROLE;
 
+typedef enum thub_peer_displacement_e {
+    kHUB_PEER_DISPLACEMENT_UNIDENTIFIED = 0,
+    kHUB_PEER_DISPLACEMENT_IDLE_CLIENT,
+    kHUB_PEER_DISPLACEMENT_ACTIVE_CLIENT,
+    kHUB_PEER_DISPLACEMENT_UNVOUCHED_AGENT,
+    kHUB_PEER_DISPLACEMENT_NEVER,
+    kHUB_PEER_DISPLACEMENT_MAX,
+} THUB_PEER_DISPLACEMENT;
+
 #define HUB_PEER_ORIGIN_SIZE 56
 
 typedef struct {
     bool in_use;
     bool local;
     bool send_failed;
+    bool vouched;
     uint32_t peer_id;
     uint32_t capabilities;
     uint8_t role;
@@ -51,4 +61,5 @@ typedef struct {
 bool HubPeer_AdoptRole(HubPeer *self, uint8_t wire_role);
 void HubPeer_SetAgentName(HubPeer *self, const char *agent_name);
 bool HubPeer_IsSameAgent(const HubPeer *self, const HubPeer *other);
+uint8_t HubPeer_Displacement(const HubPeer *self);
 void HubPeer_FillAdminEntry(const HubPeer *self, AdminPeersReplyEntry *entry, uint64_t now_us);

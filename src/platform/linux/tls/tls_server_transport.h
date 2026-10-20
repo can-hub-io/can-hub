@@ -9,8 +9,8 @@
 #include "hub/ports/hub_transport_events.h"
 #include "hub/ports/hub_transport_port.h"
 
-#define TLS_SERVER_PEERS_MAX HUB_PEERS_MAX
-#define TLS_SERVER_HANDSHAKES_MAX (TLS_SERVER_PEERS_MAX / 2)
+#define TLS_SERVER_HANDSHAKES_MAX 64
+#define TLS_SERVER_PEERS_MAX (HUB_PEERS_MAX + TLS_SERVER_HANDSHAKES_MAX)
 #define TLS_SERVER_ORIGIN_SIZE 56
 
 /*

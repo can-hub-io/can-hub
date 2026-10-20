@@ -9,7 +9,7 @@
 #define LINE_BUFFER_SIZE 512
 #define IMPORT_KEY_MAX 256
 #define PRAGMA_BUFFER_SIZE 64
-#define SCHEMA_VERSION 5
+#define SCHEMA_VERSION 6
 #define BRIDGE_FILTER_MASK_OFFSET 4
 #define BRIDGE_FILTERS_BLOB_MAX (BRIDGE_FILTERS_MAX * CAN_FILTER_SIZE)
 
@@ -44,6 +44,8 @@
     "ALTER TABLE bridge_group_members ADD COLUMN direction INTEGER NOT NULL DEFAULT 0;" \
     "ALTER TABLE bridge_group_members ADD COLUMN filters BLOB NOT NULL DEFAULT x''"
 
+#define SCHEMA_ADMIN_ENROLLMENT "ALTER TABLE agent_identities ADD COLUMN enrolled_by_admin INTEGER NOT NULL DEFAULT 1"
+
 #define SCHEMA_BRIDGE_GROUPS \
     "CREATE TABLE IF NOT EXISTS bridge_groups (" \
     "name TEXT PRIMARY KEY," \
@@ -67,13 +69,16 @@ static const SchemaMigration SCHEMA_MIGRATIONS[] = {
     { 3, SCHEMA_BRIDGE_ROUTES },
     { 4, SCHEMA_BRIDGE_GROUPS },
     { 5, SCHEMA_GROUP_MEMBER_DIRECTION },
+    { 6, SCHEMA_ADMIN_ENROLLMENT },
 };
 
 static bool migrateSchema(IdentityDatabase *self);
 static bool readUserVersion(sqlite3 *database, int32_t *version);
 static bool setUserVersion(sqlite3 *database, int32_t version);
 static bool storeLookup(void *context, const char *agent_name, char *fingerprint_hex);
+static bool storeKnows(void *context, const char *fingerprint_hex);
 static bool storePin(void *context, const char *agent_name, const char *fingerprint_hex);
+static bool storeEnroll(void *context, const char *agent_name, const char *fingerprint_hex);
 static bool storeForget(void *context, const char *agent_name);
 static uint8_t storeList(void *context, uint16_t offset, IdentityPin *pins, uint8_t max_pins, bool *more);
 static bool insertPin(IdentityDatabase *self, const char *sql, const char *agent_name, const char *fingerprint_hex);
@@ -114,7 +119,9 @@ bool IdentityDatabase_Open(IdentityDatabase *self, const char *path)
     memset(self, 0, sizeof(*self));
     self->identity_port.context = self;
     self->identity_port.lookup = storeLookup;
+    self->identity_port.knows = storeKnows;
     self->identity_port.pin = storePin;
+    self->identity_port.enroll = storeEnroll;
     self->identity_port.forget = storeForget;
     self->identity_port.list = storeList;
     self->authorization_port.context = self;
@@ -296,6 +303,29 @@ static bool storeLookup(void *context, const char *agent_name, char *fingerprint
     return found;
 }
 
+static bool storeKnows(void *context, const char *fingerprint_hex)
+{
+    IdentityDatabase *self = context;
+    sqlite3_stmt *statement = NULL;
+    bool known;
+
+    if (sqlite3_prepare_v2(
+            self->database,
+            "SELECT 1 FROM agent_identities WHERE fingerprint = ?1 AND enrolled_by_admin = 1 LIMIT 1",
+            -1,
+            &statement,
+            NULL
+        ) != SQLITE_OK) {
+        return false;
+    }
+
+    sqlite3_bind_text(statement, 1, fingerprint_hex, -1, SQLITE_STATIC);
+    known = sqlite3_step(statement) == SQLITE_ROW;
+    sqlite3_finalize(statement);
+
+    return known;
+}
+
 static bool storePin(void *context, const char *agent_name, const char *fingerprint_hex)
 {
     IdentityDatabase *self = context;
@@ -303,7 +333,7 @@ static bool storePin(void *context, const char *agent_name, const char *fingerpr
 
     pinned = insertPin(
         self,
-        "INSERT INTO agent_identities (name, fingerprint) VALUES (?1, ?2)",
+        "INSERT INTO agent_identities (name, fingerprint, enrolled_by_admin) VALUES (?1, ?2, 0)",
         agent_name,
         fingerprint_hex
     );
@@ -312,6 +342,22 @@ static bool storePin(void *context, const char *agent_name, const char *fingerpr
     }
 
     return pinned;
+}
+
+static bool storeEnroll(void *context, const char *agent_name, const char *fingerprint_hex)
+{
+    IdentityDatabase *self = context;
+    bool enrolled;
+
+    enrolled = insertPin(
+        self,
+        "INSERT INTO agent_identities (name, fingerprint, enrolled_by_admin) VALUES (?1, ?2, 1)"
+        " ON CONFLICT (name) DO UPDATE SET enrolled_by_admin = 1 WHERE fingerprint = excluded.fingerprint",
+        agent_name,
+        fingerprint_hex
+    );
+
+    return enrolled && sqlite3_changes(self->database) > 0;
 }
 
 static bool storeForget(void *context, const char *agent_name)

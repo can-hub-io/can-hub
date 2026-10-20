@@ -63,6 +63,7 @@ const ChannelBinding *ClientSession_NextBindingForInterface(
 );
 ChannelBinding *ClientSession_BindingForChannel(ClientSession *self, uint8_t channel);
 bool ClientSession_HoldsReliable(const ClientSession *self, uint32_t interface_id);
+bool ClientSession_HoldsChannels(const ClientSession *self);
 bool ClientSession_TakeReliableBinding(ClientSession *self, uint32_t *interface_id);
 void ClientSession_DetachInterface(ClientSession *self, uint32_t interface_id);
 bool ClientSession_ReattachInterface(

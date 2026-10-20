@@ -29,7 +29,7 @@ Noun-first grammar; an omitted verb lists.
 | `interface set <agent>/<iface> <setting>...` | reconfigure a bus, every setting in one step ([settings](#interface-settings)) |
 | `interface up\|down <agent>/<iface>` | bring a bus up or down |
 | `pins` | pinned agent identities |
-| `pins add <name> <fingerprint>` | authorize an agent ([enrollment](security.md#locking-down-agents-and-clients)) |
+| `pins add <name> <fingerprint>` | authorize an agent, or enroll one pinned on first contact ([enrollment](security.md#locking-down-agents-and-clients)) |
 | `pins delete <name>` | drop a pin so a re-keyed agent can pin again |
 | `acl` | client grants |
 | `acl add <fp\|*> <agent\|*>/<iface\|*> none\|r\|rw\|rwa` | grant a permission level ([semantics](security.md#client-acls)) |

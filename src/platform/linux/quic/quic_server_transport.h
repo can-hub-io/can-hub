@@ -19,8 +19,8 @@
 #include "hub/ports/hub_transport_events.h"
 #include "hub/ports/hub_transport_port.h"
 
-#define QUIC_SERVER_PEERS_MAX HUB_PEERS_MAX
-#define QUIC_SERVER_HANDSHAKES_MAX (QUIC_SERVER_PEERS_MAX / 2)
+#define QUIC_SERVER_HANDSHAKES_MAX 64
+#define QUIC_SERVER_PEERS_MAX (HUB_PEERS_MAX + QUIC_SERVER_HANDSHAKES_MAX)
 #define QUIC_SERVER_RETRY_THRESHOLD 8
 #define QUIC_SERVER_ORIGIN_SIZE 56
 
