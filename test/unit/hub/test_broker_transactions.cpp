@@ -151,6 +151,31 @@ describe("broker transactions", []() {
             expect(lastControlIndex(AGENT_PEER, kMESSAGE_TYPE_TXN_BEGIN)).toBe(-1);
         });
 
+        it("answers unsupported for ISO-TP steps to an agent that does not run them", []() {
+            TxnBeginAckMessage ack;
+
+            startHub(NULL, AGENT_CAPABILITIES);
+            client_channel = openCan0(CLIENT_PEER, RELIABLE_WRITE);
+
+            beginFrom(CLIENT_PEER, client_channel, TXN_BEGIN_FLAG_ISOTP);
+            ack = lastBeginAckTo(CLIENT_PEER);
+
+            expect(ack.status).toBe((uint8_t)kTXN_BEGIN_STATUS_UNSUPPORTED);
+            expect(lastControlIndex(AGENT_PEER, kMESSAGE_TYPE_TXN_BEGIN)).toBe(-1);
+        });
+
+        it("relays a transaction with ISO-TP steps to an agent that runs them", []() {
+            int32_t begin_index;
+
+            startHub(NULL, AGENT_CAPABILITIES | HELLO_CAP_ISOTP);
+            client_channel = openCan0(CLIENT_PEER, RELIABLE_WRITE);
+
+            beginFrom(CLIENT_PEER, client_channel, TXN_BEGIN_FLAG_ISOTP);
+            begin_index = lastControlIndex(AGENT_PEER, kMESSAGE_TYPE_TXN_BEGIN);
+
+            expect(begin_index >= 0).toBe(true);
+        });
+
         it("answers write denied to a client without a write grant", []() {
             TxnBeginAckMessage ack;
 

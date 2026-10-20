@@ -15,9 +15,12 @@ extern "C" {
 #define TEMPLATE_RESERVED_OFFSET 17
 #define TEMPLATE_RESERVED_SIZE 3
 #define STATUS_RX_FRAME_FLAGS_OFFSET 46
+#define TEMPLATE_ISOTP_RESPONSE_ID_OFFSET 92
+#define TEMPLATE_ISOTP_RESERVED_OFFSET 103
 
 static TxnBeginMessage fullRosterBegin(void);
 static TxnTemplateMessage udsTemplate(void);
+static TxnTemplateMessage isotpTemplate(void);
 static bool areBytesZero(const uint8_t *bytes, size_t count);
 
 describe("txn_message", []() {
@@ -217,6 +220,33 @@ describe("txn_template_message", []() {
         reserved_zeroed = areBytesZero(buffer + MESSAGE_HEADER_SIZE + TEMPLATE_RESERVED_OFFSET, TEMPLATE_RESERVED_SIZE);
 
         expect(reserved_zeroed).toBe(true);
+    });
+
+    it("round-trips the ISO-TP parameters after the patterns", []() {
+        TxnTemplateMessage template_message;
+        TxnTemplateMessage decoded;
+        uint8_t buffer[TEST_BUFFER_SIZE];
+        uint8_t *body = buffer + MESSAGE_HEADER_SIZE;
+        bool decoded_ok;
+
+        template_message = isotpTemplate();
+        memset(buffer, 0xAA, sizeof(buffer));
+
+        TxnTemplateMessage_Encode(&template_message, buffer, sizeof(buffer));
+        decoded_ok = TxnTemplateMessage_Decode(&decoded, body, TXN_TEMPLATE_BODY_SIZE);
+
+        expect(decoded_ok).toBe(true);
+        expect(body[TEMPLATE_ISOTP_RESPONSE_ID_OFFSET]).toBe(0xE8);
+        expect(body[TEMPLATE_ISOTP_RESERVED_OFFSET]).toBe(0);
+        expect(decoded.type).toBe((uint8_t)kTXN_TEMPLATE_TYPE_ISOTP);
+        expect(decoded.isotp.response_id).toBe((uint32_t)0x7E8);
+        expect(decoded.isotp.flags).toBe((uint8_t)(TXN_ISOTP_FLAG_PADDING | TXN_ISOTP_FLAG_ADDRESS_BYTE | TXN_ISOTP_FLAG_FD));
+        expect(decoded.isotp.tx_address).toBe(0x10);
+        expect(decoded.isotp.rx_address).toBe(0xF1);
+        expect(decoded.isotp.padding).toBe(0xCC);
+        expect(decoded.isotp.tx_data_length).toBe(64);
+        expect(decoded.isotp.block_size).toBe(8);
+        expect(decoded.isotp.st_min).toBe(0xF5);
     });
 
     it("refuses to encode a template id beyond the table", []() {
@@ -441,6 +471,22 @@ static TxnTemplateMessage udsTemplate(void)
     template_message.patterns[kTXN_PATTERN_ADVANCE] = { 0x7E8, 0x7FF, 0xFF00, 0x7600 };
     template_message.patterns[kTXN_PATTERN_ABORT] = { 0x7E8, 0x7FF, 0xFF00, 0x7F00 };
     template_message.patterns[kTXN_PATTERN_EXTEND] = { 0x7E8, 0x7FF, 0xFF00FF00, 0x78007F00 };
+    return template_message;
+}
+
+static TxnTemplateMessage isotpTemplate(void)
+{
+    TxnTemplateMessage template_message = udsTemplate();
+
+    template_message.type = kTXN_TEMPLATE_TYPE_ISOTP;
+    template_message.isotp.response_id = 0x7E8;
+    template_message.isotp.flags = TXN_ISOTP_FLAG_PADDING | TXN_ISOTP_FLAG_ADDRESS_BYTE | TXN_ISOTP_FLAG_FD;
+    template_message.isotp.tx_address = 0x10;
+    template_message.isotp.rx_address = 0xF1;
+    template_message.isotp.padding = 0xCC;
+    template_message.isotp.tx_data_length = 64;
+    template_message.isotp.block_size = 8;
+    template_message.isotp.st_min = 0xF5;
     return template_message;
 }
 

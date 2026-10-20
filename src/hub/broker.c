@@ -2812,6 +2812,9 @@ static uint8_t admitTransaction(Broker *self, const HubPeer *client, const TxnBe
     if ((agent->capabilities & HELLO_CAP_TRANSACTIONS) == 0) {
         return kTXN_BEGIN_STATUS_UNSUPPORTED;
     }
+    if ((begin->flags & TXN_BEGIN_FLAG_ISOTP) && (agent->capabilities & HELLO_CAP_ISOTP) == 0) {
+        return kTXN_BEGIN_STATUS_UNSUPPORTED;
+    }
     if (!ClientSession_ChannelReliable(&client->session, begin->channel)) {
         return kTXN_BEGIN_STATUS_RELIABLE_CHANNEL_REQUIRED;
     }

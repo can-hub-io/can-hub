@@ -129,8 +129,8 @@ HELLO (total 76)
 @5   role u8 (1 agent, 2 client, 3 admin)
 @6   reserved u16
 @8   capabilities u32 (feature bitset; bit 0 reliable channels — see Reliable
-              channels; bit 1 transactions — see Transactions. Unknown bits
-              are ignored, never fatal.)
+              channels; bit 1 transactions, bit 2 ISO-TP steps — see
+              Transactions. Unknown bits are ignored, never fatal.)
 @12  name char[64]   (optional client label; agents name themselves in REGISTER)
 
 ERROR (total 72)
@@ -818,8 +818,10 @@ The name is colloquial: a transaction runs to completion or to the first failure
 CAN has no atomicity and nothing is rolled back.
 
 **Capability.** An agent that runs transactions advertises bit 1 of the HELLO
-`capabilities` bitset (transactions). If the agent owning the interface did not,
-the hub answers TXN_BEGIN with status unsupported (3).
+`capabilities` bitset (transactions), and bit 2 if it also runs ISO-TP steps
+(below). If the agent owning the interface did not advertise bit 1, or a
+TXN_BEGIN with flag bit 1 (ISO-TP) reaches an agent that did not advertise bit
+2, the hub answers status unsupported (3).
 
 **Prerequisites.** The client runs a transaction on a channel it has open, and:
 
@@ -896,6 +898,56 @@ does not wait, `timeout_ms` bounds those retries (an agent default when zero).
   (reason timeout), or completes if the template has the soft flag;
 - `gap_us` is the minimum delay between this step's frame and the next step's.
 
+**ISO-TP steps.** A template of `type` 1 makes each of its steps one ISO
+15765-2 message instead of one frame (UDS requests longer than a frame, such as
+TransferData). The agent segments the step's message into a single frame, or a
+first frame and consecutive frames, on the step's `can_id`, honouring the block
+size and STmin of the flow control (FC) the peer sends on `isotp_response_id`.
+It reassembles the answer arriving on `isotp_response_id`, answering its first
+frame with an FC on `can_id` carrying `isotp_block_size` and `isotp_st_min`.
+Then:
+
+- the patterns match the **reassembled message**: the id compared is
+  `isotp_response_id`, P is the first 8 bytes of the message (after the
+  protocol control information and the address byte). Flow-control and partial
+  frames never match. Every message received is checked against extend, abort
+  and advance as frames are, so a response pending (`7F xx 78`) restarts the
+  timeout and the agent keeps listening;
+- `timeout_ms` runs from the moment the last frame of the request is sent (the
+  UDS P2 time), and `gap_us` from then too. An expect-only step waits for a
+  message without sending one;
+- the frames themselves travel the normal paths: subscribers see the segments
+  and the flow control on the bus as they see any traffic;
+- `isotp_flags` bit 0 (padding): every frame the agent sends is filled to its
+  data length with `isotp_padding`; without it each frame is as short as its
+  data allows. Bit 1 (address byte): every frame the agent sends starts with
+  `isotp_tx_address`, and only frames on `isotp_response_id` starting with
+  `isotp_rx_address` belong to the answer (extended addressing: target and
+  source address; mixed addressing: the address extension, the same byte both
+  ways). Bit 2 (CAN FD): the agent sends CAN FD frames with the data length
+  `isotp_tx_data_length` (8, 12, 16, 20, 24, 32, 48 or 64), bit 3 with bit rate
+  switch; it accepts answers in classic or FD frames either way;
+- a message is 1-4095 bytes: the escape for longer first frames is not
+  supported, and an answer announcing more is refused with an FC overflow;
+- the agent bounds the transfer with the standard timers: 1000 ms for the
+  peer's FC (N_Bs) and between the consecutive frames of an answer (N_Cr), and
+  at most 10 consecutive FC wait. A failure aborts the transaction with reasons
+  10 flow-control timeout, 11 consecutive-frame timeout, 12 overflow (the peer
+  answered FC overflow, or announced more than 4095 bytes), 13 sequence error
+  (a consecutive frame out of order) or 14 wait limit.
+
+A step of an ISO-TP template carries its message in records with the
+**message** flag (bit 3), whose payload is part of the message (1-255 bytes,
+`frame_flags` 0) instead of a frame. A message longer than one record goes on in
+the next ones: every record but the last of the step carries the **continued**
+flag (bit 4), and names the same `template_id` and `can_id`; only the last one
+may carry the expect value or the last-step flag. A continued record is not a
+step: sequence numbers count steps, so a batch may start or end inside one, and
+`first_seq` is the sequence number of the step its first record belongs to. A
+message record naming a generic template, a frame record naming an ISO-TP one, a
+message over 4095 bytes or a step whose records do not fit in the window abort
+the transaction (reason invalid step).
+
 **Roster.** TXN_BEGIN carries up to 64 expected origins and how to extract a
 frame's origin: from the CAN id (X = id bits 0-28) or from the payload (X = the
 4 bytes at `payload_offset`, little-endian, missing bytes read as zero), then
@@ -945,7 +997,7 @@ TXN_STATUS aborted, reason agent disconnected.
 ```
 TXN_BEGIN (total 272)
 @4   channel u8
-@5   flags u8 (bit 0: exclusive lease)
+@5   flags u8 (bit 0: exclusive lease, bit 1: uses ISO-TP templates)
 @6   origin_source u8 (0 none, 1 can_id, 2 payload)
 @7   origin_shift u8
 @8   origin_mask u32
@@ -961,7 +1013,7 @@ TXN_BEGIN_ACK (total 12)
 @6   txn_id u16
 @8   window u32 (step record bytes the client may have in flight)
 
-TXN_TEMPLATE (total 96)
+TXN_TEMPLATE (total 108)
 @4   channel u8
 @5   template_id u8 (0-15)
 @6   txn_id u16
@@ -971,25 +1023,37 @@ TXN_TEMPLATE (total 96)
 @11  patterns_present u8 (bit 0 advance, bit 1 abort, bit 2 extend)
 @12  timeout_ms u32
 @16  gap_us u32
-@20  type u8 (0 generic; reserved for typed steps)
+@20  type u8 (0 generic, 1 ISO-TP)
 @21  reserved u8[3]
 @24  patterns[3] (advance, abort, extend), 24 bytes each:
        +0  can_id u32
        +4  can_mask u32
        +8  payload_mask u64
        +16 payload_value u64
+@96  isotp_response_id u32 (as FRAME can_id; ISO-TP only, 0 otherwise)
+@100 isotp_flags u8 (bit 0 padding, bit 1 address byte, bit 2 CAN FD,
+                     bit 3 bit rate switch)
+@101 isotp_tx_address u8
+@102 isotp_rx_address u8
+@103 isotp_padding u8
+@104 isotp_tx_data_length u8 (8 classic; 8-64 CAN FD)
+@105 isotp_block_size u8 (0: the peer sends the whole answer without waiting)
+@106 isotp_st_min u8 (ISO 15765-2 encoding: 0-127 ms, 0xF1-0xF9 100-900 us)
+@107 reserved u8
 
 TXN_STEPS (total 16 + records, records at most 400 bytes)
 @4   channel u8
-@5   step_count u8
+@5   step_count u8 (records in the batch)
 @6   txn_id u16
-@8   first_seq u32
+@8   first_seq u32 (the step the first record belongs to)
 @12  reserved u32
 @16  records, back to back, each:
        +0  template_id u8
        +1  flags u8 (bit 0: expect value present, bit 1: expect-only, no
-                     frame, bit 2: last step)
-       +2  payload_length u8 (0-8 classic, 0-64 FD; 0 for expect-only)
+                     frame, bit 2: last step, bit 3: message (ISO-TP), bit 4:
+                     continued in the next record)
+       +2  payload_length u8 (0-8 classic, 0-64 FD; 0 for expect-only;
+                              1-255 for a message record)
        +3  frame_flags u8 (as FRAME)
        +4  can_id u32 (as FRAME; 0 for expect-only)
        +8  payload, zero-padded to a multiple of 8 bytes
@@ -1015,11 +1079,14 @@ TXN_STATUS (total 116)
 @44  rx_can_id u32
 @48  reason u8 (0 none, 1 timeout, 2 abort match, 3 value mismatch,
                 4 tx failed, 5 cancelled, 6 starved, 7 overrun,
-                8 agent disconnected, 9 invalid step)
+                8 agent disconnected, 9 invalid step, 10 flow-control
+                timeout, 11 consecutive-frame timeout, 12 overflow, 13
+                sequence error, 14 wait limit)
 @49  rx_payload_length u8
 @50  rx_frame_flags u8
-@51  flags u8 (bit 0: rx frame present — the last frame that matched a
-               pattern of the failing step)
+@51  flags u8 (bit 0: rx frame present — the last frame, or the first 64
+               bytes of the last ISO-TP message, that matched a pattern of the
+               failing step)
 @52  rx_payload u8[64]
 
 TXN_ABORT (total 8)
@@ -1031,6 +1098,8 @@ TXN_ABORT (total 8)
 A classic 8-byte step is a 16-byte record and an expect-only step 8 bytes, so a
 1 MB flash in batches of 16 frames plus one acknowledgement needs about 2 bytes
 of records per firmware byte.
+An ISO-TP message travels in records of up to 255 bytes: a 4095-byte
+TransferData request takes 17 records, about 4.2 KB.
 
 ## External protocol bridging
 
