@@ -71,8 +71,6 @@ extern "C" {
 #define CANHUB_ISOTP_FLAG_FD (1u << 2)
 #define CANHUB_ISOTP_FLAG_BIT_RATE_SWITCH (1u << 3)
 #define CANHUB_ISOTP_MESSAGE_MAX 4095
-#define CANHUB_UDS_EXPECT_MAX 8
-#define CANHUB_UDS_TRANSFER_BLOCK_MAX 4093
 #define CANHUB_TXN_ORIGIN_NONE 0
 #define CANHUB_TXN_ORIGIN_CAN_ID 1
 #define CANHUB_TXN_ORIGIN_PAYLOAD 2
@@ -339,22 +337,6 @@ typedef struct {
     char roster_name[CANHUB_SCRIPT_NAME_MAX];
 } CanHubScriptOutcome;
 
-/*
- * A UDS conversation (ISO 14229) over ISO-TP steps with one ECU: where requests
- * go, the ISO-TP transport (its response_id is where the ECU answers), how
- * long a request waits for its answer (P2) and, after a response pending,
- * how long again (P2*). flags takes CANHUB_TXN_FLAG_EXCLUSIVE.
- */
-typedef struct {
-    uint32_t struct_size;
-    uint32_t request_id;
-    uint32_t p2_ms;
-    uint32_t p2_extended_ms;
-    uint8_t flags;
-    uint8_t reserved[3];
-    CanHubTxnIsotp transport;
-} CanHubUds;
-
 typedef int32_t (*CanHubScriptProgress)(void *context, const CanHubTxnProgress *progress, uint32_t total_steps);
 
 CANHUB_API uint32_t canhub_api_version(void);
@@ -418,38 +400,6 @@ CANHUB_API int32_t canhub_txn_end(CanHubSession *session, int32_t timeout_ms);
 CANHUB_API int32_t canhub_txn_wait(CanHubSession *session, CanHubTxnResult *result, int32_t timeout_ms);
 CANHUB_API int32_t canhub_txn_progress(CanHubSession *session, CanHubTxnProgress *progress);
 CANHUB_API int32_t canhub_txn_abort(CanHubSession *session);
-
-/*
- * UDS requests run at the agent as one transaction, the answers checked by the
- * UDS rules: a positive answer starts with the service id + 0x40 (or with
- * expect, which must), a negative one (7F <service> <code>) aborts the
- * transaction, 7F <service> 78 makes the request wait p2_extended_ms. A
- * request whose sub-function carries the suppress-positive-response bit does
- * not wait. canhub_uds_begin begins the transaction; canhub_uds_transfer sends
- * data as TransferData blocks (36 <counter> <block>, the counter from 1,
- * wrapping after 255), each answered 76 <counter>. End and wait with
- * canhub_txn_end and canhub_txn_wait; canhub_uds_negative_code reads the code
- * of a negative answer from the result (0 when the abort was something else).
- */
-CANHUB_API int32_t canhub_uds_begin(CanHubSession *session, const CanHubUds *uds, int32_t timeout_ms);
-CANHUB_API int32_t canhub_uds_request(
-    CanHubSession *session,
-    const CanHubUds *uds,
-    const uint8_t *request,
-    uint16_t length,
-    const uint8_t *expect,
-    uint8_t expect_length,
-    int32_t timeout_ms
-);
-CANHUB_API int32_t canhub_uds_transfer(
-    CanHubSession *session,
-    const CanHubUds *uds,
-    const uint8_t *data,
-    uint32_t length,
-    uint16_t block_size,
-    int32_t timeout_ms
-);
-CANHUB_API uint8_t canhub_uds_negative_code(const CanHubTxnResult *result);
 
 /*
  * Run a transaction script (doc/transaction-scripts.md) on the open interface,
