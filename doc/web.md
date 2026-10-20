@@ -12,7 +12,9 @@ local transports, so `can-hub-web` must run **on the hub host**.
 
 ## Install
 
-Built from source today (Rust >= 1.80 and Node 20+):
+The `can-hub` Debian package ships it, enabled and started on loopback
+`127.0.0.1:8080` (see [installation](installation.md#debian-packages)); flags
+go in `/etc/can-hub/web.conf`. From source (Rust >= 1.80 and Node 20+):
 
 ```sh
 web/build-release.sh                      # UI + daemon with the SPA embedded

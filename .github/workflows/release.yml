@@ -70,6 +70,15 @@ jobs:
             dist/can-hub-${{ github.ref_name }}-linux-${{ matrix.arch }}-static.tar.gz
             dist/${{ matrix.arch }}/*.deb
 
+  apt-repo:
+    needs: static-assets
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/apt-repo.yml
+    secrets: inherit
+
   python-wheels:
     needs: create-release
     # Each arch builds on its native arm64/x86 runner instead of x86 + QEMU,

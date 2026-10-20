@@ -83,9 +83,9 @@ And beyond the binaries:
 
 ## Install
 
-Releases ship static per-arch Debian packages and tarballs (x86_64, arm64,
-armv7) plus python wheels on PyPI — see
-[doc/installation.md](doc/installation.md). From source:
+Static per-arch Debian packages (amd64, arm64, armhf) from the signed APT
+repository at `apt.can-hub.io`, release tarballs, and python wheels on PyPI —
+see [doc/installation.md](doc/installation.md). From source:
 
 ```sh
 make release            # cmake+ninja+gcc; first configure needs network
