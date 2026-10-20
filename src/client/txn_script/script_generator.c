@@ -69,6 +69,12 @@ uint8_t ScriptGenerator_Next(ScriptGenerator *self, TxnStep *step, ScriptError *
     }
 }
 
+bool ScriptGenerator_Frame(ScriptGenerator *self, const ScriptStatement *statement, TxnStep *step, ScriptError *error)
+{
+    memset(step, 0, sizeof(*step));
+    return fillFrame(self, statement, step, error);
+}
+
 /* ---------- private ---------- */
 
 static uint16_t *cursorOf(ScriptGenerator *self)

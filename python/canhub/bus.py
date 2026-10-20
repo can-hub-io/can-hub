@@ -11,7 +11,7 @@ from can import BusABC, CanInitializationError, CanOperationError, Message
 from . import _native as native
 from . import settings as interface_settings
 from .settings import InterfaceSettings
-from .transaction import Origin, Transaction, TransactionProgress, TransactionResult
+from .transaction import Keepalive, Origin, Transaction, TransactionProgress, TransactionResult
 from . import transaction as transactions
 
 DEFAULT_TIMEOUT_MS = 5000
@@ -221,6 +221,8 @@ class CanHubBus(BusABC):
         origin: Optional[Origin] = None,
         exclusive: bool = False,
         isotp: bool = False,
+        idle_timeout: Optional[float] = None,
+        keepalive: Optional[Keepalive] = None,
         timeout: float = DEFAULT_TIMEOUT_MS / 1000,
     ) -> Transaction:
         """Start a transaction on this bus (open it with ``reliable=True``).
@@ -228,14 +230,17 @@ class CanHubBus(BusABC):
         ``roster`` lists the origins expected to answer roster steps, told
         apart by ``origin``; ``exclusive`` drops other clients' frames to this
         interface until the transaction ends; ``isotp`` declares templates of
-        :class:`Isotp` steps, refused by an agent that cannot run them. Waits
-        for the agent's grant.
+        :class:`Isotp` steps, refused by an agent that cannot run them.
+        ``idle_timeout`` is how long the agent waits for steps once it ran out
+        of them (default 5 s), sending ``keepalive`` meanwhile. Waits for the
+        agent's grant.
         See :mod:`canhub.transaction`.
         """
         if not self._writable:
             raise CanOperationError("bus is read-only (write denied by the hub ACL)")
         try:
-            return transactions.begin(self, roster, origin, exclusive, isotp, timeout)
+            options = transactions.BeginOptions(exclusive, isotp, idle_timeout, keepalive)
+            return transactions.begin(self, roster, origin, options, timeout)
         except ValueError as error:
             raise CanOperationError(str(error)) from error
 

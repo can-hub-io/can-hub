@@ -274,3 +274,19 @@ A Released Lease Lets The Other Clients Write Again
     Should Not Be True    ${refused.ok}
     Should Be True    ${accepted.ok}    ${accepted.stdout}${accepted.stderr}
     Candump ${bus} Should Capture 1A0#CAFE
+
+A Keepalive Holds The Device Session While The Client Lags
+    [Documentation]    The client holds its steps back 8 s, past the default 5 s
+    ...                starvation deadline; with a 20 s idle timeout the agent waits,
+    ...                sending a keepalive every second, and the transaction ends well.
+    ${hub}=    Start CAN HUB Open To Writers On ${LOCAL_SERVER}
+    ${client_state}=    Fresh State Directory For client
+    Start CAN Agent truck42 On ${LOCAL_SERVER} Exporting vcan0 Into ${hub}
+    ${ecu}=    Start Python ${ECU} On ${LOCAL_SERVER}    vcan0    nodes    1
+    Log Of ${ecu} Should Contain ready
+
+    ${result}=    Run Python ${TXN} On ${LOCAL_SERVER}    ${QUIC}    truck42/vcan0    batch    50    1    --hold-ms    8000    --idle-timeout-ms    20000    --keepalive-ms    1000    --state-dir    ${client_state}
+
+    Should Be True    ${result.ok}    ${result.stdout}${result.stderr}
+    Should Contain    ${result.stdout}    done steps=850
+    Log Of ${ecu} Should Contain keepalive 6

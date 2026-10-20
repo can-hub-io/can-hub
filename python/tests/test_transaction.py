@@ -8,7 +8,9 @@ from canhub.bus import CanHubBus, _FairLock
 from canhub.transaction import (
     SEND_CHUNK_STEPS,
     Advance,
+    BeginOptions,
     Isotp,
+    Keepalive,
     Origin,
     Pattern,
     ScriptError,
@@ -134,13 +136,27 @@ class TestToNativeStep:
 
 
 class TestToNativeBegin:
+    def test_it_carries_the_idle_timeout_and_the_keepalive_frame(self):
+        options = BeginOptions(idle_timeout=60, keepalive=Keepalive(0x7E0, b"\x02\x3e\x80", period=2.0))
+
+        request = to_native_begin((), None, options)
+
+        assert request.idle_timeout_ms == 60000
+        assert request.keepalive_period_ms == 2000
+        assert request.keepalive.can_id == 0x7E0
+        assert bytes(request.keepalive.payload[: request.keepalive.length]) == b"\x02\x3e\x80"
+
+    def test_it_refuses_a_keepalive_longer_than_a_frame(self):
+        with pytest.raises(ValueError):
+            to_native_begin((), None, BeginOptions(keepalive=Keepalive(0x7E0, bytes(65), period=1.0)))
+
     def test_it_declares_isotp_steps(self):
-        request = to_native_begin((), None, exclusive=False, isotp=True)
+        request = to_native_begin((), None, BeginOptions(isotp=True))
 
         assert request.flags == native.TXN_FLAG_ISOTP
 
     def test_it_reads_origins_from_the_payload_when_an_offset_is_given(self):
-        request = to_native_begin((1, 2), Origin(mask=0xFF, payload_offset=2), True)
+        request = to_native_begin((1, 2), Origin(mask=0xFF, payload_offset=2), BeginOptions(exclusive=True))
 
         assert request.flags == native.TXN_FLAG_EXCLUSIVE
         assert request.origin_source == native.TXN_ORIGIN_PAYLOAD
@@ -150,7 +166,7 @@ class TestToNativeBegin:
 
     def test_it_needs_an_origin_for_a_roster(self):
         with pytest.raises(ValueError):
-            to_native_begin((1, 2), None, False)
+            to_native_begin((1, 2), None, BeginOptions())
 
 
 class TestFromNativeResult:

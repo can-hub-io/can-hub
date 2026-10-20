@@ -172,6 +172,9 @@ typedef struct {
 
 typedef struct {
     bool exclusive;
+    uint16_t keepalive;
+    uint32_t keepalive_period_us;
+    uint32_t idle_timeout_us;
     ScriptConstant constants[SCRIPT_CONSTANTS_MAX];
     uint8_t constant_count;
     ScriptTemplate templates[SCRIPT_TEMPLATES_MAX];

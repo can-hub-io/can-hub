@@ -21,6 +21,14 @@ bool CanHubTransactions_BeginToWire(const CanHubTxnBegin *begin, TxnBeginMessage
     message->origin.mask = begin->origin_mask;
     message->roster_count = (uint8_t)begin->roster_count;
     memcpy(message->roster, begin->roster, (size_t)begin->roster_count * sizeof(begin->roster[0]));
+    message->idle_timeout_ms = begin->idle_timeout_ms;
+    message->keepalive.period_ms = begin->keepalive_period_ms;
+    message->keepalive.can_id = begin->keepalive.can_id;
+    message->keepalive.frame_flags = begin->keepalive.flags & (CANHUB_FRAME_FLAG_FD | CANHUB_FRAME_FLAG_BRS);
+    message->keepalive.payload_length = begin->keepalive.length;
+    if (begin->keepalive.length <= CANHUB_FRAME_PAYLOAD_MAX) {
+        memcpy(message->keepalive.payload, begin->keepalive.payload, begin->keepalive.length);
+    }
 
     return true;
 }

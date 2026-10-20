@@ -2,7 +2,7 @@
 
 usage: txn_run.py <url> <channel> uds <count> [--exclusive] [--timeout-ms T] [--within S] [--abort-after-ms T]
                    [--lossy] [--state-dir PATH]
-       txn_run.py <url> <channel> batch <batches> <nodes> [--hold-ms T] [--state-dir PATH]
+       txn_run.py <url> <channel> batch <batches> <nodes> [--hold-ms T] [--keepalive-ms T] [--idle-timeout-ms T] [--state-dir PATH]
 
 uds: <count> requests [02 36 n] to 0x7E0, each waiting for [.. 76 n] on 0x7E8,
 aborting on a negative response and extended by a response pending.
@@ -11,7 +11,8 @@ crc by every node of a <nodes>-strong roster (ids 0x700 | node).
 --abort-after-ms cancels the transaction that long after handing the steps
 over; --lossy opens the bus without the reliable channel a transaction needs;
 --hold-ms hands the first batch over, then keeps reading for T ms without
-handing over another step.
+handing over another step; --idle-timeout-ms is how long the agent then waits
+for steps, sending a keepalive on 0x7DF every --keepalive-ms meanwhile.
 Prints "granted", then "done steps=N seconds=S" (exit 0), or "aborted
 reason=R step=S missing=[...]" (exit 2); --within S fails with exit 3 when
 the transaction took longer.
@@ -24,7 +25,7 @@ import time
 
 import can
 
-from canhub import Advance, Origin, Pattern, Step, Template, TransactionAborted
+from canhub import Advance, Keepalive, Origin, Pattern, Step, Template, TransactionAborted
 
 REQUEST_ID = 0x7E0
 RESPONSE_ID = 0x7E8
@@ -33,6 +34,8 @@ POSITIVE_SERVICE = 0x76
 NEGATIVE_RESPONSE = 0x7F
 RESPONSE_PENDING = 0x78
 BATCH_ID = 0x123
+KEEPALIVE_ID = 0x7DF
+KEEPALIVE_DATA = bytes([0x02, 0x3E, 0x80])
 BATCH_FRAMES = 16
 ACK_ID_BASE = 0x700
 ACK_ID_MASK = 0x7E0
@@ -64,6 +67,8 @@ def main():
     parser.add_argument("--abort-after-ms", type=int)
     parser.add_argument("--lossy", action="store_true")
     parser.add_argument("--hold-ms", type=int)
+    parser.add_argument("--keepalive-ms", type=int)
+    parser.add_argument("--idle-timeout-ms", type=int)
     arguments = parser.parse_args()
 
     bus = can.Bus(
@@ -139,7 +144,9 @@ def run_batches(bus, arguments):
         timeout=ACK_TIMEOUT_S,
         abort_on_mismatch=True,
     )
-    with bus.transaction(roster=range(nodes), origin=Origin(mask=NODE_MASK)) as transaction:
+    with bus.transaction(
+        roster=range(nodes), origin=Origin(mask=NODE_MASK), idle_timeout=idle_timeout(arguments), keepalive=keepalive(arguments)
+    ) as transaction:
         print("granted", flush=True)
         transaction.template(WRITE_TEMPLATE, Template())
         transaction.template(ACK_TEMPLATE, acknowledgement)
@@ -149,6 +156,16 @@ def run_batches(bus, arguments):
             hold_back(bus, arguments.hold_ms)
         transaction.send(steps)
         return transaction.wait()
+
+
+def idle_timeout(arguments):
+    return None if arguments.idle_timeout_ms is None else arguments.idle_timeout_ms / MILLISECONDS_PER_SECOND
+
+
+def keepalive(arguments):
+    if arguments.keepalive_ms is None:
+        return None
+    return Keepalive(KEEPALIVE_ID, KEEPALIVE_DATA, arguments.keepalive_ms / MILLISECONDS_PER_SECOND)
 
 
 def hold_back(bus, hold_ms):

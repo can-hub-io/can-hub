@@ -21,6 +21,7 @@ static ScriptGenerator generator;
 static ScriptError error;
 static TxnStep steps[STEPS_MAX];
 static uint16_t step_count;
+static ScriptFiles no_files = { NULL, NULL };
 static uint8_t battery_image[BATTERY_IMAGE_SIZE];
 static uint8_t inverter_image[INVERTER_IMAGE_SIZE];
 
@@ -201,6 +202,41 @@ describe("script_program", []() {
         expect(program.begin.origin.payload_offset).toBe(2);
         expect(program.variants[0].advance_mode).toBe((uint8_t)kTXN_ADVANCE_MODE_ROSTER_K);
         expect(program.variants[0].count_k).toBe(24);
+    });
+
+    it("carries the keepalive frame and the idle timeout to the begin", []() {
+        bool ready;
+        TxnStep keepalive;
+        bool built;
+
+        ready = compile(
+            "REQUEST = 0x7E0\n"
+            "idle timeout 60s\n"
+            "keepalive REQUEST data 02 3E 80 every 2s\n"
+            "send 0x123 data 01\n"
+        );
+        ScriptGenerator_Start(&generator, &program, &no_files);
+        built = ScriptGenerator_Frame(&generator, &script.statements[script.keepalive], &keepalive, &error);
+
+        expect(ready).toBe(true);
+        expect(program.begin.idle_timeout_ms).toBe((uint32_t)60000);
+        expect(program.begin.keepalive.period_ms).toBe((uint32_t)2000);
+        expect(built).toBe(true);
+        expect(keepalive.can_id).toBe((uint32_t)0x7E0);
+        expect(keepalive.payload_length).toBe(3);
+        expect(keepalive.payload[1]).toBe(0x3E);
+    });
+
+    it("refuses a second keepalive", []() {
+        bool ready;
+
+        ready = compile(
+            "keepalive 0x7E0 data 02 3E 80 every 2s\n"
+            "keepalive 0x7E1 data 02 3E 80 every 2s\n"
+        );
+
+        expect(ready).toBe(false);
+        expect(error.line_number).toBe(2);
     });
 
     it("refuses a template without a timeout", []() {

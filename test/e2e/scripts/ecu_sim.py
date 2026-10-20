@@ -10,7 +10,7 @@ response --delay-ms after the second one. nodes: <count> nodes (ids
 0x700 | node) that, after every batch of 16 frames on 0x123, acknowledge it
 with [01 crc_lo crc_hi], the crc being the 16-bit sum of the batch payload
 bytes; --silent nodes never answer, --wrong-crc nodes acknowledge the sum
-plus one.
+plus one. Keepalive frames on 0x7DF are counted ("keepalive N").
 """
 
 import argparse
@@ -27,6 +27,7 @@ GENERAL_REJECT = 0x31
 RESPONSE_PENDING = 0x78
 PENDING_RESPONSES = 2
 BATCH_ID = 0x123
+KEEPALIVE_ID = 0x7DF
 BATCH_FRAMES = 16
 ACK_ID_BASE = 0x700
 ACK_MARKER = 0x01
@@ -78,7 +79,12 @@ def answer_requests(bus, arguments):
 def acknowledge_batches(bus, arguments):
     batch = bytearray()
     frames = 0
+    keepalives = 0
     for message in bus:
+        if message.arbitration_id == KEEPALIVE_ID:
+            keepalives += 1
+            print(f"keepalive {keepalives}", flush=True)
+            continue
         if message.arbitration_id != BATCH_ID:
             continue
         batch.extend(message.data)
