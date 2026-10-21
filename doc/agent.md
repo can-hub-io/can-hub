@@ -6,7 +6,7 @@ inbound port on the device) and exports local SocketCAN interfaces.
 ```
 can-hub-agent --connect quic://<host>:<port>|tls://<host>:<port>|tcp://<host>:<port>
               --name <agent-name> [--state-dir <path>]
-              [--hub-fingerprint <hex>] <can-if> [...]
+              [--hub-fingerprint <hex>] [--pace-rate <bps>] <can-if> [...]
 can-hub-agent --show-identity [--state-dir <path>]
 ```
 
@@ -22,6 +22,12 @@ agent.
 - Injected frames are confirmed by their **bus echo**: subscribers see an
   injection only once it actually reached the wire, in real bus order. If
   the TX fails, nobody is lied to.
+- Reports each bus's bit rate (and whether it carries CAN FD), so the hub
+  paces what it sends to the device to what the bus can drain. A vcan has no
+  bit timing: `--pace-rate <bps>` sets the rate to pace to.
+- Runs [transactions](transaction-scripts.md): request/response sequences a
+  client hands over, executed at the bus so each exchange costs a bus round
+  trip instead of a network one, ISO-TP segmentation included.
 - Reconnects forever on its own backoff. Authorizing or fixing the hub side
   while the agent is retrying is enough — no restart needed.
 

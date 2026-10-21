@@ -189,7 +189,7 @@ backoff, so authorizing it while it retries is enough. A re-keyed device
 needs `can-hub-cli pins delete <name>` before it can pin again.
 
 A client is enrolled the same way: `can-hub-client --show-identity` on its
-side, `can-hub-cli acl add <fingerprint> <agent>/<iface> ro` on the hub. An
+side, `can-hub-cli acl add <fingerprint> <agent>/<iface> r` on the hub. An
 unknown client is disconnected right after its HELLO with
 `client fingerprint not in the hub allowlist`.
 

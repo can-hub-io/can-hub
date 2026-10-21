@@ -8,16 +8,16 @@
 
 ## Tool reference
 
-- [can-hub](hub.md) — the hub: listeners, identity, state, counters, limits.
+- [can-hub](hub.md) — the hub: listeners, identity, state, bridges and groups, counters, limits.
 - [can-hub-agent](agent.md) — the device daemon: exporting buses, service deployment, capabilities.
-- [can-hub-client](client.md) — list/dump/send, `attach` vcan mirroring, the socketcand bridge.
+- [can-hub-client](client.md) — list/dump/send, interface config, `txn` transaction scripts, `attach` vcan mirroring, the socketcand bridge.
 - [can-hub-cli](cli.md) — administration command reference.
 - [can-hub-web](web.md) — the web admin panel: install, users and permissions, REST API.
 
 ## Embedding
 
 - [libcanhub](libcanhub.md) — the C client library (Linux and Windows).
-- [Transaction scripts](transaction-scripts.md) — describe a request/response sequence for the agent to run at its bus.
+- [Transaction scripts](transaction-scripts.md) — describe a request/response sequence for the agent to run at its bus (`can-hub-client txn`, libcanhub, python).
 - [python-can-hub](../python/README.md) — native python-can backend.
 
 ## Internals

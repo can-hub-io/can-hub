@@ -5,7 +5,7 @@ remote buses into the tools you already use (socketcand clients, the whole
 SocketCAN ecosystem via `attach`).
 
 ```
-can-hub-client [--connect <url>] [--state-dir <path>] [--hub-fingerprint <hex>] <command>
+can-hub-client [--connect <url>] [--state-dir <path>] [--hub-fingerprint <hex>] [--name <label>] <command>
 can-hub-client --show-identity [--state-dir <path>]
 ```
 
@@ -16,6 +16,9 @@ or `unix://path`; omitted, it uses the hub's local unix socket
 [ACLs](security.md#client-acls)) and pins the hub on first contact. A hub
 reached under another address keeps its pin; `--hub-fingerprint` accepts that
 hub only, with no first contact ([security](security.md#pinning-the-hub)).
+
+`--name <label>` labels the connection in the hub's admin views (`can-hub-cli
+peers`, `pending`); it is not an identity and grants nothing.
 
 Interfaces are addressed by the numeric id from `list` or by namespaced name
 `agent/iface`. Hub-side denials print as `hub error <code>: <detail>`.
@@ -36,6 +39,7 @@ id         agent                            interface
 ```sh
 can-hub-client dump truck42/can0
 can-hub-client dump --no-echo truck42/can0
+can-hub-client --connect quic://hub.example.com:7227 dump --reliable truck42/can0
 can-hub-client dump truck42/can0 123 700:7F0
 ```
 
@@ -45,6 +49,10 @@ can-hub-client dump truck42/can0 123 700:7F0
   network.
 - `--no-echo` suppresses the bus echo of this client's own injections;
   by default you see your own frames come back once they hit the wire.
+- `--reliable` carries the channel on its own reliable QUIC stream (lossless,
+  ordered) instead of the lossy datagram plane; `quic://` only, and the open
+  fails on a hub without the capability. The stream transports are already
+  lossless.
 - `--error-frames` also shows the bus error frames, like `candump -e`. They
   print with the full SocketCAN id, `20000004 [8] ...` for a controller
   problem, the error class in the low bits and the detail in the data bytes

@@ -22,7 +22,7 @@ is what they must both match.
 3. **Control buffer guard.** If you add a new control message, add a
    `static_assert` line for it in `src/protocol/control_buffer.h`. Encode
    buffers are sized from `CONTROL_MESSAGE_MAX_WIRE_SIZE` (= header + the
-   largest body, currently REGISTER); if a body grows past it, the asserts turn
+   largest body, currently ADMIN_BRIDGE_SET); if a body grows past it, the asserts turn
    the overflow into a compile error. Bump the max there if needed — never
    hand-pick a buffer size at a call site.
 4. **Senders.** Encode the message where it is produced. HELLO has a single
@@ -54,10 +54,13 @@ is what they must both match.
 
 ### Senders (C)
 - HELLO: `HelloMessage_Build` in `src/protocol/hello_message.c`, called by `src/client/client.c`, `src/agent/agent.c`, `src/mirror/mirror_app.c`, `src/socketcand/socketcand_bridge.c`, `src/platform/linux/cli_main.c`, and the `test/mocks/broker_driver.c` mock.
-- REGISTER / IFCONFIG_REPLY: `src/agent/agent.c`.
+- REGISTER / IFCONFIG_REPLY / INTERFACE_STATUS (agent side): `src/agent/agent.c`.
 - LIST / OPEN / CLOSE / SUBSCRIBE / FRAME: `src/client/client.c`, `src/mirror/mirror_app.c`, `src/socketcand/socketcand_bridge.c` (per the message).
+- CONFIGURE: `src/client/client.c`, `src/socketcand/socketcand_bridge.c`, `src/platform/linux/cli_main.c` (`interface set`).
+- TXN_BEGIN / TXN_TEMPLATE / TXN_STEPS / TXN_ABORT: `src/client/client.c` and `src/client/transaction_sender.c`.
+- TXN_BEGIN_ACK / TXN_PROGRESS / TXN_STATUS: `src/agent/agent.c`.
 - Admin requests: `src/platform/linux/cli_main.c`.
-- Admin replies, ERROR, OPEN_ACK, REGISTER_ACK, PING, LIST_REPLY: `src/hub/broker.c`.
+- Admin replies, ERROR, OPEN_ACK, REGISTER_ACK, PING, LIST_REPLY, IFCONFIG, CONFIGURE_REPLY, INTERFACE_STATUS (client side): `src/hub/broker.c`, which also relays the TXN_* family, rewriting the channel byte.
 
 ### Rust mirror (`web/daemon/src/protocol/`)
 - `admin.rs` — admin request encoders and admin reply decoders (offsets and `*_SIZE` constants duplicated from the spec).

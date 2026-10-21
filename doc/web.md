@@ -1,9 +1,9 @@
 # can-hub-web — web admin panel
 
 Browser panel for the same admin surface as `can-hub-cli`: peers, agents,
-clients, interfaces, live telemetry, kick, interface config, pins, ACLs and
-the identities the hub turned away (Pending, under `pins.manage`) — plus its
-own users, groups and audit log.
+clients, interfaces, live telemetry, kick, interface config, pins, ACLs,
+bridges and groups, transactions in flight and the identities the hub turned
+away (Pending, under `pins.manage`) — plus its own users, groups and audit log.
 
 It is a separate daemon, not part of the hub: an ordinary admin client of
 the hub's unix socket on one side, an HTTP server (REST API + embedded React
