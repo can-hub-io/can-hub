@@ -29,11 +29,16 @@ to socketcand and cannelloni.
   wire, nobody is lied to, and ordering is the bus ordering.
 - **Fleet-shaped, not link-shaped.** One hub, many agents, a queryable
   catalogue (`truck42/can0`), per-peer and per-interface traffic counters,
-  and an admin plane with a CLI and a web panel.
+  bus-to-bus bridges and groups across sites, remote bus configuration
+  (bit rate, CAN FD, modes), and an admin plane with a CLI and a web panel.
+- **Request/response at the bus, not over the WAN.** A transaction hands a
+  UDS-style sequence (flashing, broadcast upgrades) to the agent, which runs
+  it at the bus, ISO-TP included: each exchange costs a bus round trip
+  instead of a network one.
 - **Small enough for the edge.** No OpenSSL: the TLS 1.3 and QUIC stack is
   picotls with permissively licensed primitives, statically linked. The fully
-  static musl agent is **~590 KB** on arm64 and armv7 with no runtime
-  dependencies, and its `.deb` is ~310 KB. Hardware AES where the CPU has it
+  static musl agent is **~660 KB** on arm64 and armv7 with no runtime
+  dependencies, and its `.deb` is ~340 KB. Hardware AES where the CPU has it
   (AES-NI, or the ARMv8 crypto extensions in either execution state),
   ChaCha20-Poly1305 everywhere else.
 - **Freestanding core.** Everything outside `src/platform/` is C11 without
@@ -64,7 +69,7 @@ against a `vcan` on one machine.
 |---|---|---|
 | `can-hub` | the hub: registry, frame relay, admin plane | [doc/hub.md](doc/hub.md) |
 | `can-hub-agent` | device daemon: exports local SocketCAN interfaces | [doc/agent.md](doc/agent.md) |
-| `can-hub-client` | consumer: `list`, `dump`, `send`, `socketcand`, `attach` | [doc/client.md](doc/client.md) |
+| `can-hub-client` | consumer: `list`, `dump`, `send`, `show`/`configure`, `txn`, `socketcand`, `attach` | [doc/client.md](doc/client.md) |
 | `can-hub-cli` | hub administration over the local unix socket | [doc/cli.md](doc/cli.md) |
 | `can-hub-web` | web admin panel: REST API + live telemetry | [doc/web.md](doc/web.md) |
 
@@ -74,6 +79,11 @@ And beyond the binaries:
   SavvyCAN with no can-hub awareness ([doc/client.md](doc/client.md)).
 - **`attach`** — mirror a remote bus into a local `vcan`, so `candump`,
   Wireshark and friends work unmodified ([doc/client.md](doc/client.md)).
+- **Transactions** — request/response sequences run by the agent at its
+  bus, from a [script file](doc/transaction-scripts.md) (`can-hub-client
+  txn`), libcanhub or python.
+- **Bridges and groups** — inject one bus into another, or join several
+  into one, across agents and sites ([doc/hub.md](doc/hub.md#bridging-buses)).
 - **python** — `pip install python-can-hub`, a native python-can backend
   with all transports including QUIC ([python/README.md](python/README.md)).
 - **libcanhub** — embeddable C client library, Linux and Windows

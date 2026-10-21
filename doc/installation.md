@@ -24,7 +24,7 @@ fingerprint `882FA1A7753DE71C0FEC849CBCEB231428DE4144`.
 
 The repository keeps the last ten releases. Until the wire protocol is frozen,
 hub and agents should run the same version; pin one with
-`sudo apt install can-hub-agent=0.4.0`.
+`sudo apt install can-hub-agent=0.6.0`.
 
 Without the repository, every
 [release](https://github.com/can-hub-io/can-hub/releases) ships the same debs:
@@ -143,7 +143,7 @@ sudo cp packaging/completions/zsh/_*  /usr/share/zsh/vendor-completions/
 
 | Component | Default | Contents |
 |---|---|---|
-| hub | `/var/lib/can-hub` (fallback `~/.local/state/can-hub`) | TLS identity, `hub.db` (agent pins, client ACLs) |
+| hub | `/var/lib/can-hub` (fallback `~/.local/state/can-hub`) | TLS identity, `hub.db` (agent pins, client ACLs, bridge routes and groups) |
 | agent | `/var/lib/can-hub-agent` (deb) or the same default | `agent.crt`/`agent.key`, `known_hubs` pins |
 | client | `/var/lib/can-hub` (fallback `~/.local/state/can-hub`) | TLS identity, pinned hub fingerprints |
 | web | `/var/lib/can-hub/web.db` | users, groups, sessions, audit log |

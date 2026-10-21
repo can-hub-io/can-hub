@@ -26,8 +26,8 @@ template response
 send 0x7E0 data 02 10 03 expect response
 ```
 
-Sends a UDS session change and waits for its positive response (0x50). No
-answer within 50 ms aborts the transaction with `timeout`.
+Sends a single-frame session change request and waits for its positive
+response (0x50). No answer within 50 ms aborts the transaction with `timeout`.
 
 ### 2. Constants, and what one step expects on top of its template
 
@@ -49,14 +49,14 @@ identifier that was asked for.
 ### 3. Negative answers, "wait", unexpected answers
 
 ```
-template uds-response
+template routine-response
     success  id == 0x7E8 and byte[1] == 0x71
     failure  id == 0x7E8 and byte[1] == 0x7F
     pending  id == 0x7E8 and byte[1] == 0x7F and byte[3] == 0x78
     on mismatch abort
     timeout  2s
 
-send 0x7E0 data 04 31 01 FF 00 expect uds-response
+send 0x7E0 data 04 31 01 FF 00 expect routine-response
 ```
 
 `pending` is checked before `failure`, so a `7F .. 78` restarts the timeout
@@ -281,6 +281,8 @@ a CAN FD frame.
 A script that breaks a rule is refused before anything is sent, with the line
 and the reason.
 
-The language matches frames. ISO-TP messages and UDS requests, where the answer
-follows fixed rules instead of conditions, go through the C and Python APIs
+The language matches frames. Multi-frame ISO-TP messages, which the agent
+segments and reassembles, go through the C and Python APIs
 ([libcanhub](libcanhub.md#iso-tp-steps), [python](../python/README.md#iso-tp-steps)).
+Diagnostic protocols on top of them (UDS sessions, security access, negative
+response codes) belong to a diagnostics library, not to can-hub.
