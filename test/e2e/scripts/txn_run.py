@@ -13,9 +13,9 @@ over; --lossy opens the bus without the reliable channel a transaction needs;
 --hold-ms hands the first batch over, then keeps reading for T ms without
 handing over another step; --idle-timeout-ms is how long the agent then waits
 for steps, sending a keepalive on 0x7DF every --keepalive-ms meanwhile.
-Prints "granted", then "done steps=N seconds=S" (exit 0), or "aborted
-reason=R step=S missing=[...]" (exit 2); --within S fails with exit 3 when
-the transaction took longer.
+Prints "granted" once the first step is at the agent, then "done steps=N
+seconds=S" (exit 0), or "aborted reason=R step=S missing=[...] node=N ..."
+(exit 2); --within S fails with exit 3 when the transaction took longer.
 """
 
 import argparse
@@ -25,7 +25,7 @@ import time
 
 import can
 
-from canhub import Advance, Keepalive, Origin, Pattern, Step, Template, TransactionAborted
+from canhub import Keepalive, Match, Response, TransactionAborted
 
 REQUEST_ID = 0x7E0
 RESPONSE_ID = 0x7E8
@@ -38,8 +38,7 @@ KEEPALIVE_ID = 0x7DF
 KEEPALIVE_DATA = bytes([0x02, 0x3E, 0x80])
 BATCH_FRAMES = 16
 ACK_ID_BASE = 0x700
-ACK_ID_MASK = 0x7E0
-NODE_MASK = 0x1F
+NODE_BITS = 0x1F
 ACK_MARKER = 0x01
 CRC_MASK = 0xFFFF
 BYTE_MASK = 0xFF
@@ -47,9 +46,6 @@ BITS_PER_BYTE = 8
 FRAME_BYTES = 8
 MILLISECONDS_PER_SECOND = 1000
 ACK_TIMEOUT_S = 0.5
-RESPONSE_TEMPLATE = 0
-WRITE_TEMPLATE = 1
-ACK_TEMPLATE = 2
 EXIT_ABORTED = 2
 EXIT_TOO_SLOW = 3
 
@@ -88,7 +84,7 @@ def main():
         report = aborted.result
         print(
             f"aborted reason={report.reason} step={report.failing_step} missing={sorted(report.missing)}"
-            f" origin={report.offending_origin}"
+            f" node={report.offending_node}"
             f" expected={report.expected.hex()} got={report.got.hex()}",
             flush=True,
         )
@@ -104,58 +100,54 @@ def main():
 
 def run_requests(bus, arguments):
     count = arguments.counts[0]
-    template = Template(
-        advance_on=Pattern(RESPONSE_ID, data=bytes([0, POSITIVE_SERVICE, 0]), data_mask=bytes([0, BYTE_MASK, BYTE_MASK])),
-        abort_on=Pattern(RESPONSE_ID, data=bytes([0, NEGATIVE_RESPONSE]), data_mask=bytes([0, BYTE_MASK])),
-        extend_on=Pattern(
-            RESPONSE_ID,
-            data=bytes([0, NEGATIVE_RESPONSE, 0, RESPONSE_PENDING]),
-            data_mask=bytes([0, BYTE_MASK, 0, BYTE_MASK]),
-        ),
-        mode=Advance.COUNT,
-        timeout=arguments.timeout_ms / MILLISECONDS_PER_SECOND,
-        abort_on_mismatch=True,
+    timeout = arguments.timeout_ms / MILLISECONDS_PER_SECOND
+    transfer = Response(
+        Match(RESPONSE_ID, data={1: POSITIVE_SERVICE}),
+        timeout=timeout,
+        failure=Match(RESPONSE_ID, data={1: NEGATIVE_RESPONSE}),
+        pending=Match(RESPONSE_ID, data={1: NEGATIVE_RESPONSE, 3: RESPONSE_PENDING}),
+        timeout_after_pending=timeout,
+        on_mismatch_abort=True,
     )
     with bus.transaction(exclusive=arguments.exclusive) as transaction:
-        print("granted", flush=True)
-        transaction.template(RESPONSE_TEMPLATE, template)
-        transaction.send(request_step(index) for index in range(count))
+        for index in range(count):
+            counter = index & BYTE_MASK
+            transaction.send(REQUEST_ID, bytes([0x02, SERVICE, counter]), transfer, where=Match(RESPONSE_ID, data={2: counter}))
+            announce_grant(index)
         if arguments.abort_after_ms is not None:
             time.sleep(arguments.abort_after_ms / MILLISECONDS_PER_SECOND)
             transaction.abort()
-        return transaction.wait()
+    return transaction.result
 
 
-def request_step(index):
-    counter = index & BYTE_MASK
-    return Step(
-        template=RESPONSE_TEMPLATE,
-        arbitration_id=REQUEST_ID,
-        data=bytes([0x02, SERVICE, counter]),
-        expect=bytes([0, POSITIVE_SERVICE, counter]),
-    )
+def announce_grant(step):
+    if step == 0:
+        print("granted", flush=True)
 
 
 def run_batches(bus, arguments):
     batches, nodes = arguments.counts[0], arguments.counts[1]
-    acknowledgement = Template(
-        advance_on=Pattern(ACK_ID_BASE, can_mask=ACK_ID_MASK, data=bytes([ACK_MARKER, 0, 0])),
-        mode=Advance.ROSTER_ALL,
+    acknowledgement = Response(
+        Match(ACK_ID_BASE, data={0: ACK_MARKER}, ignored_bits=NODE_BITS),
         timeout=ACK_TIMEOUT_S,
-        abort_on_mismatch=True,
+        nodes=range(nodes),
+        on_mismatch_abort=True,
     )
-    with bus.transaction(
-        roster=range(nodes), origin=Origin(mask=NODE_MASK), idle_timeout=idle_timeout(arguments), keepalive=keepalive(arguments)
-    ) as transaction:
-        print("granted", flush=True)
-        transaction.template(WRITE_TEMPLATE, Template())
-        transaction.template(ACK_TEMPLATE, acknowledgement)
-        steps = (step for batch in range(batches) for step in batch_steps(batch))
-        if arguments.hold_ms is not None:
-            transaction.send(itertools.islice(steps, BATCH_FRAMES + 2))
-            hold_back(bus, arguments.hold_ms)
-        transaction.send(steps)
-        return transaction.wait()
+    with bus.transaction(idle_timeout=idle_timeout(arguments), keepalive=keepalive(arguments)) as transaction:
+        for index, step in enumerate(step for batch in range(batches) for step in batch_steps(batch)):
+            hand_over(transaction, step, acknowledgement)
+            announce_grant(index)
+            if index == BATCH_FRAMES + 1 and arguments.hold_ms is not None:
+                hold_back(bus, arguments.hold_ms)
+    return transaction.result
+
+
+def hand_over(transaction, step, acknowledgement):
+    kind, value = step
+    if kind == "frame":
+        transaction.send(BATCH_ID, value)
+        return
+    transaction.expect(acknowledgement, where=value)
 
 
 def idle_timeout(arguments):
@@ -179,10 +171,11 @@ def hold_back(bus, hold_ms):
 
 
 def batch_steps(batch):
+    """A batch's frames, then the wait for its acknowledgement."""
     payloads = [bytes((batch + frame + offset) & BYTE_MASK for offset in range(FRAME_BYTES)) for frame in range(BATCH_FRAMES)]
     crc = sum(sum(payload) for payload in payloads) & CRC_MASK
-    steps = [Step(template=WRITE_TEMPLATE, arbitration_id=BATCH_ID, data=payload) for payload in payloads]
-    steps.append(Step(template=ACK_TEMPLATE, expect=bytes([ACK_MARKER, crc & BYTE_MASK, crc >> BITS_PER_BYTE])))
+    steps = [("frame", payload) for payload in payloads]
+    steps.append(("acknowledgement", Match(ACK_ID_BASE, data={1: crc & BYTE_MASK, 2: crc >> BITS_PER_BYTE}, ignored_bits=NODE_BITS)))
     return steps
 
 

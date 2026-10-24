@@ -1,4 +1,4 @@
-template response
+response answer
     success  id == 0x7E8
     timeout  50ms
 

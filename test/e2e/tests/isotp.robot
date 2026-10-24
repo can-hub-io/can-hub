@@ -30,6 +30,19 @@ A Firmware Image Flashes Over ISO-TP Block By Block
     Should Contain    ${result.stdout}    done steps=7 crc=${IMAGE_CRC}
     Log Of ${ecu} Should Contain image bytes=20000 crc=${IMAGE_CRC}
 
+An ISO-TP Step Runs After A Plain Frame In The Same Transaction
+    ${hub}=    Start CAN HUB Open To Writers On ${LOCAL_SERVER}
+    ${client_state}=    Fresh State Directory For client
+    Start CAN Agent truck42 On ${LOCAL_SERVER} Exporting vcan0 Into ${hub}
+    ${ecu}=    Start Python ${ECU} On ${LOCAL_SERVER}    vcan0
+    Log Of ${ecu} Should Contain ready
+
+    ${result}=    Run Python ${FLASH} On ${LOCAL_SERVER}    ${QUIC}    truck42/vcan0    --size    20000    --frame-first    --state-dir    ${client_state}
+
+    Should Be True    ${result.ok}    ${result.stdout}${result.stderr}
+    Should Contain    ${result.stdout}    done steps=8 crc=${IMAGE_CRC}
+    Log Of ${ecu} Should Contain image bytes=20000 crc=${IMAGE_CRC}
+
 A Flash Runs Across The WAN Link
     ${hub}=    Start CAN HUB Open To Writers On ${LOCAL_SERVER}
     ${client_state}=    Fresh State Directory For client
@@ -105,4 +118,4 @@ A Refused Block Aborts The Flash At Its Step
     ${result}=    Run Python ${FLASH} On ${LOCAL_SERVER}    ${QUIC}    truck42/vcan0    --size    20000    --skip-counter    2    --state-dir    ${client_state}
 
     Should Be Equal As Integers    ${result.returncode}    2
-    Should Contain    ${result.stdout}    aborted reason=abort_match step=3
+    Should Contain    ${result.stdout}    aborted reason=failure_matched step=3

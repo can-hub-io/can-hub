@@ -37,6 +37,7 @@ static uint8_t applyIfconfig(Agent *self, const IfconfigMessage *request, uint8_
 static bool interfaceIndexForName(const Agent *self, const char *interface_name, uint8_t *interface_index);
 static void handleTxnBegin(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
 static void handleTxnAbort(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
+static void handleTxnRoster(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
 static void handleTxnTemplate(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
 static void handleTxnSteps(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us);
 static bool isTransactionStreamMessage(uint8_t type);
@@ -45,6 +46,7 @@ static TransactionRunnerPort transactionRunnerPort(Agent *self);
 static bool transmitTransactionFrame(void *context, uint8_t interface_index, const FrameMessage *frame);
 static void reportTransactionProgress(void *context, const TxnProgressMessage *progress);
 static void reportTransactionStatus(void *context, const TxnStatusMessage *status);
+static void reportTransactionRoster(void *context, const TxnRosterReportMessage *report);
 static void sendEncodedControl(Agent *self, const uint8_t *encoded, size_t encoded_size);
 
 static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
@@ -53,6 +55,7 @@ static const TControlHandler control_handlers[kMESSAGE_TYPE_MAX] = {
     [kMESSAGE_TYPE_IFCONFIG] = handleIfconfig,
     [kMESSAGE_TYPE_TXN_BEGIN] = handleTxnBegin,
     [kMESSAGE_TYPE_TXN_ABORT] = handleTxnAbort,
+    [kMESSAGE_TYPE_TXN_ROSTER] = handleTxnRoster,
     [kMESSAGE_TYPE_TXN_TEMPLATE] = handleTxnTemplate,
     [kMESSAGE_TYPE_TXN_STEPS] = handleTxnSteps,
 };
@@ -521,6 +524,19 @@ static void handleTxnAbort(Agent *self, const MessageHeader *header, const uint8
     TransactionRunner_Abort(&self->transactions, abort_message.txn_id);
 }
 
+static void handleTxnRoster(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us)
+{
+    TxnRosterMessage roster;
+
+    (void)now_us;
+
+    if (!TxnRosterMessage_Decode(&roster, payload, header->length)) {
+        return;
+    }
+
+    TransactionRunner_DefineRoster(&self->transactions, &roster);
+}
+
 static void handleTxnTemplate(Agent *self, const MessageHeader *header, const uint8_t *payload, uint64_t now_us)
 {
     TxnTemplateMessage template_message;
@@ -549,7 +565,7 @@ static void handleTxnSteps(Agent *self, const MessageHeader *header, const uint8
 
 static bool isTransactionStreamMessage(uint8_t type)
 {
-    return type == kMESSAGE_TYPE_TXN_TEMPLATE || type == kMESSAGE_TYPE_TXN_STEPS;
+    return type == kMESSAGE_TYPE_TXN_ROSTER || type == kMESSAGE_TYPE_TXN_TEMPLATE || type == kMESSAGE_TYPE_TXN_STEPS;
 }
 
 static void dispatchTransactionStreamMessage(Agent *self, const uint8_t *data, size_t size)
@@ -571,6 +587,7 @@ static TransactionRunnerPort transactionRunnerPort(Agent *self)
         .transmit = transmitTransactionFrame,
         .report_progress = reportTransactionProgress,
         .report_status = reportTransactionStatus,
+        .report_roster = reportTransactionRoster,
     };
 
     return port;
@@ -604,6 +621,14 @@ static void reportTransactionStatus(void *context, const TxnStatusMessage *statu
     uint8_t encoded[MESSAGE_HEADER_SIZE + TXN_STATUS_BODY_SIZE];
 
     sendEncodedControl(self, encoded, TxnStatusMessage_Encode(status, encoded, sizeof(encoded)));
+}
+
+static void reportTransactionRoster(void *context, const TxnRosterReportMessage *report)
+{
+    Agent *self = context;
+    uint8_t encoded[MESSAGE_HEADER_SIZE + TXN_ROSTER_REPORT_BODY_SIZE];
+
+    sendEncodedControl(self, encoded, TxnRosterReportMessage_Encode(report, encoded, sizeof(encoded)));
 }
 
 static void sendEncodedControl(Agent *self, const uint8_t *encoded, size_t encoded_size)

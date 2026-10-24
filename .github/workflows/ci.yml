@@ -246,6 +246,7 @@ jobs:
             build/mingw-x86_64/release/libcanhub.dll
             build/mingw-x86_64/release/libcanhub.a
             build/mingw-x86_64/release/canhub-dump.exe
+            build/mingw-x86_64/release/canhub-txn.exe
             python/dist/*.whl
           retention-days: 7
 

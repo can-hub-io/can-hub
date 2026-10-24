@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#define SCRIPT_ERROR_MESSAGE_SIZE 96
+#define SCRIPT_ERROR_MESSAGE_SIZE 160
 
 typedef struct {
     uint16_t line_number;

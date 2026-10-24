@@ -40,6 +40,8 @@ static int error_count;
 static int disconnect_count;
 static ConfigureReplyMessage last_configure_reply;
 static int configure_reply_count;
+static TxnRosterReportMessage last_roster_report;
+static int roster_report_count;
 
 static ClientEvents clientEvents();
 static void resetCallbackLog();
@@ -61,11 +63,13 @@ static void onFrame(void *context, const FrameMessage *frame);
 static void onError(void *context, uint16_t code, const char *detail);
 static void onDisconnected(void *context);
 static void onConfigureReply(void *context, const ConfigureReplyMessage *reply);
+static void onRosterReport(void *context, const TxnRosterReportMessage *report);
 static void decodeSentConfigure(uint8_t slot, ConfigureMessage *configure);
 static void feedConfigureReply(uint8_t status);
 static InterfaceSettings bitrateSettings(void);
 static void openReliable(void);
 static void feedTxnBeginAck(uint8_t status);
+static void feedRosterReport(uint16_t txn_id, uint32_t seq, uint64_t seen_bitmap);
 static void feedLeased(bool leased);
 static TxnStep classicStep(uint32_t can_id);
 static uint8_t lastFrameType(void);
@@ -495,6 +499,53 @@ describe("client transactions", []() {
         expect(after_lease).toBe(kCLIENT_SEND_SENT);
     });
 
+    it("sends the roster on the channel's stream, for the running transaction", []() {
+        TxnBeginMessage begin;
+        TxnRosterMessage roster;
+        TxnRosterMessage sent;
+        bool defined;
+
+        memset(&begin, 0, sizeof(begin));
+        memset(&roster, 0, sizeof(roster));
+        roster.origin.source = kTXN_ORIGIN_SOURCE_CAN_ID;
+        roster.origin.mask = 0x0F;
+        roster.roster_count = 1;
+        Client_BeginTransaction(&client, &begin);
+        feedTxnBeginAck(kTXN_BEGIN_STATUS_OK);
+
+        defined = Client_DefineRoster(&client, &roster);
+        TxnRosterMessage_Decode(&sent, hub.last_frame + MESSAGE_HEADER_SIZE, TXN_ROSTER_BODY_SIZE);
+
+        expect(defined).toBe(true);
+        expect(lastFrameType()).toBe((uint8_t)kMESSAGE_TYPE_TXN_ROSTER);
+        expect(hub.last_frame_channel).toBe(TXN_CHANNEL);
+        expect(sent.channel).toBe(TXN_CHANNEL);
+        expect(sent.txn_id).toBe((uint16_t)TXN_ID);
+    });
+
+    it("refuses a roster with no transaction running", []() {
+        TxnRosterMessage roster;
+
+        memset(&roster, 0, sizeof(roster));
+
+        expect(Client_DefineRoster(&client, &roster)).toBe(false);
+    });
+
+    it("hands over the roster reports of the running transaction", []() {
+        TxnBeginMessage begin;
+
+        memset(&begin, 0, sizeof(begin));
+        Client_BeginTransaction(&client, &begin);
+        feedTxnBeginAck(kTXN_BEGIN_STATUS_OK);
+
+        feedRosterReport(TXN_ID, 3, 0x5);
+        feedRosterReport(TXN_ID + 1, 4, 0x6);
+
+        expect(roster_report_count).toBe(1);
+        expect(last_roster_report.seq).toBe((uint32_t)3);
+        expect(last_roster_report.seen_bitmap).toBe((uint64_t)0x5);
+    });
+
     it("refuses to begin a second transaction while one runs", []() {
         TxnBeginMessage begin;
         bool second;
@@ -519,6 +570,7 @@ static ClientEvents clientEvents()
         onError,
         onDisconnected,
         onConfigureReply,
+        onRosterReport,
     };
 
     return events;
@@ -540,6 +592,8 @@ static void resetCallbackLog()
     disconnect_count = 0;
     memset(&last_configure_reply, 0, sizeof(last_configure_reply));
     configure_reply_count = 0;
+    memset(&last_roster_report, 0, sizeof(last_roster_report));
+    roster_report_count = 0;
 }
 
 static void connect()
@@ -761,6 +815,15 @@ static void feedTxnBeginAck(uint8_t status)
     hub_events.on_control(hub_events.context, wire, size, 1000);
 }
 
+static void feedRosterReport(uint16_t txn_id, uint32_t seq, uint64_t seen_bitmap)
+{
+    TxnRosterReportMessage report = { TXN_CHANNEL, txn_id, seq, seen_bitmap };
+    uint8_t wire[MESSAGE_HEADER_SIZE + TXN_ROSTER_REPORT_BODY_SIZE];
+    size_t size = TxnRosterReportMessage_Encode(&report, wire, sizeof(wire));
+
+    hub_events.on_control(hub_events.context, wire, size, 1000);
+}
+
 static void feedLeased(bool leased)
 {
     InterfaceStatusMessage status;
@@ -789,4 +852,12 @@ static TxnStep classicStep(uint32_t can_id)
 static uint8_t lastFrameType(void)
 {
     return hub.last_frame[0];
+}
+
+static void onRosterReport(void *context, const TxnRosterReportMessage *report)
+{
+    (void)context;
+
+    last_roster_report = *report;
+    roster_report_count++;
 }

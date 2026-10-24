@@ -11,7 +11,7 @@ from can import BusABC, CanInitializationError, CanOperationError, Message
 from . import _native as native
 from . import settings as interface_settings
 from .settings import InterfaceSettings
-from .transaction import Keepalive, Origin, Transaction, TransactionProgress, TransactionResult
+from .transaction import Keepalive, RosterResult, Transaction, TransactionProgress, TransactionResult
 from . import transaction as transactions
 
 DEFAULT_TIMEOUT_MS = 5000
@@ -166,13 +166,10 @@ class CanHubBus(BusABC):
             raise CanOperationError("bus is read-only (write denied by the hub ACL)")
         if msg.timestamp:
             frame.timestamp_us = int(msg.timestamp * 1_000_000)
-        frame.can_id = msg.arbitration_id & native.CAN_ID_MASK
-        if msg.is_extended_id:
-            frame.can_id |= native.CAN_ID_FLAG_EFF
+        frame.id.value = msg.arbitration_id
+        frame.id.extended = msg.is_extended_id
         if msg.is_remote_frame:
-            frame.can_id |= native.CAN_ID_FLAG_RTR
-        if msg.is_error_frame:
-            frame.can_id |= native.CAN_ID_FLAG_ERR
+            frame.flags |= native.FRAME_FLAG_RTR
         if msg.is_fd:
             frame.flags |= native.FRAME_FLAG_FD
         if msg.bitrate_switch:
@@ -217,48 +214,61 @@ class CanHubBus(BusABC):
 
     def transaction(
         self,
-        roster: Iterable[int] = (),
-        origin: Optional[Origin] = None,
         exclusive: bool = False,
-        isotp: bool = False,
         idle_timeout: Optional[float] = None,
         keepalive: Optional[Keepalive] = None,
-        timeout: float = DEFAULT_TIMEOUT_MS / 1000,
+        bitrate_switch: bool = False,
+        on_roster: Optional[Callable[[RosterResult], None]] = None,
     ) -> Transaction:
-        """Start a transaction on this bus (open it with ``reliable=True``).
+        """A transaction on this bus (open it with ``reliable=True``); nothing
+        is sent until its first step.
 
-        ``roster`` lists the origins expected to answer roster steps, told
-        apart by ``origin``; ``exclusive`` drops other clients' frames to this
-        interface until the transaction ends; ``isotp`` declares templates of
-        :class:`Isotp` steps, refused by an agent that cannot run them.
-        ``idle_timeout`` is how long the agent waits for steps once it ran out
-        of them (default 5 s), sending ``keepalive`` meanwhile. Waits for the
-        agent's grant.
+        ``exclusive`` drops other clients' frames to this interface until the
+        transaction ends. ``idle_timeout`` is how long the agent waits for
+        steps once it ran out of them (default 5 s), sending ``keepalive``
+        meanwhile. ``bitrate_switch`` sends the CAN FD frames of the steps
+        with bit rate switch. ``on_roster`` gets a :class:`RosterResult` for
+        every step waiting for nodes that moves on without all of them.
         See :mod:`canhub.transaction`.
         """
         if not self._writable:
             raise CanOperationError("bus is read-only (write denied by the hub ACL)")
         try:
-            options = transactions.BeginOptions(exclusive, isotp, idle_timeout, keepalive)
-            return transactions.begin(self, roster, origin, options, timeout)
+            options = transactions.Options(exclusive, idle_timeout, keepalive, bitrate_switch, on_roster)
+            return Transaction(self, options)
         except ValueError as error:
             raise CanOperationError(str(error)) from error
 
-    def run_script(
+    def run_txn_script(
         self,
-        script_path: str,
+        text: str,
+        base_directory: Optional[str] = None,
         progress: Optional[Callable[[TransactionProgress, int], Optional[bool]]] = None,
+        on_roster: Optional[Callable[[RosterResult], None]] = None,
     ) -> TransactionResult:
-        """Run a transaction script (doc/transaction-scripts.md) on this bus,
-        opened with ``reliable=True``; files it reads resolve against the
-        script's directory. ``progress(progress, total_steps)`` runs a few
-        times a second and cancels the transaction by returning ``False``; it
+        """Run a transaction script (doc/transaction-scripts.md) given as text
+        on this bus, opened with ``reliable=True``; files it reads resolve
+        against ``base_directory`` (default: the working directory).
+        ``progress(progress, total_steps)`` runs a few times a second and
+        cancels the transaction by returning ``False``; it and ``on_roster``
         must not use the bus. Raises :class:`ScriptError` for a script that
         does not compile and :class:`TransactionAborted` with the report.
         """
         if not self._writable:
             raise CanOperationError("bus is read-only (write denied by the hub ACL)")
-        return transactions.run_script(self, script_path, progress)
+        return transactions.run_script(self, text, None, base_directory, progress, on_roster)
+
+    def run_txn_script_file(
+        self,
+        path: str,
+        progress: Optional[Callable[[TransactionProgress, int], Optional[bool]]] = None,
+        on_roster: Optional[Callable[[RosterResult], None]] = None,
+    ) -> TransactionResult:
+        """:meth:`run_txn_script` for a script file; files it reads resolve
+        against its directory."""
+        if not self._writable:
+            raise CanOperationError("bus is read-only (write denied by the hub ACL)")
+        return transactions.run_script(self, None, path, None, progress, on_roster)
 
     def drop_counters(self) -> dict:
         with self._lock:
@@ -276,18 +286,16 @@ class CanHubBus(BusABC):
         return getattr(self, "_hardware_filtered", False)
 
     def _apply_filters(self, filters) -> None:
-        if not filters or len(filters) > native.FILTERS_MAX:
+        native_filters = _native_filters(filters or [])
+        if not filters or len(native_filters) > native.FILTERS_MAX:
             with self._lock:
                 native.lib.canhub_set_filters(self._session, None, 0)
             self._hardware_filtered = False
             return
 
-        native_filters = (native.CanHubFilter * len(filters))()
-        for slot, can_filter in zip(native_filters, filters):
-            slot.can_id = can_filter["can_id"]
-            slot.can_mask = can_filter["can_mask"]
+        array = (native.CanHubFilter * len(native_filters))(*native_filters)
         with self._lock:
-            result = native.lib.canhub_set_filters(self._session, native_filters, len(filters))
+            result = native.lib.canhub_set_filters(self._session, array, len(native_filters))
         self._hardware_filtered = result == native.OK
 
     def _configurable_name(self) -> str:
@@ -356,10 +364,10 @@ class CanHubBus(BusABC):
     def _to_message(frame: native.CanHubFrame) -> CanHubMessage:
         return CanHubMessage(
             timestamp=frame.timestamp_us / 1_000_000,
-            arbitration_id=frame.can_id & native.CAN_ID_MASK,
-            is_extended_id=bool(frame.can_id & native.CAN_ID_FLAG_EFF),
-            is_remote_frame=bool(frame.can_id & native.CAN_ID_FLAG_RTR),
-            is_error_frame=bool(frame.can_id & native.CAN_ID_FLAG_ERR),
+            arbitration_id=frame.id.value,
+            is_extended_id=frame.id.extended,
+            is_remote_frame=bool(frame.flags & native.FRAME_FLAG_RTR),
+            is_error_frame=bool(frame.flags & native.FRAME_FLAG_ERROR),
             is_fd=bool(frame.flags & native.FRAME_FLAG_FD),
             bitrate_switch=bool(frame.flags & native.FRAME_FLAG_BRS),
             dlc=frame.length,
@@ -390,6 +398,22 @@ class _FairLock:
         with self._condition:
             self._serving += 1
             self._condition.notify_all()
+
+
+def _native_filters(filters) -> List["native.CanHubFilter"]:
+    """python-can filters: a filter that names no ``extended`` takes both
+    kinds of id, which the native one, comparing it always, says twice."""
+    native_filters = []
+    for can_filter in filters:
+        kinds = [can_filter["extended"]] if "extended" in can_filter else [False, True]
+        for extended in kinds:
+            width = native.EXTENDED_ID_MASK if extended else native.STANDARD_ID_MASK
+            native_filter = native.CanHubFilter()
+            native_filter.id.value = can_filter["can_id"] & width
+            native_filter.id.extended = extended
+            native_filter.id_ignored_bits = width & ~can_filter["can_mask"]
+            native_filters.append(native_filter)
+    return native_filters
 
 
 def _slice_ms(deadline: Optional[float]) -> int:

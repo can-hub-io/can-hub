@@ -119,20 +119,27 @@ class TestDetectAvailableConfigs:
 
 
 class TestApplyFilters:
-    def test_it_installs_filters_on_the_hub(self, monkeypatch):
+    def test_it_installs_a_filter_for_each_kind_of_id_when_the_filter_names_none(self, monkeypatch):
         bus, installed = given_bus_recording_filters(monkeypatch)
 
-        bus._apply_filters([{"can_id": 0x123, "can_mask": 0x7FF}])
+        bus._apply_filters([{"can_id": 0x123, "can_mask": 0x7F0}])
 
-        assert installed == [(SESSION, 1)]
+        assert installed == [(SESSION, [(0x123, False, 0x00F), (0x123, True, 0x1FFFF80F)])]
         assert bus._filters_applied
+
+    def test_it_installs_one_filter_for_the_kind_of_id_it_names(self, monkeypatch):
+        bus, installed = given_bus_recording_filters(monkeypatch)
+
+        bus._apply_filters([{"can_id": 0x18DAF100, "can_mask": 0x1FFFFF00, "extended": True}])
+
+        assert installed == [(SESSION, [(0x18DAF100, True, 0xFF)])]
 
     def test_it_clears_the_hub_filters_when_reset(self, monkeypatch):
         bus, installed = given_bus_recording_filters(monkeypatch)
 
         bus._apply_filters(None)
 
-        assert installed == [(SESSION, 0)]
+        assert installed == [(SESSION, [])]
         assert not bus._filters_applied
 
     def test_it_clears_the_hub_filters_when_there_are_too_many(self, monkeypatch):
@@ -141,7 +148,7 @@ class TestApplyFilters:
 
         bus._apply_filters(too_many)
 
-        assert installed == [(SESSION, 0)]
+        assert installed == [(SESSION, [])]
         assert not bus._filters_applied
 
 
@@ -240,7 +247,7 @@ def given_bus_recording_filters(monkeypatch):
     installed = []
 
     def record(session, filters, count):
-        installed.append((session, count))
+        installed.append((session, [(filters[index].id.value, filters[index].id.extended, filters[index].id_ignored_bits) for index in range(count)]))
         return native.OK
 
     bus = make_bare_bus()
@@ -362,7 +369,7 @@ def given_bus_on_configurable_hub(monkeypatch, result=native.OK, channel="agent/
 
 class TestToMessage:
     def test_it_marks_a_frame_the_hub_bridged(self):
-        frame = native.CanHubFrame(can_id=0x123, flags=native.FRAME_FLAG_BRIDGED, length=1)
+        frame = native.CanHubFrame(id=native.CanHubCanId(0x123, False), flags=native.FRAME_FLAG_BRIDGED, length=1)
 
         message = CanHubBus._to_message(frame)
 
@@ -370,9 +377,21 @@ class TestToMessage:
         assert message.arbitration_id == 0x123
 
     def test_it_leaves_a_frame_of_the_bus_unmarked(self):
-        frame = native.CanHubFrame(can_id=0x123, flags=native.FRAME_FLAG_FD, length=1)
+        frame = native.CanHubFrame(id=native.CanHubCanId(0x123, False), flags=native.FRAME_FLAG_FD, length=1)
 
         message = CanHubBus._to_message(frame)
 
         assert not message.bridged
         assert message.is_fd
+
+    def test_it_reads_the_extended_id_and_the_remote_and_error_flags(self):
+        frame = native.CanHubFrame(
+            id=native.CanHubCanId(0x18DAF110, True), flags=native.FRAME_FLAG_RTR | native.FRAME_FLAG_ERROR
+        )
+
+        message = CanHubBus._to_message(frame)
+
+        assert message.arbitration_id == 0x18DAF110
+        assert message.is_extended_id
+        assert message.is_remote_frame
+        assert message.is_error_frame

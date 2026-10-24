@@ -76,24 +76,6 @@ typedef enum tclient_command_e {
     kCLIENT_COMMAND_MAX,
 } TCLIENT_COMMAND;
 
-static const char *const TRANSACTION_REASON_NAMES[] = {
-    "none",
-    "timeout",
-    "abort_match",
-    "value_mismatch",
-    "tx_failed",
-    "cancelled",
-    "starved",
-    "overrun",
-    "agent_disconnected",
-    "invalid_step",
-    "flow_control_timeout",
-    "consecutive_frame_timeout",
-    "overflow",
-    "sequence_error",
-    "wait_limit",
-};
-
 static TcpClientTransport transport;
 static TlsClientTransport tls_transport;
 static QuicClientTransport quic_transport;
@@ -118,6 +100,7 @@ static const char *state_directory_override;
 static const char *connect_url_text;
 static const char *txn_script_path;
 static uint64_t txn_started_us;
+static bool txn_progress_shown;
 static const char *client_name = "";
 static char state_directory[TLS_IDENTITY_PATH_MAX];
 static char identity_certificate_path[TLS_IDENTITY_PATH_MAX];
@@ -186,9 +169,10 @@ static int32_t stopCleanly(void);
 static const char *pinnedHubFingerprint(void);
 static int32_t runTransactionScript(void);
 static int32_t printTransactionProgress(void *context, const CanHubTxnProgress *progress, uint32_t total_steps);
-static int32_t reportScriptOutcome(int32_t result, const CanHubScriptOutcome *outcome, const char *error);
-static void printMissingOrigins(const CanHubScriptOutcome *outcome);
-static const char *transactionReasonName(uint8_t reason);
+static int32_t reportScriptOutcome(int32_t result, const CanHubTxnReport *report, const char *error);
+static void printRosterResult(void *context, const CanHubTxnRosterResult *result);
+static void clearProgressLine(void);
+static void printMissing(const CanHubTxnRosterResult *result);
 
 int main(int argc, char **argv)
 {
@@ -1218,7 +1202,8 @@ static int32_t stopCleanly(void)
 static int32_t runTransactionScript(void)
 {
     CanHubConnectConfig config;
-    CanHubScriptOutcome outcome;
+    CanHubTxnScriptOptions options = { printRosterResult, printTransactionProgress, NULL };
+    CanHubTxnReport report;
     CanHubSession *session;
     int32_t result;
     int32_t exit_status;
@@ -1241,11 +1226,9 @@ static int32_t runTransactionScript(void)
         return 1;
     }
 
-    memset(&outcome, 0, sizeof(outcome));
-    outcome.struct_size = sizeof(outcome);
     txn_started_us = Clock_MonotonicUs();
-    result = canhub_txn_run_script(session, txn_script_path, &outcome, printTransactionProgress, NULL);
-    exit_status = reportScriptOutcome(result, &outcome, canhub_last_error(session));
+    result = canhub_txn_run_script_file(session, txn_script_path, &options, &report);
+    exit_status = reportScriptOutcome(result, &report, canhub_last_error(session));
     canhub_close(session);
 
     return exit_status;
@@ -1271,19 +1254,18 @@ static int32_t printTransactionProgress(void *context, const CanHubTxnProgress *
         remaining_seconds = (total_steps - progress->completed_steps) / rate;
     }
     fprintf(stderr, "\rsteps %" PRIu32 "/%" PRIu32 "  %" PRIu64 " steps/s  eta %" PRIu64 " s   ", progress->completed_steps, total_steps, rate, remaining_seconds);
+    txn_progress_shown = true;
 
     return 1;
 }
 
-static int32_t reportScriptOutcome(int32_t result, const CanHubScriptOutcome *outcome, const char *error)
+static int32_t reportScriptOutcome(int32_t result, const CanHubTxnReport *report, const char *error)
 {
     uint64_t elapsed_ms = (Clock_MonotonicUs() - txn_started_us) * MILLISECONDS_PER_SECOND / MICROSECONDS_PER_SECOND;
 
-    if (isatty(STDERR_FILENO) && outcome->total_steps > 0) {
-        fprintf(stderr, "\n");
-    }
+    clearProgressLine();
     if (result == CANHUB_OK) {
-        printf("done steps=%" PRIu32 " ms=%" PRIu64 "\n", outcome->total_steps, elapsed_ms);
+        printf("done steps=%" PRIu32 " ms=%" PRIu64 "\n", report->completed_steps, elapsed_ms);
         return 0;
     }
     if (result != CANHUB_ERR_TXN_ABORTED) {
@@ -1291,38 +1273,46 @@ static int32_t reportScriptOutcome(int32_t result, const CanHubScriptOutcome *ou
         return 1;
     }
 
-    printf("aborted reason=%s step=%" PRIu32 " completed=%" PRIu32, transactionReasonName(outcome->result.reason), outcome->result.failing_seq, outcome->result.completed_steps);
-    printMissingOrigins(outcome);
+    printf("aborted reason=%s step=%" PRIu32 " completed=%" PRIu32, canhub_txn_reason_name(report->reason), report->failing_step, report->completed_steps);
+    printMissing(&report->failing_roster);
     printf("\n");
 
     return TXN_EXIT_ABORTED;
 }
 
-static void printMissingOrigins(const CanHubScriptOutcome *outcome)
+static void printRosterResult(void *context, const CanHubTxnRosterResult *result)
+{
+    (void)context;
+
+    clearProgressLine();
+    printf("roster step=%" PRIu32, result->step);
+    printMissing(result);
+    printf("\n");
+    fflush(stdout);
+}
+
+static void clearProgressLine(void)
+{
+    if (!txn_progress_shown) {
+        return;
+    }
+    fprintf(stderr, "\n");
+    txn_progress_shown = false;
+}
+
+static void printMissing(const CanHubTxnRosterResult *result)
 {
     const char *separator = "";
     uint32_t i;
 
-    if (outcome->roster_count == 0 || outcome->result.reason != CANHUB_TXN_REASON_TIMEOUT) {
+    if (result->missing_count == 0) {
         return;
     }
 
-    printf(" missing %s=[", outcome->roster_name);
-    for(i=0; i<outcome->roster_count; i++) {
-        if ((outcome->result.seen_bitmap & ((uint64_t)1 << i)) != 0) {
-            continue;
-        }
-        printf("%s%" PRIu32, separator, outcome->roster[i]);
+    printf(" missing=[");
+    for(i=0; i<result->missing_count; i++) {
+        printf("%s%" PRIu32, separator, result->missing[i]);
         separator = ", ";
     }
     printf("]");
-}
-
-static const char *transactionReasonName(uint8_t reason)
-{
-    if (reason >= sizeof(TRANSACTION_REASON_NAMES) / sizeof(TRANSACTION_REASON_NAMES[0])) {
-        return "unknown";
-    }
-
-    return TRANSACTION_REASON_NAMES[reason];
 }

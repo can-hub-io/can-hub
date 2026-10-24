@@ -79,93 +79,110 @@ the reason.
 
 A transaction hands a request/response sequence to the agent, which runs it at
 its bus: each exchange costs a bus round trip instead of a network one (UDS
-flashing, broadcast upgrades; see the protocol's Transactions section). Open
-the bus with `reliable=True`:
+flashing, broadcast upgrades; see the protocol's Transactions section). It
+speaks the words of [transaction scripts](../doc/transaction-scripts.md) and of
+the C API: a step sends a frame and waits for a `Response`. Open the bus with
+`reliable=True`:
 
 ```python
-from canhub import Advance, Pattern, Step, Template, TransactionAborted
+from canhub import Match, Response, TransactionAborted
 
-response = Template(
-    advance_on=Pattern(0x7E8, data=b"\x00\x76", data_mask=b"\x00\xff"),
-    abort_on=Pattern(0x7E8, data=b"\x00\x7f", data_mask=b"\x00\xff"),
-    extend_on=Pattern(0x7E8, data=b"\x00\x7f\x00\x78", data_mask=b"\x00\xff\x00\xff"),
-    mode=Advance.COUNT,
+transfer = Response(
+    Match(0x7E8, data={1: 0x76}),
     timeout=0.05,
+    failure=Match(0x7E8, data={1: 0x7F}),
+    pending=Match(0x7E8, data={1: 0x7F, 3: 0x78}),
+    timeout_after_pending=5.0,
 )
 try:
     with bus.transaction(exclusive=True) as transaction:
-        transaction.template(0, response)
-        transaction.send(Step(arbitration_id=0x7E0, data=block) for block in blocks)
-        result = transaction.wait()
+        for counter, block in enumerate(blocks):
+            transaction.send(0x7E0, block, transfer, where=Match(0x7E8, data={2: counter}))
+    result = transaction.result
 except TransactionAborted as aborted:
     print(aborted.result.reason, aborted.result.failing_step, aborted.result.frame)
 ```
 
-`send()` takes any iterable, a generator included, and hands it over as the
-agent's window allows. `wait()` returns a `TransactionResult` or raises
-`TransactionAborted` with it. Leaving the `with` block on an exception
-(Ctrl-C included) cancels the transaction at the agent. A roster step waits for
-a set of nodes: `bus.transaction(roster=range(32), origin=Origin(mask=0x1F))`
-tells the nodes apart by `(id & mask) >> shift` (or by payload bytes), and the
-result names who answered (`answered`) and who did not (`missing`).
+A `Match` compares the id, except the bits in `ignored_bits`, and the data
+bytes given in `data` (index to value, or to `Masked(mask, value)`); a
+standard and an extended id (`extended=True`) never match each other. `where`
+adds to the response for one step: its id replaces the response's, its bytes
+add to them. Nothing reaches the agent before the first step; each step waits
+for the agent's window, a slice at a time, so the bus keeps receiving
+meanwhile. Leaving the `with` block finishes the transaction and raises
+`TransactionAborted` with the report when it did not complete; leaving it on
+an exception (Ctrl-C included) cancels it at the agent.
+
+A response with `nodes` waits for an answer from each of them, told apart by
+the bits `success.ignored_bits` leaves free (or by data byte `node_byte`);
+`allowed_missing` may stay silent, and `continue_on_timeout=True` moves on
+when the time runs out. `on_roster` gets a `RosterResult` (`step`, `missing`)
+for every such step that moved on without all its nodes, and the result names
+who was missing at the step that failed:
+
+```python
+alive = Response(Match(0x700, ignored_bits=0x0F), timeout=0.5, nodes=range(16), continue_on_timeout=True)
+
+with bus.transaction(on_roster=lambda roster: print(roster.step, sorted(roster.missing))) as transaction:
+    transaction.send(0x7FF, b"\x01", alive)
+```
+
 `exclusive=True` keeps other clients' frames off the bus meanwhile; their
 `send()` raises `CanOperationError`. When the client may lag behind the bus (a
 slow link, data produced as it goes), `idle_timeout=60` lets the agent wait
 that long for steps, and `keepalive=Keepalive(0x7E0, b"\x02\x3e\x80",
-period=2.0)` is the frame it sends meanwhile, for instance to keep a device
+every=2.0)` is the frame it sends meanwhile, for instance to keep a device
 session open.
 
-A [transaction script](../doc/transaction-scripts.md) describes the same in a
-file, and runs as it does from `can-hub-client txn`:
+A [transaction script](../doc/transaction-scripts.md) describes the same as
+text, and runs as it does from `can-hub-client txn`:
 
 ```python
 from canhub import ScriptError, TransactionAborted
 
 try:
-    result = bus.run_script("flash.txn", progress=lambda progress, total: print(progress.completed_steps, total))
+    result = bus.run_txn_script_file("flash.txn", progress=lambda progress, total: print(progress.completed_steps, total))
 except ScriptError as error:
-    print(error.line, error)                      # flash.txn:5: no template has this name
+    print(error.line, error)                      # flash.txn:5: no response has this name
 except TransactionAborted as aborted:
     print(aborted.result.reason, sorted(aborted.result.missing))
 ```
 
-`progress(progress, total_steps)` runs a few times a second; returning `False`
-cancels the transaction, and an exception raised in it (Ctrl-C included)
-cancels it and propagates. It must not use the bus.
+`bus.run_txn_script(text, base_directory=...)` runs a script held as text, its
+`read(...)` files resolving against `base_directory`. `progress(progress,
+total_steps)` runs a few times a second; returning `False` cancels the
+transaction, and an exception raised in it (Ctrl-C included) cancels it and
+propagates. It and `on_roster` must not use the bus.
 
-### ISO-TP steps
+### ISO-TP
 
-A template with `isotp=Isotp(...)` makes each of its steps one ISO-TP message
-(up to 4095 bytes in `data`) that the agent segments, honouring the ECU's flow
-control, and whose reassembled answer the patterns match. Begin with
-`isotp=True`; `extend_timeout` is the wait after a response pending (UDS P2*):
+`send_message(link, data, response)` sends one ISO-TP message (up to 4095
+bytes) over an `IsotpLink`: the agent segments it on `tx_id`, honouring the
+ECU's flow control, and matches the response against the answer it
+reassembles on `rx_id`:
 
 ```python
-from canhub import Advance, Isotp, Pattern, Step, Template
+from canhub import IsotpLink, Match, Response
 
-transfer = Template(
-    advance_on=Pattern(0x7E8, data=b"\x76\x00"),
-    abort_on=Pattern(0x7E8, data=b"\x7f"),
-    extend_on=Pattern(0x7E8, data=b"\x7f\x00\x78", data_mask=b"\xff\x00\xff"),
-    mode=Advance.COUNT,
+ecu = IsotpLink(0x7E0, 0x7E8, padding=0xCC)
+transfer = Response(
+    Match(0x7E8, data={0: 0x76}),
     timeout=0.05,
-    extend_timeout=5.0,
-    abort_on_mismatch=True,
-    isotp=Isotp(0x7E8),                 # padding 0xCC, normal addressing, classic CAN
+    failure=Match(0x7E8, data={0: 0x7F}),
+    pending=Match(0x7E8, data={0: 0x7F, 2: 0x78}),
+    timeout_after_pending=5.0,
+    on_mismatch_abort=True,
 )
-with bus.transaction(exclusive=True, isotp=True) as transaction:
-    transaction.template(1, transfer)
-    transaction.send(
-        Step(template=1, arbitration_id=0x7E0, data=bytes([0x36, counter]) + block, expect=bytes([0x76, counter]))
-        for counter, block in blocks
-    )
-    transaction.wait()
+with bus.transaction(exclusive=True) as transaction:
+    for counter, block in blocks:
+        transaction.send_message(ecu, bytes([0x36, counter]) + block, transfer, where=Match(0x7E8, data={1: counter}))
 ```
 
-`Isotp(response_id, tx_address=0x10, rx_address=0xF1)` is extended addressing
-(one address for mixed), `fd=True` sends CAN FD frames of `data_length` bytes,
-and `block_size`/`st_min` are the flow control the agent answers with. Each
-message is handed over whole, as the agent's window takes it.
+`IsotpLink(tx_id, rx_id, tx_address=0x10, rx_address=0xF1)` is extended
+addressing (one address for mixed), `fd=True` sends CAN FD frames of
+`fd_data_length` bytes, and `block_size`/`st_min` are the flow control the
+agent answers with. A response on the link matches `rx_id` exactly;
+`transaction.expect(response, link=ecu)` waits for a message without sending.
 
 UDS itself (sessions, security access, negative response codes) is the job of
 a diagnostics library. python-can-isotp and udsoncan work over `CanHubBus` as

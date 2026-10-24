@@ -24,6 +24,7 @@ function(add_unit_test TEST_NAME)
     target_include_directories(${TEST_NAME} PRIVATE
         ${CEST_DIR}
         ${ROOT_SRC_DIR}
+        ${ROOT_SRC_DIR}/../include
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
 endfunction()
@@ -295,18 +296,12 @@ add_unit_test(test_step_ring
         ${ROOT_SRC_DIR}/agent/domain/step_ring.c
 )
 
-add_unit_test(test_canhub_transactions
+add_unit_test(test_canhub_frames
     SOURCES
-        platform/test_canhub_transactions.cpp
-        ${ROOT_SRC_DIR}/platform/linux/libcanhub/canhub_transactions.c
-        ${ROOT_SRC_DIR}/client/transaction_sender.c
-        ${ROOT_SRC_DIR}/protocol/txn_steps_message.c
-        ${ROOT_SRC_DIR}/protocol/txn_message.c
-        ${ROOT_SRC_DIR}/protocol/frame_message.c
-        ${ROOT_SRC_DIR}/protocol/message_header.c
-        ${ROOT_SRC_DIR}/protocol/wire.c
+        platform/test_canhub_frames.cpp
+        ${ROOT_SRC_DIR}/platform/linux/libcanhub/canhub_frames.c
+        ${ROOT_SRC_DIR}/client/can_id.c
 )
-target_include_directories(test_canhub_transactions PRIVATE ${ROOT_SRC_DIR}/../include)
 
 add_unit_test(test_isotp_link
     SOURCES
@@ -578,6 +573,8 @@ add_unit_test(test_script_parser
 add_unit_test(test_script_program
     SOURCES
         client/txn_script/test_script_program.cpp
+        ${ROOT_SRC_DIR}/client/can_id.c
+        ${ROOT_SRC_DIR}/client/transaction_builder.c
         ${ROOT_SRC_DIR}/client/txn_script/checksum.c
         ${ROOT_SRC_DIR}/client/txn_script/script.c
         ${ROOT_SRC_DIR}/client/txn_script/script_compiler.c
@@ -591,6 +588,17 @@ add_unit_test(test_script_program
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/wire.c
         ${ROOT_SRC_DIR}/shared/bounded_string.c
+)
+
+add_unit_test(test_transaction_builder
+    SOURCES
+        client/test_transaction_builder.cpp
+        ${ROOT_SRC_DIR}/client/can_id.c
+        ${ROOT_SRC_DIR}/client/transaction_builder.c
+        ${ROOT_SRC_DIR}/protocol/txn_steps_message.c
+        ${ROOT_SRC_DIR}/protocol/frame_message.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
 )
 
 add_unit_test(test_transaction_sender

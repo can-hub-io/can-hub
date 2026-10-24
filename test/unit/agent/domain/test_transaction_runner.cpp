@@ -60,16 +60,18 @@ static TxnProgressMessage last_progress;
 static uint32_t progress_count;
 static TxnStatusMessage last_status;
 static uint32_t status_count;
+static TxnRosterReportMessage last_roster_report;
+static uint32_t roster_report_count;
 static uint16_t txn_id;
 
 static void resetRunner(uint32_t ring_capacity);
 static TxnBeginAckMessage beginPlain(uint64_t now_us);
 static TxnBeginAckMessage beginWithNodeRoster(uint64_t now_us);
+static TxnRosterMessage nodeRoster(void);
 static TxnTemplateMessage responseTemplate(void);
 static TxnTemplateMessage transmitOnlyTemplate(uint8_t template_id, uint32_t gap_us);
 static TxnTemplateMessage batchAckTemplate(void);
 static TxnTemplateMessage isotpTemplate(void);
-static TxnBeginAckMessage beginWithIsotp(uint64_t now_us);
 static TxnBeginAckMessage beginWithKeepalive(uint32_t idle_timeout_ms);
 static void defineTemplate(const TxnTemplateMessage *template_message);
 static TxnStep requestStep(uint8_t service);
@@ -85,6 +87,7 @@ static void answerBytes(std::initializer_list<uint8_t> bytes);
 static bool transmitFrame(void *context, uint8_t interface_index, const FrameMessage *frame);
 static void recordProgress(void *context, const TxnProgressMessage *progress);
 static void recordStatus(void *context, const TxnStatusMessage *status);
+static void recordRosterReport(void *context, const TxnRosterReportMessage *report);
 
 describe("transaction_runner", []() {
     describe("begin", []() {
@@ -111,18 +114,6 @@ describe("transaction_runner", []() {
             second = beginPlain(0);
 
             expect(second.status).toBe((uint8_t)kTXN_BEGIN_STATUS_BUSY);
-        });
-
-        it("rejects a roster without a way to extract the origin", []() {
-            TxnBeginMessage begin = { 0 };
-            TxnBeginAckMessage ack;
-
-            begin.channel = CHANNEL;
-            begin.roster_count = 1;
-
-            TransactionRunner_Begin(&runner, &begin, INTERFACE_INDEX, 0, &ack);
-
-            expect(ack.status).toBe((uint8_t)kTXN_BEGIN_STATUS_INVALID);
         });
     });
 
@@ -397,6 +388,8 @@ describe("transaction_runner", []() {
 
             expect(last_status.reason).toBe((uint8_t)kTXN_REASON_TIMEOUT);
             expect(last_status.seen_bitmap).toBe((uint64_t)((1u << 0) | (1u << 5)));
+            expect(last_status.flags & TXN_STATUS_FLAG_ROSTER_STEP).toBe((uint8_t)TXN_STATUS_FLAG_ROSTER_STEP);
+            expect(roster_report_count).toBe((uint32_t)0);
         });
 
         it("aborts on a node acknowledging another CRC and names it", []() {
@@ -406,7 +399,7 @@ describe("transaction_runner", []() {
             expect(last_status.offending_origin).toBe((uint32_t)9);
         });
 
-        it("finishes once every node answered", []() {
+        it("finishes once every node answered, with nothing to report", []() {
             uint8_t node;
 
             for(node=0; node<NODES; node++) {
@@ -414,6 +407,134 @@ describe("transaction_runner", []() {
             }
             TransactionRunner_Tick(&runner, 100);
 
+            expect(last_status.state).toBe((uint8_t)kTXN_STATE_DONE);
+            expect(roster_report_count).toBe((uint32_t)0);
+        });
+    });
+
+    describe("roster definition", []() {
+        beforeEach([]() {
+            resetRunner(RING_CAPACITY);
+            beginPlain(0);
+        });
+
+        it("aborts on a second roster", []() {
+            TxnRosterMessage roster;
+
+            roster = nodeRoster();
+            TransactionRunner_DefineRoster(&runner, &roster);
+
+            TransactionRunner_DefineRoster(&runner, &roster);
+
+            expect(last_status.reason).toBe((uint8_t)kTXN_REASON_INVALID_STEP);
+        });
+
+        it("aborts on a roster without a way to tell the origin", []() {
+            TxnRosterMessage roster;
+
+            roster = nodeRoster();
+            roster.origin.source = kTXN_ORIGIN_SOURCE_NONE;
+
+            TransactionRunner_DefineRoster(&runner, &roster);
+
+            expect(last_status.reason).toBe((uint8_t)kTXN_REASON_INVALID_STEP);
+        });
+
+        it("ignores a roster of another transaction", []() {
+            TxnRosterMessage roster;
+
+            roster = nodeRoster();
+            roster.txn_id = (uint16_t)(txn_id + 1);
+
+            TransactionRunner_DefineRoster(&runner, &roster);
+
+            expect(status_count).toBe((uint32_t)0);
+            expect(runner.roster_count).toBe(0);
+        });
+
+        it("aborts on a template waiting for the roster before it is defined", []() {
+            TxnTemplateMessage template_message;
+
+            template_message = batchAckTemplate();
+
+            defineTemplate(&template_message);
+
+            expect(last_status.reason).toBe((uint8_t)kTXN_REASON_INVALID_STEP);
+        });
+    });
+
+    describe("roster reports", []() {
+        beforeEach([]() {
+            TxnTemplateMessage template_message;
+            TxnStep steps[2];
+
+            resetRunner(RING_CAPACITY);
+            beginWithNodeRoster(0);
+            template_message = batchAckTemplate();
+            template_message.flags = TXN_TEMPLATE_FLAG_SOFT;
+            template_message.patterns[kTXN_PATTERN_ADVANCE].payload_mask = 0;
+            defineTemplate(&template_message);
+            steps[0] = expectOnlyStep(ACK_TEMPLATE);
+            steps[1] = expectOnlyStep(ACK_TEMPLATE);
+            steps[1].flags |= TXN_STEP_FLAG_LAST;
+            pushSteps(steps, 2, 0);
+            TransactionRunner_Tick(&runner, 0);
+        });
+
+        it("reports who had not answered when a soft step moves on", []() {
+            answerFromNode(3, 0);
+            answerFromNode(7, 0);
+
+            TransactionRunner_Tick(&runner, TIMEOUT_US);
+
+            expect(roster_report_count).toBe((uint32_t)1);
+            expect(last_roster_report.channel).toBe(CHANNEL);
+            expect(last_roster_report.txn_id).toBe(txn_id);
+            expect(last_roster_report.seq).toBe((uint32_t)0);
+            expect(last_roster_report.seen_bitmap).toBe((uint64_t)((1u << 3) | (1u << 7)));
+            expect(runner.completed_steps).toBe((uint32_t)1);
+            expect(status_count).toBe((uint32_t)0);
+        });
+
+        it("reports every step that moves on without every node", []() {
+            TransactionRunner_Tick(&runner, TIMEOUT_US);
+            answerFromNode(1, 0);
+
+            TransactionRunner_Tick(&runner, 2 * TIMEOUT_US);
+
+            expect(roster_report_count).toBe((uint32_t)2);
+            expect(last_roster_report.seq).toBe((uint32_t)1);
+            expect(last_roster_report.seen_bitmap).toBe((uint64_t)(1u << 1));
+            expect(last_status.state).toBe((uint8_t)kTXN_STATE_DONE);
+        });
+    });
+
+    describe("roster quorum", []() {
+        beforeEach([]() {
+            TxnTemplateMessage template_message;
+            TxnStep step;
+
+            resetRunner(RING_CAPACITY);
+            beginWithNodeRoster(0);
+            template_message = batchAckTemplate();
+            template_message.advance_mode = kTXN_ADVANCE_MODE_ROSTER_K;
+            template_message.count_k = 2;
+            template_message.patterns[kTXN_PATTERN_ADVANCE].payload_mask = 0;
+            defineTemplate(&template_message);
+            step = expectOnlyStep(ACK_TEMPLATE);
+            step.flags |= TXN_STEP_FLAG_LAST;
+            pushSteps(&step, 1, 0);
+            TransactionRunner_Tick(&runner, 0);
+        });
+
+        it("reports the nodes still missing when the quorum completes the step", []() {
+            answerFromNode(4, 0);
+            answerFromNode(6, 0);
+
+            TransactionRunner_Tick(&runner, 100);
+
+            expect(roster_report_count).toBe((uint32_t)1);
+            expect(last_roster_report.seen_bitmap).toBe((uint64_t)((1u << 4) | (1u << 6)));
             expect(last_status.state).toBe((uint8_t)kTXN_STATE_DONE);
         });
     });
@@ -423,7 +544,7 @@ describe("transaction_runner", []() {
             TxnTemplateMessage template_message;
 
             resetRunner(RING_CAPACITY);
-            beginWithIsotp(0);
+            beginPlain(0);
             template_message = isotpTemplate();
             defineTemplate(&template_message);
         });
@@ -489,7 +610,7 @@ describe("transaction_runner", []() {
             bool active_before_extended_timeout;
 
             resetRunner(RING_CAPACITY);
-            beginWithIsotp(0);
+            beginPlain(0);
             template_message = isotpTemplate();
             template_message.extend_timeout_ms = 5 * TIMEOUT_MS;
             defineTemplate(&template_message);
@@ -889,13 +1010,15 @@ describe("transaction_runner", []() {
 
 static void resetRunner(uint32_t ring_capacity)
 {
-    TransactionRunnerPort port = { NULL, transmitFrame, recordProgress, recordStatus };
+    TransactionRunnerPort port = { NULL, transmitFrame, recordProgress, recordStatus, recordRosterReport };
 
     memset(transmitted, 0, sizeof(transmitted));
     transmit_count = 0;
     transmit_accepts = true;
     progress_count = 0;
     status_count = 0;
+    roster_report_count = 0;
+    memset(&last_roster_report, 0, sizeof(last_roster_report));
     memset(&last_progress, 0, sizeof(last_progress));
     memset(&last_status, 0, sizeof(last_status));
     TransactionRunner_Init(&runner, port, ring_storage, ring_capacity);
@@ -914,20 +1037,29 @@ static TxnBeginAckMessage beginPlain(uint64_t now_us)
 
 static TxnBeginAckMessage beginWithNodeRoster(uint64_t now_us)
 {
-    TxnBeginMessage begin = { 0 };
     TxnBeginAckMessage ack;
+    TxnRosterMessage roster;
+
+    ack = beginPlain(now_us);
+    roster = nodeRoster();
+    TransactionRunner_DefineRoster(&runner, &roster);
+    return ack;
+}
+
+static TxnRosterMessage nodeRoster(void)
+{
+    TxnRosterMessage roster = { 0 };
     uint8_t node;
 
-    begin.channel = CHANNEL;
-    begin.origin.source = kTXN_ORIGIN_SOURCE_CAN_ID;
-    begin.origin.mask = NODE_MASK;
-    begin.roster_count = NODES;
+    roster.channel = CHANNEL;
+    roster.txn_id = txn_id;
+    roster.origin.source = kTXN_ORIGIN_SOURCE_CAN_ID;
+    roster.origin.mask = NODE_MASK;
+    roster.roster_count = NODES;
     for(node=0; node<NODES; node++) {
-        begin.roster[node] = node;
+        roster.roster[node] = node;
     }
-    TransactionRunner_Begin(&runner, &begin, INTERFACE_INDEX, now_us, &ack);
-    txn_id = ack.txn_id;
-    return ack;
+    return roster;
 }
 
 static TxnTemplateMessage responseTemplate(void)
@@ -1009,18 +1141,6 @@ static TxnBeginAckMessage beginWithKeepalive(uint32_t idle_timeout_ms)
     begin.keepalive.payload[1] = 0x3E;
     begin.keepalive.payload[2] = 0x80;
     TransactionRunner_Begin(&runner, &begin, INTERFACE_INDEX, 0, &ack);
-    txn_id = ack.txn_id;
-    return ack;
-}
-
-static TxnBeginAckMessage beginWithIsotp(uint64_t now_us)
-{
-    TxnBeginMessage begin = { 0 };
-    TxnBeginAckMessage ack;
-
-    begin.channel = CHANNEL;
-    begin.flags = TXN_BEGIN_FLAG_ISOTP;
-    TransactionRunner_Begin(&runner, &begin, INTERFACE_INDEX, now_us, &ack);
     txn_id = ack.txn_id;
     return ack;
 }
@@ -1168,4 +1288,12 @@ static void recordStatus(void *context, const TxnStatusMessage *status)
 
     last_status = *status;
     status_count++;
+}
+
+static void recordRosterReport(void *context, const TxnRosterReportMessage *report)
+{
+    (void)context;
+
+    last_roster_report = *report;
+    roster_report_count++;
 }

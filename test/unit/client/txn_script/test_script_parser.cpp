@@ -35,17 +35,17 @@ describe("script_parser", []() {
         expect(parsed).toBe(10);
     });
 
-    it("reads a template with its success, timeout and continue", []() {
+    it("reads a response with its success, timeout and continue", []() {
         bool parsed;
-        ScriptTemplate *template_node;
+        ScriptResponse *response_node;
 
         parsed = parse(EXAMPLE_5);
-        template_node = &script.templates[0];
+        response_node = &script.responses[0];
 
         expect(parsed).toBe(true);
-        expect(ScriptName_Is(&template_node->name, "optional-wake-up")).toBe(true);
-        expect(template_node->timeout_us).toBe((uint32_t)200000);
-        expect(template_node->continue_on_timeout).toBe(true);
+        expect(ScriptName_Is(&response_node->name, "optional-wake-up")).toBe(true);
+        expect(response_node->timeout_us).toBe((uint32_t)200000);
+        expect(response_node->continue_on_timeout).toBe(true);
         expect(script.statement_count).toBe(3);
         expect(script.statements[0].gap_us).toBe((uint32_t)10000);
         expect(script.statements[2].has_expect).toBe(true);
@@ -66,19 +66,19 @@ describe("script_parser", []() {
         expect(send->id.number.value).toBe((uint64_t)0x600);
     });
 
-    it("reads a roster template and its quorum", []() {
+    it("reads a roster response and its quorum", []() {
         bool parsed;
-        const ScriptTemplate *template_node;
+        const ScriptResponse *response_node;
         const ScriptCondition *success;
 
         parsed = parse(EXAMPLE_10);
-        template_node = &script.templates[0];
-        success = &script.conditions[template_node->success];
+        response_node = &script.responses[0];
+        success = &script.conditions[response_node->success];
 
         expect(parsed).toBe(true);
-        expect(template_node->has_roster).toBe(true);
-        expect(template_node->quorum).toBe(24);
-        expect(ScriptName_Is(&template_node->roster_variable, "cell")).toBe(true);
+        expect(response_node->has_roster).toBe(true);
+        expect(response_node->quorum).toBe(24);
+        expect(ScriptName_Is(&response_node->roster_variable, "cell")).toBe(true);
         expect(success->count).toBe(3);
         expect(success->terms[2].first).toBe(2);
     });
@@ -132,7 +132,7 @@ describe("script_parser", []() {
     it("refuses a block that is not indented", []() {
         bool parsed;
 
-        parsed = parse("template response\nsuccess id == 0x7E8\n");
+        parsed = parse("response answer\nsuccess id == 0x7E8\n");
 
         expect(parsed).toBe(false);
         expect(error.line_number).toBe(1);
@@ -141,7 +141,7 @@ describe("script_parser", []() {
     it("refuses indentation that matches no block", []() {
         bool parsed;
 
-        parsed = parse("template response\n    success id == 0x7E8\n  timeout 50ms\n");
+        parsed = parse("response answer\n    success id == 0x7E8\n  timeout 50ms\n");
 
         expect(parsed).toBe(false);
         expect(error.line_number).toBe(3);
@@ -150,16 +150,16 @@ describe("script_parser", []() {
     it("refuses tabs", []() {
         bool parsed;
 
-        parsed = parse("template response\n\tsuccess id == 0x7E8\n");
+        parsed = parse("response answer\n\tsuccess id == 0x7E8\n");
 
         expect(parsed).toBe(false);
         expect(errorMessage()).toBe("indent with spaces, not tabs");
     });
 
-    it("refuses a template for without success", []() {
+    it("refuses a response for without success", []() {
         bool parsed;
 
-        parsed = parse("template alive\n    for node in 0..3\n        timeout 1s\n");
+        parsed = parse("response alive\n    for node in 0..3\n        timeout 1s\n");
 
         expect(parsed).toBe(false);
     });
@@ -167,7 +167,7 @@ describe("script_parser", []() {
     it("refuses several bytes compared without a byte order", []() {
         bool parsed;
 
-        parsed = parse("template ack\n    success byte[1..2] == 0x1234\n");
+        parsed = parse("response ack\n    success byte[1..2] == 0x1234\n");
 
         expect(parsed).toBe(false);
         expect(errorMessage()).toBe("several bytes compare to little_endian(...) or big_endian(...)");

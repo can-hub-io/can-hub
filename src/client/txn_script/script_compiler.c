@@ -5,9 +5,10 @@
 #include "protocol/frame_message.h"
 
 #define MICROSECONDS_PER_MILLISECOND 1000
+#define BITS_PER_BYTE 8
 #define BYTE_VALUE_MAX 0xFF
 #define BITS_PER_WORD 32
-#define ROSTER_DISAGREES "every template for uses the same list and the same way to tell who answered"
+#define ROSTER_DISAGREES "every response for uses the same list and the same way to tell who answered"
 
 typedef struct {
     ScriptProgram *program;
@@ -15,14 +16,14 @@ typedef struct {
     ScriptBindings bindings;
     ScriptError *error;
     bool has_roster;
-    TxnOriginExtractor origin;
-    uint32_t roster[TXN_ROSTER_MAX];
-    uint8_t roster_count;
+    CanHubTxnNodeSource node_from;
+    uint8_t node_byte;
+    uint32_t node_bits;
 } Compiler;
 
 static const char *const RESERVED_NAMES[] = {
-    "id", "byte", "and", "data", "send", "expect", "where", "for", "in", "of", "template", "exclusive",
-    "success", "failure", "pending", "timeout", "then", "continue", "on", "mismatch", "abort", "gap",
+    "id", "byte", "and", "data", "send", "expect", "where", "for", "in", "of", "response", "exclusive",
+    "success", "failure", "pending", "timeout", "after", "then", "continue", "on", "mismatch", "abort", "gap",
     "read", "chunks", "crc", "sum8", "sum16", "sum32", "crc16", "crc32", "little_endian", "big_endian", "pad",
     "keepalive", "every", "idle",
 };
@@ -30,26 +31,20 @@ static const char *const RESERVED_NAMES[] = {
 static bool fail(Compiler *self, uint16_t line_number, const char *message);
 static bool checkConstants(Compiler *self);
 static bool isReserved(const ScriptName *name);
-static bool checkTemplates(Compiler *self);
-static bool compileTemplate(Compiler *self, uint16_t index);
-static bool compileRoster(Compiler *self, uint16_t index, const ScriptTerm *term);
-static bool rosterValues(Compiler *self, const ScriptTemplate *template_node, uint32_t *values, uint8_t *count);
-static bool deriveOrigin(
-    Compiler *self,
-    const ScriptTerm *term,
-    uint32_t highest,
-    TxnOriginExtractor *origin,
-    ScriptPattern *success
-);
-static bool agreesWithRoster(Compiler *self, const TxnOriginExtractor *origin, const uint32_t *values, uint8_t count);
+static bool checkResponses(Compiler *self);
+static bool compileResponse(Compiler *self, uint16_t index);
+static bool compileOther(Compiler *self, uint16_t condition, uint16_t line_number, CanHubTxnMatch *match);
+static bool compileRoster(Compiler *self, uint16_t index, const ScriptTerm *term, ScriptPattern *success);
+static bool nodeBitsAreFree(Compiler *self, const CanHubTxnResponse *response, const ScriptTerm *term);
+static bool rosterValues(Compiler *self, const ScriptResponse *response_node, uint32_t *values, uint8_t *count);
+static bool deriveNodeBits(Compiler *self, const ScriptTerm *term, uint32_t highest, ScriptPattern *success, uint32_t *bits);
+static bool agreesWithRoster(Compiler *self, const CanHubTxnResponse *response, const uint32_t *values, uint8_t count);
 static bool walk(Compiler *self, uint16_t first);
 static bool walkFor(Compiler *self, const ScriptStatement *statement);
 static bool checkSend(Compiler *self, const ScriptStatement *statement);
 static bool checkChunkSource(Compiler *self, const ScriptStatement *statement);
-static bool addStepVariant(Compiler *self, const ScriptStatement *statement);
-static bool addVariant(Compiler *self, const ScriptVariantKey *key, uint16_t line_number);
-static void buildVariant(const ScriptProgram *program, const ScriptVariantKey *key, TxnTemplateMessage *message);
-static void toWirePattern(const ScriptPattern *pattern, TxnPattern *wire);
+static bool checkStep(Compiler *self, const ScriptStatement *statement);
+static void toMatch(const ScriptPattern *pattern, CanHubTxnMatch *match);
 static uint32_t timeoutMilliseconds(uint32_t timeout_us);
 static bool pushBinding(Compiler *self, const ScriptName *name, uint8_t kind, uint32_t value, uint16_t line_number);
 static const ScriptList *listOf(const Script *script, const ScriptListReference *reference);
@@ -69,19 +64,18 @@ bool ScriptCompiler_Compile(ScriptProgram *program, const Script *script, Script
     compiler.script = script;
     compiler.error = error;
 
-    if (!checkConstants(&compiler) || !checkTemplates(&compiler) || !walk(&compiler, script->first_statement)) {
+    if (!checkConstants(&compiler) || !checkResponses(&compiler) || !walk(&compiler, script->first_statement)) {
         return false;
     }
     if (script->keepalive != SCRIPT_NO_INDEX && !checkSend(&compiler, &script->statements[script->keepalive])) {
         return false;
     }
 
-    program->begin.flags = script->exclusive ? TXN_BEGIN_FLAG_EXCLUSIVE : 0;
-    program->begin.idle_timeout_ms = script->idle_timeout_us / MICROSECONDS_PER_MILLISECOND;
-    program->begin.keepalive.period_ms = script->keepalive_period_us / MICROSECONDS_PER_MILLISECOND;
-    program->begin.origin = compiler.origin;
-    program->begin.roster_count = compiler.roster_count;
-    memcpy(program->begin.roster, compiler.roster, sizeof(compiler.roster));
+    program->options.exclusive = script->exclusive;
+    program->options.idle_timeout_ms = script->idle_timeout_us / MICROSECONDS_PER_MILLISECOND;
+    if (program->options.idle_timeout_ms == 0) {
+        program->options.idle_timeout_ms = SCRIPT_DEFAULT_IDLE_TIMEOUT_MS;
+    }
     return true;
 }
 
@@ -89,64 +83,49 @@ bool ScriptCompiler_StepShape(
     const ScriptProgram *program,
     const ScriptStatement *statement,
     const ScriptScope *scope,
-    ScriptVariantKey *key,
-    ScriptPattern *where,
+    uint16_t *response,
+    CanHubTxnMatch *where,
     ScriptError *error
 )
 {
-    memset(key, 0, sizeof(*key));
-    memset(where, 0, sizeof(*where));
-    key->base = SCRIPT_TRANSMIT_ONLY;
-    key->gap_us = statement->gap_us;
+    const CanHubTxnResponse *response_definition;
+    ScriptPattern pattern;
 
+    *response = SCRIPT_TRANSMIT_ONLY;
+    memset(where, 0, sizeof(*where));
     if (statement->has_expect) {
-        key->base = ScriptCompiler_TemplateIndex(program->script, &statement->template_name);
-        if (key->base == SCRIPT_NO_INDEX) {
-            ScriptError_Set(error, statement->line_number, "no template has this name");
+        *response = ScriptCompiler_ResponseIndex(program->script, &statement->response_name);
+        if (*response == SCRIPT_NO_INDEX) {
+            ScriptError_Set(error, statement->line_number, "no response has this name");
             return false;
         }
     }
     if (statement->where == SCRIPT_NO_INDEX) {
         return true;
     }
-    if (!ScriptResolver_Condition(scope, &program->script->conditions[statement->where], where, NULL, error)) {
-        return false;
-    }
-    if (program->script->templates[key->base].success == SCRIPT_NO_INDEX) {
-        ScriptError_Set(error, statement->line_number, "where needs a template with a success");
-        return false;
-    }
-    if (where->has_id && program->script->templates[key->base].has_roster) {
-        ScriptError_Set(error, statement->line_number, "a template waiting for a list tells the answers apart by itself");
+    if (!ScriptResolver_Condition(scope, &program->script->conditions[statement->where], &pattern, NULL, error)) {
         return false;
     }
 
-    key->where_mask = where->payload_mask;
-    key->has_id_override = where->has_id;
-    key->id_value = where->can_id;
-    key->id_mask = where->can_mask;
+    response_definition = &program->responses[*response];
+    if (pattern.has_id && response_definition->nodes != NULL) {
+        ScriptError_Set(error, statement->line_number, "a response waiting for a list tells the answers apart by itself");
+        return false;
+    }
+    toMatch(&pattern, where);
+    if (!pattern.has_id) {
+        where->id = response_definition->success.id;
+        where->id_ignored_bits = response_definition->success.id_ignored_bits;
+    }
     return true;
 }
 
-bool ScriptCompiler_FindVariant(const ScriptProgram *program, const ScriptVariantKey *key, uint8_t *template_id)
+uint16_t ScriptCompiler_ResponseIndex(const Script *script, const ScriptName *name)
 {
     uint8_t i;
 
-    for(i=0; i<program->variant_count; i++) {
-        if (memcmp(&program->variant_keys[i], key, sizeof(*key)) == 0) {
-            *template_id = i;
-            return true;
-        }
-    }
-    return false;
-}
-
-uint16_t ScriptCompiler_TemplateIndex(const Script *script, const ScriptName *name)
-{
-    uint8_t i;
-
-    for(i=0; i<script->template_count; i++) {
-        if (ScriptName_Equals(&script->templates[i].name, name)) {
+    for(i=0; i<script->response_count; i++) {
+        if (ScriptName_Equals(&script->responses[i].name, name)) {
             return i;
         }
     }
@@ -196,107 +175,168 @@ static bool isReserved(const ScriptName *name)
     return false;
 }
 
-static bool checkTemplates(Compiler *self)
+static bool checkResponses(Compiler *self)
 {
     uint8_t i;
     uint8_t j;
 
-    for(i=0; i<self->script->template_count; i++) {
+    for(i=0; i<self->script->response_count; i++) {
         for(j=0; j<i; j++) {
-            if (ScriptName_Equals(&self->script->templates[j].name, &self->script->templates[i].name)) {
-                return fail(self, self->script->templates[i].line_number, "this template is already defined");
+            if (ScriptName_Equals(&self->script->responses[j].name, &self->script->responses[i].name)) {
+                return fail(self, self->script->responses[i].line_number, "this response is already defined");
             }
         }
-        if (!compileTemplate(self, i)) {
+        if (!compileResponse(self, i)) {
             return false;
         }
     }
     return true;
 }
 
-static bool compileTemplate(Compiler *self, uint16_t index)
+static bool compileResponse(Compiler *self, uint16_t index)
 {
-    const ScriptTemplate *template_node = &self->script->templates[index];
+    const ScriptResponse *response_node = &self->script->responses[index];
+    CanHubTxnResponse *response = &self->program->responses[index];
     ScriptScope scope = { self->script, NULL, NULL, NULL };
-    ScriptPattern unused;
     const ScriptTerm *roster_term = NULL;
+    const ScriptCondition *condition;
+    ScriptPattern success;
 
-    if (!template_node->has_timeout) {
-        return fail(self, template_node->line_number, "a template needs a timeout");
+    if (!response_node->has_timeout) {
+        return fail(self, response_node->line_number, "a response needs a timeout");
     }
-    if (template_node->success != SCRIPT_NO_INDEX) {
-        scope.roster_variable = template_node->has_roster ? &template_node->roster_variable : NULL;
-        if (!ScriptResolver_Condition(&scope, &self->script->conditions[template_node->success],
-                                      &self->program->success[index], &roster_term, self->error)) {
+    if (response_node->success == SCRIPT_NO_INDEX) {
+        return fail(self, response_node->line_number, "a response needs a success line");
+    }
+
+    scope.roster_variable = response_node->has_roster ? &response_node->roster_variable : NULL;
+    condition = &self->script->conditions[response_node->success];
+    if (!ScriptResolver_Condition(&scope, condition, &success, &roster_term, self->error)) {
+        return false;
+    }
+    if (response_node->has_roster && roster_term == NULL) {
+        return fail(self, response_node->line_number, "the success of a response for compares the loop variable");
+    }
+    if (response_node->has_roster && !compileRoster(self, index, roster_term, &success)) {
+        return false;
+    }
+    if (!success.has_id) {
+        return fail(self, condition->line_number, "a success line compares the id");
+    }
+
+    toMatch(&success, &response->success);
+    if (response_node->has_roster && !nodeBitsAreFree(self, response, roster_term)) {
+        return false;
+    }
+    if (response_node->failure != SCRIPT_NO_INDEX) {
+        if (!compileOther(self, response_node->failure, response_node->line_number, &self->program->failures[index])) {
             return false;
         }
-        scope.roster_variable = NULL;
+        response->failure = &self->program->failures[index];
     }
-    if (template_node->failure != SCRIPT_NO_INDEX &&
-        !ScriptResolver_Condition(&scope, &self->script->conditions[template_node->failure], &unused, NULL, self->error)) {
-        return false;
+    if (response_node->pending != SCRIPT_NO_INDEX) {
+        if (!compileOther(self, response_node->pending, response_node->line_number, &self->program->pendings[index])) {
+            return false;
+        }
+        response->pending = &self->program->pendings[index];
     }
-    if (template_node->pending != SCRIPT_NO_INDEX &&
-        !ScriptResolver_Condition(&scope, &self->script->conditions[template_node->pending], &unused, NULL, self->error)) {
-        return false;
+
+    response->timeout_ms = timeoutMilliseconds(response_node->timeout_us);
+    response->timeout_after_pending_ms = response->timeout_ms;
+    if (response_node->timeout_after_pending_us > 0) {
+        response->timeout_after_pending_ms = timeoutMilliseconds(response_node->timeout_after_pending_us);
     }
-    if (!template_node->has_roster) {
-        return true;
-    }
-    if (roster_term == NULL) {
-        return fail(self, template_node->line_number, "the success of a template for compares the loop variable");
-    }
-    return compileRoster(self, index, roster_term);
+    response->continue_on_timeout = response_node->continue_on_timeout;
+    response->on_mismatch_abort = response_node->mismatch_abort;
+    return true;
 }
 
-static bool compileRoster(Compiler *self, uint16_t index, const ScriptTerm *term)
+static bool compileOther(Compiler *self, uint16_t condition, uint16_t line_number, CanHubTxnMatch *match)
 {
-    const ScriptTemplate *template_node = &self->script->templates[index];
-    TxnOriginExtractor origin;
-    uint32_t values[TXN_ROSTER_MAX];
+    ScriptScope scope = { self->script, NULL, NULL, NULL };
+    ScriptPattern pattern;
+
+    if (!ScriptResolver_Condition(&scope, &self->script->conditions[condition], &pattern, NULL, self->error)) {
+        return false;
+    }
+    if (!pattern.has_id) {
+        return fail(self, line_number, "a failure or pending line compares the id");
+    }
+    toMatch(&pattern, match);
+    return true;
+}
+
+static bool compileRoster(Compiler *self, uint16_t index, const ScriptTerm *term, ScriptPattern *success)
+{
+    const ScriptResponse *response_node = &self->script->responses[index];
+    CanHubTxnResponse *response = &self->program->responses[index];
+    uint32_t values[CANHUB_TXN_ROSTER_MAX];
     uint32_t highest = 0;
+    uint32_t bits;
     uint8_t count;
     uint8_t i;
 
-    if (!rosterValues(self, template_node, values, &count)) {
+    if (!rosterValues(self, response_node, values, &count)) {
         return false;
     }
     for(i=0; i<count; i++) {
         highest = values[i] > highest ? values[i] : highest;
     }
-    if (template_node->quorum > count) {
-        return fail(self, template_node->line_number, "the count is larger than the list");
+    if (response_node->quorum > count) {
+        return fail(self, response_node->line_number, "the count is larger than the list");
     }
-    if (!deriveOrigin(self, term, highest, &origin, &self->program->success[index])) {
+
+    if (term->field == kSCRIPT_FIELD_BYTE) {
+        if ((term->has_mask && term->mask.value != BYTE_VALUE_MAX) || term->shift != 0) {
+            return fail(self, term->line_number, "a node told by a data byte is the whole byte, such as byte[2] == cell");
+        }
+        response->node_from = CANHUB_TXN_NODE_IN_BYTE;
+        response->node_byte = term->first;
+        bits = BYTE_VALUE_MAX;
+    } else if (!deriveNodeBits(self, term, highest, success, &bits)) {
         return false;
     }
     for(i=0; i<count; i++) {
-        if ((((uint64_t)values[i] << origin.shift) & ~(uint64_t)origin.mask) != 0) {
+        if (term->field != kSCRIPT_FIELD_BYTE && (((uint64_t)values[i] << term->shift) & ~(uint64_t)bits) != 0) {
             return fail(self, term->line_number, "a value of the list does not fit the mask");
         }
-    }
-    if (!agreesWithRoster(self, &origin, values, count)) {
-        return fail(self, template_node->line_number, ROSTER_DISAGREES);
+        if (term->field == kSCRIPT_FIELD_BYTE && values[i] > BYTE_VALUE_MAX) {
+            return fail(self, term->line_number, "a value of the list does not fit the byte");
+        }
     }
 
-    self->program->roster_variable = template_node->roster_variable;
+    response->nodes = self->program->nodes;
+    response->node_count = count;
+    response->allowed_missing = response_node->quorum > 0 ? count - response_node->quorum : 0;
+    if (!agreesWithRoster(self, response, values, count)) {
+        return fail(self, response_node->line_number, ROSTER_DISAGREES);
+    }
+    self->node_bits = bits;
     return true;
 }
 
-static bool rosterValues(Compiler *self, const ScriptTemplate *template_node, uint32_t *values, uint8_t *count)
+static bool nodeBitsAreFree(Compiler *self, const CanHubTxnResponse *response, const ScriptTerm *term)
 {
-    const ScriptList *list = listOf(self->script, &template_node->roster);
+    if (response->node_from == CANHUB_TXN_NODE_IN_BYTE || response->success.id_ignored_bits == self->node_bits) {
+        return true;
+    }
+    return fail(self, term->line_number, "the bits of the loop variable must be the only bits of the id left free, such as id & 0x7F0 == 0x700 and id & 0x0F == node");
+}
+
+static bool rosterValues(Compiler *self, const ScriptResponse *response_node, uint32_t *values, uint8_t *count)
+{
+    const ScriptList *list = listOf(self->script, &response_node->roster);
     uint32_t value;
     uint8_t i;
 
     *count = 0;
     if (list == NULL) {
-        return fail(self, template_node->line_number, "the template for needs a list such as 0..31 or a list constant");
+        return fail(self, response_node->line_number, "the response for needs a list such as 0..31 or a list constant");
     }
     for(i=0; i<list->range_count; i++) {
         for(value=list->ranges[i].first; ; value++) {
-            if (*count == TXN_ROSTER_MAX) {
-                return fail(self, template_node->line_number, "a template for waits for at most 64 values");
+            if (*count == CANHUB_TXN_ROSTER_MAX) {
+                return fail(self, response_node->line_number, "a response for waits for at most 64 values");
             }
             values[(*count)++] = value;
             if (value == list->ranges[i].last) {
@@ -307,44 +347,27 @@ static bool rosterValues(Compiler *self, const ScriptTemplate *template_node, ui
     return true;
 }
 
-static bool deriveOrigin(
-    Compiler *self,
-    const ScriptTerm *term,
-    uint32_t highest,
-    TxnOriginExtractor *origin,
-    ScriptPattern *success
-)
+static bool deriveNodeBits(Compiler *self, const ScriptTerm *term, uint32_t highest, ScriptPattern *success, uint32_t *bits)
 {
     uint32_t variable_mask = ((uint32_t)1 << bitsFor(highest)) - 1;
     uint32_t base = (uint32_t)term->value.number.value;
     bool extended = term->value.number.hex_digits >= SCRIPT_EXTENDED_HEX_DIGITS || base > SCRIPT_STANDARD_ID_MAX;
 
-    memset(origin, 0, sizeof(*origin));
-    origin->shift = term->shift;
-    if (term->field == kSCRIPT_FIELD_BYTE) {
-        origin->source = kTXN_ORIGIN_SOURCE_PAYLOAD;
-        origin->payload_offset = term->first;
-        origin->mask = (uint32_t)(term->has_mask ? term->mask.value : BYTE_VALUE_MAX) << term->shift;
-        return true;
-    }
-
-    origin->source = kTXN_ORIGIN_SOURCE_CAN_ID;
     if (term->has_mask) {
-        origin->mask = (uint32_t)term->mask.value << term->shift;
+        *bits = (uint32_t)term->mask.value << term->shift;
         return true;
     }
     if (base == 0) {
-        origin->mask = FRAME_CAN_ID_MASK;
-        return true;
+        return fail(self, term->line_number, "compare the other bits of the id, such as id == 0x700 + node");
     }
     if ((base & variable_mask) != 0) {
         return fail(self, term->line_number, "the base must leave the variable's bits clear, such as 0x700 + node");
     }
 
-    origin->mask = variable_mask;
+    *bits = variable_mask;
     success->has_id = true;
     success->extended = success->extended || extended;
-    success->can_mask |= (extended ? FRAME_CAN_ID_MASK : SCRIPT_STANDARD_ID_MAX) & ~variable_mask;
+    success->can_mask |= (success->extended ? FRAME_CAN_ID_MASK : SCRIPT_STANDARD_ID_MAX) & ~variable_mask;
     success->can_id |= base;
     success->can_mask |= FRAME_CAN_ID_FLAG_EFF;
     if (success->extended) {
@@ -353,17 +376,20 @@ static bool deriveOrigin(
     return true;
 }
 
-static bool agreesWithRoster(Compiler *self, const TxnOriginExtractor *origin, const uint32_t *values, uint8_t count)
+static bool agreesWithRoster(Compiler *self, const CanHubTxnResponse *response, const uint32_t *values, uint8_t count)
 {
+    ScriptProgram *program = self->program;
+
     if (!self->has_roster) {
         self->has_roster = true;
-        self->origin = *origin;
-        self->roster_count = count;
-        memcpy(self->roster, values, (size_t)count * sizeof(values[0]));
+        self->node_from = response->node_from;
+        self->node_byte = response->node_byte;
+        program->node_count = count;
+        memcpy(program->nodes, values, (size_t)count * sizeof(values[0]));
         return true;
     }
-    return memcmp(&self->origin, origin, sizeof(*origin)) == 0 && self->roster_count == count &&
-           memcmp(self->roster, values, (size_t)count * sizeof(values[0])) == 0;
+    return self->node_from == response->node_from && self->node_byte == response->node_byte &&
+           program->node_count == count && memcmp(program->nodes, values, (size_t)count * sizeof(values[0])) == 0;
 }
 
 static bool walk(Compiler *self, uint16_t first)
@@ -382,7 +408,7 @@ static bool walk(Compiler *self, uint16_t first)
         if (statement->kind == kSCRIPT_STATEMENT_SEND && !checkSend(self, statement)) {
             return false;
         }
-        if (!addStepVariant(self, statement)) {
+        if (!checkStep(self, statement)) {
             return false;
         }
     }
@@ -476,91 +502,28 @@ static bool checkChunkSource(Compiler *self, const ScriptStatement *statement)
     return fail(self, statement->line_number, "chunks() splits a read() constant or another chunk");
 }
 
-static bool addStepVariant(Compiler *self, const ScriptStatement *statement)
+static bool checkStep(Compiler *self, const ScriptStatement *statement)
 {
     ScriptScope scope = { self->script, &self->bindings, NULL, NULL };
-    ScriptVariantKey key;
-    ScriptPattern where;
-    uint8_t template_id;
+    CanHubTxnMatch where;
+    uint16_t response;
 
-    if (!ScriptCompiler_StepShape(self->program, statement, &scope, &key, &where, self->error)) {
-        return false;
-    }
-    if (ScriptCompiler_FindVariant(self->program, &key, &template_id)) {
-        return true;
-    }
-    return addVariant(self, &key, statement->line_number);
+    return ScriptCompiler_StepShape(self->program, statement, &scope, &response, &where, self->error);
 }
 
-static bool addVariant(Compiler *self, const ScriptVariantKey *key, uint16_t line_number)
+static void toMatch(const ScriptPattern *pattern, CanHubTxnMatch *match)
 {
-    ScriptProgram *program = self->program;
+    uint32_t width = pattern->extended ? CANHUB_EXTENDED_ID_MASK : CANHUB_STANDARD_ID_MASK;
+    uint8_t i;
 
-    if (program->variant_count == TXN_TEMPLATES_MAX) {
-        return fail(self, line_number, "more than 16 templates, counting what where and gap add to them");
+    memset(match, 0, sizeof(*match));
+    match->id.value = pattern->can_id & width;
+    match->id.extended = pattern->extended;
+    match->id_ignored_bits = pattern->has_id ? width & ~pattern->can_mask : width;
+    for(i=0; i<CANHUB_TXN_MATCH_BYTES; i++) {
+        match->bytes[i].mask = (uint8_t)(pattern->payload_mask >> (i * BITS_PER_BYTE));
+        match->bytes[i].value = (uint8_t)(pattern->payload_value >> (i * BITS_PER_BYTE));
     }
-
-    program->variant_keys[program->variant_count] = *key;
-    buildVariant(program, key, &program->variants[program->variant_count]);
-    program->variants[program->variant_count].template_id = program->variant_count;
-    program->variant_count++;
-    return true;
-}
-
-static void buildVariant(const ScriptProgram *program, const ScriptVariantKey *key, TxnTemplateMessage *message)
-{
-    const ScriptTemplate *template_node;
-    ScriptPattern success;
-    ScriptPattern other;
-    ScriptScope scope = { program->script, NULL, NULL, NULL };
-    ScriptError ignored;
-
-    memset(message, 0, sizeof(*message));
-    message->gap_us = key->gap_us;
-    if (key->base == SCRIPT_TRANSMIT_ONLY) {
-        message->advance_mode = kTXN_ADVANCE_MODE_NONE;
-        return;
-    }
-
-    template_node = &program->script->templates[key->base];
-    message->advance_mode = kTXN_ADVANCE_MODE_COUNT;
-    message->count_k = 1;
-    if (template_node->has_roster) {
-        message->advance_mode = template_node->quorum > 0 ? kTXN_ADVANCE_MODE_ROSTER_K : kTXN_ADVANCE_MODE_ROSTER_ALL;
-        message->count_k = template_node->quorum;
-    }
-    message->timeout_ms = timeoutMilliseconds(template_node->timeout_us);
-    message->flags = (uint8_t)((template_node->continue_on_timeout ? TXN_TEMPLATE_FLAG_SOFT : 0) |
-                               (template_node->mismatch_abort ? TXN_TEMPLATE_FLAG_MISMATCH_ABORT : 0));
-
-    if (template_node->success != SCRIPT_NO_INDEX) {
-        success = program->success[key->base];
-        success.payload_mask |= key->where_mask;
-        if (key->has_id_override) {
-            success.can_id = key->id_value;
-            success.can_mask = key->id_mask;
-        }
-        toWirePattern(&success, &message->patterns[kTXN_PATTERN_ADVANCE]);
-        message->patterns_present |= 1u << kTXN_PATTERN_ADVANCE;
-    }
-    if (template_node->failure != SCRIPT_NO_INDEX &&
-        ScriptResolver_Condition(&scope, &program->script->conditions[template_node->failure], &other, NULL, &ignored)) {
-        toWirePattern(&other, &message->patterns[kTXN_PATTERN_ABORT]);
-        message->patterns_present |= 1u << kTXN_PATTERN_ABORT;
-    }
-    if (template_node->pending != SCRIPT_NO_INDEX &&
-        ScriptResolver_Condition(&scope, &program->script->conditions[template_node->pending], &other, NULL, &ignored)) {
-        toWirePattern(&other, &message->patterns[kTXN_PATTERN_EXTEND]);
-        message->patterns_present |= 1u << kTXN_PATTERN_EXTEND;
-    }
-}
-
-static void toWirePattern(const ScriptPattern *pattern, TxnPattern *wire)
-{
-    wire->can_id = pattern->can_id;
-    wire->can_mask = pattern->can_mask;
-    wire->payload_mask = pattern->payload_mask;
-    wire->payload_value = pattern->payload_value;
 }
 
 static uint32_t timeoutMilliseconds(uint32_t timeout_us)

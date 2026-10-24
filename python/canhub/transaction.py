@@ -2,157 +2,127 @@
 
 A transaction moves the gating loop to the agent, so each exchange costs a
 bus round trip instead of a network one (UDS flashing, broadcast upgrades;
-see doc/protocol.md "Transactions"). Open the bus with ``reliable=True``::
+see doc/libcanhub.md "Transactions"). The vocabulary is the C API's and the
+scripts' (doc/transaction-scripts.md). Open the bus with ``reliable=True``::
 
-    with bus.transaction(roster=range(32), origin=Origin(mask=0x1F), exclusive=True) as txn:
-        txn.template(0, Template(advance_on=Pattern(0x700, can_mask=0x7E0), mode=Advance.ROSTER_ALL))
-        txn.send(steps)           # any iterable, a generator included
-        result = txn.wait()       # raises TransactionAborted with the report
+    positive = Response(Match(0x7E8, data={1: 0x50}), timeout=0.05)
 
-or describe it in a script (doc/transaction-scripts.md) and run that::
+    with bus.transaction() as transaction:
+        transaction.send(0x7E0, b"\\x02\\x10\\x03", positive)
+    result = transaction.result     # TransactionAborted is raised otherwise
 
-    result = bus.run_script("flash.txn", progress=lambda progress, total: print(progress.completed_steps, total))
+or describe it in a script and run that::
 
-Payload values are bytes: a pattern matches the first 8 payload bytes under
-``data_mask`` (``None`` = every byte given in ``data``).
+    result = bus.run_txn_script_file("flash.txn")
+
+A match compares the id, except the bits in ``ignored_bits``, and the first 8
+data bytes given in ``data`` (index to value, or to :class:`Masked`).
 """
 
 import ctypes
 import os
+import re
 import time
-from dataclasses import dataclass
-from enum import IntEnum
-from typing import Callable, FrozenSet, Iterable, Iterator, Optional
+from dataclasses import dataclass, field
+from typing import Callable, FrozenSet, Mapping, Optional, Sequence, Union
 
 from can import CanOperationError, Message
 
 from . import _native as native
 
-PATTERN_PAYLOAD_BYTES = 8
-SEND_CHUNK_STEPS = 256
+MATCH_BYTES = 8
 SEND_SLICE_MS = 50
 WAIT_SLICE_MS = 50
 CLOSE_WAIT_MS = 1000
 MICROSECONDS_PER_SECOND = 1_000_000
 MILLISECONDS_PER_SECOND = 1000
-STANDARD_ID_MASK = 0x7FF
-
-REASONS = (
-    "none",
-    "timeout",
-    "abort_match",
-    "value_mismatch",
-    "tx_failed",
-    "cancelled",
-    "starved",
-    "overrun",
-    "agent_disconnected",
-    "invalid_step",
-    "flow_control_timeout",
-    "consecutive_frame_timeout",
-    "overflow",
-    "sequence_error",
-    "wait_limit",
-)
-
-
-class Advance(IntEnum):
-    """How a step waits once its frame is sent."""
-
-    NONE = 0
-    COUNT = 1
-    ROSTER_ALL = 2
-    ROSTER_K = 3
+BYTE_MASK = 0xFF
+SCRIPT_ERROR_PATTERN = re.compile(r"^.*?:(\d+): (.*)$")
 
 
 @dataclass(frozen=True)
-class Pattern:
-    """A frame the step waits for: id under ``can_mask`` and payload bytes.
-
-    ``can_mask`` ``None`` compares every id bit and the extended flag.
-    """
-
-    arbitration_id: int
-    can_mask: Optional[int] = None
-    data: bytes = b""
-    data_mask: Optional[bytes] = None
-    is_extended_id: bool = False
-
-
-@dataclass(frozen=True)
-class Origin:
-    """How to tell who answered: ``(X & mask) >> shift``, X being the CAN id,
-    or the 4 payload bytes at ``payload_offset`` (little-endian) when given."""
+class Masked:
+    """A data byte compared under ``mask``: ``byte & mask == value``."""
 
     mask: int
-    shift: int = 0
-    payload_offset: Optional[int] = None
+    value: int
 
 
 @dataclass(frozen=True)
-class Keepalive:
-    """A frame the agent sends every ``period`` seconds while it waits for
-    steps, for instance to keep a device session open across a slow link."""
+class Match:
+    """A frame whose id equals ``id`` except in ``ignored_bits`` (0: the exact
+    id) and whose first 8 data bytes meet ``data``. A standard and an
+    extended id never match each other."""
 
-    arbitration_id: int
-    data: bytes
-    period: float
-    is_extended_id: bool = False
-    is_fd: bool = False
+    id: int
+    data: Mapping[int, Union[int, Masked]] = field(default_factory=dict)
+    ignored_bits: int = 0
+    extended: bool = False
 
 
 @dataclass(frozen=True)
-class Isotp:
-    """Makes a template's steps ISO-TP messages (begin with ``isotp=True``):
-    the agent segments each step's data (up to 4095 bytes) and reassembles the
-    answer arriving on ``response_id``, which the patterns then match without
-    the protocol bytes. ``tx_address``/``rx_address`` add the address byte of
-    extended or mixed addressing; ``fd`` sends CAN FD frames of
-    ``data_length`` bytes; ``block_size`` and ``st_min`` (raw ISO 15765-2
+class Response:
+    """What a step waits for: ``success`` completes it, ``failure`` aborts the
+    transaction, ``pending`` (a "busy, wait" answer, checked first) restarts
+    the wait with ``timeout_after_pending``. With ``nodes``, the step waits for
+    an answer from each (``allowed_missing`` may stay silent); a node is told
+    by the bits ``success.ignored_bits`` leaves free, or by data byte
+    ``node_byte``. ``continue_on_timeout`` moves on when the time runs out
+    instead of aborting. Times are in seconds."""
+
+    success: Match
+    timeout: float
+    failure: Optional[Match] = None
+    pending: Optional[Match] = None
+    timeout_after_pending: Optional[float] = None
+    nodes: Sequence[int] = ()
+    allowed_missing: int = 0
+    node_byte: Optional[int] = None
+    continue_on_timeout: bool = False
+    on_mismatch_abort: bool = False
+
+
+@dataclass(frozen=True)
+class IsotpLink:
+    """Two ends of ISO 15765-2: the agent sends each message on ``tx_id``,
+    segmented, and reassembles the answer on ``rx_id``. ``tx_address`` and
+    ``rx_address`` start every frame for extended or mixed addressing;
+    ``padding`` fills short frames; ``fd`` sends CAN FD frames of
+    ``fd_data_length`` bytes; ``block_size`` and ``st_min`` (raw ISO 15765-2
     value) go in the flow control the agent answers with."""
 
-    response_id: int
-    is_extended_id: bool = False
-    padding: Optional[int] = 0xCC
+    tx_id: int
+    rx_id: int
+    extended: bool = False
     tx_address: Optional[int] = None
     rx_address: Optional[int] = None
+    padding: Optional[int] = None
     fd: bool = False
-    data_length: int = native.FRAME_PAYLOAD_MAX
     bitrate_switch: bool = False
+    fd_data_length: int = native.FRAME_PAYLOAD_MAX
     block_size: int = 0
     st_min: int = 0
 
 
 @dataclass(frozen=True)
-class Template:
-    """How a step waits: up to 16 per transaction, each defined once."""
+class Keepalive:
+    """A frame the agent sends every ``every`` seconds while it waits for
+    steps, for instance to keep a device session open across a slow link."""
 
-    advance_on: Optional[Pattern] = None
-    abort_on: Optional[Pattern] = None
-    extend_on: Optional[Pattern] = None
-    mode: Advance = Advance.NONE
-    count: int = 1
-    timeout: float = 1.0
-    extend_timeout: Optional[float] = None
-    gap: float = 0.0
-    soft: bool = False
-    abort_on_mismatch: bool = False
-    isotp: Optional[Isotp] = None
+    id: int
+    data: bytes
+    every: float
+    extended: bool = False
 
 
 @dataclass(frozen=True)
-class Step:
-    """One step: sends a frame (expect-only when ``arbitration_id`` is None),
-    then waits as its template says. ``expect`` replaces the bytes the
-    template's advance pattern expects, for this step only."""
+class RosterResult:
+    """A step waiting for nodes that ended without all of them: ``step`` is
+    its position in the transaction, ``missing`` the nodes that had not
+    answered."""
 
-    template: int = 0
-    arbitration_id: Optional[int] = None
-    data: bytes = b""
-    is_extended_id: bool = False
-    is_fd: bool = False
-    bitrate_switch: bool = False
-    expect: Optional[bytes] = None
+    step: int
+    missing: FrozenSet[int]
 
 
 @dataclass(frozen=True)
@@ -165,16 +135,16 @@ class TransactionProgress:
 
 @dataclass(frozen=True)
 class TransactionResult:
-    """The agent's report. ``answered``/``missing`` resolve the roster of the
-    failing step; ``frame`` is the frame that triggered the failure, if any."""
+    """How the transaction ended. ``missing`` names who had not answered when
+    the failing step waited for nodes; ``expected`` and ``got`` are the data
+    bytes of a value mismatch; ``frame`` is the frame that ended it, if any."""
 
     done: bool
     reason: str
     failing_step: int
     completed_steps: int
-    answered: FrozenSet[int]
     missing: FrozenSet[int]
-    offending_origin: int
+    offending_node: int
     expected: bytes
     got: bytes
     frame: Optional[Message]
@@ -198,156 +168,151 @@ class ScriptError(CanOperationError):
 
 
 class Transaction:
-    """A transaction granted on one bus; use as a context manager so an
-    exception or Ctrl-C cancels it at the agent."""
+    """A transaction on one bus; use it as a context manager, which finishes
+    it (raising :class:`TransactionAborted`) or cancels it when the block
+    raises. Nothing is sent until the first step. ``on_roster`` runs inside
+    the transaction's calls and must not use the bus."""
 
-    def __init__(self, bus, roster: Iterable[int]):
+    def __init__(self, bus, options: "Options"):
         self._bus = bus
-        self._roster = tuple(roster)
-        self._isotp_templates = set()
-        self._ended = False
-        self._finished = False
+        self._keep = []
+        self._result = None
+        self._on_roster = options.on_roster
+        self._roster_callback = native.RosterCallback(self._report_roster)
+        native_options = to_native_options(options, self._roster_callback, self._keep)
+        with bus._lock:
+            self._handle = native.lib.canhub_txn_create(bus._session, ctypes.byref(native_options))
+        if not self._handle:
+            raise CanOperationError(native.last_error(bus._session))
 
     def __enter__(self) -> "Transaction":
         return self
 
     def __exit__(self, exception_type, exception, traceback) -> None:
-        if self._finished:
+        if self._handle is None:
             return
         if exception_type is None:
-            self.wait()
+            self.finish()
             return
-        with self._bus._lock:
-            if native.lib.canhub_txn_abort(self._bus._session) == native.OK:
-                native.lib.canhub_txn_wait(self._bus._session, None, CLOSE_WAIT_MS)
-        self._finished = True
+        self.abort()
+        self._release()
 
-    def template(self, template_id: int, template: Template, timeout: Optional[float] = None) -> None:
-        definition = to_native_template(template_id, template)
-        with self._bus._lock:
-            result = native.lib.canhub_txn_template(self._bus._session, ctypes.byref(definition), _timeout_ms(timeout))
-        self._check(result)
-        if template.isotp is not None:
-            self._isotp_templates.add(template_id)
+    @property
+    def result(self) -> Optional[TransactionResult]:
+        return self._result
 
-    def send(self, steps: Iterable[Step]) -> int:
-        """Hand every step over, waiting for the agent's window as needed, the
-        way a blocking write does; returns how many were handed over. A step
-        of an ISO-TP template carries its whole message in ``data``; without
-        data it waits for a message without sending one."""
-        sent = 0
+    def send(
+        self,
+        id: int,
+        data: bytes,
+        response: Optional[Response] = None,
+        *,
+        where: Optional[Match] = None,
+        gap: float = 0.0,
+        extended: bool = False,
+    ) -> None:
+        """Send a frame (more than 8 bytes is CAN FD) and wait as ``response``
+        says, ``where`` adding to it for this step only; ``gap`` keeps at
+        least that long before the next frame."""
+        keep = []
+        self._step(native_step(id, extended, bytes(data), None, response, where, gap, keep))
 
-        for batch in _batches(steps, self._isotp_templates, SEND_CHUNK_STEPS):
-            if isinstance(batch, Step):
-                self._send_message(batch)
-                sent += 1
-                continue
-            native_steps = (native.CanHubTxnStep * len(batch))(
-                *[to_native_step(step, step.template in self._isotp_templates) for step in batch]
-            )
-            self._send_chunk(native_steps, len(batch))
-            sent += len(batch)
-        return sent
+    def send_message(
+        self,
+        link: IsotpLink,
+        data: bytes,
+        response: Optional[Response] = None,
+        *,
+        where: Optional[Match] = None,
+        gap: float = 0.0,
+    ) -> None:
+        """Send an ISO-TP message (1-4095 bytes) over ``link``; ``response``
+        matches the reassembled answer."""
+        keep = []
+        self._step(native_step(link.tx_id, link.extended, bytes(data), link, response, where, gap, keep))
 
-    def end(self, timeout: Optional[float] = None) -> None:
-        """Mark the last step handed over as the last one."""
-        with self._bus._lock:
-            result = native.lib.canhub_txn_end(self._bus._session, _timeout_ms(timeout))
-        self._check(result)
-        self._ended = True
-
-    def wait(self, timeout: Optional[float] = None) -> TransactionResult:
-        """Wait for the outcome (ends the transaction first if not done yet)."""
-        deadline = None if timeout is None else time.monotonic() + max(0.0, timeout)
-        report = native.CanHubTxnResult()
-        report.struct_size = ctypes.sizeof(report)
-
-        if not self._ended:
-            self.end(timeout)
-        while True:
-            with self._bus._lock:
-                status = native.lib.canhub_txn_wait(self._bus._session, ctypes.byref(report), _slice_ms(deadline, WAIT_SLICE_MS))
-            if status != native.ERR_TIMEOUT:
-                break
-            if _expired(deadline):
-                raise CanOperationError("transaction still running")
-
-        self._finished = True
-        result = from_native_result(report, self._roster)
-        if status == native.ERR_TXN_ABORTED:
-            raise TransactionAborted(result)
-        if status != native.OK:
-            raise CanOperationError(native.last_error(self._bus._session))
-        return result
-
-    def abort(self) -> None:
-        """Cancel at the agent; wait() then reports the reason cancelled."""
-        with self._bus._lock:
-            result = native.lib.canhub_txn_abort(self._bus._session)
-        self._check(result)
-        self._ended = True
+    def expect(self, response: Response, *, where: Optional[Match] = None, link: Optional[IsotpLink] = None) -> None:
+        """Wait as ``response`` says without sending."""
+        keep = []
+        tx_id, extended = (link.tx_id, link.extended) if link is not None else (0, False)
+        self._step(native_step(tx_id, extended, None, link, response, where, 0.0, keep))
 
     def progress(self) -> TransactionProgress:
         progress = native.CanHubTxnProgress()
-        progress.struct_size = ctypes.sizeof(progress)
         with self._bus._lock:
-            native.lib.canhub_txn_progress(self._bus._session, ctypes.byref(progress))
+            native.lib.canhub_txn_progress(self._handle, ctypes.byref(progress))
         return from_native_progress(progress)
 
-    def _send_chunk(self, native_steps, count: int) -> None:
-        step_size = ctypes.sizeof(native.CanHubTxnStep)
-        taken = 0
+    def abort(self) -> None:
+        """Cancel at the agent; finishing then reports the reason cancelled."""
+        native.lib.canhub_txn_abort(self._handle)
 
-        while taken < count:
-            remaining = ctypes.cast(ctypes.byref(native_steps, taken * step_size), ctypes.POINTER(native.CanHubTxnStep))
+    def finish(self) -> TransactionResult:
+        """Wait for the outcome; raises :class:`TransactionAborted` with the
+        report when the transaction did not complete."""
+        while True:
             with self._bus._lock:
-                result = native.lib.canhub_txn_send(self._bus._session, remaining, count - taken, SEND_SLICE_MS)
-            self._check(result)
-            taken += result
-
-    def _send_message(self, step: Step) -> None:
-        message, data = to_native_message(step)
-        result = native.ERR_TIMEOUT
-
-        while result == native.ERR_TIMEOUT:
-            with self._bus._lock:
-                result = native.lib.canhub_txn_send_message(self._bus._session, ctypes.byref(message), SEND_SLICE_MS)
-        self._check(result)
-        del data
-
-    def _check(self, result: int) -> None:
-        if result == native.ERR_TXN_ABORTED:
-            raise TransactionAborted(self._collect_result())
-        if result < native.OK:
-            raise CanOperationError(native.last_error(self._bus._session))
-
-    def _collect_result(self) -> TransactionResult:
-        report = native.CanHubTxnResult()
-        report.struct_size = ctypes.sizeof(report)
+                status = native.lib.canhub_txn_wait(self._handle, WAIT_SLICE_MS)
+            if status != native.ERR_TIMEOUT:
+                break
+        report = native.CanHubTxnReport()
         with self._bus._lock:
-            native.lib.canhub_txn_wait(self._bus._session, ctypes.byref(report), 0)
-        self._finished = True
-        return from_native_result(report, self._roster)
+            status = native.lib.canhub_txn_finish(self._handle, ctypes.byref(report))
+            error = native.last_error(self._bus._session)
+        self._handle = None
+        self._result = from_native_report(report)
+        if status == native.ERR_TXN_ABORTED:
+            raise TransactionAborted(self._result)
+        if status != native.OK:
+            raise CanOperationError(error)
+        return self._result
+
+    def _step(self, step: "native.CanHubTxnStep") -> None:
+        while True:
+            with self._bus._lock:
+                status = native.lib.canhub_txn_try_step(self._handle, ctypes.byref(step), SEND_SLICE_MS)
+                error = native.last_error(self._bus._session) if status not in (native.OK, native.ERR_TIMEOUT) else ""
+            if status == native.OK:
+                return
+            if status == native.ERR_TIMEOUT:
+                continue
+            if status == native.ERR_TXN_ABORTED:
+                self.finish()
+            raise CanOperationError(error)
+
+    def _report_roster(self, context, result) -> None:
+        if self._on_roster is not None:
+            self._on_roster(from_native_roster(result.contents))
+
+    def _release(self) -> None:
+        report = native.CanHubTxnReport()
+        with self._bus._lock:
+            native.lib.canhub_txn_wait(self._handle, CLOSE_WAIT_MS)
+            native.lib.canhub_txn_finish(self._handle, ctypes.byref(report))
+        self._handle = None
+        self._result = from_native_report(report)
 
 
-def begin(bus, roster: Iterable[int], origin: Optional[Origin], options: "BeginOptions", timeout: float) -> Transaction:
-    members = tuple(roster)
-    request = to_native_begin(members, origin, options)
-    with bus._lock:
-        result = native.lib.canhub_txn_begin(bus._session, ctypes.byref(request), int(timeout * MILLISECONDS_PER_SECOND))
-    if result != native.OK:
-        raise CanOperationError(native.last_error(bus._session))
-    return Transaction(bus, members)
+@dataclass(frozen=True)
+class Options:
+    exclusive: bool = False
+    idle_timeout: Optional[float] = None
+    keepalive: Optional[Keepalive] = None
+    bitrate_switch: bool = False
+    on_roster: Optional[Callable[[RosterResult], None]] = None
 
 
 def run_script(
-    bus, script_path: str, progress: Optional[Callable[[TransactionProgress, int], Optional[bool]]]
+    bus,
+    text: Optional[str],
+    path: Optional[str],
+    base_directory: Optional[str],
+    progress: Optional[Callable[[TransactionProgress, int], Optional[bool]]],
+    on_roster: Optional[Callable[[RosterResult], None]],
 ) -> TransactionResult:
-    outcome = native.CanHubScriptOutcome()
-    outcome.struct_size = ctypes.sizeof(outcome)
     interruption = []
 
-    def report(context, native_progress, total_steps):
+    def report_progress(context, native_progress, total_steps):
         if progress is None:
             return 1
         try:
@@ -357,253 +322,198 @@ def run_script(
             return 0
         return 1 if keep_going else 0
 
-    callback = native.ScriptProgress(report)
+    def report_roster(context, result):
+        if on_roster is not None:
+            on_roster(from_native_roster(result.contents))
+
+    options = native.CanHubTxnScriptOptions()
+    options.on_progress = native.ProgressCallback(report_progress)
+    options.on_roster = native.RosterCallback(report_roster)
+    report = native.CanHubTxnReport()
     with bus._lock:
-        status = native.lib.canhub_txn_run_script(
-            bus._session, os.fsencode(script_path), ctypes.byref(outcome), callback, None
-        )
+        if path is not None:
+            status = native.lib.canhub_txn_run_script_file(bus._session, os.fsencode(path), ctypes.byref(options), ctypes.byref(report))
+        else:
+            directory = os.fsencode(base_directory) if base_directory is not None else None
+            status = native.lib.canhub_txn_run_script(bus._session, text.encode(), directory, ctypes.byref(options), ctypes.byref(report))
         error = "" if status in (native.OK, native.ERR_TXN_ABORTED) else native.last_error(bus._session)
     if interruption:
         raise interruption[0]
 
-    roster = tuple(outcome.roster[: outcome.roster_count])
-    result = from_native_result(outcome.result, roster)
+    result = from_native_report(report)
     if status == native.OK:
         return result
     if status == native.ERR_TXN_ABORTED:
         raise TransactionAborted(result)
     if status == native.ERR_ARGUMENT:
-        raise ScriptError(error, outcome.error_line)
+        raise ScriptError(error, _script_error_line(error))
     raise CanOperationError(error)
 
 
-@dataclass(frozen=True)
-class BeginOptions:
-    exclusive: bool = False
-    isotp: bool = False
-    idle_timeout: Optional[float] = None
-    keepalive: Optional[Keepalive] = None
-
-
-def to_native_begin(roster, origin: Optional[Origin], options: BeginOptions = BeginOptions()) -> "native.CanHubTxnBegin":
-    if len(roster) > native.TXN_ROSTER_MAX:
-        raise ValueError(f"a roster holds at most {native.TXN_ROSTER_MAX} origins")
-    if roster and origin is None:
-        raise ValueError("a roster needs an origin to tell who answered")
-
-    request = native.CanHubTxnBegin()
-    request.struct_size = ctypes.sizeof(request)
-    request.flags = native.TXN_FLAG_EXCLUSIVE if options.exclusive else 0
-    if options.isotp:
-        request.flags |= native.TXN_FLAG_ISOTP
-    if options.idle_timeout is not None:
-        request.idle_timeout_ms = int(round(options.idle_timeout * MILLISECONDS_PER_SECOND))
+def to_native_options(options: Options, roster_callback, keep: list) -> "native.CanHubTxnOptions":
+    native_options = native.CanHubTxnOptions()
+    native_options.exclusive = options.exclusive
+    native_options.idle_timeout_ms = _milliseconds(options.idle_timeout) if options.idle_timeout is not None else 5000
+    native_options.bitrate_switch = options.bitrate_switch
+    native_options.on_roster = roster_callback
     if options.keepalive is not None:
-        to_native_keepalive(options.keepalive, request)
-    if origin is not None:
-        request.origin_source = native.TXN_ORIGIN_CAN_ID if origin.payload_offset is None else native.TXN_ORIGIN_PAYLOAD
-        request.origin_shift = origin.shift
-        request.origin_payload_offset = origin.payload_offset or 0
-        request.origin_mask = origin.mask
-    request.roster_count = len(roster)
-    for index, member in enumerate(roster):
-        request.roster[index] = member
-    return request
+        keepalive = to_native_keepalive(options.keepalive)
+        keep.append(keepalive)
+        native_options.keepalive = ctypes.pointer(keepalive)
+    return native_options
 
 
-def to_native_keepalive(keepalive: Keepalive, request: "native.CanHubTxnBegin") -> None:
+def to_native_keepalive(keepalive: Keepalive) -> "native.CanHubTxnKeepalive":
     data = bytes(keepalive.data)
     if len(data) > native.FRAME_PAYLOAD_MAX:
         raise ValueError(f"a keepalive frame holds at most {native.FRAME_PAYLOAD_MAX} bytes")
-    request.keepalive_period_ms = int(round(keepalive.period * MILLISECONDS_PER_SECOND))
-    request.keepalive.can_id = _wire_id(keepalive.arbitration_id, keepalive.is_extended_id)
-    request.keepalive.flags = native.FRAME_FLAG_FD if keepalive.is_fd else 0
-    request.keepalive.length = len(data)
-    request.keepalive.payload[: len(data)] = data
+    native_keepalive = native.CanHubTxnKeepalive()
+    native_keepalive.id = to_native_id(keepalive.id, keepalive.extended)
+    native_keepalive.length = len(data)
+    native_keepalive.data[: len(data)] = data
+    native_keepalive.every_ms = _milliseconds(keepalive.every)
+    return native_keepalive
 
 
-def to_native_template(template_id: int, template: Template) -> "native.CanHubTxnTemplate":
-    if not 0 <= template_id < native.TXN_TEMPLATES_MAX:
-        raise ValueError(f"template ids go from 0 to {native.TXN_TEMPLATES_MAX - 1}")
-
-    definition = native.CanHubTxnTemplate()
-    definition.struct_size = ctypes.sizeof(definition)
-    definition.template_id = template_id
-    definition.advance_mode = int(template.mode)
-    definition.count_k = template.count
-    definition.timeout_ms = int(round(template.timeout * MILLISECONDS_PER_SECOND))
-    if template.extend_timeout is not None:
-        definition.extend_timeout_ms = int(round(template.extend_timeout * MILLISECONDS_PER_SECOND))
-    definition.gap_us = int(round(template.gap * MICROSECONDS_PER_SECOND))
-    if template.soft:
-        definition.flags |= native.TXN_TEMPLATE_SOFT
-    if template.abort_on_mismatch:
-        definition.flags |= native.TXN_TEMPLATE_MISMATCH_ABORT
-    for slot, pattern in (
-        (native.TXN_PATTERN_ADVANCE, template.advance_on),
-        (native.TXN_PATTERN_ABORT, template.abort_on),
-        (native.TXN_PATTERN_EXTEND, template.extend_on),
-    ):
-        if pattern is not None:
-            definition.patterns_present |= 1 << slot
-            definition.patterns[slot] = to_native_pattern(pattern)
-    if template.isotp is not None:
-        definition.type = native.TXN_TYPE_ISOTP
-        definition.isotp = to_native_isotp(template.isotp)
-    return definition
-
-
-def to_native_isotp(isotp: Isotp) -> "native.CanHubTxnIsotp":
-    parameters = native.CanHubTxnIsotp()
-    parameters.response_id = _wire_id(isotp.response_id, isotp.is_extended_id)
-    parameters.tx_data_length = native.FRAME_PAYLOAD_MAX_CLASSIC
-    parameters.block_size = isotp.block_size
-    parameters.st_min = isotp.st_min
-    if isotp.padding is not None:
-        parameters.flags |= native.ISOTP_FLAG_PADDING
-        parameters.padding = isotp.padding
-    if isotp.tx_address is not None or isotp.rx_address is not None:
-        parameters.flags |= native.ISOTP_FLAG_ADDRESS_BYTE
-        parameters.tx_address = isotp.tx_address if isotp.tx_address is not None else isotp.rx_address
-        parameters.rx_address = isotp.rx_address if isotp.rx_address is not None else isotp.tx_address
-    if isotp.fd:
-        parameters.flags |= native.ISOTP_FLAG_FD
-        parameters.tx_data_length = isotp.data_length
-    if isotp.bitrate_switch:
-        parameters.flags |= native.ISOTP_FLAG_BIT_RATE_SWITCH
-    return parameters
+def native_step(
+    id: int,
+    extended: bool,
+    data: Optional[bytes],
+    link: Optional[IsotpLink],
+    response: Optional[Response],
+    where: Optional[Match],
+    gap: float,
+    keep: list,
+) -> "native.CanHubTxnStep":
+    step = native.CanHubTxnStep()
+    step.id = to_native_id(id, extended)
+    if data is not None:
+        buffer = ctypes.create_string_buffer(data, max(len(data), 1))
+        keep.append(buffer)
+        step.data = ctypes.cast(buffer, ctypes.c_void_p)
+        step.length = len(data)
+    if link is not None:
+        native_link = to_native_link(link)
+        keep.append(native_link)
+        step.isotp = ctypes.pointer(native_link)
+    if response is not None:
+        native_response = to_native_response(response, keep)
+        keep.append(native_response)
+        step.response = ctypes.pointer(native_response)
+    if where is not None:
+        native_where = to_native_match(where)
+        keep.append(native_where)
+        step.where = ctypes.pointer(native_where)
+    step.gap_us = int(round(gap * MICROSECONDS_PER_SECOND))
+    return step
 
 
-def to_native_pattern(pattern: Pattern) -> "native.CanHubTxnPattern":
-    native_pattern = native.CanHubTxnPattern()
-    native_pattern.can_id = _wire_id(pattern.arbitration_id, pattern.is_extended_id)
-    native_pattern.can_mask = _id_mask(pattern) if pattern.can_mask is None else pattern.can_mask
-    native_pattern.payload_value = _payload_word(pattern.data)
-    native_pattern.payload_mask = _payload_word(_data_mask(pattern))
-    return native_pattern
+def to_native_response(response: Response, keep: list) -> "native.CanHubTxnResponse":
+    native_response = native.CanHubTxnResponse()
+    native_response.success = to_native_match(response.success)
+    if response.failure is not None:
+        failure = to_native_match(response.failure)
+        keep.append(failure)
+        native_response.failure = ctypes.pointer(failure)
+    if response.pending is not None:
+        pending = to_native_match(response.pending)
+        keep.append(pending)
+        native_response.pending = ctypes.pointer(pending)
+    if response.nodes:
+        nodes = (ctypes.c_uint32 * len(response.nodes))(*response.nodes)
+        keep.append(nodes)
+        native_response.nodes = ctypes.cast(nodes, ctypes.POINTER(ctypes.c_uint32))
+        native_response.node_count = len(response.nodes)
+    native_response.allowed_missing = response.allowed_missing
+    if response.node_byte is not None:
+        native_response.node_from = native.TXN_NODE_IN_BYTE
+        native_response.node_byte = response.node_byte
+    native_response.timeout_ms = _milliseconds(response.timeout)
+    if response.timeout_after_pending is not None:
+        native_response.timeout_after_pending_ms = _milliseconds(response.timeout_after_pending)
+    native_response.continue_on_timeout = response.continue_on_timeout
+    native_response.on_mismatch_abort = response.on_mismatch_abort
+    return native_response
 
 
-def to_native_step(step: Step, isotp: bool = False) -> "native.CanHubTxnStep":
-    data = bytes(step.data)
-    native_step = native.CanHubTxnStep()
-    native_step.template_id = step.template
-    if step.arbitration_id is None or isotp:
-        native_step.flags |= native.TXN_STEP_EXPECT_ONLY
-    if step.arbitration_id is not None:
-        native_step.can_id = _wire_id(step.arbitration_id, step.is_extended_id)
-    if step.expect is not None:
-        native_step.flags |= native.TXN_STEP_EXPECT_VALUE
-        native_step.expect_value = _payload_word(step.expect)
-    if step.is_fd:
-        native_step.frame_flags |= native.FRAME_FLAG_FD
-    if step.bitrate_switch:
-        native_step.frame_flags |= native.FRAME_FLAG_BRS
-    native_step.length = len(data)
-    native_step.payload[: len(data)] = data
-    return native_step
+def to_native_match(match: Match) -> "native.CanHubTxnMatch":
+    native_match = native.CanHubTxnMatch()
+    native_match.id = to_native_id(match.id, match.extended)
+    native_match.id_ignored_bits = match.ignored_bits
+    for index, expected in match.data.items():
+        if not 0 <= index < MATCH_BYTES:
+            raise ValueError(f"a match compares the first {MATCH_BYTES} data bytes")
+        if isinstance(expected, Masked):
+            native_match.bytes[index].mask = expected.mask
+            native_match.bytes[index].value = expected.value
+        else:
+            native_match.bytes[index].mask = BYTE_MASK
+            native_match.bytes[index].value = expected
+    return native_match
 
 
-def to_native_message(step: Step):
-    """The native ISO-TP message of a step, with the buffer that must outlive it."""
-    data = bytes(step.data)
-    if step.arbitration_id is None:
-        raise ValueError("an ISO-TP step that sends needs arbitration_id")
-    if len(data) > native.ISOTP_MESSAGE_MAX:
-        raise ValueError(f"an ISO-TP message holds at most {native.ISOTP_MESSAGE_MAX} bytes")
+def to_native_link(link: IsotpLink) -> "native.CanHubTxnIsotpLink":
+    native_link = native.CanHubTxnIsotpLink()
+    native_link.tx_id = to_native_id(link.tx_id, link.extended)
+    native_link.rx_id = to_native_id(link.rx_id, link.extended)
+    if link.tx_address is not None or link.rx_address is not None:
+        native_link.address_byte = True
+        native_link.tx_address = link.tx_address if link.tx_address is not None else link.rx_address
+        native_link.rx_address = link.rx_address if link.rx_address is not None else link.tx_address
+    if link.padding is not None:
+        native_link.padded = True
+        native_link.padding = link.padding
+    native_link.fd = link.fd
+    native_link.bitrate_switch = link.bitrate_switch
+    if link.fd:
+        native_link.fd_data_length = link.fd_data_length
+    native_link.block_size = link.block_size
+    native_link.st_min = link.st_min
+    return native_link
 
-    buffer = ctypes.create_string_buffer(data, len(data))
-    message = native.CanHubTxnMessage()
-    message.struct_size = ctypes.sizeof(message)
-    message.can_id = _wire_id(step.arbitration_id, step.is_extended_id)
-    message.template_id = step.template
-    message.length = len(data)
-    message.data = ctypes.cast(buffer, ctypes.c_void_p)
-    if step.expect is not None:
-        message.flags |= native.TXN_STEP_EXPECT_VALUE
-        message.expect_value = _payload_word(step.expect)
-    return message, buffer
+
+def to_native_id(id: int, extended: bool) -> "native.CanHubCanId":
+    native_id = native.CanHubCanId()
+    native_id.value = id
+    native_id.extended = extended
+    return native_id
 
 
 def from_native_progress(progress: "native.CanHubTxnProgress") -> TransactionProgress:
     return TransactionProgress(progress.sent_steps, progress.completed_steps, progress.bytes_in_flight, progress.window_bytes)
 
 
-def from_native_result(report: "native.CanHubTxnResult", roster) -> TransactionResult:
-    answered = frozenset(member for index, member in enumerate(roster) if report.seen_bitmap & (1 << index))
+def from_native_roster(result: "native.CanHubTxnRosterResult") -> RosterResult:
+    return RosterResult(result.step, frozenset(result.missing[: result.missing_count]))
+
+
+def from_native_report(report: "native.CanHubTxnReport") -> TransactionResult:
     frame = None
-    if report.has_rx_frame:
+    if report.has_frame:
         frame = Message(
-            arbitration_id=report.rx_frame.can_id & native.CAN_ID_MASK,
-            is_extended_id=bool(report.rx_frame.can_id & native.CAN_ID_FLAG_EFF),
-            is_fd=bool(report.rx_frame.flags & native.FRAME_FLAG_FD),
-            data=bytes(report.rx_frame.payload[: report.rx_frame.length]),
+            arbitration_id=report.frame.id.value,
+            is_extended_id=report.frame.id.extended,
+            is_fd=bool(report.frame.flags & native.FRAME_FLAG_FD),
+            data=bytes(report.frame.payload[: report.frame.length]),
         )
+    missing = report.failing_roster.missing[: report.failing_roster.missing_count]
     return TransactionResult(
-        done=report.state == native.TXN_DONE and report.reason == 0,
-        reason=REASONS[report.reason] if report.reason < len(REASONS) else str(report.reason),
-        failing_step=report.failing_seq,
+        done=report.done,
+        reason=native.lib.canhub_txn_reason_name(report.reason).decode(),
+        failing_step=report.failing_step,
         completed_steps=report.completed_steps,
-        answered=answered,
-        missing=frozenset(roster) - answered,
-        offending_origin=report.offending_origin,
-        expected=report.expected.to_bytes(PATTERN_PAYLOAD_BYTES, "little"),
-        got=report.got.to_bytes(PATTERN_PAYLOAD_BYTES, "little"),
+        missing=frozenset(missing),
+        offending_node=report.offending_node,
+        expected=bytes(report.expected),
+        got=bytes(report.got),
         frame=frame,
     )
 
 
-def _wire_id(arbitration_id: int, is_extended_id: bool) -> int:
-    wire_id = arbitration_id & native.CAN_ID_MASK
-    if is_extended_id:
-        wire_id |= native.CAN_ID_FLAG_EFF
-    return wire_id
+def _milliseconds(seconds: float) -> int:
+    return int(round(seconds * MILLISECONDS_PER_SECOND))
 
 
-def _id_mask(pattern: Pattern) -> int:
-    id_bits = native.CAN_ID_MASK if pattern.is_extended_id else STANDARD_ID_MASK
-    return id_bits | native.CAN_ID_FLAG_EFF
-
-
-def _data_mask(pattern: Pattern) -> bytes:
-    if pattern.data_mask is not None:
-        return pattern.data_mask
-    return b"\xff" * len(pattern.data)
-
-
-def _payload_word(data: bytes) -> int:
-    if len(data) > PATTERN_PAYLOAD_BYTES:
-        raise ValueError(f"patterns compare the first {PATTERN_PAYLOAD_BYTES} payload bytes")
-    return int.from_bytes(bytes(data).ljust(PATTERN_PAYLOAD_BYTES, b"\0"), "little")
-
-
-def _batches(steps: Iterable[Step], isotp_templates, size: int) -> Iterator:
-    """Runs of up to ``size`` frame steps, and each ISO-TP message on its own."""
-    batch = []
-    for step in steps:
-        if step.template in isotp_templates and step.data:
-            if batch:
-                yield batch
-                batch = []
-            yield step
-            continue
-        batch.append(step)
-        if len(batch) == size:
-            yield batch
-            batch = []
-    if batch:
-        yield batch
-
-
-def _timeout_ms(timeout: Optional[float]) -> int:
-    return -1 if timeout is None else max(0, int(timeout * MILLISECONDS_PER_SECOND))
-
-
-def _slice_ms(deadline: Optional[float], slice_ms: int) -> int:
-    if deadline is None:
-        return slice_ms
-    remaining_ms = max(0, int((deadline - time.monotonic()) * MILLISECONDS_PER_SECOND))
-    return min(slice_ms, remaining_ms)
-
-
-def _expired(deadline: Optional[float]) -> bool:
-    return deadline is not None and time.monotonic() >= deadline
+def _script_error_line(error: str) -> int:
+    matched = SCRIPT_ERROR_PATTERN.match(error)
+    return int(matched.group(1)) if matched else 0
