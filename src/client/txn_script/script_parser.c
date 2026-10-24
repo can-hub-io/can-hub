@@ -12,7 +12,7 @@
 
 typedef enum tblock_e {
     kBLOCK_ROOT = 0,
-    kBLOCK_TEMPLATE,
+    kBLOCK_RESPONSE,
     kBLOCK_ROSTER,
     kBLOCK_FOR,
     kBLOCK_MAX,
@@ -68,15 +68,16 @@ static bool openBlock(Parser *self, uint8_t kind, uint16_t index, const ScriptLi
 static Block *currentBlock(Parser *self);
 static bool parseLine(Parser *self, const ScriptLine *line);
 static bool parseRootOrForLine(Parser *self, Cursor *cursor);
-static bool parseTemplateLine(Parser *self, Cursor *cursor);
+static bool parseResponseLine(Parser *self, Cursor *cursor);
 static bool parseRosterLine(Parser *self, Cursor *cursor);
 static bool parseConstant(Parser *self, Cursor *cursor);
 static bool parseConstantValue(Parser *self, Cursor *cursor, ScriptConstant *constant);
 static bool parseCrcModel(Parser *self, Cursor *cursor, ScriptConstant *constant);
 static bool parseCrcParameter(Parser *self, Cursor *cursor, ChecksumModel *model, uint8_t *given);
-static bool parseTemplateHeader(Parser *self, Cursor *cursor);
+static bool parseResponseHeader(Parser *self, Cursor *cursor);
 static bool parseRosterHeader(Parser *self, Cursor *cursor);
-static bool parseTimeout(Parser *self, Cursor *cursor, ScriptTemplate *template_node);
+static bool parseTimeout(Parser *self, Cursor *cursor, ScriptResponse *response_node);
+static bool parseTimeoutAfterPending(Parser *self, Cursor *cursor, ScriptResponse *response_node);
 static bool parseSend(Parser *self, Cursor *cursor);
 static bool parseKeepalive(Parser *self, Cursor *cursor);
 static bool parseIdleTimeout(Parser *self, Cursor *cursor);
@@ -180,16 +181,16 @@ static bool placeLine(Parser *self, const ScriptLine *line)
 static bool closeBlock(Parser *self)
 {
     Block *block = currentBlock(self);
-    ScriptTemplate *template_node;
+    ScriptResponse *response_node;
 
     if (block->awaiting_first_line) {
         ScriptError_Set(self->error, block->header_line, "expected an indented block after this line");
         return false;
     }
     if (block->kind == kBLOCK_ROSTER) {
-        template_node = &self->script->templates[block->index];
-        if (template_node->success == SCRIPT_NO_INDEX) {
-            ScriptError_Set(self->error, block->header_line, "a template for needs a success line");
+        response_node = &self->script->responses[block->index];
+        if (response_node->success == SCRIPT_NO_INDEX) {
+            ScriptError_Set(self->error, block->header_line, "a response for needs a success line");
             return false;
         }
     }
@@ -228,8 +229,8 @@ static bool parseLine(Parser *self, const ScriptLine *line)
     Cursor cursor = { line, 0 };
     uint8_t kind = currentBlock(self)->kind;
 
-    if (kind == kBLOCK_TEMPLATE) {
-        return parseTemplateLine(self, &cursor);
+    if (kind == kBLOCK_RESPONSE) {
+        return parseResponseLine(self, &cursor);
     }
     if (kind == kBLOCK_ROSTER) {
         return parseRosterLine(self, &cursor);
@@ -263,8 +264,8 @@ static bool parseRootOrForLine(Parser *self, Cursor *cursor)
     if (acceptWord(cursor, "idle")) {
         return parseIdleTimeout(self, cursor);
     }
-    if (acceptWord(cursor, "template")) {
-        return parseTemplateHeader(self, cursor);
+    if (acceptWord(cursor, "response")) {
+        return parseResponseHeader(self, cursor);
     }
     if (cursor->line->token_count > 1 && cursor->line->tokens[1].kind == kSCRIPT_TOKEN_ASSIGN) {
         return parseConstant(self, cursor);
@@ -273,52 +274,52 @@ static bool parseRootOrForLine(Parser *self, Cursor *cursor)
     return fail(self, "unknown statement");
 }
 
-static bool parseTemplateLine(Parser *self, Cursor *cursor)
+static bool parseResponseLine(Parser *self, Cursor *cursor)
 {
-    ScriptTemplate *template_node = &self->script->templates[currentBlock(self)->index];
+    ScriptResponse *response_node = &self->script->responses[currentBlock(self)->index];
 
     if (acceptWord(cursor, "success")) {
-        if (template_node->has_roster) {
-            return fail(self, "this template already waits for its for block");
+        if (response_node->has_roster) {
+            return fail(self, "this response already waits for its for block");
         }
-        return parseCondition(self, cursor, &template_node->success) && expectEnd(self, cursor);
+        return parseCondition(self, cursor, &response_node->success) && expectEnd(self, cursor);
     }
     if (acceptWord(cursor, "failure")) {
-        return parseCondition(self, cursor, &template_node->failure) && expectEnd(self, cursor);
+        return parseCondition(self, cursor, &response_node->failure) && expectEnd(self, cursor);
     }
     if (acceptWord(cursor, "pending")) {
-        return parseCondition(self, cursor, &template_node->pending) && expectEnd(self, cursor);
+        return parseCondition(self, cursor, &response_node->pending) && expectEnd(self, cursor);
     }
     if (acceptWord(cursor, "timeout")) {
-        return parseTimeout(self, cursor, template_node);
+        return parseTimeout(self, cursor, response_node);
     }
     if (acceptWord(cursor, "on")) {
         if (!expectWord(self, cursor, "mismatch", "expected on mismatch abort") ||
             !expectWord(self, cursor, "abort", "expected on mismatch abort")) {
             return false;
         }
-        template_node->mismatch_abort = true;
+        response_node->mismatch_abort = true;
         return expectEnd(self, cursor);
     }
     if (acceptWord(cursor, "for")) {
         return parseRosterHeader(self, cursor);
     }
 
-    return fail(self, "a template holds success, failure, pending, for, on mismatch abort and timeout lines");
+    return fail(self, "a response holds success, failure, pending, for, on mismatch abort, timeout and timeout after pending lines");
 }
 
 static bool parseRosterLine(Parser *self, Cursor *cursor)
 {
-    ScriptTemplate *template_node = &self->script->templates[currentBlock(self)->index];
+    ScriptResponse *response_node = &self->script->responses[currentBlock(self)->index];
 
     if (!acceptWord(cursor, "success")) {
-        return fail(self, "a template for holds one success line");
+        return fail(self, "a response for holds one success line");
     }
-    if (template_node->success != SCRIPT_NO_INDEX) {
-        return fail(self, "a template for holds one success line");
+    if (response_node->success != SCRIPT_NO_INDEX) {
+        return fail(self, "a response for holds one success line");
     }
 
-    return parseCondition(self, cursor, &template_node->success) && expectEnd(self, cursor);
+    return parseCondition(self, cursor, &response_node->success) && expectEnd(self, cursor);
 }
 
 static bool parseConstant(Parser *self, Cursor *cursor)
@@ -437,37 +438,37 @@ static bool parseCrcParameter(Parser *self, Cursor *cursor, ChecksumModel *model
     return fail(self, "unknown crc parameter");
 }
 
-static bool parseTemplateHeader(Parser *self, Cursor *cursor)
+static bool parseResponseHeader(Parser *self, Cursor *cursor)
 {
-    ScriptTemplate *template_node;
-    uint16_t index = self->script->template_count;
+    ScriptResponse *response_node;
+    uint16_t index = self->script->response_count;
 
-    if (index == SCRIPT_TEMPLATES_MAX) {
-        return fail(self, "too many templates");
+    if (index == SCRIPT_RESPONSES_MAX) {
+        return fail(self, "too many responses");
     }
 
-    template_node = &self->script->templates[index];
-    memset(template_node, 0, sizeof(*template_node));
-    template_node->line_number = cursor->line->line_number;
-    template_node->success = SCRIPT_NO_INDEX;
-    template_node->failure = SCRIPT_NO_INDEX;
-    template_node->pending = SCRIPT_NO_INDEX;
-    if (!expectName(self, cursor, &template_node->name, "expected a template name") || !expectEnd(self, cursor)) {
+    response_node = &self->script->responses[index];
+    memset(response_node, 0, sizeof(*response_node));
+    response_node->line_number = cursor->line->line_number;
+    response_node->success = SCRIPT_NO_INDEX;
+    response_node->failure = SCRIPT_NO_INDEX;
+    response_node->pending = SCRIPT_NO_INDEX;
+    if (!expectName(self, cursor, &response_node->name, "expected a response name") || !expectEnd(self, cursor)) {
         return false;
     }
 
-    self->script->template_count++;
-    return openBlock(self, kBLOCK_TEMPLATE, index, cursor->line);
+    self->script->response_count++;
+    return openBlock(self, kBLOCK_RESPONSE, index, cursor->line);
 }
 
 static bool parseRosterHeader(Parser *self, Cursor *cursor)
 {
     uint16_t index = currentBlock(self)->index;
-    ScriptTemplate *template_node = &self->script->templates[index];
+    ScriptResponse *response_node = &self->script->responses[index];
     ScriptNumber quorum;
 
-    if (template_node->has_roster || template_node->success != SCRIPT_NO_INDEX) {
-        return fail(self, "a template waits on one success, either a line or a for block");
+    if (response_node->has_roster || response_node->success != SCRIPT_NO_INDEX) {
+        return fail(self, "a response waits on one success, either a line or a for block");
     }
     if (peek(cursor) != NULL && peek(cursor)->kind == kSCRIPT_TOKEN_NUMBER) {
         if (!expectNumber(self, cursor, &quorum, "expected a count") ||
@@ -477,36 +478,56 @@ static bool parseRosterHeader(Parser *self, Cursor *cursor)
         if (quorum.value == 0 || quorum.value > BYTE_VALUE_MAX) {
             return fail(self, "the count must be at least 1");
         }
-        template_node->quorum = (uint8_t)quorum.value;
+        response_node->quorum = (uint8_t)quorum.value;
     }
-    if (!expectName(self, cursor, &template_node->roster_variable, "expected a variable name") ||
+    if (!expectName(self, cursor, &response_node->roster_variable, "expected a variable name") ||
         !expectWord(self, cursor, "in", "expected in") ||
-        !parseListReference(self, cursor, &template_node->roster) ||
+        !parseListReference(self, cursor, &response_node->roster) ||
         !expectEnd(self, cursor)) {
         return false;
     }
 
-    template_node->has_roster = true;
+    response_node->has_roster = true;
     return openBlock(self, kBLOCK_ROSTER, index, cursor->line);
 }
 
-static bool parseTimeout(Parser *self, Cursor *cursor, ScriptTemplate *template_node)
+static bool parseTimeout(Parser *self, Cursor *cursor, ScriptResponse *response_node)
 {
-    const ScriptToken *duration = next(cursor);
+    const ScriptToken *duration;
 
+    if (acceptWord(cursor, "after")) {
+        return parseTimeoutAfterPending(self, cursor, response_node);
+    }
+    duration = next(cursor);
     if (duration == NULL || duration->kind != kSCRIPT_TOKEN_DURATION) {
         return fail(self, "expected a time such as 50ms or 2s");
     }
 
-    template_node->has_timeout = true;
-    template_node->timeout_us = (uint32_t)duration->number;
+    response_node->has_timeout = true;
+    response_node->timeout_us = (uint32_t)duration->number;
     if (acceptWord(cursor, "then")) {
         if (!expectWord(self, cursor, "continue", "expected then continue")) {
             return false;
         }
-        template_node->continue_on_timeout = true;
+        response_node->continue_on_timeout = true;
     }
 
+    return expectEnd(self, cursor);
+}
+
+static bool parseTimeoutAfterPending(Parser *self, Cursor *cursor, ScriptResponse *response_node)
+{
+    const ScriptToken *duration;
+
+    if (!expectWord(self, cursor, "pending", "expected timeout after pending TIME")) {
+        return false;
+    }
+    duration = next(cursor);
+    if (duration == NULL || duration->kind != kSCRIPT_TOKEN_DURATION) {
+        return fail(self, "expected a time such as 5s after timeout after pending");
+    }
+
+    response_node->timeout_after_pending_us = (uint32_t)duration->number;
     return expectEnd(self, cursor);
 }
 
@@ -601,7 +622,7 @@ static bool parseExpect(Parser *self, Cursor *cursor)
 static bool parseExpectClause(Parser *self, Cursor *cursor, ScriptStatement *statement)
 {
     statement->has_expect = true;
-    if (!expectName(self, cursor, &statement->template_name, "expected a template name after expect")) {
+    if (!expectName(self, cursor, &statement->response_name, "expected a response name after expect")) {
         return false;
     }
     if (acceptWord(cursor, "where")) {

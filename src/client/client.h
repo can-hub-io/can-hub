@@ -44,6 +44,7 @@ typedef struct {
     void (*on_error)(void *context, uint16_t code, const char *detail);
     void (*on_disconnected)(void *context);
     void (*on_configure_reply)(void *context, const ConfigureReplyMessage *reply);
+    void (*on_roster_report)(void *context, const TxnRosterReportMessage *report);
 } ClientEvents;
 
 typedef struct {
@@ -82,6 +83,7 @@ uint8_t Client_State(const Client *self);
 uint8_t Client_Channel(const Client *self);
 bool Client_InterfaceLeased(const Client *self);
 bool Client_BeginTransaction(Client *self, TxnBeginMessage *begin);
+bool Client_DefineRoster(Client *self, TxnRosterMessage *roster);
 bool Client_DefineTemplate(Client *self, TxnTemplateMessage *template_message);
 uint32_t Client_SendSteps(Client *self, const TxnStep *steps, uint32_t count, TTRANSACTION_OFFER *stopped_by);
 TTRANSACTION_OFFER Client_EndTransaction(Client *self);

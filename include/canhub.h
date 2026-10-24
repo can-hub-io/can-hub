@@ -1,6 +1,7 @@
 #ifndef CANHUB_H
 #define CANHUB_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -8,7 +9,7 @@
 extern "C" {
 #endif
 
-#define CANHUB_API_VERSION 1
+#define CANHUB_API_VERSION 2
 
 #if defined(_WIN32)
 #define CANHUB_API __declspec(dllexport)
@@ -23,13 +24,14 @@ extern "C" {
 #define CANHUB_INTERFACE_NAME_MAX 16
 #define CANHUB_FILTERS_MAX 16
 
-#define CANHUB_CAN_ID_MASK 0x1FFFFFFFu
-#define CANHUB_CAN_ID_FLAG_ERR (1u << 29)
-#define CANHUB_CAN_ID_FLAG_RTR (1u << 30)
-#define CANHUB_CAN_ID_FLAG_EFF (1u << 31)
+#define CANHUB_STANDARD_ID_MASK 0x7FFu
+#define CANHUB_EXTENDED_ID_MASK 0x1FFFFFFFu
 
 #define CANHUB_FRAME_FLAG_FD (1u << 0)
 #define CANHUB_FRAME_FLAG_BRS (1u << 1)
+#define CANHUB_FRAME_FLAG_RTR (1u << 2)
+/* Received only, with CANHUB_OPEN_FLAG_ERROR_FRAMES: a controller error frame. */
+#define CANHUB_FRAME_FLAG_ERROR (1u << 3)
 /* Received only: the hub injected this frame along a bridge route or group. */
 #define CANHUB_FRAME_FLAG_BRIDGED (1u << 7)
 
@@ -61,49 +63,8 @@ extern "C" {
 #define CANHUB_ERR_TXN_ABORTED (-19)
 
 #define CANHUB_TXN_ROSTER_MAX 64
-#define CANHUB_TXN_TEMPLATES_MAX 16
-#define CANHUB_TXN_FLAG_EXCLUSIVE (1u << 0)
-#define CANHUB_TXN_FLAG_ISOTP (1u << 1)
-#define CANHUB_TXN_TYPE_GENERIC 0
-#define CANHUB_TXN_TYPE_ISOTP 1
-#define CANHUB_ISOTP_FLAG_PADDING (1u << 0)
-#define CANHUB_ISOTP_FLAG_ADDRESS_BYTE (1u << 1)
-#define CANHUB_ISOTP_FLAG_FD (1u << 2)
-#define CANHUB_ISOTP_FLAG_BIT_RATE_SWITCH (1u << 3)
+#define CANHUB_TXN_MATCH_BYTES 8
 #define CANHUB_ISOTP_MESSAGE_MAX 4095
-#define CANHUB_TXN_ORIGIN_NONE 0
-#define CANHUB_TXN_ORIGIN_CAN_ID 1
-#define CANHUB_TXN_ORIGIN_PAYLOAD 2
-#define CANHUB_TXN_ADVANCE_NONE 0
-#define CANHUB_TXN_ADVANCE_COUNT 1
-#define CANHUB_TXN_ADVANCE_ROSTER_ALL 2
-#define CANHUB_TXN_ADVANCE_ROSTER_K 3
-#define CANHUB_TXN_TEMPLATE_SOFT (1u << 0)
-#define CANHUB_TXN_TEMPLATE_MISMATCH_ABORT (1u << 1)
-#define CANHUB_TXN_PATTERN_ADVANCE 0
-#define CANHUB_TXN_PATTERN_ABORT 1
-#define CANHUB_TXN_PATTERN_EXTEND 2
-#define CANHUB_TXN_PATTERNS 3
-#define CANHUB_TXN_STEP_EXPECT_VALUE (1u << 0)
-#define CANHUB_TXN_STEP_EXPECT_ONLY (1u << 1)
-#define CANHUB_TXN_DONE 0
-#define CANHUB_TXN_ABORTED 1
-#define CANHUB_TXN_REASON_NONE 0
-#define CANHUB_TXN_REASON_TIMEOUT 1
-#define CANHUB_TXN_REASON_ABORT_MATCH 2
-#define CANHUB_TXN_REASON_VALUE_MISMATCH 3
-#define CANHUB_TXN_REASON_TX_FAILED 4
-#define CANHUB_TXN_REASON_CANCELLED 5
-#define CANHUB_TXN_REASON_STARVED 6
-#define CANHUB_TXN_REASON_OVERRUN 7
-#define CANHUB_TXN_REASON_AGENT_DISCONNECTED 8
-#define CANHUB_TXN_REASON_INVALID_STEP 9
-#define CANHUB_TXN_REASON_FLOW_CONTROL_TIMEOUT 10
-#define CANHUB_TXN_REASON_CONSECUTIVE_FRAME_TIMEOUT 11
-#define CANHUB_TXN_REASON_OVERFLOW 12
-#define CANHUB_TXN_REASON_SEQUENCE_ERROR 13
-#define CANHUB_TXN_REASON_WAIT_LIMIT 14
-#define CANHUB_SCRIPT_NAME_MAX 32
 
 #define CANHUB_SETTING_BITRATE (1u << 0)
 #define CANHUB_SETTING_SAMPLE_POINT (1u << 1)
@@ -134,12 +95,24 @@ extern "C" {
 
 typedef struct CanHubSession CanHubSession;
 
+/*
+ * A CAN identifier: value is 11 bits for a standard id, 29 for an extended
+ * one. A standard and an extended id never match each other, whatever their
+ * value.
+ */
+typedef struct {
+    uint32_t value;
+    bool extended;
+} CanHubCanId;
+
+#define CANHUB_STANDARD_ID(id_value) ((CanHubCanId){ (id_value), false })
+#define CANHUB_EXTENDED_ID(id_value) ((CanHubCanId){ (id_value), true })
+
 typedef struct {
     uint64_t timestamp_us;
-    uint32_t can_id;
+    CanHubCanId id;
     uint8_t flags;
     uint8_t length;
-    uint8_t reserved[2];
     uint8_t payload[CANHUB_FRAME_PAYLOAD_MAX];
 } CanHubFrame;
 
@@ -149,9 +122,13 @@ typedef struct {
     char interface_name[CANHUB_INTERFACE_NAME_MAX];
 } CanHubInterfaceInfo;
 
+/*
+ * Receive the frames whose id equals id, except in id_ignored_bits (0: the
+ * exact id). No filter at all receives everything.
+ */
 typedef struct {
-    uint32_t can_id;
-    uint32_t can_mask;
+    CanHubCanId id;
+    uint32_t id_ignored_bits;
 } CanHubFilter;
 
 typedef struct {
@@ -212,139 +189,210 @@ typedef struct {
 } CanHubInterfaceSettings;
 
 /*
- * Transactions (see doc/protocol.md "Transactions"): the agent runs a sequence
- * of steps at the bus. A step transmits a frame, unless it is expect-only, and
- * waits as its template says. The roster lists the expected answering origins,
- * extracted as (X & origin_mask) >> origin_shift from the CAN id or from the 4
- * payload bytes at origin_payload_offset. Patterns match a frame when
- * (can_id & can_mask) == (pattern can_id & can_mask) and its first 8 payload
- * bytes, little-endian, match payload_value under payload_mask; a pattern
- * counts only if its bit (1 << CANHUB_TXN_PATTERN_*) is in patterns_present.
- * idle_timeout_ms is how long the agent waits for steps once it has run out of
- * them before it aborts (reason starved; 0: 5 s); while it waits it sends the
- * keepalive frame every keepalive_period_ms (0: none), for instance to keep a
- * device session open across a slow link.
+ * Transactions (doc/libcanhub.md "Transactions", doc/protocol.md): the agent
+ * runs a sequence of steps at the bus. A step sends a frame, or an ISO-TP
+ * message over a link, and waits as its response says. Declarations are
+ * structs, and every zero means what it says: id 0 is the id 0x000, a byte
+ * whose mask is 0 is not compared; what is optional is a pointer, NULL when
+ * absent.
  */
-typedef struct {
-    uint32_t struct_size;
-    uint8_t flags;
-    uint8_t origin_source;
-    uint8_t origin_shift;
-    uint8_t origin_payload_offset;
-    uint32_t origin_mask;
-    uint32_t roster_count;
-    uint32_t roster[CANHUB_TXN_ROSTER_MAX];
-    uint32_t idle_timeout_ms;
-    uint32_t keepalive_period_ms;
-    CanHubFrame keepalive;
-} CanHubTxnBegin;
+typedef struct CanHubTxn CanHubTxn;
 
 typedef struct {
-    uint32_t can_id;
-    uint32_t can_mask;
-    uint64_t payload_mask;
-    uint64_t payload_value;
-} CanHubTxnPattern;
+    uint8_t mask;
+    uint8_t value;
+} CanHubTxnByte;
+
+#define CANHUB_TXN_EQUALS(byte_value) { 0xFF, (byte_value) }
+#define CANHUB_TXN_MASKED(byte_mask, byte_value) { (byte_mask), (byte_value) }
+#define CANHUB_TXN_BYTES(...) (const uint8_t[]){ __VA_ARGS__ }, sizeof((const uint8_t[]){ __VA_ARGS__ })
 
 /*
- * ISO-TP parameters of a template of type CANHUB_TXN_TYPE_ISOTP: each of its
- * steps is one ISO 15765-2 message the agent segments, and the patterns match
- * the reassembled answer arriving on response_id (doc/protocol.md "ISO-TP
- * steps"). With the address byte flag every frame starts with tx_address and
- * answers must start with rx_address (extended or mixed addressing).
+ * A frame meets a match when its id equals id except in id_ignored_bits, and
+ * each of its first 8 data bytes meets bytes[i] under bytes[i].mask.
  */
 typedef struct {
-    uint32_t response_id;
-    uint8_t flags;
+    CanHubCanId id;
+    uint32_t id_ignored_bits;
+    CanHubTxnByte bytes[CANHUB_TXN_MATCH_BYTES];
+} CanHubTxnMatch;
+
+typedef enum {
+    CANHUB_TXN_NODE_IN_ID = 0,
+    CANHUB_TXN_NODE_IN_BYTE = 1
+} CanHubTxnNodeSource;
+
+/*
+ * What a step waits for. success completes it, failure aborts the
+ * transaction, pending (a "busy, wait" answer, checked first) restarts the
+ * wait with timeout_after_pending_ms. With nodes, the step waits for an
+ * answer from each of them (node_count - allowed_missing are enough); a node
+ * is told by the bits success.id_ignored_bits leaves free, or by data byte
+ * node_byte. continue_on_timeout moves on when the time runs out instead of
+ * aborting; on_mismatch_abort aborts on a frame with the success id that does
+ * not meet success.
+ */
+typedef struct {
+    CanHubTxnMatch success;
+    const CanHubTxnMatch *failure;
+    const CanHubTxnMatch *pending;
+    const uint32_t *nodes;
+    uint32_t node_count;
+    uint32_t allowed_missing;
+    CanHubTxnNodeSource node_from;
+    uint8_t node_byte;
+    uint32_t timeout_ms;
+    uint32_t timeout_after_pending_ms;
+    bool continue_on_timeout;
+    bool on_mismatch_abort;
+} CanHubTxnResponse;
+
+/*
+ * Two ends of ISO 15765-2: the agent sends each message on tx_id, segmented,
+ * and reassembles the answer arriving on rx_id. address_byte starts every
+ * frame with tx_address and expects rx_address (extended or mixed
+ * addressing); padded fills short frames with padding; fd sends CAN FD frames
+ * of fd_data_length bytes; block_size and st_min (raw ISO 15765-2 value) go
+ * in the flow control the agent answers with.
+ */
+typedef struct {
+    CanHubCanId tx_id;
+    CanHubCanId rx_id;
+    bool address_byte;
     uint8_t tx_address;
     uint8_t rx_address;
+    bool padded;
     uint8_t padding;
-    uint8_t tx_data_length;
+    bool fd;
+    bool bitrate_switch;
+    uint8_t fd_data_length;
     uint8_t block_size;
     uint8_t st_min;
-    uint8_t reserved;
-} CanHubTxnIsotp;
+} CanHubTxnIsotpLink;
 
 typedef struct {
-    uint32_t struct_size;
-    uint8_t template_id;
-    uint8_t advance_mode;
-    uint8_t flags;
-    uint8_t count_k;
-    uint8_t patterns_present;
-    uint8_t type;
-    uint8_t reserved[2];
-    uint32_t timeout_ms;
-    uint32_t gap_us;
-    uint32_t extend_timeout_ms;
-    CanHubTxnPattern patterns[CANHUB_TXN_PATTERNS];
-    CanHubTxnIsotp isotp;
-} CanHubTxnTemplate;
-
-typedef struct {
-    uint32_t can_id;
-    uint8_t template_id;
-    uint8_t flags;
-    uint8_t frame_flags;
+    CanHubCanId id;
+    uint8_t data[CANHUB_FRAME_PAYLOAD_MAX];
     uint8_t length;
-    uint64_t expect_value;
-    uint8_t payload[CANHUB_FRAME_PAYLOAD_MAX];
-} CanHubTxnStep;
+    uint32_t every_ms;
+} CanHubTxnKeepalive;
 
 /*
- * One step of an ISO-TP template: the message (1-4095 bytes) the agent sends to
- * can_id, which is also where it sends flow control for a multi-frame answer.
+ * A step of a response with nodes that ended without every node: step is its
+ * position in the transaction, missing the nodes that had not answered.
  */
 typedef struct {
-    uint32_t struct_size;
-    uint32_t can_id;
-    uint8_t template_id;
-    uint8_t flags;
-    uint16_t length;
-    uint64_t expect_value;
+    uint32_t step;
+    uint32_t missing[CANHUB_TXN_ROSTER_MAX];
+    uint32_t missing_count;
+} CanHubTxnRosterResult;
+
+typedef void (*CanHubTxnRosterCallback)(void *context, const CanHubTxnRosterResult *result);
+
+/*
+ * exclusive keeps the other clients' frames off the interface while the
+ * transaction runs. idle_timeout_ms (required) is how long the agent waits
+ * for steps once it ran out of them, sending keepalive meanwhile.
+ * bitrate_switch sends the CAN FD frames of the steps with bit rate switch.
+ * on_roster is called from inside the transaction's calls, on their thread,
+ * and must not call them.
+ */
+typedef struct {
+    bool exclusive;
+    uint32_t idle_timeout_ms;
+    const CanHubTxnKeepalive *keepalive;
+    bool bitrate_switch;
+    CanHubTxnRosterCallback on_roster;
+    void *context;
+} CanHubTxnOptions;
+
+/*
+ * Every way of sending a step. data NULL sends nothing (wait for response,
+ * where if any); data with length 0 sends an empty frame. More than 8 bytes
+ * is a CAN FD frame. With isotp, data is a message (1-4095 bytes) and id must
+ * be the link's tx_id. where adds to the response for this step only: its id
+ * and id_ignored_bits replace the response's, its bytes add to them. gap_us
+ * keeps at least that long before the next step's frame.
+ */
+typedef struct {
+    CanHubCanId id;
     const uint8_t *data;
-} CanHubTxnMessage;
+    uint16_t length;
+    const CanHubTxnIsotpLink *isotp;
+    const CanHubTxnResponse *response;
+    const CanHubTxnMatch *where;
+    uint32_t gap_us;
+} CanHubTxnStep;
 
 typedef struct {
-    uint32_t struct_size;
     uint32_t sent_steps;
     uint32_t completed_steps;
     uint32_t bytes_in_flight;
     uint32_t window_bytes;
 } CanHubTxnProgress;
 
-typedef struct {
-    uint32_t struct_size;
-    uint8_t state;
-    uint8_t reason;
-    uint8_t has_rx_frame;
-    uint8_t reserved;
-    uint32_t failing_seq;
-    uint32_t completed_steps;
-    uint32_t offending_origin;
-    uint64_t seen_bitmap;
-    uint64_t expected;
-    uint64_t got;
-    CanHubFrame rx_frame;
-} CanHubTxnResult;
+typedef enum {
+    CANHUB_TXN_REASON_NONE = 0,
+    CANHUB_TXN_REASON_TIMEOUT = 1,
+    CANHUB_TXN_REASON_FAILURE_MATCHED = 2,
+    CANHUB_TXN_REASON_VALUE_MISMATCH = 3,
+    CANHUB_TXN_REASON_TX_FAILED = 4,
+    CANHUB_TXN_REASON_CANCELLED = 5,
+    CANHUB_TXN_REASON_STARVED = 6,
+    CANHUB_TXN_REASON_OVERRUN = 7,
+    CANHUB_TXN_REASON_AGENT_DISCONNECTED = 8,
+    CANHUB_TXN_REASON_INVALID_STEP = 9,
+    CANHUB_TXN_REASON_FLOW_CONTROL_TIMEOUT = 10,
+    CANHUB_TXN_REASON_CONSECUTIVE_FRAME_TIMEOUT = 11,
+    CANHUB_TXN_REASON_OVERFLOW = 12,
+    CANHUB_TXN_REASON_SEQUENCE_ERROR = 13,
+    CANHUB_TXN_REASON_WAIT_LIMIT = 14,
+    CANHUB_TXN_REASON_UNSUPPORTED = 15
+} CanHubTxnReason;
 
 /*
- * The outcome of canhub_txn_run_script: the agent's result, how many steps the
- * script holds, its roster (the list of a template for) with the name of the
- * loop variable, so a report can name who did not answer, and the line of a
- * script error (0 when the script was fine).
+ * How the transaction ended. failing_roster names who had not answered when
+ * the failing step waited for nodes (missing_count 0 otherwise); expected and
+ * got are the 8 data bytes of a value mismatch; frame, when has_frame, the
+ * frame that ended it, from offending_node for a response with nodes.
  */
 typedef struct {
-    uint32_t struct_size;
-    CanHubTxnResult result;
-    uint32_t total_steps;
-    uint32_t error_line;
-    uint32_t roster_count;
-    uint32_t roster[CANHUB_TXN_ROSTER_MAX];
-    char roster_name[CANHUB_SCRIPT_NAME_MAX];
-} CanHubScriptOutcome;
+    bool done;
+    CanHubTxnReason reason;
+    uint32_t failing_step;
+    uint32_t completed_steps;
+    CanHubTxnRosterResult failing_roster;
+    uint32_t offending_node;
+    uint8_t expected[CANHUB_TXN_MATCH_BYTES];
+    uint8_t got[CANHUB_TXN_MATCH_BYTES];
+    bool has_frame;
+    CanHubFrame frame;
+} CanHubTxnReport;
 
-typedef int32_t (*CanHubScriptProgress)(void *context, const CanHubTxnProgress *progress, uint32_t total_steps);
+/*
+ * A CRC of the Rocksoft model (width 8-32 bits), as transaction scripts
+ * define them.
+ */
+typedef struct {
+    uint8_t width;
+    uint32_t polynomial;
+    uint32_t initial;
+    bool reflect_input;
+    bool reflect_output;
+    uint32_t final_xor;
+} CanHubTxnCrc;
+
+typedef int32_t (*CanHubTxnProgressCallback)(void *context, const CanHubTxnProgress *progress, uint32_t total_steps);
+
+/*
+ * What a script run reports while it runs: on_roster as for a transaction,
+ * on_progress a few times a second (returning 0 cancels the transaction).
+ */
+typedef struct {
+    CanHubTxnRosterCallback on_roster;
+    CanHubTxnProgressCallback on_progress;
+    void *context;
+} CanHubTxnScriptOptions;
 
 CANHUB_API uint32_t canhub_api_version(void);
 
@@ -385,44 +433,75 @@ CANHUB_API int32_t canhub_query(
 );
 
 /*
- * Run a transaction on the open interface, which must be opened with
- * CANHUB_OPEN_FLAG_RELIABLE and CANHUB_OPEN_FLAG_WRITE. canhub_txn_begin waits
- * for the agent's grant. canhub_txn_send behaves like a blocking socket write:
- * it hands the steps over as the agent's window allows, waiting for credit,
- * and returns how many it took (fewer than count on timeout); frames received
- * meanwhile stay queued for canhub_recv. The last step handed over is held
- * back until canhub_txn_end, which marks it the last one. Steps of an ISO-TP
- * template go through canhub_txn_send_message instead (begin with
- * CANHUB_TXN_FLAG_ISOTP): it waits until the agent's window takes the whole
- * message, then hands it over, so a timeout leaves nothing half sent.
- * canhub_txn_wait returns CANHUB_OK once the transaction is done,
- * CANHUB_ERR_TXN_ABORTED with the report in result otherwise.
- * canhub_txn_abort cancels it.
+ * Transactions run on the open interface, which must be opened with
+ * CANHUB_OPEN_FLAG_RELIABLE and CANHUB_OPEN_FLAG_WRITE; one per session at a
+ * time. canhub_txn_create sends nothing: the first step starts the
+ * transaction at the agent, and every step waits for the agent's window like
+ * a blocking write. A step the API refuses (canhub_last_error says why)
+ * cancels the transaction. canhub_txn_finish waits for the outcome, fills
+ * report and frees the transaction: call it after every canhub_txn_create,
+ * also after an error, and before canhub_close. It returns CANHUB_OK when the transaction is done,
+ * CANHUB_ERR_TXN_ABORTED with the report otherwise. canhub_txn_abort may be
+ * called from another thread. For an event loop or a binding, the timed
+ * twins give up with CANHUB_ERR_TIMEOUT: canhub_txn_try_step when the agent's
+ * window did not take the step in time (nothing of it sent: call it again),
+ * canhub_txn_wait when the outcome is not known yet (it marks the last step
+ * first; finish then reports at once). timeout_ms -1 waits forever. sum and
+ * crc compute the checks scripts use.
  */
-CANHUB_API int32_t canhub_txn_begin(CanHubSession *session, const CanHubTxnBegin *begin, int32_t timeout_ms);
-CANHUB_API int32_t canhub_txn_template(CanHubSession *session, const CanHubTxnTemplate *template_definition, int32_t timeout_ms);
-CANHUB_API int32_t canhub_txn_send(CanHubSession *session, const CanHubTxnStep *steps, uint32_t count, int32_t timeout_ms);
-CANHUB_API int32_t canhub_txn_send_message(CanHubSession *session, const CanHubTxnMessage *message, int32_t timeout_ms);
-CANHUB_API int32_t canhub_txn_end(CanHubSession *session, int32_t timeout_ms);
-CANHUB_API int32_t canhub_txn_wait(CanHubSession *session, CanHubTxnResult *result, int32_t timeout_ms);
-CANHUB_API int32_t canhub_txn_progress(CanHubSession *session, CanHubTxnProgress *progress);
-CANHUB_API int32_t canhub_txn_abort(CanHubSession *session);
+CANHUB_API CanHubTxn *canhub_txn_create(CanHubSession *session, const CanHubTxnOptions *options);
+CANHUB_API int32_t canhub_txn_send(
+    CanHubTxn *transaction,
+    CanHubCanId id,
+    const uint8_t *data,
+    uint8_t length,
+    const CanHubTxnResponse *response
+);
+CANHUB_API int32_t canhub_txn_send_message(
+    CanHubTxn *transaction,
+    const CanHubTxnIsotpLink *link,
+    const uint8_t *data,
+    uint16_t length,
+    const CanHubTxnResponse *response
+);
+CANHUB_API int32_t canhub_txn_expect(CanHubTxn *transaction, const CanHubTxnResponse *response);
+CANHUB_API int32_t canhub_txn_step(CanHubTxn *transaction, const CanHubTxnStep *step);
+CANHUB_API int32_t canhub_txn_try_step(CanHubTxn *transaction, const CanHubTxnStep *step, int32_t timeout_ms);
+CANHUB_API int32_t canhub_txn_progress(CanHubTxn *transaction, CanHubTxnProgress *progress);
+CANHUB_API int32_t canhub_txn_abort(CanHubTxn *transaction);
+CANHUB_API int32_t canhub_txn_wait(CanHubTxn *transaction, int32_t timeout_ms);
+CANHUB_API int32_t canhub_txn_finish(CanHubTxn *transaction, CanHubTxnReport *report);
+CANHUB_API const char *canhub_txn_reason_name(CanHubTxnReason reason);
 
 /*
  * Run a transaction script (doc/transaction-scripts.md) on the open interface,
- * opened as for canhub_txn_begin. Files the script reads resolve against the
- * script's directory. on_progress, which may be NULL, is called a few times a
- * second; returning 0 cancels the transaction. Returns CANHUB_OK when done,
- * CANHUB_ERR_TXN_ABORTED with the report in outcome, CANHUB_ERR_ARGUMENT for a
- * script error (canhub_last_error says "file:line: reason").
+ * opened as for a transaction. canhub_txn_run_script takes the text, and
+ * resolves the files it reads against base_directory (NULL: the working
+ * directory); canhub_txn_run_script_file reads the script and resolves against
+ * its directory. options may be NULL. Returns as canhub_txn_finish, or
+ * CANHUB_ERR_ARGUMENT for a script error, canhub_last_error then saying
+ * "script:LINE: reason" ("PATH:LINE: reason" for a file).
  */
 CANHUB_API int32_t canhub_txn_run_script(
     CanHubSession *session,
-    const char *script_path,
-    CanHubScriptOutcome *outcome,
-    CanHubScriptProgress on_progress,
-    void *context
+    const char *text,
+    const char *base_directory,
+    const CanHubTxnScriptOptions *options,
+    CanHubTxnReport *report
 );
+CANHUB_API int32_t canhub_txn_run_script_file(
+    CanHubSession *session,
+    const char *path,
+    const CanHubTxnScriptOptions *options,
+    CanHubTxnReport *report
+);
+
+CANHUB_API uint8_t canhub_txn_sum8(const uint8_t *data, uint32_t length);
+CANHUB_API uint16_t canhub_txn_sum16(const uint8_t *data, uint32_t length);
+CANHUB_API uint32_t canhub_txn_sum32(const uint8_t *data, uint32_t length);
+CANHUB_API uint16_t canhub_txn_crc16(const uint8_t *data, uint32_t length);
+CANHUB_API uint32_t canhub_txn_crc32(const uint8_t *data, uint32_t length);
+CANHUB_API uint32_t canhub_txn_crc(const CanHubTxnCrc *crc, const uint8_t *data, uint32_t length);
 
 #ifdef __cplusplus
 }

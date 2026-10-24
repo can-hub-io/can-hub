@@ -106,11 +106,13 @@ agent. It prints the outcome and exits with:
 | Exit | Output |
 |---|---|
 | 0 | `done steps=272 ms=1840` |
-| 1 | `flash.txn:5: no template has this name`, or why it could not connect or open |
-| 2 | `aborted reason=timeout step=16 completed=16 missing node=[5]` |
+| 1 | `flash.txn:5: no response has this name`, or why it could not connect or open |
+| 2 | `aborted reason=timeout step=16 completed=16 missing=[5]` |
 
-`missing` lists, by the script's loop variable, who did not answer a template
-`for` when the reason is `timeout`. Needs a write grant, and a reliable channel
+Before the outcome, every step waiting for a response `for` that moved on
+without all its nodes (`then continue`, or `for N of`) prints a line of its
+own, `roster step=16 missing=[5]`; `missing` on the outcome line names who had
+not answered the step that failed. Needs a write grant, and a reliable channel
 (quic, or the stream transports).
 
 ## attach — mirror into a local vcan

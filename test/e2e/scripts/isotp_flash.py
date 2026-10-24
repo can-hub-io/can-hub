@@ -1,13 +1,15 @@
 """Flashes an image into isotp_ecu.py over ISO-TP transaction steps.
 
 usage: isotp_flash.py <url> <channel> --size N [--block-size B] [--extended TARGET SOURCE]
-                      [--fd] [--skip-counter K] [--state-dir D]
+                      [--fd] [--skip-counter K] [--frame-first] [--state-dir D]
 
 RequestDownload, then the image in TransferData blocks of B bytes (block
 sequence counter 1, 2, .. 255, 0, ..), then RequestTransferExit, each one step
 the agent segments. The image is deterministic, so its CRC-32 printed here
 matches the one the ECU prints when the transfer arrived whole. --skip-counter
-jumps the counter after block K, which the ECU refuses.
+jumps the counter after block K, which the ECU refuses. --frame-first starts
+the transaction with a plain TesterPresent frame on 0x7DF, before any
+ISO-TP step.
 
 Prints "done steps=N crc=XXXXXXXX" (exit 0) or "aborted reason=R step=S" (exit 2).
 """
@@ -18,13 +20,10 @@ import zlib
 
 import can
 
-from canhub import Advance, Isotp, Pattern, Step, Template, TransactionAborted
+from canhub import IsotpLink, Match, Response, TransactionAborted
 
 REQUEST_ID = 0x7E0
 RESPONSE_ID = 0x7E8
-DOWNLOAD_TEMPLATE = 0
-TRANSFER_TEMPLATE = 1
-EXIT_TEMPLATE = 2
 REQUEST_DOWNLOAD = bytes([0x34, 0x00, 0x44, 0x00, 0x00, 0x00, 0x00])
 TRANSFER_DATA = 0x36
 TRANSFER_EXIT = bytes([0x37])
@@ -38,6 +37,9 @@ SIZE_BYTES = 4
 TIMEOUT_S = 0.5
 PENDING_TIMEOUT_S = 5.0
 EXIT_ABORTED = 2
+TESTER_PRESENT_ID = 0x7DF
+TESTER_PRESENT = bytes([0x02, 0x3E, 0x80])
+PADDING = 0xCC
 
 
 def main():
@@ -49,6 +51,7 @@ def main():
     parser.add_argument("--extended", type=lambda text: int(text, 0), nargs=2, metavar=("TARGET", "SOURCE"))
     parser.add_argument("--fd", action="store_true")
     parser.add_argument("--skip-counter", type=int)
+    parser.add_argument("--frame-first", action="store_true")
     parser.add_argument("--state-dir")
     arguments = parser.parse_args()
 
@@ -66,58 +69,47 @@ def main():
 
 
 def flash(bus, image, arguments):
-    isotp = transport(arguments)
-    with bus.transaction(exclusive=True, isotp=True) as transaction:
-        transaction.template(DOWNLOAD_TEMPLATE, answer(POSITIVE_DOWNLOAD, isotp))
-        transaction.template(TRANSFER_TEMPLATE, transfer_answer(isotp))
-        transaction.template(EXIT_TEMPLATE, answer(POSITIVE_EXIT, isotp))
-        transaction.send(steps(image, arguments))
-        return transaction.wait()
-
-
-def transport(arguments):
-    target, source = arguments.extended if arguments.extended else (None, None)
-    return Isotp(RESPONSE_ID, tx_address=target, rx_address=source, fd=arguments.fd)
-
-
-def answer(positive, isotp):
-    return Template(
-        advance_on=Pattern(RESPONSE_ID, data=bytes([positive])),
-        abort_on=Pattern(RESPONSE_ID, data=bytes([NEGATIVE_RESPONSE])),
-        mode=Advance.COUNT,
-        timeout=TIMEOUT_S,
-        isotp=isotp,
-    )
-
-
-def transfer_answer(isotp):
-    return Template(
-        advance_on=Pattern(RESPONSE_ID, data=bytes([POSITIVE_TRANSFER, 0])),
-        abort_on=Pattern(RESPONSE_ID, data=bytes([NEGATIVE_RESPONSE])),
-        extend_on=Pattern(RESPONSE_ID, data=bytes([NEGATIVE_RESPONSE, 0, RESPONSE_PENDING]), data_mask=bytes([0xFF, 0, 0xFF])),
-        mode=Advance.COUNT,
-        timeout=TIMEOUT_S,
-        extend_timeout=PENDING_TIMEOUT_S,
-        abort_on_mismatch=True,
-        isotp=isotp,
-    )
-
-
-def steps(image, arguments):
-    yield Step(template=DOWNLOAD_TEMPLATE, arbitration_id=REQUEST_ID, data=REQUEST_DOWNLOAD + len(image).to_bytes(SIZE_BYTES, "big"))
-    counter = 1
-    for block_number, offset in enumerate(range(0, len(image), arguments.block_size), start=1):
-        block = image[offset:offset + arguments.block_size]
-        yield Step(
-            template=TRANSFER_TEMPLATE,
-            arbitration_id=REQUEST_ID,
-            data=bytes([TRANSFER_DATA, counter]) + block,
-            expect=bytes([POSITIVE_TRANSFER, counter]),
-        )
-        counter = (counter + 1) & COUNTER_MASK
-        if block_number == arguments.skip_counter:
+    link = isotp_link(arguments)
+    download = answer(POSITIVE_DOWNLOAD)
+    transfer = transfer_answer()
+    transfer_exit = answer(POSITIVE_EXIT)
+    with bus.transaction(exclusive=True) as transaction:
+        if arguments.frame_first:
+            transaction.send(TESTER_PRESENT_ID, TESTER_PRESENT)
+        transaction.send_message(link, REQUEST_DOWNLOAD + len(image).to_bytes(SIZE_BYTES, "big"), download)
+        counter = 1
+        for block_number, offset in enumerate(range(0, len(image), arguments.block_size), start=1):
+            block = image[offset:offset + arguments.block_size]
+            transaction.send_message(link, bytes([TRANSFER_DATA, counter]) + block, transfer, where=Match(RESPONSE_ID, data={1: counter}))
             counter = (counter + 1) & COUNTER_MASK
-    yield Step(template=EXIT_TEMPLATE, arbitration_id=REQUEST_ID, data=TRANSFER_EXIT)
+            if block_number == arguments.skip_counter:
+                counter = (counter + 1) & COUNTER_MASK
+        transaction.send_message(link, TRANSFER_EXIT, transfer_exit)
+    return transaction.result
+
+
+def isotp_link(arguments):
+    target, source = arguments.extended if arguments.extended else (None, None)
+    return IsotpLink(REQUEST_ID, RESPONSE_ID, tx_address=target, rx_address=source, padding=PADDING, fd=arguments.fd)
+
+
+def answer(positive):
+    return Response(
+        Match(RESPONSE_ID, data={0: positive}),
+        timeout=TIMEOUT_S,
+        failure=Match(RESPONSE_ID, data={0: NEGATIVE_RESPONSE}),
+    )
+
+
+def transfer_answer():
+    return Response(
+        Match(RESPONSE_ID, data={0: POSITIVE_TRANSFER}),
+        timeout=TIMEOUT_S,
+        failure=Match(RESPONSE_ID, data={0: NEGATIVE_RESPONSE}),
+        pending=Match(RESPONSE_ID, data={0: NEGATIVE_RESPONSE, 2: RESPONSE_PENDING}),
+        timeout_after_pending=PENDING_TIMEOUT_S,
+        on_mismatch_abort=True,
+    )
 
 
 main()

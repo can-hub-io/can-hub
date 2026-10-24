@@ -41,7 +41,7 @@ A Negative Response Aborts The Transaction At Its Step
     ${result}=    Run Python ${TXN} On ${LOCAL_SERVER}    ${QUIC}    truck42/vcan0    uds    100    --state-dir    ${client_state}
 
     Should Be Equal As Integers    ${result.returncode}    2
-    Should Contain    ${result.stdout}    aborted reason=abort_match step=49
+    Should Contain    ${result.stdout}    aborted reason=failure_matched step=49
 
 A Response Pending Extends The Wait Beyond The Step Timeout
     ${hub}=    Start CAN HUB Open To Writers On ${LOCAL_SERVER}
@@ -241,7 +241,7 @@ A Node Acknowledging Another CRC Is Named With The Values
 
     Should Be Equal As Integers    ${result.returncode}    2
     Should Contain    ${result.stdout}    aborted reason=value_mismatch step=16
-    Should Contain    ${result.stdout}    origin=21
+    Should Contain    ${result.stdout}    node=21
 
 A Client That Stops Handing Steps Over Starves Its Transaction
     [Documentation]    The client keeps reading but holds its steps back past the

@@ -5,14 +5,14 @@
 
 #include "client/txn_script/script_compiler.h"
 #include "client/txn_script/script_resolver.h"
-#include "protocol/txn_steps_message.h"
 
 /*
- * Produces the steps of a compiled script one at a time, in order, unrolling
- * its loops: list loops value by value, chunk loops reading their file through
- * the platform's port as they go, so a firmware image never sits whole in
- * memory. Each step carries its template variant and, after a where, the value
- * the agent expects for that step.
+ * Produces the steps of a compiled script one at a time, in order, as the
+ * libcanhub transaction API takes them, unrolling its loops: list loops value
+ * by value, chunk loops reading their file through the platform's port as
+ * they go, so a firmware image never sits whole in memory. A step's data and
+ * where live in the generator until the next step; line_number is the line
+ * the last step came from.
  */
 typedef enum tscript_generated_e {
     kSCRIPT_GENERATED_STEP = 0,
@@ -38,8 +38,16 @@ typedef struct {
     uint8_t depth;
     uint16_t root_cursor;
     ScriptBindings bindings;
+    uint8_t data[CANHUB_FRAME_PAYLOAD_MAX];
+    CanHubTxnMatch where;
+    uint16_t line_number;
 } ScriptGenerator;
 
 void ScriptGenerator_Start(ScriptGenerator *self, const ScriptProgram *program, const ScriptFiles *files);
-uint8_t ScriptGenerator_Next(ScriptGenerator *self, TxnStep *step, ScriptError *error);
-bool ScriptGenerator_Frame(ScriptGenerator *self, const ScriptStatement *statement, TxnStep *step, ScriptError *error);
+uint8_t ScriptGenerator_Next(ScriptGenerator *self, CanHubTxnStep *step, ScriptError *error);
+bool ScriptGenerator_Keepalive(
+    ScriptGenerator *self,
+    const ScriptStatement *statement,
+    CanHubTxnKeepalive *keepalive,
+    ScriptError *error
+);

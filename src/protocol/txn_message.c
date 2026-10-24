@@ -7,19 +7,12 @@
 
 #define BEGIN_CHANNEL_OFFSET 0
 #define BEGIN_FLAGS_OFFSET 1
-#define BEGIN_ORIGIN_SOURCE_OFFSET 2
-#define BEGIN_ORIGIN_SHIFT_OFFSET 3
-#define BEGIN_ORIGIN_MASK_OFFSET 4
-#define BEGIN_ORIGIN_PAYLOAD_OFFSET_OFFSET 8
-#define BEGIN_ROSTER_COUNT_OFFSET 9
-#define BEGIN_ROSTER_OFFSET 12
-#define ROSTER_ENTRY_SIZE 4
-#define BEGIN_IDLE_TIMEOUT_MS_OFFSET 268
-#define BEGIN_KEEPALIVE_PERIOD_MS_OFFSET 272
-#define BEGIN_KEEPALIVE_CAN_ID_OFFSET 276
-#define BEGIN_KEEPALIVE_PAYLOAD_LENGTH_OFFSET 280
-#define BEGIN_KEEPALIVE_FRAME_FLAGS_OFFSET 281
-#define BEGIN_KEEPALIVE_PAYLOAD_OFFSET 284
+#define BEGIN_IDLE_TIMEOUT_MS_OFFSET 4
+#define BEGIN_KEEPALIVE_PERIOD_MS_OFFSET 8
+#define BEGIN_KEEPALIVE_CAN_ID_OFFSET 12
+#define BEGIN_KEEPALIVE_PAYLOAD_LENGTH_OFFSET 16
+#define BEGIN_KEEPALIVE_FRAME_FLAGS_OFFSET 17
+#define BEGIN_KEEPALIVE_PAYLOAD_OFFSET 20
 
 #define BEGIN_ACK_CHANNEL_OFFSET 0
 #define BEGIN_ACK_STATUS_OFFSET 1
@@ -76,6 +69,21 @@
 #define ABORT_CHANNEL_OFFSET 0
 #define ABORT_TXN_ID_OFFSET 2
 
+#define ROSTER_CHANNEL_OFFSET 0
+#define ROSTER_ORIGIN_SOURCE_OFFSET 1
+#define ROSTER_TXN_ID_OFFSET 2
+#define ROSTER_ORIGIN_MASK_OFFSET 4
+#define ROSTER_ORIGIN_SHIFT_OFFSET 8
+#define ROSTER_ORIGIN_PAYLOAD_OFFSET_OFFSET 9
+#define ROSTER_COUNT_OFFSET 10
+#define ROSTER_ENTRIES_OFFSET 12
+#define ROSTER_ENTRY_SIZE 4
+
+#define ROSTER_REPORT_CHANNEL_OFFSET 0
+#define ROSTER_REPORT_TXN_ID_OFFSET 2
+#define ROSTER_REPORT_SEQ_OFFSET 4
+#define ROSTER_REPORT_SEEN_BITMAP_OFFSET 12
+
 static size_t encodeFixedBody(uint8_t type, size_t body_size, uint8_t *buffer, size_t buffer_size, uint8_t **body);
 static void writePattern(uint8_t *destination, const TxnPattern *pattern);
 static void readPattern(const uint8_t *source, TxnPattern *pattern);
@@ -100,11 +108,7 @@ size_t TxnBeginMessage_Encode(const TxnBeginMessage *self, uint8_t *buffer, size
 {
     uint8_t *body;
     size_t total_size;
-    uint8_t i;
 
-    if (self->roster_count > TXN_ROSTER_MAX) {
-        return 0;
-    }
     total_size = encodeFixedBody(kMESSAGE_TYPE_TXN_BEGIN, TXN_BEGIN_BODY_SIZE, buffer, buffer_size, &body);
     if (total_size == 0) {
         return 0;
@@ -112,14 +116,6 @@ size_t TxnBeginMessage_Encode(const TxnBeginMessage *self, uint8_t *buffer, size
 
     body[BEGIN_CHANNEL_OFFSET] = self->channel;
     body[BEGIN_FLAGS_OFFSET] = self->flags;
-    body[BEGIN_ORIGIN_SOURCE_OFFSET] = self->origin.source;
-    body[BEGIN_ORIGIN_SHIFT_OFFSET] = self->origin.shift;
-    Wire_WriteU32(body + BEGIN_ORIGIN_MASK_OFFSET, self->origin.mask);
-    body[BEGIN_ORIGIN_PAYLOAD_OFFSET_OFFSET] = self->origin.payload_offset;
-    body[BEGIN_ROSTER_COUNT_OFFSET] = self->roster_count;
-    for(i=0; i<self->roster_count; i++) {
-        Wire_WriteU32(body + BEGIN_ROSTER_OFFSET + i * ROSTER_ENTRY_SIZE, self->roster[i]);
-    }
     Wire_WriteU32(body + BEGIN_IDLE_TIMEOUT_MS_OFFSET, self->idle_timeout_ms);
     writeKeepalive(body, &self->keepalive);
 
@@ -128,26 +124,13 @@ size_t TxnBeginMessage_Encode(const TxnBeginMessage *self, uint8_t *buffer, size
 
 bool TxnBeginMessage_Decode(TxnBeginMessage *self, const uint8_t *payload, size_t payload_length)
 {
-    uint8_t i;
-
     if (payload_length < TXN_BEGIN_BODY_SIZE) {
-        return false;
-    }
-    if (payload[BEGIN_ROSTER_COUNT_OFFSET] > TXN_ROSTER_MAX) {
         return false;
     }
 
     memset(self, 0, sizeof(*self));
     self->channel = payload[BEGIN_CHANNEL_OFFSET];
     self->flags = payload[BEGIN_FLAGS_OFFSET];
-    self->origin.source = payload[BEGIN_ORIGIN_SOURCE_OFFSET];
-    self->origin.shift = payload[BEGIN_ORIGIN_SHIFT_OFFSET];
-    self->origin.mask = Wire_ReadU32(payload + BEGIN_ORIGIN_MASK_OFFSET);
-    self->origin.payload_offset = payload[BEGIN_ORIGIN_PAYLOAD_OFFSET_OFFSET];
-    self->roster_count = payload[BEGIN_ROSTER_COUNT_OFFSET];
-    for(i=0; i<self->roster_count; i++) {
-        self->roster[i] = Wire_ReadU32(payload + BEGIN_ROSTER_OFFSET + i * ROSTER_ENTRY_SIZE);
-    }
     self->idle_timeout_ms = Wire_ReadU32(payload + BEGIN_IDLE_TIMEOUT_MS_OFFSET);
 
     return readKeepalive(payload, &self->keepalive);
@@ -370,6 +353,89 @@ bool TxnAbortMessage_Decode(TxnAbortMessage *self, const uint8_t *payload, size_
 
     self->channel = payload[ABORT_CHANNEL_OFFSET];
     self->txn_id = Wire_ReadU16(payload + ABORT_TXN_ID_OFFSET);
+
+    return true;
+}
+
+size_t TxnRosterMessage_Encode(const TxnRosterMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t total_size;
+    uint8_t i;
+
+    if (self->roster_count > TXN_ROSTER_MAX) {
+        return 0;
+    }
+    total_size = encodeFixedBody(kMESSAGE_TYPE_TXN_ROSTER, TXN_ROSTER_BODY_SIZE, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    body[ROSTER_CHANNEL_OFFSET] = self->channel;
+    body[ROSTER_ORIGIN_SOURCE_OFFSET] = self->origin.source;
+    Wire_WriteU16(body + ROSTER_TXN_ID_OFFSET, self->txn_id);
+    Wire_WriteU32(body + ROSTER_ORIGIN_MASK_OFFSET, self->origin.mask);
+    body[ROSTER_ORIGIN_SHIFT_OFFSET] = self->origin.shift;
+    body[ROSTER_ORIGIN_PAYLOAD_OFFSET_OFFSET] = self->origin.payload_offset;
+    body[ROSTER_COUNT_OFFSET] = self->roster_count;
+    for(i=0; i<self->roster_count; i++) {
+        Wire_WriteU32(body + ROSTER_ENTRIES_OFFSET + i * ROSTER_ENTRY_SIZE, self->roster[i]);
+    }
+
+    return total_size;
+}
+
+bool TxnRosterMessage_Decode(TxnRosterMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    uint8_t i;
+
+    if (payload_length < TXN_ROSTER_BODY_SIZE || payload[ROSTER_COUNT_OFFSET] > TXN_ROSTER_MAX) {
+        return false;
+    }
+
+    memset(self, 0, sizeof(*self));
+    self->channel = payload[ROSTER_CHANNEL_OFFSET];
+    self->origin.source = payload[ROSTER_ORIGIN_SOURCE_OFFSET];
+    self->txn_id = Wire_ReadU16(payload + ROSTER_TXN_ID_OFFSET);
+    self->origin.mask = Wire_ReadU32(payload + ROSTER_ORIGIN_MASK_OFFSET);
+    self->origin.shift = payload[ROSTER_ORIGIN_SHIFT_OFFSET];
+    self->origin.payload_offset = payload[ROSTER_ORIGIN_PAYLOAD_OFFSET_OFFSET];
+    self->roster_count = payload[ROSTER_COUNT_OFFSET];
+    for(i=0; i<self->roster_count; i++) {
+        self->roster[i] = Wire_ReadU32(payload + ROSTER_ENTRIES_OFFSET + i * ROSTER_ENTRY_SIZE);
+    }
+
+    return true;
+}
+
+size_t TxnRosterReportMessage_Encode(const TxnRosterReportMessage *self, uint8_t *buffer, size_t buffer_size)
+{
+    uint8_t *body;
+    size_t total_size;
+
+    total_size = encodeFixedBody(kMESSAGE_TYPE_TXN_ROSTER_REPORT, TXN_ROSTER_REPORT_BODY_SIZE, buffer, buffer_size, &body);
+    if (total_size == 0) {
+        return 0;
+    }
+
+    body[ROSTER_REPORT_CHANNEL_OFFSET] = self->channel;
+    Wire_WriteU16(body + ROSTER_REPORT_TXN_ID_OFFSET, self->txn_id);
+    Wire_WriteU32(body + ROSTER_REPORT_SEQ_OFFSET, self->seq);
+    Wire_WriteU64(body + ROSTER_REPORT_SEEN_BITMAP_OFFSET, self->seen_bitmap);
+
+    return total_size;
+}
+
+bool TxnRosterReportMessage_Decode(TxnRosterReportMessage *self, const uint8_t *payload, size_t payload_length)
+{
+    if (payload_length < TXN_ROSTER_REPORT_BODY_SIZE) {
+        return false;
+    }
+
+    self->channel = payload[ROSTER_REPORT_CHANNEL_OFFSET];
+    self->txn_id = Wire_ReadU16(payload + ROSTER_REPORT_TXN_ID_OFFSET);
+    self->seq = Wire_ReadU32(payload + ROSTER_REPORT_SEQ_OFFSET);
+    self->seen_bitmap = Wire_ReadU64(payload + ROSTER_REPORT_SEEN_BITMAP_OFFSET);
 
     return true;
 }

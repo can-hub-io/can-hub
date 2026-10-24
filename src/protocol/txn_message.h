@@ -6,12 +6,14 @@
 
 #include "protocol/frame_message.h"
 
-#define TXN_BEGIN_BODY_SIZE 348
+#define TXN_BEGIN_BODY_SIZE 84
 #define TXN_BEGIN_ACK_BODY_SIZE 8
 #define TXN_TEMPLATE_BODY_SIZE 108
 #define TXN_PROGRESS_BODY_SIZE 12
 #define TXN_STATUS_BODY_SIZE 112
 #define TXN_ABORT_BODY_SIZE 4
+#define TXN_ROSTER_BODY_SIZE 268
+#define TXN_ROSTER_REPORT_BODY_SIZE 20
 
 #define TXN_ROSTER_MAX 64
 #define TXN_TEMPLATES_MAX 16
@@ -19,10 +21,10 @@
 #define TXN_CHANNEL_OFFSET 0
 
 #define TXN_BEGIN_FLAG_EXCLUSIVE (1u << 0)
-#define TXN_BEGIN_FLAG_ISOTP (1u << 1)
 #define TXN_TEMPLATE_FLAG_SOFT (1u << 0)
 #define TXN_TEMPLATE_FLAG_MISMATCH_ABORT (1u << 1)
 #define TXN_STATUS_FLAG_HAS_RX_FRAME (1u << 0)
+#define TXN_STATUS_FLAG_ROSTER_STEP (1u << 1)
 #define TXN_ISOTP_FLAG_PADDING (1u << 0)
 #define TXN_ISOTP_FLAG_ADDRESS_BYTE (1u << 1)
 #define TXN_ISOTP_FLAG_FD (1u << 2)
@@ -89,6 +91,7 @@ typedef enum ttxn_reason_e {
     kTXN_REASON_OVERFLOW = 12,
     kTXN_REASON_SEQUENCE_ERROR = 13,
     kTXN_REASON_WAIT_LIMIT = 14,
+    kTXN_REASON_UNSUPPORTED = 15,
     kTXN_REASON_MAX,
 } TTXN_REASON;
 
@@ -110,9 +113,6 @@ typedef struct {
 typedef struct {
     uint8_t channel;
     uint8_t flags;
-    TxnOriginExtractor origin;
-    uint8_t roster_count;
-    uint32_t roster[TXN_ROSTER_MAX];
     uint32_t idle_timeout_ms;
     TxnKeepalive keepalive;
 } TxnBeginMessage;
@@ -192,6 +192,21 @@ typedef struct {
     uint16_t txn_id;
 } TxnAbortMessage;
 
+typedef struct {
+    uint8_t channel;
+    uint16_t txn_id;
+    TxnOriginExtractor origin;
+    uint8_t roster_count;
+    uint32_t roster[TXN_ROSTER_MAX];
+} TxnRosterMessage;
+
+typedef struct {
+    uint8_t channel;
+    uint16_t txn_id;
+    uint32_t seq;
+    uint64_t seen_bitmap;
+} TxnRosterReportMessage;
+
 void TxnMessage_SetChannel(uint8_t *encoded, uint8_t channel);
 uint8_t TxnMessage_Channel(const uint8_t *payload);
 
@@ -212,3 +227,9 @@ bool TxnStatusMessage_Decode(TxnStatusMessage *self, const uint8_t *payload, siz
 
 size_t TxnAbortMessage_Encode(const TxnAbortMessage *self, uint8_t *buffer, size_t buffer_size);
 bool TxnAbortMessage_Decode(TxnAbortMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t TxnRosterMessage_Encode(const TxnRosterMessage *self, uint8_t *buffer, size_t buffer_size);
+bool TxnRosterMessage_Decode(TxnRosterMessage *self, const uint8_t *payload, size_t payload_length);
+
+size_t TxnRosterReportMessage_Encode(const TxnRosterReportMessage *self, uint8_t *buffer, size_t buffer_size);
+bool TxnRosterReportMessage_Decode(TxnRosterReportMessage *self, const uint8_t *payload, size_t payload_length);

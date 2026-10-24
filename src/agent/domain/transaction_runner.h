@@ -36,6 +36,7 @@ typedef struct {
     bool (*transmit)(void *context, uint8_t interface_index, const FrameMessage *frame);
     void (*report_progress)(void *context, const TxnProgressMessage *progress);
     void (*report_status)(void *context, const TxnStatusMessage *status);
+    void (*report_roster)(void *context, const TxnRosterReportMessage *report);
 } TransactionRunnerPort;
 
 typedef struct {
@@ -95,6 +96,7 @@ void TransactionRunner_Begin(
     uint64_t now_us,
     TxnBeginAckMessage *ack
 );
+void TransactionRunner_DefineRoster(TransactionRunner *self, const TxnRosterMessage *roster);
 void TransactionRunner_DefineTemplate(TransactionRunner *self, const TxnTemplateMessage *template_message);
 void TransactionRunner_PushSteps(TransactionRunner *self, const TxnStepsMessage *steps);
 void TransactionRunner_OnFrame(TransactionRunner *self, uint8_t interface_index, const FrameMessage *frame);

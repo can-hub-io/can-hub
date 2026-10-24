@@ -6,7 +6,7 @@
 #include "client/txn_script/checksum.h"
 
 #define SCRIPT_CONSTANTS_MAX 64
-#define SCRIPT_TEMPLATES_MAX 16
+#define SCRIPT_RESPONSES_MAX 16
 #define SCRIPT_STATEMENTS_MAX 256
 #define SCRIPT_CONDITIONS_MAX 320
 #define SCRIPT_CONDITION_TERMS_MAX 8
@@ -19,7 +19,7 @@
  * The syntax tree of a transaction script (doc/transaction-scripts.md), as the
  * parser builds it and before any name is resolved. Names point into the
  * script text, which must outlive the tree. Conditions and data bytes live in
- * pools the templates and statements index into.
+ * pools the responses and statements index into.
  */
 typedef struct {
     const char *text;
@@ -120,8 +120,9 @@ typedef struct {
     bool mismatch_abort;
     bool has_timeout;
     uint32_t timeout_us;
+    uint32_t timeout_after_pending_us;
     bool continue_on_timeout;
-} ScriptTemplate;
+} ScriptResponse;
 
 typedef enum tscript_data_e {
     kSCRIPT_DATA_BYTE = 0,
@@ -159,7 +160,7 @@ typedef struct {
     bool has_gap;
     uint32_t gap_us;
     bool has_expect;
-    ScriptName template_name;
+    ScriptName response_name;
     uint16_t where;
     ScriptName variable;
     uint8_t iterable;
@@ -177,8 +178,8 @@ typedef struct {
     uint32_t idle_timeout_us;
     ScriptConstant constants[SCRIPT_CONSTANTS_MAX];
     uint8_t constant_count;
-    ScriptTemplate templates[SCRIPT_TEMPLATES_MAX];
-    uint8_t template_count;
+    ScriptResponse responses[SCRIPT_RESPONSES_MAX];
+    uint8_t response_count;
     ScriptCondition conditions[SCRIPT_CONDITIONS_MAX];
     uint16_t condition_count;
     ScriptDataItem data_items[SCRIPT_DATA_ITEMS_MAX];

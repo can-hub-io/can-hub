@@ -6,266 +6,271 @@ from can import CanOperationError
 import canhub._native as native
 from canhub.bus import CanHubBus, _FairLock
 from canhub.transaction import (
-    SEND_CHUNK_STEPS,
-    Advance,
-    BeginOptions,
-    Isotp,
+    IsotpLink,
     Keepalive,
-    Origin,
-    Pattern,
+    Masked,
+    Match,
+    Response,
     ScriptError,
-    Step,
-    Template,
     TransactionAborted,
-    from_native_result,
-    to_native_begin,
-    to_native_message,
-    to_native_step,
-    to_native_template,
+    from_native_report,
+    to_native_link,
+    to_native_match,
+    to_native_options,
+    to_native_response,
+    Options,
 )
 
 SESSION = 0x1234
-STANDARD_ID_PATTERN_MASK = 0x7FF | native.CAN_ID_FLAG_EFF
+TRANSACTION = 0x5678
+REASON_NONE = 0
 REASON_TIMEOUT = 1
+SCRIPT_TEXT = "send 0x123 data 01\n"
 SCRIPT_PATH = "flash.txn"
 SCRIPT_TOTAL_STEPS = 40
 
 
-class TestToNativeTemplate:
-    def test_it_packs_pattern_bytes_little_endian_under_their_mask(self):
-        template = Template(advance_on=Pattern(0x7E8, data=b"\x00\x76", data_mask=b"\x00\xff"), mode=Advance.COUNT)
+class TestToNativeMatch:
+    def test_it_compares_the_given_bytes_whole_or_under_their_mask(self):
+        match = Match(0x7E8, data={1: 0x76, 2: Masked(0xF0, 0x30)})
 
-        definition = to_native_template(3, template)
-        advance = definition.patterns[native.TXN_PATTERN_ADVANCE]
+        native_match = to_native_match(match)
 
-        assert definition.template_id == 3
-        assert definition.patterns_present == 1 << native.TXN_PATTERN_ADVANCE
-        assert advance.can_id == 0x7E8
-        assert advance.can_mask == STANDARD_ID_PATTERN_MASK
-        assert advance.payload_value == 0x7600
-        assert advance.payload_mask == 0xFF00
+        assert native_match.id.value == 0x7E8
+        assert not native_match.id.extended
+        assert native_match.id_ignored_bits == 0
+        assert (native_match.bytes[1].mask, native_match.bytes[1].value) == (0xFF, 0x76)
+        assert (native_match.bytes[2].mask, native_match.bytes[2].value) == (0xF0, 0x30)
+        assert native_match.bytes[0].mask == 0
 
-    def test_it_compares_every_given_byte_when_no_mask_is_given(self):
-        template = Template(abort_on=Pattern(0x7E8, data=b"\x03\x7f"))
+    def test_it_carries_an_extended_id_and_its_ignored_bits(self):
+        native_match = to_native_match(Match(0x18DAF100, ignored_bits=0xFF, extended=True))
 
-        definition = to_native_template(0, template)
+        assert native_match.id.extended
+        assert native_match.id_ignored_bits == 0xFF
 
-        assert definition.patterns[native.TXN_PATTERN_ABORT].payload_mask == 0xFFFF
-
-    def test_it_converts_timeout_and_gap_and_flags(self):
-        template = Template(mode=Advance.COUNT, timeout=0.05, gap=0.0015, soft=True, abort_on_mismatch=True)
-
-        definition = to_native_template(0, template)
-
-        assert definition.timeout_ms == 50
-        assert definition.gap_us == 1500
-        assert definition.flags == native.TXN_TEMPLATE_SOFT | native.TXN_TEMPLATE_MISMATCH_ABORT
-
-    def test_it_rejects_an_id_beyond_the_table(self):
+    def test_it_refuses_a_byte_beyond_the_eighth(self):
         with pytest.raises(ValueError):
-            to_native_template(native.TXN_TEMPLATES_MAX, Template())
+            to_native_match(Match(0x7E8, data={8: 0x01}))
 
 
-class TestToNativeIsotp:
-    def test_it_carries_the_isotp_parameters_of_a_template(self):
-        template = Template(
-            mode=Advance.COUNT,
-            isotp=Isotp(0x7E8, tx_address=0x10, rx_address=0xF1, fd=True, bitrate_switch=True, block_size=8, st_min=2),
+class TestToNativeResponse:
+    def test_it_converts_the_times_and_flags(self):
+        response = Response(
+            Match(0x7E8, data={1: 0x76}),
+            timeout=0.05,
+            pending=Match(0x7E8, data={1: 0x7F, 3: 0x78}),
+            timeout_after_pending=5.0,
+            continue_on_timeout=True,
+            on_mismatch_abort=True,
         )
 
-        definition = to_native_template(1, template)
+        native_response = to_native_response(response, [])
 
-        assert definition.type == native.TXN_TYPE_ISOTP
-        assert definition.isotp.response_id == 0x7E8
-        assert definition.isotp.flags == (
-            native.ISOTP_FLAG_PADDING
-            | native.ISOTP_FLAG_ADDRESS_BYTE
-            | native.ISOTP_FLAG_FD
-            | native.ISOTP_FLAG_BIT_RATE_SWITCH
-        )
-        assert (definition.isotp.tx_address, definition.isotp.rx_address) == (0x10, 0xF1)
-        assert definition.isotp.tx_data_length == native.FRAME_PAYLOAD_MAX
-        assert (definition.isotp.block_size, definition.isotp.st_min) == (8, 2)
+        assert native_response.timeout_ms == 50
+        assert native_response.timeout_after_pending_ms == 5000
+        assert native_response.pending.contents.bytes[3].value == 0x78
+        assert not native_response.failure
+        assert native_response.continue_on_timeout
+        assert native_response.on_mismatch_abort
+
+    def test_it_carries_the_nodes_told_by_a_data_byte(self):
+        response = Response(Match(0x650), timeout=1.0, nodes=range(32), allowed_missing=8, node_byte=2)
+
+        native_response = to_native_response(response, [])
+
+        assert native_response.node_count == 32
+        assert native_response.nodes[31] == 31
+        assert native_response.allowed_missing == 8
+        assert native_response.node_from == native.TXN_NODE_IN_BYTE
+        assert native_response.node_byte == 2
+
+    def test_it_tells_nodes_by_the_id_when_no_byte_is_given(self):
+        response = Response(Match(0x700, ignored_bits=0x0F), timeout=0.5, nodes=range(16))
+
+        native_response = to_native_response(response, [])
+
+        assert native_response.node_from == native.TXN_NODE_IN_ID
+
+
+class TestToNativeLink:
+    def test_it_carries_the_isotp_parameters(self):
+        link = IsotpLink(0x7E0, 0x7E8, tx_address=0x10, rx_address=0xF1, padding=0xCC, fd=True, block_size=8, st_min=2)
+
+        native_link = to_native_link(link)
+
+        assert (native_link.tx_id.value, native_link.rx_id.value) == (0x7E0, 0x7E8)
+        assert native_link.address_byte
+        assert (native_link.tx_address, native_link.rx_address) == (0x10, 0xF1)
+        assert native_link.padded
+        assert native_link.padding == 0xCC
+        assert native_link.fd
+        assert native_link.fd_data_length == native.FRAME_PAYLOAD_MAX
+        assert (native_link.block_size, native_link.st_min) == (8, 2)
 
     def test_it_uses_one_address_both_ways_for_mixed_addressing(self):
-        definition = to_native_template(1, Template(isotp=Isotp(0x7E8, tx_address=0x22)))
+        native_link = to_native_link(IsotpLink(0x7E0, 0x7E8, tx_address=0x42))
 
-        assert (definition.isotp.tx_address, definition.isotp.rx_address) == (0x22, 0x22)
+        assert (native_link.tx_address, native_link.rx_address) == (0x42, 0x42)
 
-    def test_it_sends_classic_frames_unless_told_otherwise(self):
-        definition = to_native_template(1, Template(isotp=Isotp(0x7E8, padding=None)))
+    def test_it_pads_nothing_unless_told(self):
+        native_link = to_native_link(IsotpLink(0x7E0, 0x7E8))
 
-        assert definition.isotp.flags == 0
-        assert definition.isotp.tx_data_length == native.FRAME_PAYLOAD_MAX_CLASSIC
-
-    def test_it_packs_a_message_with_the_value_the_answer_must_carry(self):
-        message, data = to_native_message(Step(template=1, arbitration_id=0x7E0, data=b"\x36\x01" + bytes(500), expect=b"\x76\x01"))
-
-        assert message.length == 502
-        assert message.can_id == 0x7E0
-        assert message.flags == native.TXN_STEP_EXPECT_VALUE
-        assert message.expect_value == 0x0176
-        assert bytes(data)[:2] == b"\x36\x01"
-
-    def test_it_refuses_a_message_over_4095_bytes(self):
-        with pytest.raises(ValueError):
-            to_native_message(Step(template=1, arbitration_id=0x7E0, data=bytes(native.ISOTP_MESSAGE_MAX + 1)))
-
-    def test_it_waits_for_a_message_keeping_the_request_id_for_flow_control(self):
-        native_step = to_native_step(Step(template=1, arbitration_id=0x7E0), isotp=True)
-
-        assert native_step.flags == native.TXN_STEP_EXPECT_ONLY
-        assert native_step.can_id == 0x7E0
+        assert not native_link.padded
+        assert not native_link.address_byte
 
 
-class TestToNativeStep:
-    def test_it_sends_a_frame_with_its_payload(self):
-        native_step = to_native_step(Step(template=1, arbitration_id=0x18DA10F1, data=b"\x02\x36\x01", is_extended_id=True))
+class TestToNativeOptions:
+    def test_it_carries_exclusive_the_idle_timeout_and_the_keepalive(self):
+        keep = []
+        options = Options(exclusive=True, idle_timeout=60.0, keepalive=Keepalive(0x7DF, b"\x02\x3e\x80", every=2.0))
 
-        assert native_step.template_id == 1
-        assert native_step.can_id == 0x18DA10F1 | native.CAN_ID_FLAG_EFF
-        assert native_step.length == 3
-        assert bytes(native_step.payload[:3]) == b"\x02\x36\x01"
-        assert native_step.flags == 0
+        native_options = to_native_options(options, native.RosterCallback(), keep)
 
-    def test_it_only_waits_when_the_step_has_no_frame(self):
-        native_step = to_native_step(Step(template=2, expect=b"\x01\xde\xc0"))
+        assert native_options.exclusive
+        assert native_options.idle_timeout_ms == 60000
+        assert native_options.keepalive.contents.every_ms == 2000
+        assert native_options.keepalive.contents.length == 3
 
-        assert native_step.flags == native.TXN_STEP_EXPECT_ONLY | native.TXN_STEP_EXPECT_VALUE
-        assert native_step.expect_value == 0xC0DE01
+    def test_it_asks_for_the_agent_default_idle_timeout(self):
+        native_options = to_native_options(Options(), native.RosterCallback(), [])
 
-
-class TestToNativeBegin:
-    def test_it_carries_the_idle_timeout_and_the_keepalive_frame(self):
-        options = BeginOptions(idle_timeout=60, keepalive=Keepalive(0x7E0, b"\x02\x3e\x80", period=2.0))
-
-        request = to_native_begin((), None, options)
-
-        assert request.idle_timeout_ms == 60000
-        assert request.keepalive_period_ms == 2000
-        assert request.keepalive.can_id == 0x7E0
-        assert bytes(request.keepalive.payload[: request.keepalive.length]) == b"\x02\x3e\x80"
-
-    def test_it_refuses_a_keepalive_longer_than_a_frame(self):
-        with pytest.raises(ValueError):
-            to_native_begin((), None, BeginOptions(keepalive=Keepalive(0x7E0, bytes(65), period=1.0)))
-
-    def test_it_declares_isotp_steps(self):
-        request = to_native_begin((), None, BeginOptions(isotp=True))
-
-        assert request.flags == native.TXN_FLAG_ISOTP
-
-    def test_it_reads_origins_from_the_payload_when_an_offset_is_given(self):
-        request = to_native_begin((1, 2), Origin(mask=0xFF, payload_offset=2), BeginOptions(exclusive=True))
-
-        assert request.flags == native.TXN_FLAG_EXCLUSIVE
-        assert request.origin_source == native.TXN_ORIGIN_PAYLOAD
-        assert request.origin_payload_offset == 2
-        assert request.roster_count == 2
-        assert list(request.roster[:2]) == [1, 2]
-
-    def test_it_needs_an_origin_for_a_roster(self):
-        with pytest.raises(ValueError):
-            to_native_begin((1, 2), None, BeginOptions())
+        assert native_options.idle_timeout_ms == 5000
 
 
-class TestFromNativeResult:
-    def test_it_names_who_answered_and_who_is_missing(self):
-        report = native.CanHubTxnResult()
-        report.state = 1
-        report.reason = REASON_TIMEOUT
-        report.failing_seq = 16
-        report.seen_bitmap = 0b101
+class TestFromNativeReport:
+    def test_it_names_who_was_missing_at_the_failing_step(self):
+        report = native.CanHubTxnReport(reason=REASON_TIMEOUT, failing_step=4)
+        report.failing_roster.missing_count = 2
+        report.failing_roster.missing[0] = 11
+        report.failing_roster.missing[1] = 13
 
-        result = from_native_result(report, (10, 11, 12, 13))
+        result = from_native_report(report)
 
         assert not result.done
         assert result.reason == "timeout"
-        assert result.failing_step == 16
-        assert result.answered == frozenset({10, 12})
+        assert result.failing_step == 4
         assert result.missing == frozenset({11, 13})
+
+    def test_it_reads_the_frame_that_ended_the_transaction(self):
+        report = native.CanHubTxnReport(has_frame=True)
+        report.frame.id = native.CanHubCanId(0x18DAF110, True)
+        report.frame.length = 1
+        report.frame.payload[0] = 0x7F
+
+        result = from_native_report(report)
+
+        assert result.frame.arbitration_id == 0x18DAF110
+        assert result.frame.is_extended_id
+        assert result.frame.data == b"\x7f"
 
 
 class TestTransaction:
-    def test_it_hands_every_step_over_in_chunks(self, monkeypatch):
-        bus, hub = given_bus_on_transaction_hub(monkeypatch)
+    def test_it_creates_nothing_at_the_agent_until_the_first_step(self, monkeypatch):
+        bus, library = given_bus_on_library(monkeypatch)
+
+        given_transaction(bus)
+
+        assert library.created
+        assert library.steps == []
+
+    def test_it_hands_a_frame_over_with_its_response(self, monkeypatch):
+        bus, library = given_bus_on_library(monkeypatch)
         transaction = given_transaction(bus)
 
-        sent = transaction.send(Step(arbitration_id=0x100 + index) for index in range(SEND_CHUNK_STEPS + 10))
+        transaction.send(0x7E0, b"\x02\x10\x03", Response(Match(0x7E8, data={1: 0x50}), timeout=0.05))
 
-        assert sent == SEND_CHUNK_STEPS + 10
-        assert hub.sent_ids[0] == 0x100
-        assert hub.sent_ids[-1] == 0x100 + SEND_CHUNK_STEPS + 9
-        assert len(hub.sent_ids) == SEND_CHUNK_STEPS + 10
+        assert library.steps == [(0x7E0, False, b"\x02\x10\x03", 0x7E8, 50)]
 
-    def test_it_waits_for_credit_when_the_library_takes_only_part(self, monkeypatch):
-        bus, hub = given_bus_on_transaction_hub(monkeypatch)
+    def test_it_retries_a_step_the_window_did_not_take_in_time(self, monkeypatch):
+        bus, library = given_bus_on_library(monkeypatch)
         transaction = given_transaction(bus)
-        hub.steps_per_call = 3
+        library.step_timeouts = 2
 
-        sent = transaction.send([Step(arbitration_id=0x100 + index) for index in range(10)])
+        transaction.send(0x123, b"\x01")
 
-        assert sent == 10
-        assert hub.sent_ids == [0x100 + index for index in range(10)]
+        assert library.step_calls == 3
+        assert len(library.steps) == 1
+
+    def test_it_waits_without_sending(self, monkeypatch):
+        bus, library = given_bus_on_library(monkeypatch)
+        transaction = given_transaction(bus)
+
+        transaction.expect(Response(Match(0x7E8), timeout=0.1))
+
+        assert library.steps == [(0, False, None, 0x7E8, 100)]
+
+    def test_it_sends_an_isotp_message_on_the_link_tx_id(self, monkeypatch):
+        bus, library = given_bus_on_library(monkeypatch)
+        transaction = given_transaction(bus)
+
+        transaction.send_message(IsotpLink(0x7E0, 0x7E8), bytes(500), Response(Match(0x7E8), timeout=0.05))
+
+        assert library.steps[0][0] == 0x7E0
+        assert len(library.steps[0][2]) == 500
+        assert library.isotp_steps == 1
+
+    def test_it_reports_a_finished_transaction(self, monkeypatch):
+        bus, library = given_bus_on_library(monkeypatch)
+
+        with given_transaction(bus) as transaction:
+            transaction.send(0x123, b"\x01")
+
+        assert library.finished
+        assert transaction.result.done
+
+    def test_it_waits_for_the_outcome_in_slices(self, monkeypatch):
+        bus, library = given_bus_on_library(monkeypatch)
+        transaction = given_transaction(bus)
+        library.wait_timeouts = 2
+
+        transaction.finish()
+
+        assert library.wait_calls == 3
 
     def test_it_raises_with_the_report_when_the_agent_aborts(self, monkeypatch):
-        bus, hub = given_bus_on_transaction_hub(monkeypatch)
+        bus, library = given_bus_on_library(monkeypatch)
         transaction = given_transaction(bus)
-        hub.abort_at_send = True
+        library.abort_at_step = True
 
         with pytest.raises(TransactionAborted) as aborted:
-            transaction.send([Step(arbitration_id=0x100)])
+            transaction.send(0x123, b"\x01")
 
         assert aborted.value.result.reason == "timeout"
 
-    def test_it_ends_and_reports_a_finished_transaction(self, monkeypatch):
-        bus, hub = given_bus_on_transaction_hub(monkeypatch)
+    def test_it_raises_why_the_library_refused_a_step(self, monkeypatch):
+        bus, library = given_bus_on_library(monkeypatch)
         transaction = given_transaction(bus)
+        library.refuse_step = True
 
-        result = transaction.wait()
+        with pytest.raises(CanOperationError) as refused:
+            transaction.send(0x123, b"\x01")
 
-        assert hub.ended
-        assert result.done
+        assert str(refused.value) == "step 0: a response needs timeout_ms"
 
     def test_it_cancels_at_the_agent_when_the_block_raises(self, monkeypatch):
-        bus, hub = given_bus_on_transaction_hub(monkeypatch)
+        bus, library = given_bus_on_library(monkeypatch)
 
         with pytest.raises(KeyboardInterrupt):
             with given_transaction(bus):
                 raise KeyboardInterrupt
 
-        assert hub.aborted
+        assert library.aborted
+        assert library.finished
 
-    def test_it_hands_each_isotp_message_over_whole_between_frame_steps(self, monkeypatch):
-        bus, hub = given_bus_on_transaction_hub(monkeypatch)
-        transaction = given_transaction(bus)
-        transaction.template(1, Template(mode=Advance.COUNT, isotp=Isotp(0x7E8)))
+    def test_it_hands_the_roster_results_to_on_roster(self, monkeypatch):
+        bus, library = given_bus_on_library(monkeypatch)
+        results = []
+        transaction = bus.transaction(on_roster=results.append)
+        library.roster_report = (3, [5, 9])
 
-        sent = transaction.send(
-            [
-                Step(arbitration_id=0x100),
-                Step(template=1, arbitration_id=0x7E0, data=bytes(500)),
-                Step(arbitration_id=0x101),
-            ]
-        )
+        transaction.send(0x7FF, b"\x01")
 
-        assert sent == 3
-        assert hub.message_lengths == [500]
-        assert hub.sent_ids == [0x100, 0x101]
-
-    def test_it_waits_for_credit_before_handing_a_message_over(self, monkeypatch):
-        bus, hub = given_bus_on_transaction_hub(monkeypatch)
-        transaction = given_transaction(bus)
-        transaction.template(1, Template(mode=Advance.COUNT, isotp=Isotp(0x7E8)))
-        hub.message_timeouts = 2
-
-        transaction.send([Step(template=1, arbitration_id=0x7E0, data=bytes(20))])
-
-        assert hub.message_calls == 3
-        assert hub.message_lengths == [20]
+        assert results[0].step == 3
+        assert results[0].missing == frozenset({5, 9})
 
     def test_it_refuses_to_start_on_a_read_only_bus(self, monkeypatch):
-        bus, _ = given_bus_on_transaction_hub(monkeypatch)
+        bus, _ = given_bus_on_library(monkeypatch)
         bus._writable = False
 
         with pytest.raises(CanOperationError):
@@ -273,28 +278,31 @@ class TestTransaction:
 
 
 class TestRunScript:
-    def test_it_reports_who_answered_from_the_script_roster(self, monkeypatch):
+    def test_it_runs_a_script_given_as_text_against_a_base_directory(self, monkeypatch):
         bus, runner = given_bus_on_script_runner(monkeypatch)
-        runner.roster = [0x10, 0x11, 0x12]
-        runner.seen_bitmap = 0b101
 
-        result = bus.run_script(SCRIPT_PATH)
+        result = bus.run_txn_script(SCRIPT_TEXT, base_directory="/images")
 
-        assert runner.script_path == SCRIPT_PATH.encode()
+        assert runner.text == SCRIPT_TEXT.encode()
+        assert runner.base_directory == b"/images"
         assert result.done
-        assert result.answered == {0x10, 0x12}
-        assert result.missing == {0x11}
+
+    def test_it_runs_a_script_file(self, monkeypatch):
+        bus, runner = given_bus_on_script_runner(monkeypatch)
+
+        bus.run_txn_script_file(SCRIPT_PATH)
+
+        assert runner.path == SCRIPT_PATH.encode()
 
     def test_it_raises_the_script_error_with_its_line(self, monkeypatch):
         bus, runner = given_bus_on_script_runner(monkeypatch)
         runner.status = native.ERR_ARGUMENT
-        runner.error_line = 7
 
         with pytest.raises(ScriptError) as failure:
-            bus.run_script(SCRIPT_PATH)
+            bus.run_txn_script_file(SCRIPT_PATH)
 
         assert failure.value.line == 7
-        assert str(failure.value) == "flash.txn:7: unknown template"
+        assert str(failure.value) == "flash.txn:7: no response has this name"
 
     def test_it_raises_with_the_report_when_the_agent_aborts(self, monkeypatch):
         bus, runner = given_bus_on_script_runner(monkeypatch)
@@ -302,7 +310,7 @@ class TestRunScript:
         runner.reason = REASON_TIMEOUT
 
         with pytest.raises(TransactionAborted) as aborted:
-            bus.run_script(SCRIPT_PATH)
+            bus.run_txn_script(SCRIPT_TEXT)
 
         assert aborted.value.result.reason == "timeout"
 
@@ -310,7 +318,7 @@ class TestRunScript:
         bus, runner = given_bus_on_script_runner(monkeypatch)
         reports = []
 
-        bus.run_script(SCRIPT_PATH, progress=lambda progress, total: reports.append((progress.completed_steps, total)))
+        bus.run_txn_script(SCRIPT_TEXT, progress=lambda progress, total: reports.append((progress.completed_steps, total)))
 
         assert reports == [(runner.completed_steps, SCRIPT_TOTAL_STEPS)]
         assert runner.kept_going
@@ -318,7 +326,7 @@ class TestRunScript:
     def test_it_cancels_when_progress_returns_false(self, monkeypatch):
         bus, runner = given_bus_on_script_runner(monkeypatch)
 
-        bus.run_script(SCRIPT_PATH, progress=lambda progress, total: False)
+        bus.run_txn_script(SCRIPT_TEXT, progress=lambda progress, total: False)
 
         assert not runner.kept_going
 
@@ -326,107 +334,158 @@ class TestRunScript:
         bus, runner = given_bus_on_script_runner(monkeypatch)
 
         with pytest.raises(KeyboardInterrupt):
-            bus.run_script(SCRIPT_PATH, progress=interrupt)
+            bus.run_txn_script(SCRIPT_TEXT, progress=interrupt)
 
         assert not runner.kept_going
+
+    def test_it_hands_the_roster_results_to_on_roster(self, monkeypatch):
+        bus, runner = given_bus_on_script_runner(monkeypatch)
+        results = []
+        runner.roster_report = (2, [3])
+
+        bus.run_txn_script(SCRIPT_TEXT, on_roster=results.append)
+
+        assert results[0].step == 2
+        assert results[0].missing == frozenset({3})
+
+
+class FakeLibrary:
+    def __init__(self):
+        self.created = False
+        self.options = None
+        self.steps = []
+        self.step_calls = 0
+        self.step_timeouts = 0
+        self.isotp_steps = 0
+        self.abort_at_step = False
+        self.refuse_step = False
+        self.roster_report = None
+        self.wait_calls = 0
+        self.wait_timeouts = 0
+        self.aborted = False
+        self.finished = False
+        self.error = b""
+
+    def create(self, session, options):
+        self.created = True
+        self.options = native.CanHubTxnOptions.from_buffer_copy(ctypes.cast(options, ctypes.POINTER(native.CanHubTxnOptions)).contents)
+        return TRANSACTION
+
+    def try_step(self, transaction, step, timeout_ms):
+        self.step_calls += 1
+        if self.step_timeouts > 0:
+            self.step_timeouts -= 1
+            return native.ERR_TIMEOUT
+        if self.abort_at_step:
+            return native.ERR_TXN_ABORTED
+        if self.refuse_step:
+            self.error = b"step 0: a response needs timeout_ms"
+            return native.ERR_ARGUMENT
+        self.steps.append(recorded_step(ctypes.cast(step, ctypes.POINTER(native.CanHubTxnStep)).contents))
+        if ctypes.cast(step, ctypes.POINTER(native.CanHubTxnStep)).contents.isotp:
+            self.isotp_steps += 1
+        if self.roster_report is not None:
+            report_roster(self.options.on_roster, *self.roster_report)
+        return native.OK
+
+    def progress(self, transaction, progress):
+        return native.OK
+
+    def abort(self, transaction):
+        self.aborted = True
+        return native.OK
+
+    def wait(self, transaction, timeout_ms):
+        self.wait_calls += 1
+        if self.wait_timeouts > 0:
+            self.wait_timeouts -= 1
+            return native.ERR_TIMEOUT
+        return native.OK
+
+    def finish(self, transaction, report):
+        self.finished = True
+        contents = ctypes.cast(report, ctypes.POINTER(native.CanHubTxnReport)).contents
+        if self.abort_at_step or self.aborted:
+            contents.reason = REASON_TIMEOUT
+            return native.ERR_TXN_ABORTED
+        contents.done = True
+        return native.OK
+
+    def last_error(self, session):
+        return self.error
 
 
 class ScriptRunner:
     def __init__(self):
         self.status = native.OK
-        self.roster = []
-        self.seen_bitmap = 0
-        self.reason = 0
-        self.error_line = 0
+        self.reason = REASON_NONE
         self.completed_steps = 12
-        self.script_path = None
+        self.text = None
+        self.base_directory = None
+        self.path = None
         self.kept_going = None
+        self.roster_report = None
 
-    def run(self, session, script_path, outcome, on_progress, context):
-        report = ctypes.cast(outcome, ctypes.POINTER(native.CanHubScriptOutcome)).contents
+    def run(self, session, text, base_directory, options, report):
+        self.text = text
+        self.base_directory = base_directory
+        return self.report(options, report)
+
+    def run_file(self, session, path, options, report):
+        self.path = path
+        return self.report(options, report)
+
+    def report(self, options, report):
+        callbacks = ctypes.cast(options, ctypes.POINTER(native.CanHubTxnScriptOptions)).contents
+        contents = ctypes.cast(report, ctypes.POINTER(native.CanHubTxnReport)).contents
         progress = native.CanHubTxnProgress(completed_steps=self.completed_steps)
-        self.script_path = script_path
-        self.kept_going = on_progress(context, ctypes.pointer(progress), SCRIPT_TOTAL_STEPS) != 0
-        report.total_steps = SCRIPT_TOTAL_STEPS
-        report.error_line = self.error_line
-        report.roster_count = len(self.roster)
-        report.roster[: len(self.roster)] = self.roster
-        report.result.seen_bitmap = self.seen_bitmap
-        report.result.reason = self.reason
+        self.kept_going = callbacks.on_progress(None, ctypes.pointer(progress), SCRIPT_TOTAL_STEPS) != 0
+        if self.roster_report is not None:
+            report_roster(callbacks.on_roster, *self.roster_report)
+        contents.done = self.status == native.OK
+        contents.reason = self.reason
         return self.status
 
     def last_error(self, session):
-        return b"flash.txn:7: unknown template"
+        return b"flash.txn:7: no response has this name"
+
+
+def recorded_step(step):
+    data = ctypes.string_at(step.data, step.length) if step.data else None
+    response = step.response.contents if step.response else None
+    return (
+        step.id.value,
+        step.id.extended,
+        data,
+        response.success.id.value if response else None,
+        response.timeout_ms if response else None,
+    )
+
+
+def report_roster(callback, step, missing):
+    result = native.CanHubTxnRosterResult(step=step, missing_count=len(missing))
+    result.missing[: len(missing)] = missing
+    callback(None, ctypes.pointer(result))
+
+
+def given_bus_on_library(monkeypatch):
+    library = FakeLibrary()
+    monkeypatch.setattr(native.lib, "canhub_txn_create", library.create)
+    monkeypatch.setattr(native.lib, "canhub_txn_try_step", library.try_step)
+    monkeypatch.setattr(native.lib, "canhub_txn_progress", library.progress)
+    monkeypatch.setattr(native.lib, "canhub_txn_abort", library.abort)
+    monkeypatch.setattr(native.lib, "canhub_txn_wait", library.wait)
+    monkeypatch.setattr(native.lib, "canhub_txn_finish", library.finish)
+    monkeypatch.setattr(native.lib, "canhub_last_error", library.last_error)
+    return given_bus(), library
 
 
 def given_bus_on_script_runner(monkeypatch):
     runner = ScriptRunner()
     monkeypatch.setattr(native.lib, "canhub_txn_run_script", runner.run)
+    monkeypatch.setattr(native.lib, "canhub_txn_run_script_file", runner.run_file)
     monkeypatch.setattr(native.lib, "canhub_last_error", runner.last_error)
     return given_bus(), runner
-
-
-def interrupt(progress, total_steps):
-    raise KeyboardInterrupt
-
-
-class TransactionHub:
-    def __init__(self):
-        self.sent_ids = []
-        self.steps_per_call = None
-        self.abort_at_send = False
-        self.ended = False
-        self.aborted = False
-        self.message_lengths = []
-        self.message_calls = 0
-        self.message_timeouts = 0
-
-    def begin(self, session, request, timeout_ms):
-        return native.OK
-
-    def send(self, session, steps, count, timeout_ms):
-        if self.abort_at_send:
-            return native.ERR_TXN_ABORTED
-        taken = count if self.steps_per_call is None else min(count, self.steps_per_call)
-        self.sent_ids.extend(steps[index].can_id for index in range(taken))
-        return taken
-
-    def template(self, session, definition, timeout_ms):
-        return native.OK
-
-    def send_message(self, session, message, timeout_ms):
-        self.message_calls += 1
-        if self.message_timeouts > 0:
-            self.message_timeouts -= 1
-            return native.ERR_TIMEOUT
-        self.message_lengths.append(ctypes.cast(message, ctypes.POINTER(native.CanHubTxnMessage)).contents.length)
-        return native.OK
-
-    def end(self, session, timeout_ms):
-        self.ended = True
-        return native.OK
-
-    def wait(self, session, report, timeout_ms):
-        if self.abort_at_send:
-            ctypes.cast(report, ctypes.POINTER(native.CanHubTxnResult)).contents.reason = REASON_TIMEOUT
-            return native.ERR_TXN_ABORTED
-        return native.OK
-
-    def abort(self, session):
-        self.aborted = True
-        return native.OK
-
-
-def given_bus_on_transaction_hub(monkeypatch):
-    hub = TransactionHub()
-    monkeypatch.setattr(native.lib, "canhub_txn_begin", hub.begin)
-    monkeypatch.setattr(native.lib, "canhub_txn_send", hub.send)
-    monkeypatch.setattr(native.lib, "canhub_txn_template", hub.template)
-    monkeypatch.setattr(native.lib, "canhub_txn_send_message", hub.send_message)
-    monkeypatch.setattr(native.lib, "canhub_txn_end", hub.end)
-    monkeypatch.setattr(native.lib, "canhub_txn_wait", hub.wait)
-    monkeypatch.setattr(native.lib, "canhub_txn_abort", hub.abort)
-    return given_bus(), hub
 
 
 def given_bus():
@@ -439,3 +498,7 @@ def given_bus():
 
 def given_transaction(bus):
     return bus.transaction()
+
+
+def interrupt(progress, total_steps):
+    raise KeyboardInterrupt
