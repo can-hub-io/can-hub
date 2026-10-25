@@ -24,7 +24,7 @@ fingerprint `882FA1A7753DE71C0FEC849CBCEB231428DE4144`.
 
 The repository keeps the last ten releases. Until the wire protocol is frozen,
 hub and agents should run the same version; pin one with
-`sudo apt install can-hub-agent=0.6.0`.
+`sudo apt install can-hub-agent=0.6.1`.
 
 Without the repository, every
 [release](https://github.com/can-hub-io/can-hub/releases) ships the same debs:
