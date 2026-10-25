@@ -94,8 +94,19 @@ And beyond the binaries:
 ## Install
 
 Static per-arch Debian packages (amd64, arm64, armhf) from the signed APT
-repository at `apt.can-hub.io`, release tarballs, and python wheels on PyPI —
-see [doc/installation.md](doc/installation.md). From source:
+repository at `apt.can-hub.io`:
+
+```sh
+curl -fsSL https://apt.can-hub.io/key.gpg | sudo tee /usr/share/keyrings/can-hub.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/can-hub.gpg] https://apt.can-hub.io stable main" | sudo tee /etc/apt/sources.list.d/can-hub.list
+sudo apt update
+sudo apt install can-hub          # hub, can-hub-cli and the web admin panel
+sudo apt install can-hub-agent    # on each device
+```
+
+Hub and agents should run the same version until the wire protocol is frozen.
+Release tarballs, python wheels on PyPI (`pip install python-can-hub`) and the
+key fingerprint: [doc/installation.md](doc/installation.md). From source:
 
 ```sh
 make release            # cmake+ninja+gcc; first configure needs network
