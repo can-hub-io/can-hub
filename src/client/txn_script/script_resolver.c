@@ -121,7 +121,7 @@ bool ScriptResolver_Condition(
         error->line_number = term->line_number;
         if (isRosterTerm(scope, term)) {
             if (roster_term == NULL || *roster_term != NULL) {
-                return fail(error, term->line_number, "the loop variable is compared once, in the template's success");
+                return fail(error, term->line_number, "the loop variable is compared once, in the response's success");
             }
             *roster_term = term;
             continue;

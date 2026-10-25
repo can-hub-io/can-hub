@@ -15,7 +15,7 @@ import time
 
 import can
 
-from canhub import Advance, Pattern, Step, Template
+from canhub import Match, Response
 
 REQUEST_ID = 0x7E0
 RESPONSE_ID = 0x7E8
@@ -51,21 +51,11 @@ def main():
 
 
 def run_transaction(bus, requests):
-    answer = Template(
-        advance_on=Pattern(RESPONSE_ID, data=bytes([0, POSITIVE_SERVICE, 0]), data_mask=bytes([0, BYTE_MASK, BYTE_MASK])),
-        mode=Advance.COUNT,
-        timeout=TIMEOUT_S,
-        abort_on_mismatch=True,
-    )
+    answer = Response(Match(RESPONSE_ID, data={1: POSITIVE_SERVICE}), timeout=TIMEOUT_S, on_mismatch_abort=True)
     with bus.transaction() as transaction:
-        transaction.template(0, answer)
-        transaction.send(request_step(index) for index in range(requests))
-        transaction.wait()
-
-
-def request_step(index):
-    counter = index & BYTE_MASK
-    return Step(arbitration_id=REQUEST_ID, data=bytes([0x02, SERVICE, counter]), expect=bytes([0, POSITIVE_SERVICE, counter]))
+        for index in range(requests):
+            counter = index & BYTE_MASK
+            transaction.send(REQUEST_ID, bytes([0x02, SERVICE, counter]), answer, where=Match(RESPONSE_ID, data={2: counter}))
 
 
 def run_lockstep(bus, requests):

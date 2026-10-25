@@ -120,8 +120,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/platform/windows/shared/tls_identity.c
         src/platform/windows/libcanhub/canhub.c
         src/platform/linux/libcanhub/canhub_settings.c
-        src/platform/linux/libcanhub/canhub_transactions.c
+        src/platform/linux/libcanhub/canhub_frames.c
+        src/platform/linux/libcanhub/canhub_txn.c
         src/platform/linux/libcanhub/canhub_script.c
+        src/client/can_id.c
+        src/client/transaction_builder.c
         src/client/txn_script/checksum.c
         src/client/txn_script/script.c
         src/client/txn_script/script_error.c
@@ -144,7 +147,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 
     add_executable(canhub-dump examples/canhub_dump.c)
     target_link_libraries(canhub-dump PRIVATE canhub)
-    can_hub_strict_warnings(canhub canhub_shared canhub-dump)
+    add_executable(canhub-txn examples/canhub_txn.c)
+    target_link_libraries(canhub-txn PRIVATE canhub)
+    can_hub_strict_warnings(canhub canhub_shared canhub-dump canhub-txn)
 
     return()
 endif()
@@ -338,6 +343,8 @@ set(SOCKETCAND_SOURCES
 )
 
 set(TXN_SCRIPT_SOURCES
+    src/client/can_id.c
+    src/client/transaction_builder.c
     src/client/txn_script/checksum.c
     src/client/txn_script/script.c
     src/client/txn_script/script_error.c
@@ -351,7 +358,8 @@ set(TXN_SCRIPT_SOURCES
 set(LIBCANHUB_API_SOURCES
     src/platform/linux/libcanhub/canhub.c
     src/platform/linux/libcanhub/canhub_settings.c
-    src/platform/linux/libcanhub/canhub_transactions.c
+    src/platform/linux/libcanhub/canhub_frames.c
+    src/platform/linux/libcanhub/canhub_txn.c
     src/platform/linux/libcanhub/canhub_script.c
     ${TXN_SCRIPT_SOURCES}
 )
@@ -390,7 +398,9 @@ endif()
 
 add_executable(canhub-dump examples/canhub_dump.c)
 target_link_libraries(canhub-dump PRIVATE canhub)
-can_hub_strict_warnings(can-hub can-hub-agent can-hub-client can-hub-cli canhub canhub-dump)
+add_executable(canhub-txn examples/canhub_txn.c)
+target_link_libraries(canhub-txn PRIVATE canhub)
+can_hub_strict_warnings(can-hub can-hub-agent can-hub-client can-hub-cli canhub canhub-dump canhub-txn)
 
 install(TARGETS can-hub can-hub-agent can-hub-cli can-hub-client RUNTIME DESTINATION bin)
 install(TARGETS canhub ARCHIVE DESTINATION lib)

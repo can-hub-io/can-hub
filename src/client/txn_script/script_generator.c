@@ -4,6 +4,8 @@
 
 #include "protocol/frame_message.h"
 
+#define MICROSECONDS_PER_MILLISECOND 1000
+
 static const uint8_t FD_LENGTHS[] = { 12, 16, 20, 24, 32, 48, 64 };
 
 static uint16_t *cursorOf(ScriptGenerator *self);
@@ -19,9 +21,16 @@ static bool readFile(
     uint32_t *read_size
 );
 static void rebuildBindings(ScriptGenerator *self);
-static bool buildStep(ScriptGenerator *self, const ScriptStatement *statement, TxnStep *step, ScriptError *error);
-static bool fillFrame(ScriptGenerator *self, const ScriptStatement *statement, TxnStep *step, ScriptError *error);
-static bool appendData(TxnStep *step, const uint8_t *data, uint32_t size);
+static bool buildStep(ScriptGenerator *self, const ScriptStatement *statement, CanHubTxnStep *step, ScriptError *error);
+static bool fillFrame(
+    ScriptGenerator *self,
+    const ScriptStatement *statement,
+    CanHubCanId *id,
+    uint8_t *data,
+    uint8_t *length,
+    ScriptError *error
+);
+static bool appendData(uint8_t *destination, uint8_t *length, const uint8_t *data, uint32_t size);
 static bool isFrameLength(uint32_t length);
 
 /* ---------- public ---------- */
@@ -34,7 +43,7 @@ void ScriptGenerator_Start(ScriptGenerator *self, const ScriptProgram *program, 
     self->root_cursor = program->script->first_statement;
 }
 
-uint8_t ScriptGenerator_Next(ScriptGenerator *self, TxnStep *step, ScriptError *error)
+uint8_t ScriptGenerator_Next(ScriptGenerator *self, CanHubTxnStep *step, ScriptError *error)
 {
     const ScriptStatement *statement;
     uint16_t *cursor;
@@ -69,10 +78,16 @@ uint8_t ScriptGenerator_Next(ScriptGenerator *self, TxnStep *step, ScriptError *
     }
 }
 
-bool ScriptGenerator_Frame(ScriptGenerator *self, const ScriptStatement *statement, TxnStep *step, ScriptError *error)
+bool ScriptGenerator_Keepalive(
+    ScriptGenerator *self,
+    const ScriptStatement *statement,
+    CanHubTxnKeepalive *keepalive,
+    ScriptError *error
+)
 {
-    memset(step, 0, sizeof(*step));
-    return fillFrame(self, statement, step, error);
+    memset(keepalive, 0, sizeof(*keepalive));
+    keepalive->every_ms = self->program->script->keepalive_period_us / MICROSECONDS_PER_MILLISECOND;
+    return fillFrame(self, statement, &keepalive->id, keepalive->data, &keepalive->length, error);
 }
 
 /* ---------- private ---------- */
@@ -250,63 +265,70 @@ static void rebuildBindings(ScriptGenerator *self)
     }
 }
 
-static bool buildStep(ScriptGenerator *self, const ScriptStatement *statement, TxnStep *step, ScriptError *error)
+static bool buildStep(ScriptGenerator *self, const ScriptStatement *statement, CanHubTxnStep *step, ScriptError *error)
 {
     ScriptScope scope = { self->program->script, &self->bindings, &self->files, NULL };
-    ScriptVariantKey key;
-    ScriptPattern where;
-    uint8_t template_id;
+    uint16_t response;
+    uint8_t length = 0;
 
     memset(step, 0, sizeof(*step));
-    if (!ScriptCompiler_StepShape(self->program, statement, &scope, &key, &where, error)) {
-        return false;
-    }
-    if (!ScriptCompiler_FindVariant(self->program, &key, &template_id)) {
-        ScriptError_Set(error, statement->line_number, "this step's template was not prepared");
+    self->line_number = statement->line_number;
+    if (!ScriptCompiler_StepShape(self->program, statement, &scope, &response, &self->where, error)) {
         return false;
     }
 
-    step->template_id = template_id;
+    step->gap_us = statement->gap_us;
+    if (response != SCRIPT_TRANSMIT_ONLY) {
+        step->response = &self->program->responses[response];
+    }
     if (statement->where != SCRIPT_NO_INDEX) {
-        step->flags |= TXN_STEP_FLAG_EXPECT_VALUE;
-        step->expect_value = (self->program->success[key.base].payload_value & ~where.payload_mask) | where.payload_value;
+        step->where = &self->where;
     }
     if (statement->kind == kSCRIPT_STATEMENT_EXPECT) {
-        step->flags |= TXN_STEP_FLAG_EXPECT_ONLY;
         return true;
     }
-    return fillFrame(self, statement, step, error);
+    if (!fillFrame(self, statement, &step->id, self->data, &length, error)) {
+        return false;
+    }
+    step->data = self->data;
+    step->length = length;
+    return true;
 }
 
-static bool fillFrame(ScriptGenerator *self, const ScriptStatement *statement, TxnStep *step, ScriptError *error)
+static bool fillFrame(
+    ScriptGenerator *self,
+    const ScriptStatement *statement,
+    CanHubCanId *id,
+    uint8_t *data,
+    uint8_t *length,
+    ScriptError *error
+)
 {
     ScriptScope scope = { self->program->script, &self->bindings, NULL, NULL };
     const ScriptDataItem *item;
     const ScriptBinding *binding;
     const ScriptConstant *constant;
-    uint32_t can_id;
     uint8_t byte;
-    bool extended;
     bool appended;
     uint8_t i;
 
+    *length = 0;
     error->line_number = statement->line_number;
-    if (!ScriptResolver_Value(&scope, &statement->id, &can_id, &extended, error)) {
+    if (!ScriptResolver_Value(&scope, &statement->id, &id->value, &id->extended, error)) {
         return false;
     }
-    step->can_id = extended ? can_id | FRAME_CAN_ID_FLAG_EFF : can_id;
 
     for(i=0; i<statement->data_count; i++) {
         item = &self->program->script->data_items[statement->first_data_item + i];
         binding = ScriptResolver_Binding(&self->bindings, &item->name);
         constant = ScriptResolver_Constant(self->program->script, &item->name);
         if (item->kind == kSCRIPT_DATA_BYTE) {
-            appended = appendData(step, &item->byte, 1);
+            appended = appendData(data, length, &item->byte, 1);
         } else if (binding != NULL && binding->kind == kSCRIPT_BINDING_CHUNK) {
-            appended = appendData(step, binding->data, binding->size);
+            appended = appendData(data, length, binding->data, binding->size);
         } else {
             byte = (uint8_t)(binding != NULL ? binding->value : constant->number.value);
-            appended = appendData(step, &byte, 1);
+            appended = appendData(data, length, &byte, 1);
         }
         if (!appended) {
             ScriptError_Set(error, statement->line_number, "a frame carries at most 64 bytes");
@@ -314,23 +336,20 @@ static bool fillFrame(ScriptGenerator *self, const ScriptStatement *statement, T
         }
     }
 
-    if (!isFrameLength(step->payload_length)) {
+    if (!isFrameLength(*length)) {
         ScriptError_Set(error, statement->line_number, "a frame over 8 bytes is CAN FD: 12, 16, 20, 24, 32, 48 or 64 bytes");
         return false;
-    }
-    if (step->payload_length > FRAME_PAYLOAD_MAX_CLASSIC) {
-        step->frame_flags = FRAME_FLAG_FD;
     }
     return true;
 }
 
-static bool appendData(TxnStep *step, const uint8_t *data, uint32_t size)
+static bool appendData(uint8_t *destination, uint8_t *length, const uint8_t *data, uint32_t size)
 {
-    if (step->payload_length + size > FRAME_PAYLOAD_MAX_FD) {
+    if (*length + size > CANHUB_FRAME_PAYLOAD_MAX) {
         return false;
     }
-    memcpy(step->payload + step->payload_length, data, size);
-    step->payload_length = (uint8_t)(step->payload_length + size);
+    memcpy(destination + *length, data, size);
+    *length = (uint8_t)(*length + size);
     return true;
 }
 

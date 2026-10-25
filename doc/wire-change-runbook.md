@@ -57,8 +57,8 @@ is what they must both match.
 - REGISTER / IFCONFIG_REPLY / INTERFACE_STATUS (agent side): `src/agent/agent.c`.
 - LIST / OPEN / CLOSE / SUBSCRIBE / FRAME: `src/client/client.c`, `src/mirror/mirror_app.c`, `src/socketcand/socketcand_bridge.c` (per the message).
 - CONFIGURE: `src/client/client.c`, `src/socketcand/socketcand_bridge.c`, `src/platform/linux/cli_main.c` (`interface set`).
-- TXN_BEGIN / TXN_TEMPLATE / TXN_STEPS / TXN_ABORT: `src/client/client.c` and `src/client/transaction_sender.c`.
-- TXN_BEGIN_ACK / TXN_PROGRESS / TXN_STATUS: `src/agent/agent.c`.
+- TXN_BEGIN / TXN_ROSTER / TXN_TEMPLATE / TXN_STEPS / TXN_ABORT: `src/client/client.c` and `src/client/transaction_sender.c`, built from the libcanhub API by `src/client/transaction_builder.c`.
+- TXN_BEGIN_ACK / TXN_PROGRESS / TXN_STATUS / TXN_ROSTER_REPORT: `src/agent/agent.c`.
 - Admin requests: `src/platform/linux/cli_main.c`.
 - Admin replies, ERROR, OPEN_ACK, REGISTER_ACK, PING, LIST_REPLY, IFCONFIG, CONFIGURE_REPLY, INTERFACE_STATUS (client side): `src/hub/broker.c`, which also relays the TXN_* family, rewriting the channel byte.
 

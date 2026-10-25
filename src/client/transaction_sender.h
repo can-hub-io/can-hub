@@ -10,10 +10,9 @@
 
 /*
  * The client side of one transaction (see doc/protocol.md "Transactions"):
- * keeps the step record bytes in flight within the agent's window, packs
- * offered steps into TXN_STEPS batches and holds the last offered step back,
- * so End can flag it last without the caller knowing in advance which step
- * that is. A batch the transport could not take stays pending, in order,
+ * keeps the step record bytes in flight within the agent's window and packs
+ * offered steps into TXN_STEPS batches; End flags the batch that closes the
+ * transaction. A batch the transport could not take stays pending, in order,
  * until it is sent.
  */
 
@@ -46,8 +45,7 @@ typedef struct {
     uint32_t consumed_bytes;
     uint32_t completed_steps;
     uint32_t next_seq;
-    bool has_held;
-    TxnStep held;
+    bool message_open;
     bool batch_open;
     TxnStepsWriter writer;
     uint8_t batch[TRANSACTION_SENDER_BATCH_SIZE];

@@ -53,27 +53,21 @@ describe("transaction_sender", []() {
         expect(sender.state).toBe((uint8_t)kTRANSACTION_SENDER_BEGINNING);
     });
 
-    it("holds the last offered step back", []() {
+    it("packs an offered step into the open batch at once", []() {
         TxnStep step;
-        const uint8_t *batch;
-        size_t held_only_size;
         TxnStepsMessage sent;
 
         grant(LARGE_WINDOW);
         step = classicStep(0x100);
-        TransactionSender_Offer(&sender, &step);
-        held_only_size = TransactionSender_PendingBatch(&sender, &batch);
-        step = classicStep(0x101);
 
         TransactionSender_Offer(&sender, &step);
         sent = pendingBatch();
 
-        expect(held_only_size).toBe((size_t)0);
         expect(sent.step_count).toBe(1);
         expect(decodedStep(&sent, 0).can_id).toBe((uint32_t)0x100);
     });
 
-    it("flags the held step last when the transaction ends", []() {
+    it("flags the batch that ends the transaction", []() {
         TxnStep step;
         TTRANSACTION_OFFER ended;
         TxnStepsMessage sent;
@@ -87,7 +81,24 @@ describe("transaction_sender", []() {
 
         expect(ended).toBe(kTRANSACTION_OFFER_ACCEPTED);
         expect(sent.step_count).toBe(1);
-        expect(decodedStep(&sent, 0).flags).toBe((uint8_t)TXN_STEP_FLAG_LAST);
+        expect(sent.flags).toBe((uint8_t)TXN_STEPS_FLAG_END);
+    });
+
+    it("ends with a batch of its own once the steps went out", []() {
+        TxnStep step;
+        TxnStepsMessage sent;
+
+        grant(LARGE_WINDOW);
+        step = classicStep(0x100);
+        TransactionSender_Offer(&sender, &step);
+        TransactionSender_BatchSent(&sender);
+
+        TransactionSender_End(&sender);
+        sent = pendingBatch();
+
+        expect(sent.step_count).toBe(0);
+        expect(sent.first_seq).toBe((uint32_t)1);
+        expect(sent.flags).toBe((uint8_t)TXN_STEPS_FLAG_END);
     });
 
     it("numbers a message spread over records as one step", []() {
@@ -110,8 +121,8 @@ describe("transaction_sender", []() {
         TransactionSender_Offer(&sender, &after);
         second = pendingBatch();
 
-        expect(first.step_count).toBe(2);
-        expect(second.first_seq).toBe((uint32_t)1);
+        expect(first.step_count).toBe(3);
+        expect(second.first_seq).toBe((uint32_t)2);
     });
 
     it("refuses to end on a record that leaves its message unfinished", []() {
@@ -125,12 +136,6 @@ describe("transaction_sender", []() {
         ended = TransactionSender_End(&sender);
 
         expect(ended).toBe(kTRANSACTION_OFFER_REJECTED);
-    });
-
-    it("refuses to end a transaction that has sent nothing", []() {
-        grant(LARGE_WINDOW);
-
-        expect(TransactionSender_End(&sender)).toBe(kTRANSACTION_OFFER_REJECTED);
     });
 
     it("stops when the window is spent and resumes as credit comes back", []() {
@@ -147,7 +152,7 @@ describe("transaction_sender", []() {
         step = classicStep(0x200);
         resumed = TransactionSender_Offer(&sender, &step);
 
-        expect(accepted).toBe((uint32_t)3);
+        expect(accepted).toBe((uint32_t)2);
         expect(stopped_by).toBe(kTRANSACTION_OFFER_NO_CREDIT);
         expect(resumed).toBe(kTRANSACTION_OFFER_ACCEPTED);
         expect(TransactionSender_BytesInFlight(&sender)).toBe((uint32_t)TWO_RECORDS_WINDOW);

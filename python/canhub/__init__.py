@@ -7,25 +7,37 @@ python fingerprint helper) must work without libcanhub present.
 from .fingerprint import identity_fingerprint
 
 __all__ = [
-    "Advance",
     "BitTiming",
     "CanHubBus",
     "CanHubMessage",
     "InterfaceSettings",
-    "Isotp",
+    "IsotpLink",
     "Keepalive",
-    "Origin",
-    "Pattern",
+    "Masked",
+    "Match",
+    "Response",
+    "RosterResult",
     "ScriptError",
-    "Step",
-    "Template",
     "Transaction",
     "TransactionAborted",
+    "TransactionProgress",
     "TransactionResult",
     "identity_fingerprint",
 ]
 
-TRANSACTION_NAMES = {"Advance", "Isotp", "Keepalive", "Origin", "Pattern", "ScriptError", "Step", "Template", "Transaction", "TransactionAborted", "TransactionResult"}
+TRANSACTION_NAMES = {
+    "IsotpLink",
+    "Keepalive",
+    "Masked",
+    "Match",
+    "Response",
+    "RosterResult",
+    "ScriptError",
+    "Transaction",
+    "TransactionAborted",
+    "TransactionProgress",
+    "TransactionResult",
+}
 
 
 def __getattr__(name):

@@ -49,6 +49,9 @@ static void agentReportsProgress(uint16_t txn_id, uint32_t completed_steps, uint
 static void agentReportsStatus(uint16_t txn_id, uint8_t state, uint8_t reason, uint32_t completed_steps);
 static size_t encodeOneStep(uint8_t channel, uint8_t *buffer, size_t buffer_size);
 static bool stepsFromClientStream(uint32_t peer_id, uint8_t channel);
+static bool templateFromClientStream(uint32_t peer_id, uint8_t channel, uint8_t type);
+static bool rosterFromClientStream(uint32_t peer_id, uint8_t channel);
+static void agentReportsRoster(uint16_t txn_id, uint32_t seq, uint64_t seen_bitmap);
 static void stepsFromClientControl(uint32_t peer_id, uint8_t channel);
 static void writeFrameFrom(uint32_t peer_id, uint8_t channel);
 static int32_t lastControlIndex(uint32_t peer_id, uint8_t type);
@@ -151,29 +154,41 @@ describe("broker transactions", []() {
             expect(lastControlIndex(AGENT_PEER, kMESSAGE_TYPE_TXN_BEGIN)).toBe(-1);
         });
 
-        it("answers unsupported for ISO-TP steps to an agent that does not run them", []() {
-            TxnBeginAckMessage ack;
+        it("aborts the transaction when an ISO-TP template reaches an agent that does not run ISO-TP", []() {
+            TxnStatusMessage status;
+            bool accepted;
+            int32_t abort_index;
 
             startHub(NULL, AGENT_CAPABILITIES);
             client_channel = openCan0(CLIENT_PEER, RELIABLE_WRITE);
+            beginFrom(CLIENT_PEER, client_channel, 0);
+            agentAnswersBegin(kTXN_BEGIN_STATUS_OK, TXN_ID, AGENT_WINDOW);
+            HubTransportPortMock_Reset(&transport);
 
-            beginFrom(CLIENT_PEER, client_channel, TXN_BEGIN_FLAG_ISOTP);
-            ack = lastBeginAckTo(CLIENT_PEER);
+            accepted = templateFromClientStream(CLIENT_PEER, client_channel, kTXN_TEMPLATE_TYPE_ISOTP);
+            status = lastStatusTo(CLIENT_PEER);
+            abort_index = lastControlIndex(AGENT_PEER, kMESSAGE_TYPE_TXN_ABORT);
 
-            expect(ack.status).toBe((uint8_t)kTXN_BEGIN_STATUS_UNSUPPORTED);
-            expect(lastControlIndex(AGENT_PEER, kMESSAGE_TYPE_TXN_BEGIN)).toBe(-1);
+            expect(accepted).toBe(true);
+            expect(transport.frame_count).toBe(0);
+            expect(abort_index >= 0).toBe(true);
+            expect(status.state).toBe((uint8_t)kTXN_STATE_ABORTED);
+            expect(status.reason).toBe((uint8_t)kTXN_REASON_UNSUPPORTED);
+            expect(status.channel).toBe(client_channel);
+            expect(TransactionTable_ForAgent(&broker.transactions, AGENT_PEER) == NULL).toBe(true);
         });
 
-        it("relays a transaction with ISO-TP steps to an agent that runs them", []() {
-            int32_t begin_index;
-
+        it("relays an ISO-TP template to an agent that runs ISO-TP", []() {
             startHub(NULL, AGENT_CAPABILITIES | HELLO_CAP_ISOTP);
             client_channel = openCan0(CLIENT_PEER, RELIABLE_WRITE);
+            beginFrom(CLIENT_PEER, client_channel, 0);
+            agentAnswersBegin(kTXN_BEGIN_STATUS_OK, TXN_ID, AGENT_WINDOW);
+            HubTransportPortMock_Reset(&transport);
 
-            beginFrom(CLIENT_PEER, client_channel, TXN_BEGIN_FLAG_ISOTP);
-            begin_index = lastControlIndex(AGENT_PEER, kMESSAGE_TYPE_TXN_BEGIN);
+            templateFromClientStream(CLIENT_PEER, client_channel, kTXN_TEMPLATE_TYPE_ISOTP);
 
-            expect(begin_index >= 0).toBe(true);
+            expect(transport.frame_count).toBe(1);
+            expect(transport.frame_log[0][0]).toBe((uint8_t)kMESSAGE_TYPE_TXN_TEMPLATE);
         });
 
         it("answers write denied to a client without a write grant", []() {
@@ -224,6 +239,44 @@ describe("broker transactions", []() {
 
             expect(accepted).toBe(false);
             expect(transport.frame_count).toBe(0);
+        });
+
+        it("relays a generic template to an agent that does not run ISO-TP", []() {
+            templateFromClientStream(CLIENT_PEER, client_channel, kTXN_TEMPLATE_TYPE_GENERIC);
+
+            expect(transport.frame_count).toBe(1);
+            expect(transport.frame_peers[0]).toBe((uint32_t)AGENT_PEER);
+        });
+
+        it("relays the roster from the client's reliable stream to the agent's channel", []() {
+            uint8_t relayed_channel;
+
+            rosterFromClientStream(CLIENT_PEER, client_channel);
+            relayed_channel = TxnMessage_Channel(transport.frame_log[0] + MESSAGE_HEADER_SIZE);
+
+            expect(transport.frame_count).toBe(1);
+            expect(transport.frame_log[0][0]).toBe((uint8_t)kMESSAGE_TYPE_TXN_ROSTER);
+            expect(relayed_channel).toBe(AGENT_CHANNEL);
+        });
+
+        it("relays a roster report to the client on its channel", []() {
+            int32_t index;
+            TxnRosterReportMessage report;
+
+            agentReportsRoster(TXN_ID, 4, 0x5);
+            index = lastControlIndex(CLIENT_PEER, kMESSAGE_TYPE_TXN_ROSTER_REPORT);
+            TxnRosterReportMessage_Decode(&report, transport.control_log[index] + MESSAGE_HEADER_SIZE, TXN_ROSTER_REPORT_BODY_SIZE);
+
+            expect(index >= 0).toBe(true);
+            expect(report.channel).toBe(client_channel);
+            expect(report.seq).toBe((uint32_t)4);
+            expect(report.seen_bitmap).toBe((uint64_t)0x5);
+        });
+
+        it("ignores a roster report about another transaction", []() {
+            agentReportsRoster(TXN_ID + 1, 4, 0x5);
+
+            expect(lastControlIndex(CLIENT_PEER, kMESSAGE_TYPE_TXN_ROSTER_REPORT)).toBe(-1);
         });
 
         it("relays steps that arrive on the control stream", []() {
@@ -408,6 +461,26 @@ describe("broker transactions", []() {
             expect(TransactionTable_AnyLease(&broker.transactions)).toBe(false);
         });
 
+        it("cancels a transaction its client aborted before the agent granted it", []() {
+            TxnAbortMessage abort_message = { client_channel, 0 };
+            uint8_t encoded[MESSAGE_BUFFER_SIZE];
+            size_t encoded_size;
+            int32_t agent_abort;
+            int32_t client_grant;
+
+            encoded_size = TxnAbortMessage_Encode(&abort_message, encoded, sizeof(encoded));
+            events.on_peer_control(events.context, CLIENT_PEER, encoded, encoded_size, 0);
+            HubTransportPortMock_Reset(&transport);
+
+            agentAnswersBegin(kTXN_BEGIN_STATUS_OK, TXN_ID, AGENT_WINDOW);
+            agent_abort = lastControlIndex(AGENT_PEER, kMESSAGE_TYPE_TXN_ABORT);
+            client_grant = lastControlIndex(CLIENT_PEER, kMESSAGE_TYPE_TXN_BEGIN_ACK);
+
+            expect(agent_abort >= 0).toBe(true);
+            expect(client_grant).toBe(-1);
+            expect(TransactionTable_AnyLease(&broker.transactions)).toBe(false);
+        });
+
         it("tells the client when the agent leaves", []() {
             TxnStatusMessage status;
 
@@ -514,7 +587,7 @@ static void agentReportsStatus(uint16_t txn_id, uint8_t state, uint8_t reason, u
 
 static size_t encodeOneStep(uint8_t channel, uint8_t *buffer, size_t buffer_size)
 {
-    TxnStepsMessage fixed_fields = { channel, 0, TXN_ID, 0, NULL, 0 };
+    TxnStepsMessage fixed_fields = { channel, 0, TXN_ID, 0, 0, NULL, 0 };
     TxnStepsWriter writer;
     TxnStep step;
 
@@ -533,6 +606,46 @@ static bool stepsFromClientStream(uint32_t peer_id, uint8_t channel)
 
     encoded_size = encodeOneStep(channel, encoded, sizeof(encoded));
     return events.on_peer_frame(events.context, peer_id, encoded, encoded_size);
+}
+
+static bool templateFromClientStream(uint32_t peer_id, uint8_t channel, uint8_t type)
+{
+    TxnTemplateMessage template_message;
+    uint8_t encoded[MESSAGE_BUFFER_SIZE];
+    size_t encoded_size;
+
+    memset(&template_message, 0, sizeof(template_message));
+    template_message.channel = channel;
+    template_message.txn_id = TXN_ID;
+    template_message.type = type;
+    encoded_size = TxnTemplateMessage_Encode(&template_message, encoded, sizeof(encoded));
+    return events.on_peer_frame(events.context, peer_id, encoded, encoded_size);
+}
+
+static bool rosterFromClientStream(uint32_t peer_id, uint8_t channel)
+{
+    TxnRosterMessage roster;
+    uint8_t encoded[MESSAGE_BUFFER_SIZE];
+    size_t encoded_size;
+
+    memset(&roster, 0, sizeof(roster));
+    roster.channel = channel;
+    roster.txn_id = TXN_ID;
+    roster.origin.source = kTXN_ORIGIN_SOURCE_CAN_ID;
+    roster.origin.mask = 0x0F;
+    roster.roster_count = 1;
+    encoded_size = TxnRosterMessage_Encode(&roster, encoded, sizeof(encoded));
+    return events.on_peer_frame(events.context, peer_id, encoded, encoded_size);
+}
+
+static void agentReportsRoster(uint16_t txn_id, uint32_t seq, uint64_t seen_bitmap)
+{
+    TxnRosterReportMessage report = { AGENT_CHANNEL, txn_id, seq, seen_bitmap };
+    uint8_t encoded[MESSAGE_BUFFER_SIZE];
+    size_t encoded_size;
+
+    encoded_size = TxnRosterReportMessage_Encode(&report, encoded, sizeof(encoded));
+    events.on_peer_control(events.context, AGENT_PEER, encoded, encoded_size, 0);
 }
 
 static void stepsFromClientControl(uint32_t peer_id, uint8_t channel)

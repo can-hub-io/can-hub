@@ -7,9 +7,11 @@ extern "C" {
 }
 
 #define TEST_BUFFER_SIZE 512
-#define BEGIN_ROSTER_COUNT_OFFSET 9
-#define BEGIN_RESERVED_OFFSET 10
-#define BEGIN_ROSTER_OFFSET 12
+#define BEGIN_RESERVED_OFFSET 2
+#define BEGIN_RESERVED_SIZE 2
+#define ROSTER_COUNT_OFFSET 10
+#define ROSTER_RESERVED_OFFSET 11
+#define ROSTER_ENTRIES_OFFSET 12
 #define ROSTER_ENTRY_SIZE 4
 #define TEMPLATE_TEMPLATE_ID_OFFSET 1
 #define TEMPLATE_RESERVED_OFFSET 17
@@ -18,7 +20,8 @@ extern "C" {
 #define TEMPLATE_ISOTP_RESPONSE_ID_OFFSET 92
 #define TEMPLATE_ISOTP_RESERVED_OFFSET 103
 
-static TxnBeginMessage fullRosterBegin(void);
+static TxnBeginMessage keepaliveBegin(void);
+static TxnRosterMessage fullRoster(void);
 static TxnTemplateMessage udsTemplate(void);
 static TxnTemplateMessage isotpTemplate(void);
 static bool areBytesZero(const uint8_t *bytes, size_t count);
@@ -43,14 +46,14 @@ describe("txn_message", []() {
 });
 
 describe("txn_begin_message", []() {
-    it("round-trips the channel, the flags, the origin extractor and a full roster", []() {
+    it("round-trips the channel, the flags, the idle timeout and the keepalive frame", []() {
         TxnBeginMessage begin;
         TxnBeginMessage decoded;
         uint8_t buffer[TEST_BUFFER_SIZE];
         size_t encoded_size;
         bool decoded_ok;
 
-        begin = fullRosterBegin();
+        begin = keepaliveBegin();
 
         encoded_size = TxnBeginMessage_Encode(&begin, buffer, sizeof(buffer));
         decoded_ok = TxnBeginMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, TXN_BEGIN_BODY_SIZE);
@@ -60,6 +63,56 @@ describe("txn_begin_message", []() {
         expect(decoded_ok).toBe(true);
         expect(decoded.channel).toBe(3);
         expect(decoded.flags).toBe((uint8_t)TXN_BEGIN_FLAG_EXCLUSIVE);
+        expect(decoded.idle_timeout_ms).toBe((uint32_t)60000);
+        expect(decoded.keepalive.period_ms).toBe((uint32_t)2000);
+        expect(decoded.keepalive.can_id).toBe((uint32_t)0x7E0);
+        expect(decoded.keepalive.payload_length).toBe(3);
+        expect(decoded.keepalive.payload[1]).toBe(0x3E);
+    });
+
+    it("zeroes the reserved bytes", []() {
+        TxnBeginMessage begin;
+        uint8_t buffer[TEST_BUFFER_SIZE];
+        bool reserved_zeroed;
+
+        begin = keepaliveBegin();
+        memset(buffer, 0xAA, sizeof(buffer));
+
+        TxnBeginMessage_Encode(&begin, buffer, sizeof(buffer));
+        reserved_zeroed = areBytesZero(buffer + MESSAGE_HEADER_SIZE + BEGIN_RESERVED_OFFSET, BEGIN_RESERVED_SIZE);
+
+        expect(reserved_zeroed).toBe(true);
+    });
+
+    it("rejects a truncated begin payload", []() {
+        TxnBeginMessage decoded;
+        uint8_t payload[TXN_BEGIN_BODY_SIZE] = { 0 };
+        bool decoded_ok;
+
+        decoded_ok = TxnBeginMessage_Decode(&decoded, payload, TXN_BEGIN_BODY_SIZE - 1);
+
+        expect(decoded_ok).toBe(false);
+    });
+});
+
+describe("txn_roster_message", []() {
+    it("round-trips the channel, the transaction id, the origin extractor and a full roster", []() {
+        TxnRosterMessage roster;
+        TxnRosterMessage decoded;
+        uint8_t buffer[TEST_BUFFER_SIZE];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        roster = fullRoster();
+
+        encoded_size = TxnRosterMessage_Encode(&roster, buffer, sizeof(buffer));
+        decoded_ok = TxnRosterMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, TXN_ROSTER_BODY_SIZE);
+
+        expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + TXN_ROSTER_BODY_SIZE));
+        expect(buffer[0]).toBe((uint8_t)kMESSAGE_TYPE_TXN_ROSTER);
+        expect(decoded_ok).toBe(true);
+        expect(decoded.channel).toBe(3);
+        expect(decoded.txn_id).toBe((uint16_t)7);
         expect(decoded.origin.source).toBe((uint8_t)kTXN_ORIGIN_SOURCE_PAYLOAD);
         expect(decoded.origin.shift).toBe(4);
         expect(decoded.origin.payload_offset).toBe(2);
@@ -69,88 +122,89 @@ describe("txn_begin_message", []() {
         expect(decoded.roster[TXN_ROSTER_MAX - 1]).toBe((uint32_t)(0x100 + TXN_ROSTER_MAX - 1));
     });
 
-    it("round-trips a transaction without roster and zeroes the unused roster block", []() {
-        TxnBeginMessage begin = { 3, 0, { kTXN_ORIGIN_SOURCE_NONE, 0, 0, 0 }, 0, { 0 } };
-        TxnBeginMessage decoded;
+    it("zeroes the reserved byte and the unused roster entries", []() {
+        TxnRosterMessage roster;
         uint8_t buffer[TEST_BUFFER_SIZE];
-        size_t encoded_size;
-        bool decoded_ok;
-        bool roster_zeroed;
         bool reserved_zeroed;
+        bool unused_zeroed;
 
+        roster = fullRoster();
+        roster.roster_count = 1;
         memset(buffer, 0xAA, sizeof(buffer));
 
-        encoded_size = TxnBeginMessage_Encode(&begin, buffer, sizeof(buffer));
-        decoded_ok = TxnBeginMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, TXN_BEGIN_BODY_SIZE);
-        roster_zeroed = areBytesZero(buffer + MESSAGE_HEADER_SIZE + BEGIN_ROSTER_OFFSET, TXN_ROSTER_MAX * ROSTER_ENTRY_SIZE);
-        reserved_zeroed = areBytesZero(buffer + MESSAGE_HEADER_SIZE + BEGIN_RESERVED_OFFSET, BEGIN_ROSTER_OFFSET - BEGIN_RESERVED_OFFSET);
+        TxnRosterMessage_Encode(&roster, buffer, sizeof(buffer));
+        reserved_zeroed = areBytesZero(buffer + MESSAGE_HEADER_SIZE + ROSTER_RESERVED_OFFSET, 1);
+        unused_zeroed = areBytesZero(buffer + MESSAGE_HEADER_SIZE + ROSTER_ENTRIES_OFFSET + ROSTER_ENTRY_SIZE, (TXN_ROSTER_MAX - 1) * ROSTER_ENTRY_SIZE);
 
-        expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + TXN_BEGIN_BODY_SIZE));
-        expect(decoded_ok).toBe(true);
-        expect(decoded.roster_count).toBe(0);
-        expect(roster_zeroed).toBe(true);
         expect(reserved_zeroed).toBe(true);
-    });
-
-    it("round-trips the idle timeout and the keepalive frame", []() {
-        TxnBeginMessage begin = { 0 };
-        TxnBeginMessage decoded;
-        uint8_t buffer[TEST_BUFFER_SIZE];
-        bool decoded_ok;
-
-        begin.idle_timeout_ms = 60000;
-        begin.keepalive.period_ms = 2000;
-        begin.keepalive.can_id = 0x7E0;
-        begin.keepalive.payload_length = 3;
-        begin.keepalive.payload[0] = 0x02;
-        begin.keepalive.payload[1] = 0x3E;
-        begin.keepalive.payload[2] = 0x80;
-
-        TxnBeginMessage_Encode(&begin, buffer, sizeof(buffer));
-        decoded_ok = TxnBeginMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, TXN_BEGIN_BODY_SIZE);
-
-        expect(decoded_ok).toBe(true);
-        expect(decoded.idle_timeout_ms).toBe((uint32_t)60000);
-        expect(decoded.keepalive.period_ms).toBe((uint32_t)2000);
-        expect(decoded.keepalive.can_id).toBe((uint32_t)0x7E0);
-        expect(decoded.keepalive.payload_length).toBe(3);
-        expect(decoded.keepalive.payload[1]).toBe(0x3E);
+        expect(unused_zeroed).toBe(true);
     });
 
     it("refuses to encode a roster above the maximum", []() {
-        TxnBeginMessage begin;
+        TxnRosterMessage roster;
         uint8_t buffer[TEST_BUFFER_SIZE];
         size_t encoded_size;
 
-        begin = fullRosterBegin();
-        begin.roster_count = TXN_ROSTER_MAX + 1;
+        roster = fullRoster();
+        roster.roster_count = TXN_ROSTER_MAX + 1;
 
-        encoded_size = TxnBeginMessage_Encode(&begin, buffer, sizeof(buffer));
+        encoded_size = TxnRosterMessage_Encode(&roster, buffer, sizeof(buffer));
 
         expect(encoded_size).toBe((size_t)0);
     });
 
     it("rejects a roster count above the maximum", []() {
-        TxnBeginMessage begin;
-        TxnBeginMessage decoded;
+        TxnRosterMessage roster;
+        TxnRosterMessage decoded;
         uint8_t buffer[TEST_BUFFER_SIZE];
         bool decoded_ok;
 
-        begin = fullRosterBegin();
-        TxnBeginMessage_Encode(&begin, buffer, sizeof(buffer));
-        buffer[MESSAGE_HEADER_SIZE + BEGIN_ROSTER_COUNT_OFFSET] = TXN_ROSTER_MAX + 1;
+        roster = fullRoster();
+        TxnRosterMessage_Encode(&roster, buffer, sizeof(buffer));
+        buffer[MESSAGE_HEADER_SIZE + ROSTER_COUNT_OFFSET] = TXN_ROSTER_MAX + 1;
 
-        decoded_ok = TxnBeginMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, TXN_BEGIN_BODY_SIZE);
+        decoded_ok = TxnRosterMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, TXN_ROSTER_BODY_SIZE);
 
         expect(decoded_ok).toBe(false);
     });
 
-    it("rejects a truncated begin payload", []() {
-        TxnBeginMessage decoded;
-        uint8_t payload[TXN_BEGIN_BODY_SIZE] = { 0 };
+    it("rejects a truncated roster payload", []() {
+        TxnRosterMessage decoded;
+        uint8_t payload[TXN_ROSTER_BODY_SIZE] = { 0 };
         bool decoded_ok;
 
-        decoded_ok = TxnBeginMessage_Decode(&decoded, payload, TXN_BEGIN_BODY_SIZE - 1);
+        decoded_ok = TxnRosterMessage_Decode(&decoded, payload, TXN_ROSTER_BODY_SIZE - 1);
+
+        expect(decoded_ok).toBe(false);
+    });
+});
+
+describe("txn_roster_report_message", []() {
+    it("round-trips the channel, the transaction id, the step and who answered", []() {
+        TxnRosterReportMessage report = { 3, 7, 41, 0x8000000000000005ull };
+        TxnRosterReportMessage decoded;
+        uint8_t buffer[TEST_BUFFER_SIZE];
+        size_t encoded_size;
+        bool decoded_ok;
+
+        encoded_size = TxnRosterReportMessage_Encode(&report, buffer, sizeof(buffer));
+        decoded_ok = TxnRosterReportMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, TXN_ROSTER_REPORT_BODY_SIZE);
+
+        expect(encoded_size).toBe((size_t)(MESSAGE_HEADER_SIZE + TXN_ROSTER_REPORT_BODY_SIZE));
+        expect(buffer[0]).toBe((uint8_t)kMESSAGE_TYPE_TXN_ROSTER_REPORT);
+        expect(decoded_ok).toBe(true);
+        expect(decoded.channel).toBe(3);
+        expect(decoded.txn_id).toBe((uint16_t)7);
+        expect(decoded.seq).toBe((uint32_t)41);
+        expect(decoded.seen_bitmap).toBe((uint64_t)0x8000000000000005ull);
+    });
+
+    it("rejects a truncated roster report payload", []() {
+        TxnRosterReportMessage decoded;
+        uint8_t payload[TXN_ROSTER_REPORT_BODY_SIZE] = { 0 };
+        bool decoded_ok;
+
+        decoded_ok = TxnRosterReportMessage_Decode(&decoded, payload, TXN_ROSTER_REPORT_BODY_SIZE - 1);
 
         expect(decoded_ok).toBe(false);
     });
@@ -463,22 +517,38 @@ describe("txn_abort_message", []() {
     });
 });
 
-static TxnBeginMessage fullRosterBegin(void)
+static TxnBeginMessage keepaliveBegin(void)
 {
     TxnBeginMessage begin = { 0 };
-    uint8_t i;
 
     begin.channel = 3;
     begin.flags = TXN_BEGIN_FLAG_EXCLUSIVE;
-    begin.origin.source = kTXN_ORIGIN_SOURCE_PAYLOAD;
-    begin.origin.shift = 4;
-    begin.origin.payload_offset = 2;
-    begin.origin.mask = 0x0000FFF0;
-    begin.roster_count = TXN_ROSTER_MAX;
-    for(i=0; i<TXN_ROSTER_MAX; i++) {
-        begin.roster[i] = 0x100 + i;
-    }
+    begin.idle_timeout_ms = 60000;
+    begin.keepalive.period_ms = 2000;
+    begin.keepalive.can_id = 0x7E0;
+    begin.keepalive.payload_length = 3;
+    begin.keepalive.payload[0] = 0x02;
+    begin.keepalive.payload[1] = 0x3E;
+    begin.keepalive.payload[2] = 0x80;
     return begin;
+}
+
+static TxnRosterMessage fullRoster(void)
+{
+    TxnRosterMessage roster = { 0 };
+    uint8_t i;
+
+    roster.channel = 3;
+    roster.txn_id = 7;
+    roster.origin.source = kTXN_ORIGIN_SOURCE_PAYLOAD;
+    roster.origin.shift = 4;
+    roster.origin.payload_offset = 2;
+    roster.origin.mask = 0x0000FFF0;
+    roster.roster_count = TXN_ROSTER_MAX;
+    for(i=0; i<TXN_ROSTER_MAX; i++) {
+        roster.roster[i] = 0x100 + i;
+    }
+    return roster;
 }
 
 static TxnTemplateMessage udsTemplate(void)

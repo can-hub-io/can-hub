@@ -11,6 +11,9 @@
 #define ISOTP_FLAGS_KNOWN (TXN_ISOTP_FLAG_PADDING | TXN_ISOTP_FLAG_ADDRESS_BYTE | TXN_ISOTP_FLAG_FD | TXN_ISOTP_FLAG_BIT_RATE_SWITCH)
 
 static bool isBeginValid(const TxnBeginMessage *begin);
+static bool isRosterValid(const TxnRosterMessage *roster);
+static bool isRosterMode(uint8_t advance_mode);
+static void reportMissingRoster(TransactionRunner *self);
 static bool isTemplateValid(const TransactionRunner *self, const TxnTemplateMessage *template_message);
 static bool isTypeValid(const TxnTemplateMessage *template_message);
 static bool isIsotpDataLengthValid(const TxnIsotpParameters *isotp);
@@ -38,6 +41,7 @@ static bool transmitTracked(TransactionRunner *self, const FrameMessage *frame, 
 static bool settleWait(TransactionRunner *self, uint64_t now_us);
 static void startWait(TransactionRunner *self, uint64_t now_us);
 static void completeStep(TransactionRunner *self);
+static void finishDone(TransactionRunner *self);
 static void flushProgress(TransactionRunner *self, uint64_t now_us);
 static void reportProgress(TransactionRunner *self);
 static bool isOnBus(const TransactionRunner *self, uint8_t interface_index, const FrameMessage *frame);
@@ -122,11 +126,11 @@ void TransactionRunner_Begin(
     self->active = true;
     self->channel = begin->channel;
     self->interface_index = interface_index;
-    self->origin = begin->origin;
-    self->roster_count = begin->roster_count;
-    memcpy(self->roster, begin->roster, sizeof(self->roster));
+    memset(&self->origin, 0, sizeof(self->origin));
+    self->roster_count = 0;
     self->defined_templates = 0;
     self->next_seq = 0;
+    self->steps_ended = false;
     self->completed_steps = 0;
     self->pushed_bytes = 0;
     self->consumed_bytes = 0;
@@ -146,6 +150,21 @@ void TransactionRunner_Begin(
     ack->status = kTXN_BEGIN_STATUS_OK;
     ack->txn_id = self->txn_id;
     ack->window_bytes = self->window_bytes;
+}
+
+void TransactionRunner_DefineRoster(TransactionRunner *self, const TxnRosterMessage *roster)
+{
+    if (!self->active || roster->txn_id != self->txn_id) {
+        return;
+    }
+    if (self->roster_count != 0 || !isRosterValid(roster)) {
+        abortWith(self, kTXN_REASON_INVALID_STEP, self->next_seq);
+        return;
+    }
+
+    self->origin = roster->origin;
+    self->roster_count = roster->roster_count;
+    memcpy(self->roster, roster->roster, sizeof(self->roster));
 }
 
 void TransactionRunner_DefineTemplate(TransactionRunner *self, const TxnTemplateMessage *template_message)
@@ -174,7 +193,7 @@ void TransactionRunner_PushSteps(TransactionRunner *self, const TxnStepsMessage 
     if (!self->active || steps->txn_id != self->txn_id) {
         return;
     }
-    if (steps->first_seq != self->next_seq) {
+    if (self->steps_ended || steps->first_seq != self->next_seq) {
         abortWith(self, kTXN_REASON_INVALID_STEP, steps->first_seq);
         return;
     }
@@ -191,6 +210,7 @@ void TransactionRunner_PushSteps(TransactionRunner *self, const TxnStepsMessage 
         }
     }
     self->next_seq = seq;
+    self->steps_ended = (steps->flags & TXN_STEPS_FLAG_END) != 0;
 }
 
 void TransactionRunner_OnFrame(TransactionRunner *self, uint8_t interface_index, const FrameMessage *frame)
@@ -254,7 +274,7 @@ uint64_t TransactionRunner_NextWakeUs(const TransactionRunner *self)
 
     wake_us = earliestWake(wake_us, self->report_due_us);
     if (self->current.phase == kTRANSACTION_PHASE_IDLE) {
-        if (!StepRing_IsEmpty(&self->ring)) {
+        if (!StepRing_IsEmpty(&self->ring) || self->steps_ended) {
             return self->last_tick_us;
         }
         if (self->keepalive.period_ms != 0) {
@@ -281,19 +301,41 @@ static bool isBeginValid(const TxnBeginMessage *begin)
 {
     const TxnKeepalive *keepalive = &begin->keepalive;
 
-    if (keepalive->period_ms != 0 && !FrameMessage_IsPayloadLengthValid(keepalive->payload_length, keepalive->frame_flags)) {
+    return keepalive->period_ms == 0 || FrameMessage_IsPayloadLengthValid(keepalive->payload_length, keepalive->frame_flags);
+}
+
+static bool isRosterValid(const TxnRosterMessage *roster)
+{
+    if (roster->roster_count == 0 || roster->roster_count > TXN_ROSTER_MAX) {
         return false;
     }
-    if (begin->origin.source >= kTXN_ORIGIN_SOURCE_MAX) {
+    if (roster->origin.source != kTXN_ORIGIN_SOURCE_CAN_ID && roster->origin.source != kTXN_ORIGIN_SOURCE_PAYLOAD) {
         return false;
     }
-    if (begin->roster_count > 0 && begin->origin.source == kTXN_ORIGIN_SOURCE_NONE) {
+    if (roster->origin.shift >= ORIGIN_SHIFT_MAX) {
         return false;
     }
-    if (begin->origin.shift >= ORIGIN_SHIFT_MAX) {
-        return false;
+    return roster->origin.payload_offset < FRAME_PAYLOAD_MAX_FD;
+}
+
+static bool isRosterMode(uint8_t advance_mode)
+{
+    return advance_mode == kTXN_ADVANCE_MODE_ROSTER_ALL || advance_mode == kTXN_ADVANCE_MODE_ROSTER_K;
+}
+
+static void reportMissingRoster(TransactionRunner *self)
+{
+    TxnRosterReportMessage report;
+
+    if (!isRosterMode(currentTemplate(self)->advance_mode) || self->current.seen_count >= self->roster_count) {
+        return;
     }
-    return begin->origin.payload_offset < FRAME_PAYLOAD_MAX_FD;
+
+    report.channel = self->channel;
+    report.txn_id = self->txn_id;
+    report.seq = self->completed_steps;
+    report.seen_bitmap = self->current.seen_bitmap;
+    self->port.report_roster(self->port.context, &report);
 }
 
 static bool isTemplateValid(const TransactionRunner *self, const TxnTemplateMessage *template_message)
@@ -312,7 +354,7 @@ static bool isTemplateValid(const TransactionRunner *self, const TxnTemplateMess
     if ((mode == kTXN_ADVANCE_MODE_COUNT || mode == kTXN_ADVANCE_MODE_ROSTER_K) && template_message->count_k == 0) {
         return false;
     }
-    if ((mode == kTXN_ADVANCE_MODE_ROSTER_ALL || mode == kTXN_ADVANCE_MODE_ROSTER_K) && self->roster_count == 0) {
+    if (isRosterMode(mode) && self->roster_count == 0) {
         return false;
     }
     return mode != kTXN_ADVANCE_MODE_ROSTER_K || template_message->count_k <= self->roster_count;
@@ -415,6 +457,10 @@ static bool loadNextStep(TransactionRunner *self, uint64_t now_us)
     uint32_t available;
 
     available = StepRing_Peek(&self->ring, &record);
+    if (available == 0 && self->steps_ended) {
+        finishDone(self);
+        return false;
+    }
     if (available == 0) {
         return waitForSteps(self, now_us);
     }
@@ -666,17 +712,16 @@ static void startWait(TransactionRunner *self, uint64_t now_us)
 
 static void completeStep(TransactionRunner *self)
 {
-    TxnStatusMessage status;
-    bool last = (self->current.step.flags & TXN_STEP_FLAG_LAST) != 0;
-
+    reportMissingRoster(self);
     releaseRecord(self);
     self->message_length = 0;
     self->completed_steps++;
     self->current.phase = kTRANSACTION_PHASE_IDLE;
+}
 
-    if (!last) {
-        return;
-    }
+static void finishDone(TransactionRunner *self)
+{
+    TxnStatusMessage status;
 
     prepareStatus(self, &status, kTXN_STATE_DONE, kTXN_REASON_NONE);
     finish(self, &status);
@@ -974,6 +1019,9 @@ static void prepareStatus(const TransactionRunner *self, TxnStatusMessage *statu
     status->failing_seq = self->completed_steps;
     status->completed_steps = self->completed_steps;
     status->seen_bitmap = self->current.seen_bitmap;
+    if (self->current.phase != kTRANSACTION_PHASE_IDLE && isRosterMode(currentTemplate(self)->advance_mode)) {
+        status->flags |= TXN_STATUS_FLAG_ROSTER_STEP;
+    }
     if (self->current.has_rx_frame) {
         status->flags |= TXN_STATUS_FLAG_HAS_RX_FRAME;
         status->rx_frame = self->current.rx_frame;

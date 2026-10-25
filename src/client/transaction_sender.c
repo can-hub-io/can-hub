@@ -3,7 +3,6 @@
 #include <string.h>
 
 static bool isStepValid(const TxnStep *step);
-static TTRANSACTION_OFFER appendHeld(TransactionSender *self, uint8_t extra_flags);
 static void openBatch(TransactionSender *self);
 
 /* ---------- public ---------- */
@@ -66,41 +65,45 @@ void TransactionSender_OnStatus(TransactionSender *self, const TxnStatusMessage 
 
 TTRANSACTION_OFFER TransactionSender_Offer(TransactionSender *self, const TxnStep *step)
 {
-    TTRANSACTION_OFFER result;
+    uint32_t size;
 
     if (self->state != kTRANSACTION_SENDER_RUNNING || self->ended || !isStepValid(step)) {
         return kTRANSACTION_OFFER_REJECTED;
     }
-    if (self->has_held) {
-        result = appendHeld(self, 0);
-        if (result != kTRANSACTION_OFFER_ACCEPTED) {
-            return result;
-        }
+
+    size = (uint32_t)TxnStep_RecordSize(step);
+    if (TransactionSender_BytesInFlight(self) + size > self->window_bytes) {
+        return kTRANSACTION_OFFER_NO_CREDIT;
+    }
+    if (!self->batch_open) {
+        openBatch(self);
+    }
+    if (!TxnStepsWriter_Append(&self->writer, step)) {
+        return kTRANSACTION_OFFER_FLUSH_NEEDED;
     }
 
-    self->held = *step;
-    self->has_held = true;
+    self->sent_bytes += size;
+    self->message_open = (step->flags & TXN_STEP_FLAG_CONTINUED) != 0;
+    if (!self->message_open) {
+        self->next_seq++;
+    }
 
     return kTRANSACTION_OFFER_ACCEPTED;
 }
 
 TTRANSACTION_OFFER TransactionSender_End(TransactionSender *self)
 {
-    TTRANSACTION_OFFER result;
-
-    if (self->state != kTRANSACTION_SENDER_RUNNING || self->ended || !self->has_held) {
-        return kTRANSACTION_OFFER_REJECTED;
-    }
-    if (self->held.flags & TXN_STEP_FLAG_CONTINUED) {
+    if (self->state != kTRANSACTION_SENDER_RUNNING || self->ended || self->message_open) {
         return kTRANSACTION_OFFER_REJECTED;
     }
 
-    result = appendHeld(self, TXN_STEP_FLAG_LAST);
-    if (result == kTRANSACTION_OFFER_ACCEPTED) {
-        self->ended = true;
+    if (!self->batch_open) {
+        openBatch(self);
     }
+    TxnStepsWriter_MarkEnd(&self->writer);
+    self->ended = true;
 
-    return result;
+    return kTRANSACTION_OFFER_ACCEPTED;
 }
 
 size_t TransactionSender_PendingBatch(TransactionSender *self, const uint8_t **data)
@@ -131,32 +134,6 @@ static bool isStepValid(const TxnStep *step)
     uint8_t record[TXN_STEP_RECORD_SIZE_MAX];
 
     return TxnStep_Encode(step, record, sizeof(record)) != 0;
-}
-
-static TTRANSACTION_OFFER appendHeld(TransactionSender *self, uint8_t extra_flags)
-{
-    TxnStep step = self->held;
-    uint32_t size;
-
-    step.flags |= extra_flags;
-    size = (uint32_t)TxnStep_RecordSize(&step);
-    if (TransactionSender_BytesInFlight(self) + size > self->window_bytes) {
-        return kTRANSACTION_OFFER_NO_CREDIT;
-    }
-    if (!self->batch_open) {
-        openBatch(self);
-    }
-    if (!TxnStepsWriter_Append(&self->writer, &step)) {
-        return kTRANSACTION_OFFER_FLUSH_NEEDED;
-    }
-
-    self->sent_bytes += size;
-    if ((step.flags & TXN_STEP_FLAG_CONTINUED) == 0) {
-        self->next_seq++;
-    }
-    self->has_held = false;
-
-    return kTRANSACTION_OFFER_ACCEPTED;
 }
 
 static void openBatch(TransactionSender *self)

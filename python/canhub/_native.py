@@ -1,4 +1,4 @@
-"""ctypes bindings over the libcanhub C ABI (include/canhub.h, version 1).
+"""ctypes bindings over the libcanhub C ABI (include/canhub.h, version 2).
 
 The shared library is resolved in order: the CANHUB_LIBRARY environment
 variable, the copy bundled inside this package, the system library path.
@@ -7,7 +7,7 @@ variable, the copy bundled inside this package, the system library path.
 import ctypes
 import os
 import sys
-from ctypes import POINTER, Structure, c_char, c_char_p, c_int32, c_size_t, c_uint8, c_uint16, c_uint32, c_uint64, c_void_p
+from ctypes import POINTER, Structure, c_bool, c_char, c_char_p, c_int, c_int32, c_size_t, c_uint8, c_uint16, c_uint32, c_uint64, c_void_p
 
 FRAME_PAYLOAD_MAX = 64
 FRAME_PAYLOAD_MAX_CLASSIC = 8
@@ -15,13 +15,13 @@ AGENT_NAME_MAX = 128
 INTERFACE_NAME_MAX = 16
 FILTERS_MAX = 16
 
-CAN_ID_MASK = 0x1FFFFFFF
-CAN_ID_FLAG_ERR = 1 << 29
-CAN_ID_FLAG_RTR = 1 << 30
-CAN_ID_FLAG_EFF = 1 << 31
+STANDARD_ID_MASK = 0x7FF
+EXTENDED_ID_MASK = 0x1FFFFFFF
 
 FRAME_FLAG_FD = 1 << 0
 FRAME_FLAG_BRS = 1 << 1
+FRAME_FLAG_RTR = 1 << 2
+FRAME_FLAG_ERROR = 1 << 3
 FRAME_FLAG_BRIDGED = 1 << 7
 
 OPEN_FLAG_NO_ECHO = 1 << 0
@@ -52,28 +52,12 @@ ERR_TXN_UNSUPPORTED = -18
 ERR_TXN_ABORTED = -19
 
 TXN_ROSTER_MAX = 64
-TXN_TEMPLATES_MAX = 16
-TXN_PATTERNS = 3
-TXN_FLAG_EXCLUSIVE = 1 << 0
-TXN_FLAG_ISOTP = 1 << 1
-TXN_TYPE_ISOTP = 1
-ISOTP_FLAG_PADDING = 1 << 0
-ISOTP_FLAG_ADDRESS_BYTE = 1 << 1
-ISOTP_FLAG_FD = 1 << 2
-ISOTP_FLAG_BIT_RATE_SWITCH = 1 << 3
+TXN_MATCH_BYTES = 8
+TXN_ANY_ID_BITS = 0xFFFFFFFF
 ISOTP_MESSAGE_MAX = 4095
-TXN_ORIGIN_NONE = 0
-TXN_ORIGIN_CAN_ID = 1
-TXN_ORIGIN_PAYLOAD = 2
-TXN_TEMPLATE_SOFT = 1 << 0
-TXN_TEMPLATE_MISMATCH_ABORT = 1 << 1
-TXN_PATTERN_ADVANCE = 0
-TXN_PATTERN_ABORT = 1
-TXN_PATTERN_EXTEND = 2
-TXN_STEP_EXPECT_VALUE = 1 << 0
-TXN_STEP_EXPECT_ONLY = 1 << 1
-TXN_DONE = 0
-SCRIPT_NAME_MAX = 32
+TXN_NODE_IN_ID = 0
+TXN_NODE_IN_BYTE = 1
+FOREVER = -1
 
 SETTING_BITRATE = 1 << 0
 SETTING_SAMPLE_POINT = 1 << 1
@@ -96,13 +80,19 @@ CTRLMODE_BERR_REPORTING = 1 << 4
 CTRLMODE_FD = 1 << 5
 
 
+class CanHubCanId(Structure):
+    _fields_ = [
+        ("value", c_uint32),
+        ("extended", c_bool),
+    ]
+
+
 class CanHubFrame(Structure):
     _fields_ = [
         ("timestamp_us", c_uint64),
-        ("can_id", c_uint32),
+        ("id", CanHubCanId),
         ("flags", c_uint8),
         ("length", c_uint8),
-        ("reserved", c_uint8 * 2),
         ("payload", c_uint8 * FRAME_PAYLOAD_MAX),
     ]
 
@@ -117,8 +107,8 @@ class CanHubInterfaceInfo(Structure):
 
 class CanHubFilter(Structure):
     _fields_ = [
-        ("can_id", c_uint32),
-        ("can_mask", c_uint32),
+        ("id", CanHubCanId),
+        ("id_ignored_bits", c_uint32),
     ]
 
 
@@ -161,90 +151,100 @@ class CanHubInterfaceSettings(Structure):
     ]
 
 
-class CanHubTxnBegin(Structure):
+class CanHubTxnByte(Structure):
     _fields_ = [
-        ("struct_size", c_uint32),
-        ("flags", c_uint8),
-        ("origin_source", c_uint8),
-        ("origin_shift", c_uint8),
-        ("origin_payload_offset", c_uint8),
-        ("origin_mask", c_uint32),
-        ("roster_count", c_uint32),
-        ("roster", c_uint32 * TXN_ROSTER_MAX),
-        ("idle_timeout_ms", c_uint32),
-        ("keepalive_period_ms", c_uint32),
-        ("keepalive", CanHubFrame),
+        ("mask", c_uint8),
+        ("value", c_uint8),
     ]
 
 
-class CanHubTxnPattern(Structure):
+class CanHubTxnMatch(Structure):
     _fields_ = [
-        ("can_id", c_uint32),
-        ("can_mask", c_uint32),
-        ("payload_mask", c_uint64),
-        ("payload_value", c_uint64),
+        ("id", CanHubCanId),
+        ("id_ignored_bits", c_uint32),
+        ("bytes", CanHubTxnByte * TXN_MATCH_BYTES),
     ]
 
 
-class CanHubTxnIsotp(Structure):
+class CanHubTxnResponse(Structure):
     _fields_ = [
-        ("response_id", c_uint32),
-        ("flags", c_uint8),
+        ("success", CanHubTxnMatch),
+        ("failure", POINTER(CanHubTxnMatch)),
+        ("pending", POINTER(CanHubTxnMatch)),
+        ("nodes", POINTER(c_uint32)),
+        ("node_count", c_uint32),
+        ("allowed_missing", c_uint32),
+        ("node_from", c_int),
+        ("node_byte", c_uint8),
+        ("timeout_ms", c_uint32),
+        ("timeout_after_pending_ms", c_uint32),
+        ("continue_on_timeout", c_bool),
+        ("on_mismatch_abort", c_bool),
+    ]
+
+
+class CanHubTxnIsotpLink(Structure):
+    _fields_ = [
+        ("tx_id", CanHubCanId),
+        ("rx_id", CanHubCanId),
+        ("address_byte", c_bool),
         ("tx_address", c_uint8),
         ("rx_address", c_uint8),
+        ("padded", c_bool),
         ("padding", c_uint8),
-        ("tx_data_length", c_uint8),
+        ("fd", c_bool),
+        ("bitrate_switch", c_bool),
+        ("fd_data_length", c_uint8),
         ("block_size", c_uint8),
         ("st_min", c_uint8),
-        ("reserved", c_uint8),
     ]
 
 
-class CanHubTxnTemplate(Structure):
+class CanHubTxnKeepalive(Structure):
     _fields_ = [
-        ("struct_size", c_uint32),
-        ("template_id", c_uint8),
-        ("advance_mode", c_uint8),
-        ("flags", c_uint8),
-        ("count_k", c_uint8),
-        ("patterns_present", c_uint8),
-        ("type", c_uint8),
-        ("reserved", c_uint8 * 2),
-        ("timeout_ms", c_uint32),
-        ("gap_us", c_uint32),
-        ("extend_timeout_ms", c_uint32),
-        ("patterns", CanHubTxnPattern * TXN_PATTERNS),
-        ("isotp", CanHubTxnIsotp),
+        ("id", CanHubCanId),
+        ("data", c_uint8 * FRAME_PAYLOAD_MAX),
+        ("length", c_uint8),
+        ("every_ms", c_uint32),
     ]
 
 
-class CanHubTxnMessage(Structure):
+class CanHubTxnRosterResult(Structure):
     _fields_ = [
-        ("struct_size", c_uint32),
-        ("can_id", c_uint32),
-        ("template_id", c_uint8),
-        ("flags", c_uint8),
-        ("length", c_uint16),
-        ("expect_value", c_uint64),
-        ("data", c_void_p),
+        ("step", c_uint32),
+        ("missing", c_uint32 * TXN_ROSTER_MAX),
+        ("missing_count", c_uint32),
+    ]
+
+
+RosterCallback = ctypes.CFUNCTYPE(None, c_void_p, POINTER(CanHubTxnRosterResult))
+
+
+class CanHubTxnOptions(Structure):
+    _fields_ = [
+        ("exclusive", c_bool),
+        ("idle_timeout_ms", c_uint32),
+        ("keepalive", POINTER(CanHubTxnKeepalive)),
+        ("bitrate_switch", c_bool),
+        ("on_roster", RosterCallback),
+        ("context", c_void_p),
     ]
 
 
 class CanHubTxnStep(Structure):
     _fields_ = [
-        ("can_id", c_uint32),
-        ("template_id", c_uint8),
-        ("flags", c_uint8),
-        ("frame_flags", c_uint8),
-        ("length", c_uint8),
-        ("expect_value", c_uint64),
-        ("payload", c_uint8 * FRAME_PAYLOAD_MAX),
+        ("id", CanHubCanId),
+        ("data", c_void_p),
+        ("length", c_uint16),
+        ("isotp", POINTER(CanHubTxnIsotpLink)),
+        ("response", POINTER(CanHubTxnResponse)),
+        ("where", POINTER(CanHubTxnMatch)),
+        ("gap_us", c_uint32),
     ]
 
 
 class CanHubTxnProgress(Structure):
     _fields_ = [
-        ("struct_size", c_uint32),
         ("sent_steps", c_uint32),
         ("completed_steps", c_uint32),
         ("bytes_in_flight", c_uint32),
@@ -252,36 +252,30 @@ class CanHubTxnProgress(Structure):
     ]
 
 
-class CanHubTxnResult(Structure):
+class CanHubTxnReport(Structure):
     _fields_ = [
-        ("struct_size", c_uint32),
-        ("state", c_uint8),
-        ("reason", c_uint8),
-        ("has_rx_frame", c_uint8),
-        ("reserved", c_uint8),
-        ("failing_seq", c_uint32),
+        ("done", c_bool),
+        ("reason", c_int),
+        ("failing_step", c_uint32),
         ("completed_steps", c_uint32),
-        ("offending_origin", c_uint32),
-        ("seen_bitmap", c_uint64),
-        ("expected", c_uint64),
-        ("got", c_uint64),
-        ("rx_frame", CanHubFrame),
+        ("failing_roster", CanHubTxnRosterResult),
+        ("offending_node", c_uint32),
+        ("expected", c_uint8 * TXN_MATCH_BYTES),
+        ("got", c_uint8 * TXN_MATCH_BYTES),
+        ("has_frame", c_bool),
+        ("frame", CanHubFrame),
     ]
 
 
-class CanHubScriptOutcome(Structure):
+ProgressCallback = ctypes.CFUNCTYPE(c_int32, c_void_p, POINTER(CanHubTxnProgress), c_uint32)
+
+
+class CanHubTxnScriptOptions(Structure):
     _fields_ = [
-        ("struct_size", c_uint32),
-        ("result", CanHubTxnResult),
-        ("total_steps", c_uint32),
-        ("error_line", c_uint32),
-        ("roster_count", c_uint32),
-        ("roster", c_uint32 * TXN_ROSTER_MAX),
-        ("roster_name", c_char * SCRIPT_NAME_MAX),
+        ("on_roster", RosterCallback),
+        ("on_progress", ProgressCallback),
+        ("context", c_void_p),
     ]
-
-
-ScriptProgress = ctypes.CFUNCTYPE(c_int32, c_void_p, POINTER(CanHubTxnProgress), c_uint32)
 
 
 class CanHubConnectConfig(Structure):
@@ -352,23 +346,11 @@ lib.canhub_configure.argtypes = [
 lib.canhub_query.restype = c_int32
 lib.canhub_query.argtypes = [c_void_p, c_char_p, POINTER(CanHubInterfaceSettings), c_int32]
 
-lib.canhub_txn_begin.restype = c_int32
-lib.canhub_txn_begin.argtypes = [c_void_p, POINTER(CanHubTxnBegin), c_int32]
+lib.canhub_txn_create.restype = c_void_p
+lib.canhub_txn_create.argtypes = [c_void_p, POINTER(CanHubTxnOptions)]
 
-lib.canhub_txn_template.restype = c_int32
-lib.canhub_txn_template.argtypes = [c_void_p, POINTER(CanHubTxnTemplate), c_int32]
-
-lib.canhub_txn_send.restype = c_int32
-lib.canhub_txn_send.argtypes = [c_void_p, POINTER(CanHubTxnStep), c_uint32, c_int32]
-
-lib.canhub_txn_send_message.restype = c_int32
-lib.canhub_txn_send_message.argtypes = [c_void_p, POINTER(CanHubTxnMessage), c_int32]
-
-lib.canhub_txn_end.restype = c_int32
-lib.canhub_txn_end.argtypes = [c_void_p, c_int32]
-
-lib.canhub_txn_wait.restype = c_int32
-lib.canhub_txn_wait.argtypes = [c_void_p, POINTER(CanHubTxnResult), c_int32]
+lib.canhub_txn_try_step.restype = c_int32
+lib.canhub_txn_try_step.argtypes = [c_void_p, POINTER(CanHubTxnStep), c_int32]
 
 lib.canhub_txn_progress.restype = c_int32
 lib.canhub_txn_progress.argtypes = [c_void_p, POINTER(CanHubTxnProgress)]
@@ -376,8 +358,20 @@ lib.canhub_txn_progress.argtypes = [c_void_p, POINTER(CanHubTxnProgress)]
 lib.canhub_txn_abort.restype = c_int32
 lib.canhub_txn_abort.argtypes = [c_void_p]
 
+lib.canhub_txn_wait.restype = c_int32
+lib.canhub_txn_wait.argtypes = [c_void_p, c_int32]
+
+lib.canhub_txn_finish.restype = c_int32
+lib.canhub_txn_finish.argtypes = [c_void_p, POINTER(CanHubTxnReport)]
+
+lib.canhub_txn_reason_name.restype = c_char_p
+lib.canhub_txn_reason_name.argtypes = [c_int]
+
 lib.canhub_txn_run_script.restype = c_int32
-lib.canhub_txn_run_script.argtypes = [c_void_p, c_char_p, POINTER(CanHubScriptOutcome), ScriptProgress, c_void_p]
+lib.canhub_txn_run_script.argtypes = [c_void_p, c_char_p, c_char_p, POINTER(CanHubTxnScriptOptions), POINTER(CanHubTxnReport)]
+
+lib.canhub_txn_run_script_file.restype = c_int32
+lib.canhub_txn_run_script_file.argtypes = [c_void_p, c_char_p, POINTER(CanHubTxnScriptOptions), POINTER(CanHubTxnReport)]
 
 
 def last_error(session):

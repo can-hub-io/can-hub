@@ -25,7 +25,7 @@ CanHubSession *session = canhub_connect(&config);
 canhub_open(session, "truck42/can0", CANHUB_OPEN_FLAG_WRITE, 5000);
 
 CanHubFrame frame = { 0 };
-frame.can_id = 0x123;
+frame.id = CANHUB_STANDARD_ID(0x123);           // CANHUB_EXTENDED_ID(...) for 29 bits
 frame.length = 2;
 frame.payload[0] = 0xCA; frame.payload[1] = 0xFE;
 canhub_send(session, &frame);
@@ -41,9 +41,9 @@ canhub_close(session);
 |---|---|
 | `canhub_connect(config)` | NULL on failure; optional `state_directory`, `certificate_path`/`key_path`, `hub_fingerprint` (pre-pin instead of TOFU) |
 | `canhub_list(session, out, max, timeout_ms)` | catalogue; returns the count |
-| `canhub_open(session, name, flags, timeout_ms)` | by namespaced name (`agent/iface`) or numeric id; flags `CANHUB_OPEN_FLAG_WRITE`, `CANHUB_OPEN_FLAG_NO_ECHO`, `CANHUB_OPEN_FLAG_RELIABLE` (lossless ordered QUIC stream, `quic://` only; `CANHUB_ERR_RELIABLE_UNSUPPORTED` if the hub lacks the capability), `CANHUB_OPEN_FLAG_ERROR_FRAMES` (also receive the bus error frames, `CANHUB_CAN_ID_FLAG_ERR` set) |
-| `canhub_set_filters(session, filters, count)` | hub-side CAN id mask filters, replace semantics, max 16 |
-| `canhub_recv(session, frame, timeout_ms)` | `CANHUB_RECEIVED`, `CANHUB_ERR_TIMEOUT`, or a failure; `frame.flags` carries `CANHUB_FRAME_FLAG_FD`, `CANHUB_FRAME_FLAG_BRS` and `CANHUB_FRAME_FLAG_BRIDGED` (the hub injected the frame along a [bridge](hub.md#bridging-buses); ignored on send) |
+| `canhub_open(session, name, flags, timeout_ms)` | by namespaced name (`agent/iface`) or numeric id; flags `CANHUB_OPEN_FLAG_WRITE`, `CANHUB_OPEN_FLAG_NO_ECHO`, `CANHUB_OPEN_FLAG_RELIABLE` (lossless ordered QUIC stream, `quic://` only; `CANHUB_ERR_RELIABLE_UNSUPPORTED` if the hub lacks the capability), `CANHUB_OPEN_FLAG_ERROR_FRAMES` (also receive the bus error frames, `CANHUB_FRAME_FLAG_ERROR` set) |
+| `canhub_set_filters(session, filters, count)` | hub-side filters, replace semantics, max 16: a frame passes when its id equals `filter.id` except in `id_ignored_bits`; a standard and an extended id never match each other, so filter both kinds with two filters. No filter receives everything |
+| `canhub_recv(session, frame, timeout_ms)` | `CANHUB_RECEIVED`, `CANHUB_ERR_TIMEOUT`, or a failure; `frame.id` is the value with its `extended` flag; `frame.flags` carries `CANHUB_FRAME_FLAG_FD`, `_BRS`, `_RTR`, `_ERROR` and `_BRIDGED` (the hub injected the frame along a [bridge](hub.md#bridging-buses); ignored on send) |
 | `canhub_send(session, frame)` | needs an open writable channel; `CANHUB_ERR_RATE_LIMITED` when the local pacer drops the frame, `CANHUB_ERR_LEASED` while another client's exclusive [transaction](#transactions) holds the interface |
 | `canhub_stats(session, stats)` | local drop counters: `frames_rate_limited` (pacer), `frames_ring_dropped` (receive ring overrun) |
 | `canhub_configure(session, name, requested, effective, timeout_ms)` | reconfigure `agent/iface` in one step (needs an `rwa` grant; [settings](#interface-settings)); `effective` may be NULL |
@@ -123,101 +123,197 @@ resolver.
 
 A transaction runs a request/response sequence at the agent, at bus speed,
 instead of paying a network round trip per exchange (UDS flashing, broadcast
-upgrades; [protocol](protocol.md#transactions)). Open the interface with
+upgrades; [protocol](protocol.md#transactions)). It speaks the vocabulary of
+[transaction scripts](transaction-scripts.md): a step sends a frame and waits
+for a **response**. Open the interface with
 `CANHUB_OPEN_FLAG_RELIABLE | CANHUB_OPEN_FLAG_WRITE`, then:
 
 ```c
-CanHubTxnBegin begin = { 0 };
-begin.struct_size = sizeof(begin);
-begin.flags = CANHUB_TXN_FLAG_EXCLUSIVE;          // other clients' writes are dropped meanwhile
-canhub_txn_begin(session, &begin, 5000);
+static const CanHubTxnResponse SESSION_CHANGED = {
+    .success = { .id = { 0x7E8 }, .bytes = { [1] = CANHUB_TXN_EQUALS(0x50) } },
+    .timeout_ms = 50,
+};
 
-CanHubTxnTemplate response = { 0 };               // wait for 0x7E8 xx 76, abort on 7F, extend on 7F xx 78
-response.struct_size = sizeof(response);
-response.template_id = 0;
-response.advance_mode = CANHUB_TXN_ADVANCE_COUNT;
-response.count_k = 1;
-response.timeout_ms = 1000;
-response.patterns_present = (1u << CANHUB_TXN_PATTERN_ADVANCE) | (1u << CANHUB_TXN_PATTERN_ABORT)
-                          | (1u << CANHUB_TXN_PATTERN_EXTEND);
-response.patterns[CANHUB_TXN_PATTERN_ADVANCE] = (CanHubTxnPattern){ 0x7E8, 0x7FF, 0xFF00, 0x7600 };
-response.patterns[CANHUB_TXN_PATTERN_ABORT] = (CanHubTxnPattern){ 0x7E8, 0x7FF, 0xFF00, 0x7F00 };
-response.patterns[CANHUB_TXN_PATTERN_EXTEND] = (CanHubTxnPattern){ 0x7E8, 0x7FF, 0xFF00FF00, 0x78007F00 };
-canhub_txn_template(session, &response, 5000);
+CanHubTxnReport report;
+CanHubTxn *transaction = canhub_txn_create(session, NULL);
 
-canhub_txn_send(session, steps, step_count, -1);  // blocks while waiting for credit
-canhub_txn_end(session, -1);                      // marks the last step
-
-CanHubTxnResult result = { 0 };
-result.struct_size = sizeof(result);
-if (canhub_txn_wait(session, &result, -1) == CANHUB_ERR_TXN_ABORTED) {
-    fprintf(stderr, "step %" PRIu32 " failed, reason %u\n", result.failing_seq, result.reason);
+canhub_txn_send(transaction, CANHUB_STANDARD_ID(0x7E0), CANHUB_TXN_BYTES(0x02, 0x10, 0x03), &SESSION_CHANGED);
+if (canhub_txn_finish(transaction, &report) != CANHUB_OK) {
+    fprintf(stderr, "step %" PRIu32 ": %s\n", report.failing_step, canhub_txn_reason_name(report.reason));
 }
 ```
 
-| Function | Notes |
+Declarations are structs, written with designated initializers and fine as
+`static const`; actions are functions. **Every zero means what it says**: id 0
+is the id 0x000, `id_ignored_bits` 0 compares the whole id, a byte whose mask
+is 0 is not compared. `CANHUB_TXN_ANY_ID_BITS` as `id_ignored_bits` compares
+no id at all, standard or extended. What is optional is a pointer, `NULL` when
+absent.
+`CANHUB_TXN_BYTES(...)` expands to a byte array and its length,
+`CANHUB_TXN_EQUALS(v)` and `CANHUB_TXN_MASKED(m, v)` to a byte to compare;
+they use C99 compound literals, so C++ passes an array and its length instead.
+
+### Responses
+
+| `CanHubTxnResponse` | |
 |---|---|
-| `canhub_txn_begin(session, begin, timeout_ms)` | waits for the agent's grant; `begin` carries the exclusive flag, the roster with its origin extractor, how long the agent waits for steps once it ran out (`idle_timeout_ms`) and the `keepalive` frame it sends meanwhile every `keepalive_period_ms`. `CANHUB_ERR_TXN_BUSY` while the agent runs another one, `CANHUB_ERR_TXN_UNSUPPORTED` for an agent that cannot, `CANHUB_ERR_WRITE_DENIED`, `CANHUB_ERR_STATE` on a lossy channel |
-| `canhub_txn_template(session, template, timeout_ms)` | define template 0-15 (once per transaction), before the steps that use it |
-| `canhub_txn_send(session, steps, count, timeout_ms)` | like a blocking socket write: hands the steps over as the agent's window allows and returns how many it took; hand over a whole image at once or in chunks. Frames received meanwhile stay queued for `canhub_recv` |
-| `canhub_txn_end(session, timeout_ms)` | the step handed over last is held back until now, so it can be marked the last one |
-| `canhub_txn_wait(session, result, timeout_ms)` | `CANHUB_OK` when done, `CANHUB_ERR_TXN_ABORTED` with the failing step, the reason, the roster bitmap of who answered, expected/got values and the frame that triggered it |
-| `canhub_txn_progress(session, progress)` | steps sent and completed, record bytes in flight, window |
-| `canhub_txn_abort(session)` | cancel; `canhub_txn_wait` then reports the reason cancelled |
-
-### ISO-TP steps
-
-A template of type `CANHUB_TXN_TYPE_ISOTP` makes each of its steps one ISO-TP
-message of up to 4095 bytes that the agent segments, honouring the ECU's flow
-control, and whose answer it reassembles before matching the patterns against
-it ([protocol](protocol.md#transactions), "ISO-TP steps"). Begin with
-`CANHUB_TXN_FLAG_ISOTP` and hand each message over with
-`canhub_txn_send_message`, which waits until the agent's window takes it whole:
+| `success` | the `CanHubTxnMatch` that completes the step: id except `id_ignored_bits`, the first 8 data bytes under their masks |
+| `failure` | aborts the transaction (`CANHUB_TXN_REASON_FAILURE_MATCHED`) |
+| `pending` | a "busy, wait" answer (UDS `7F xx 78`), checked before `failure`: the wait restarts with `timeout_after_pending_ms` |
+| `timeout_ms` | how long the step waits, required (UDS P2) |
+| `timeout_after_pending_ms` | required with `pending` (UDS P2*) |
+| `continue_on_timeout` | when the time runs out the step completes and the transaction goes on, instead of aborting with `CANHUB_TXN_REASON_TIMEOUT` |
+| `on_mismatch_abort` | a frame with the success id that fails `success` aborts (`CANHUB_TXN_REASON_VALUE_MISMATCH`, `expected`/`got` in the report) |
+| `nodes`, `node_count` | wait for an answer from each of these nodes (up to 64) |
+| `allowed_missing` | how many may stay silent; the step completes as soon as the rest answered |
+| `node_from`, `node_byte` | how a node is told: `CANHUB_TXN_NODE_IN_ID`, the bits `success.id_ignored_bits` leaves free (shifted down: `0x1F00` gives nodes 0-31 from id bits 8-12), or `CANHUB_TXN_NODE_IN_BYTE`, data byte `node_byte` |
 
 ```c
-CanHubTxnTemplate transfer = { 0 };               // 76 <counter> on 0x7E8, abort on 7F, 7F xx 78 waits up to 5 s
-transfer.struct_size = sizeof(transfer);
-transfer.template_id = 1;
-transfer.type = CANHUB_TXN_TYPE_ISOTP;
-transfer.advance_mode = CANHUB_TXN_ADVANCE_COUNT;
-transfer.count_k = 1;
-transfer.timeout_ms = 50;                         // P2
-transfer.extend_timeout_ms = 5000;                // P2*
-transfer.patterns_present = (1u << CANHUB_TXN_PATTERN_ADVANCE) | (1u << CANHUB_TXN_PATTERN_ABORT)
-                          | (1u << CANHUB_TXN_PATTERN_EXTEND);
-transfer.patterns[CANHUB_TXN_PATTERN_ADVANCE] = (CanHubTxnPattern){ 0x7E8, 0x7FF, 0xFFFF, 0x0076 };
-transfer.patterns[CANHUB_TXN_PATTERN_ABORT] = (CanHubTxnPattern){ 0x7E8, 0x7FF, 0xFF, 0x7F };
-transfer.patterns[CANHUB_TXN_PATTERN_EXTEND] = (CanHubTxnPattern){ 0x7E8, 0x7FF, 0xFF00FF, 0x78007F };
-transfer.isotp.response_id = 0x7E8;
-transfer.isotp.flags = CANHUB_ISOTP_FLAG_PADDING;
-transfer.isotp.padding = 0xCC;
-transfer.isotp.tx_data_length = 8;
-canhub_txn_template(session, &transfer, 5000);
+static const CanHubTxnMatch NEGATIVE = { .id = { 0x7E8 }, .bytes = { [1] = CANHUB_TXN_EQUALS(0x7F) } };
+static const CanHubTxnMatch BUSY = { .id = { 0x7E8 }, .bytes = { [1] = CANHUB_TXN_EQUALS(0x7F), [3] = CANHUB_TXN_EQUALS(0x78) } };
 
-CanHubTxnMessage block = { 0 };                   // 36 <counter> <4093 bytes>, answered 76 <counter>
-block.struct_size = sizeof(block);
-block.can_id = 0x7E0;
-block.template_id = 1;
-block.flags = CANHUB_TXN_STEP_EXPECT_VALUE;
-block.expect_value = 0x76 | ((uint64_t)counter << 8);
-block.data = request;
-block.length = request_length;
-canhub_txn_send_message(session, &block, -1);
+static const CanHubTxnResponse ROUTINE_RESPONSE = {
+    .success = { .id = { 0x7E8 }, .bytes = { [1] = CANHUB_TXN_EQUALS(0x71) } },
+    .failure = &NEGATIVE,
+    .pending = &BUSY,
+    .timeout_ms = 50,
+    .timeout_after_pending_ms = 5000,
+};
+
+static const uint32_t NODES[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+
+static const CanHubTxnResponse ALIVE = {                  /* answers on 0x700-0x70F */
+    .success = { .id = { 0x700 }, .id_ignored_bits = 0x00F },
+    .nodes = NODES,
+    .node_count = 16,
+    .timeout_ms = 500,
+    .continue_on_timeout = true,
+};
 ```
 
-| `CanHubTxnIsotp` | |
+A transaction waits for one set of nodes, told the same way, in every response
+that names nodes.
+
+### Steps
+
+| Function | Notes |
 |---|---|
-| `response_id` | where the ECU answers (as a frame id, EFF flag included) |
-| `flags` | `CANHUB_ISOTP_FLAG_PADDING` (fill frames with `padding`), `_ADDRESS_BYTE` (extended or mixed addressing: frames start with `tx_address`, answers with `rx_address`), `_FD` (CAN FD frames of `tx_data_length` bytes), `_BIT_RATE_SWITCH` |
+| `canhub_txn_create(session, options)` | sends nothing: the first step starts the transaction at the agent. `NULL` with `canhub_last_error` when a transaction already runs on the session or the interface is not open |
+| `canhub_txn_send(transaction, id, data, length, response)` | a frame (more than 8 bytes is CAN FD: 12, 16, 20, 24, 32, 48 or 64), then the wait `response` describes; `NULL` waits for nothing |
+| `canhub_txn_send_message(transaction, link, data, length, response)` | an [ISO-TP](#iso-tp) message |
+| `canhub_txn_expect(transaction, response)` | waits without sending |
+| `canhub_txn_step(transaction, step)` | every option of a step: `where`, `gap_us`, a frame of length 0 (`data` not NULL), a wait on an ISO-TP link (`data` NULL) |
+| `canhub_txn_try_step(transaction, step, timeout_ms)` | gives up with `CANHUB_ERR_TIMEOUT` when the agent has not granted the transaction yet or its window did not take the step in time, nothing of it sent: call it again with the same step |
+| `canhub_txn_progress(transaction, progress)` | steps sent and completed, record bytes in flight, window |
+| `canhub_txn_abort(transaction)` | cancels at the agent; may be called from another thread (a Ctrl-C handler thread, say) |
+| `canhub_txn_wait(transaction, timeout_ms)` | ends the transaction (no step follows), then waits for the outcome: `CANHUB_ERR_TIMEOUT` while it is not known |
+| `canhub_txn_finish(transaction, report)` | waits for the outcome, fills `report` and frees the transaction. Call it after every `canhub_txn_create`, also after an error, as `fclose` after `fopen`. After `canhub_close` it only frees the transaction and returns `CANHUB_ERR_DISCONNECTED` |
+| `canhub_txn_reason_name(reason)` | `"timeout"`, `"failure_matched"`... as the CLI prints them |
+
+A step waits for the agent's window like a blocking write and goes out as soon
+as the call returns, so the agent runs it while the application builds the
+next one; frames received meanwhile stay queued for `canhub_recv`. `where` adds to the response for that
+step only: its id and `id_ignored_bits` replace the response's, its bytes add
+to the response's bytes, so one response serves every block of a firmware
+image, each with its own counter or checksum:
+
+```c
+for (offset = 0, counter = 1; offset < image_length; offset += 8, counter++) {
+    CanHubTxnMatch where = { .id = { 0x7E8 }, .bytes = { [2] = CANHUB_TXN_EQUALS(counter) } };
+
+    canhub_txn_step(transaction, &(CanHubTxnStep){
+        .id = CANHUB_STANDARD_ID(0x7E0),
+        .data = image + offset,
+        .length = 8,
+        .response = &ACCEPTED,
+        .where = &where,
+        .gap_us = 1000,
+    });
+}
+```
+
+The agent holds 16 ways of waiting per transaction: each distinct response,
+`where` shape, gap and ISO-TP link is one, found again by content, so building
+a response anew for every step costs nothing. A step the library refuses — a
+17th way of waiting, a timeout of 0, a node outside the ignored bits — returns
+`CANHUB_ERR_ARGUMENT` with `"step N: reason"` in `canhub_last_error` and
+cancels the transaction; try a long sequence against a vcan first, or write it
+as a [script](transaction-scripts.md), which is checked whole before anything
+is sent.
+
+### Options and reports
+
+| `CanHubTxnOptions` (or `NULL` for the defaults) | |
+|---|---|
+| `exclusive` | other clients' frames to the interface are dropped while the transaction runs |
+| `idle_timeout_ms` | required: how long the agent waits for steps once it ran out of them (`CANHUB_TXN_REASON_STARVED` after) |
+| `keepalive` | a `CanHubTxnKeepalive` frame the agent sends every `every_ms` while it waits for steps, for instance to keep a device session open |
+| `bitrate_switch` | sends the CAN FD frames of the steps with bit rate switch |
+| `on_roster`, `context` | called with a `CanHubTxnRosterResult` (`step`, `missing`) for every step waiting for nodes that ended without all of them; it runs inside the transaction's calls, on their thread, and must not call them |
+
+| `CanHubTxnReport` | |
+|---|---|
+| `done`, `reason` | `CANHUB_TXN_REASON_*` |
+| `failing_step`, `completed_steps` | |
+| `failing_roster` | who had not answered, when the failing step waited for nodes |
+| `offending_node`, `expected`, `got` | the node and the 8 data bytes of a value mismatch |
+| `has_frame`, `frame` | the frame that ended the transaction |
+
+`canhub_txn_create` and the first step answer `CANHUB_ERR_TXN_BUSY` while the
+agent runs another transaction, `CANHUB_ERR_TXN_UNSUPPORTED` for an agent that
+cannot, `CANHUB_ERR_WRITE_DENIED`, `CANHUB_ERR_STATE` on a lossy channel, and
+`CANHUB_ERR_AGENT_UNREACHABLE` when the agent did not grant the transaction
+within 5 s (the library cancels it, even if the grant comes later). Once the
+transaction ran, the calls return `CANHUB_ERR_TXN_ABORTED` and
+`canhub_txn_finish` reports why. An agent without ISO-TP aborts the
+transaction with `CANHUB_TXN_REASON_UNSUPPORTED` when the first ISO-TP step
+arrives, after the steps before it ran; `failing_step` names that step.
+`canhub_close` cancels a transaction still running at the agent.
+
+### ISO-TP
+
+A `CanHubTxnIsotpLink` makes a step one ISO 15765-2 message of up to 4095 bytes
+that the agent segments on `tx_id`, honouring the ECU's flow control, and
+whose answer on `rx_id` it reassembles before matching the response against
+it ([protocol](protocol.md#transactions), "ISO-TP steps"):
+
+```c
+static const CanHubTxnIsotpLink ECU = {
+    .tx_id = { 0x7E0 }, .rx_id = { 0x7E8 }, .padded = true, .padding = 0xCC,
+};
+static const CanHubTxnMatch TRANSFER_NEGATIVE = { .id = { 0x7E8 }, .bytes = { [0] = CANHUB_TXN_EQUALS(0x7F) } };
+static const CanHubTxnMatch TRANSFER_BUSY = {
+    .id = { 0x7E8 }, .bytes = { [0] = CANHUB_TXN_EQUALS(0x7F), [2] = CANHUB_TXN_EQUALS(0x78) },
+};
+static const CanHubTxnResponse TRANSFER_ACCEPTED = {        /* 76 <counter>, abort on 7F, 7F xx 78 waits up to 5 s */
+    .success = { .id = { 0x7E8 }, .bytes = { [0] = CANHUB_TXN_EQUALS(0x76) } },
+    .failure = &TRANSFER_NEGATIVE,
+    .pending = &TRANSFER_BUSY,
+    .timeout_ms = 50,
+    .timeout_after_pending_ms = 5000,
+};
+
+CanHubTxnMatch where = { .id = { 0x7E8 }, .bytes = { [1] = CANHUB_TXN_EQUALS(counter) } };
+
+canhub_txn_step(transaction, &(CanHubTxnStep){
+    .id = ECU.tx_id, .data = request, .length = request_length,
+    .isotp = &ECU, .response = &TRANSFER_ACCEPTED, .where = &where,
+});
+```
+
+| `CanHubTxnIsotpLink` | |
+|---|---|
+| `tx_id`, `rx_id` | where the agent sends (and its flow control goes) and where the ECU answers; a response on the link matches `rx_id` exactly |
+| `address_byte`, `tx_address`, `rx_address` | extended or mixed addressing: frames start with `tx_address`, answers with `rx_address` |
+| `padded`, `padding` | fill short frames |
+| `fd`, `fd_data_length`, `bitrate_switch` | CAN FD frames of `fd_data_length` bytes (8-64) |
 | `block_size`, `st_min` | the flow control the agent answers a multi-frame answer with |
 
-`extend_timeout_ms` works for any template: after an extend match (a response
-pending) the step waits that long instead of `timeout_ms`. A step of an ISO-TP
-template without a message (`canhub_txn_send` with
-`CANHUB_TXN_STEP_EXPECT_ONLY`) waits for one; its `can_id` is the request id,
-where the flow control for a multi-frame answer goes. Transport failures abort
-with `CANHUB_TXN_REASON_FLOW_CONTROL_TIMEOUT`, `_CONSECUTIVE_FRAME_TIMEOUT`,
-`_OVERFLOW`, `_SEQUENCE_ERROR` or `_WAIT_LIMIT`.
+A step on a link without data waits for a message without sending one.
+Transport failures abort with `CANHUB_TXN_REASON_FLOW_CONTROL_TIMEOUT`,
+`_CONSECUTIVE_FRAME_TIMEOUT`, `_OVERFLOW`, `_SEQUENCE_ERROR` or `_WAIT_LIMIT`;
+an agent without ISO-TP aborts the transaction with `_UNSUPPORTED` at the first
+ISO-TP step.
 
 These are transport steps: what a UDS answer means (positive, negative
 response codes, sessions) stays with the application or its diagnostics
@@ -226,42 +322,47 @@ library; the example above is the whole of what a TransferData block needs.
 ### Scripts
 
 `canhub_txn_run_script` runs a [transaction script](transaction-scripts.md)
-on the open interface: it compiles it, begins, defines its templates, streams
-its steps and waits for the outcome, all over the calls above.
+given as text on the open interface, `canhub_txn_run_script_file` one read
+from a file. Both check the whole script before anything is sent, then run it
+over the calls above.
 
 ```c
 static int32_t onProgress(void *context, const CanHubTxnProgress *progress, uint32_t total_steps)
 {
     fprintf(stderr, "\r%" PRIu32 "/%" PRIu32, progress->completed_steps, total_steps);
-    return 1;                                     // 0 cancels the transaction
+    return 1;                                     /* 0 cancels the transaction */
 }
 
-CanHubScriptOutcome outcome = { 0 };
-outcome.struct_size = sizeof(outcome);
-int32_t status = canhub_txn_run_script(session, "flash.txn", &outcome, onProgress, NULL);
+CanHubTxnScriptOptions options = { .on_progress = onProgress };
+CanHubTxnReport report;
+int32_t status = canhub_txn_run_script_file(session, "flash.txn", &options, &report);
 if (status == CANHUB_ERR_ARGUMENT) {
-    fprintf(stderr, "%s\n", canhub_last_error(session));   // "flash.txn:5: no template has this name"
+    fprintf(stderr, "%s\n", canhub_last_error(session));   /* "flash.txn:5: no response has this name" */
 }
 ```
 
-Files the script reads resolve against its directory. `outcome` holds the
-agent's `result`, the number of steps in the script, the line of a script
-error, and the roster of its template `for` with the loop variable's name, so a
-report can name who did not answer (`seen_bitmap` bit i is `roster[i]`).
-`on_progress` may be NULL; it is called a few times a second.
+Files a script file reads resolve against its directory; for text, against
+`base_directory` (`NULL`: the working directory), and errors say
+`script:LINE: reason`. `options` may be `NULL`; `on_roster` works as for a
+transaction, `on_progress` is called a few times a second. What the script
+declares (`exclusive`, `idle timeout`, `keepalive`) is the script's own.
 
 ## Example
 
 [`examples/canhub_dump.c`](../examples/canhub_dump.c) is a complete
-list/dump/send tool built as `canhub-dump` in every build tree:
+list/dump/send tool built as `canhub-dump` in every build tree, and
+[`examples/canhub_txn.c`](../examples/canhub_txn.c) a transaction one
+(`canhub-txn`): a UDS-style request sequence, and batches acknowledged by
+nodes that reports who stayed silent:
 
 ```sh
 ./build/x86_64/release/canhub-dump unix:///run/can-hub/hub.sock list
+./build/x86_64/release/canhub-txn unix:///run/can-hub/hub.sock truck42/can0 batch 4 8
 ```
 
 ## Windows
 
 `make windows` (llvm-mingw or mingw-w64 in PATH, or `CAN_HUB_MINGW_ROOT`)
-cross-builds `canhub.dll`, the static library and `canhub-dump.exe` with all
+cross-builds `canhub.dll`, the static library, `canhub-dump.exe` and `canhub-txn.exe` with all
 transports including QUIC. `scripts/build-python-wheel-windows.sh` wraps it
 into the win_amd64 python wheel.

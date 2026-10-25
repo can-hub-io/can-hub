@@ -8,6 +8,8 @@
 
 #define LIST_INTERFACES_MAX 256
 #define RECV_TIMEOUT_MS 1000
+#define STANDARD_ID_DIGITS 3
+#define CLASSIC_PAYLOAD_MAX 8
 
 static int32_t runList(CanHubSession *session);
 static int32_t runDump(CanHubSession *session, const char *interface);
@@ -100,10 +102,14 @@ static int32_t runSend(CanHubSession *session, const char *interface, const char
     int32_t result;
 
     memset(&frame, 0, sizeof(frame));
-    frame.can_id = (uint32_t)strtoul(id_text, NULL, 16);
+    frame.id.value = (uint32_t)strtoul(id_text, NULL, 16);
+    frame.id.extended = strlen(id_text) > STANDARD_ID_DIGITS || frame.id.value > CANHUB_STANDARD_ID_MASK;
     if (!parsePayload(payload_text, &frame)) {
         fprintf(stderr, "bad payload\n");
         return 1;
+    }
+    if (frame.length > CLASSIC_PAYLOAD_MAX) {
+        frame.flags = CANHUB_FRAME_FLAG_FD;
     }
 
     result = canhub_open(session, interface, CANHUB_OPEN_FLAG_WRITE, -1);
@@ -149,10 +155,10 @@ static void printFrame(const CanHubFrame *frame)
     uint8_t i;
 
     printf(
-        "(%llu.%06llu) %03X#",
+        frame->id.extended ? "(%llu.%06llu) %08X#" : "(%llu.%06llu) %03X#",
         (unsigned long long)(frame->timestamp_us / 1000000),
         (unsigned long long)(frame->timestamp_us % 1000000),
-        frame->can_id & CANHUB_CAN_ID_MASK
+        frame->id.value
     );
     for(i=0; i<frame->length; i++) {
         printf("%02X", frame->payload[i]);

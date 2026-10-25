@@ -35,7 +35,7 @@ _INTEROP_URL := https://github.com/can-hub-io/can-hub/releases/download/v$(INTER
 
 _BUILD_WINDOWS := build/mingw-x86_64/release
 
-# libcanhub + canhub-dump for x86_64 Windows (tcp/tls/quic). Needs an
+# libcanhub + canhub-dump + canhub-txn for x86_64 Windows (tcp/tls/quic). Needs an
 # llvm-mingw or mingw-w64 toolchain in PATH or CAN_HUB_MINGW_ROOT.
 windows:
 	$(CMAKE) -B $(_BUILD_WINDOWS) \

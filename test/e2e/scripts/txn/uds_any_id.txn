@@ -1,0 +1,10 @@
+REQUEST  = 0x7E0
+COUNTERS = 0..49
+
+response any-sender
+    success  byte[1] == 0x76
+    failure  byte[1] == 0x7F
+    timeout  200ms
+
+for counter in COUNTERS
+    send REQUEST data 02 36 counter expect any-sender where byte[2] == counter

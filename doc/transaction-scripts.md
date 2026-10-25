@@ -10,16 +10,19 @@ the agent never runs code.
 can-hub-client --connect quic://hub:7227 txn truck42/can0 flash.txn
 ```
 
-The same script runs from C ([`canhub_txn_run_script`](libcanhub.md#scripts))
-and Python (`bus.run_script("flash.txn")`). What the client prints and its exit
-codes: [client](client.md#txn--run-a-transaction-script).
+The same script runs from C ([`canhub_txn_run_script_file`](libcanhub.md#scripts),
+or `canhub_txn_run_script` for a script held as text) and Python
+(`bus.run_txn_script_file("flash.txn")`, `bus.run_txn_script(text)`). Its words
+are the words of the C and Python transaction APIs, so what a script says can
+be written step by step in either. What the client prints and its exit codes:
+[client](client.md#txn--run-a-transaction-script).
 
 ## Examples
 
 ### 1. One request, one answer
 
 ```
-template response
+response response
     success  id == 0x7E8 and byte[1] == 0x50
     timeout  50ms
 
@@ -29,13 +32,13 @@ send 0x7E0 data 02 10 03 expect response
 Sends a single-frame session change request and waits for its positive
 response (0x50). No answer within 50 ms aborts the transaction with `timeout`.
 
-### 2. Constants, and what one step expects on top of its template
+### 2. Constants, and what one step expects on top of its response
 
 ```
 REQUEST  = 0x7E0
 RESPONSE = 0x7E8
 
-template read-response
+response read-response
     success  id == RESPONSE and byte[1] == 0x62
     timeout  50ms
 
@@ -49,7 +52,7 @@ identifier that was asked for.
 ### 3. Negative answers, "wait", unexpected answers
 
 ```
-template routine-response
+response routine-response
     success  id == 0x7E8 and byte[1] == 0x71
     failure  id == 0x7E8 and byte[1] == 0x7F
     pending  id == 0x7E8 and byte[1] == 0x7F and byte[3] == 0x78
@@ -67,7 +70,7 @@ frame is ignored.
 ### 4. Extended identifiers and masks
 
 ```
-template any-ecu-response
+response any-ecu-response
     success  id & 0x1FFFFF00 == 0x18DAF100 and byte[1] == 0x7E
     timeout  100ms
 
@@ -79,7 +82,7 @@ The mask leaves the last byte, the answering ECU's address, free: the answer may
 ### 5. Frames without waiting, spacing, optional answers
 
 ```
-template optional-wake-up
+response optional-wake-up
     success  id == 0x7E8
     timeout  200ms then continue
 
@@ -96,7 +99,7 @@ the next frame. `then continue` moves on when nothing answers.
 ```
 NODES = 0..15
 
-template alive
+response alive
     for node in NODES
         success  id & 0x7F0 == 0x700 and id & 0x0F == node
     timeout  500ms then continue
@@ -104,15 +107,18 @@ template alive
 send 0x7FF data 01 expect alive
 ```
 
-A `for` inside a template waits for an answer from each value of the list; the
-result names who did not answer (`missing node=[3, 9]`).
+A `for` inside a response waits for an answer from each value of the list.
+When the time runs out the step moves on, and the run names who did not
+answer at that step (`roster step=0 missing=[3, 9]`). The bits that tell the
+nodes apart must be the only bits of the id the other terms leave free: here
+`0x7F0` compares the rest, and the loop variable takes `0x00F`.
 
 ### 7. Each node in turn
 
 ```
 NODES = 0..15
 
-template configured
+response configured
     success  id & 0x7F0 == 0x580 and byte[0] == 0x60
     timeout  100ms
 
@@ -120,7 +126,7 @@ for node in NODES
     send 0x600 + node data 2B 00 10 00 node expect configured where id == 0x580 + node
 ```
 
-A `for` outside a template repeats steps. The loop variable can be used in an
+A `for` outside a response repeats steps. The loop variable can be used in an
 identifier and as a data byte.
 
 ### 8. Broadcast firmware, acknowledged by batches
@@ -130,7 +136,7 @@ FIRMWARE    = read("battery.bin")
 FIRMWARE_ID = 0x123
 BATTERIES   = 0..31
 
-template batch-acknowledgement
+response batch-acknowledgement
     for battery in BATTERIES
         success  id & 0x7E0 == 0x700 and id & 0x1F == battery and byte[0] == 0x01
     on mismatch abort
@@ -155,13 +161,13 @@ FIRMWARE_ID = 0x18FF5000
 INVERTERS   = 0..7
 VENDOR_CRC  = crc(width 16, polynomial 0x8005, initial 0xFFFF, reflect_input yes, reflect_output yes, final_xor 0x0000)
 
-template block-received
+response block-received
     for inverter in INVERTERS
         success  id & 0x1FFFFF00 == 0x18FF5100 and id & 0xFF == inverter and byte[0] == 0x01
     on mismatch abort
     timeout  1s
 
-template image-verified
+response image-verified
     for inverter in INVERTERS
         success  id & 0x1FFFFF00 == 0x18FF5100 and id & 0xFF == inverter and byte[0] == 0x02
     on mismatch abort
@@ -183,7 +189,7 @@ the file streams, without loading it.
 ```
 CELLS = 0..31
 
-template quorum
+response quorum
     for 24 of cell in CELLS
         success  id == 0x650 and byte[0] == 0xA5 and byte[2] == cell
     timeout  1s
@@ -204,25 +210,30 @@ The cell number is the third data byte; 24 answers out of 32 are enough.
 | `idle timeout TIME` | how long the agent waits for steps once it ran out of them (default 5s) |
 | `keepalive ID data BYTES every TIME` | a frame the agent sends while it waits for steps, e.g. to keep a device session open |
 | `NAME = value` | constant: a number, a list (`0..31`, `1, 4, 7..9`), `read("file")` or `crc(...)` |
-| `template NAME` | starts a template block |
-| `send ID data BYTES [gap TIME] [expect TEMPLATE [where CONDITION]]` | transmit a frame, then wait as the template says (or not at all) |
-| `expect TEMPLATE [where CONDITION]` | wait without transmitting |
+| `response NAME` | starts a response block: what a step waits for |
+| `send ID data BYTES [gap TIME] [expect RESPONSE [where CONDITION]]` | transmit a frame, then wait as the response says (or not at all) |
+| `expect RESPONSE [where CONDITION]` | wait without transmitting |
 | `for VARIABLE in ITEMS` | repeat the indented statements for each item |
 
 Blocks are indented with spaces (tabs are refused), every line of one block at
 the same depth.
 
-### Template block
+### Response block
 
 | Line | Meaning |
 |---|---|
-| `success CONDITION` | the step completes on a frame meeting it |
-| `failure CONDITION` | the transaction aborts (`abort_match`) |
-| `pending CONDITION` | the step timeout restarts (checked before `failure`) |
+| `success CONDITION` | the step completes on a frame meeting it; required |
+| `failure CONDITION` | the transaction aborts (`failure_matched`) |
+| `pending CONDITION` | the wait restarts (checked before `failure`) |
 | `for VARIABLE in LIST` + `success ...` | completes once every value of the list answered |
 | `for N of VARIABLE in LIST` + `success ...` | completes once N different values answered |
 | `on mismatch abort` | a frame of the success identifier that fails `success` aborts (`value_mismatch`) |
-| `timeout TIME [then continue]` | how long the step waits; `then continue` moves on instead of aborting |
+| `timeout TIME [then continue]` | how long the step waits, required; `then continue` moves on instead of aborting |
+| `timeout after pending TIME` | how long the wait lasts after a `pending` answer (UDS P2*); without it, `timeout` again |
+
+The words match the C and Python APIs (`CanHubTxnResponse`, `Response`):
+`then continue` is `continue_on_timeout`, `for N of` leaves `allowed_missing`
+nodes free.
 
 ### Conditions
 
@@ -235,10 +246,13 @@ Terms joined with `and`, each one of:
 | `byte[I] == VALUE`, `byte[I] & MASK == VALUE` | `byte[1] == 0x76`, `byte[0] & 0xF0 == 0x30` |
 | `byte[I..J] == ORDER(NUMBER)` | `byte[1..2] == little_endian(sum16(block))` |
 
-Only the first 8 data bytes can be compared. Inside a template `for`, one term
-names the loop variable: `id & MASK == variable`, `(id >> SHIFT) & MASK ==
-variable`, `byte[I] == variable` or `byte[I] & MASK == variable`, or the
-shorthand `id == BASE + variable`; every value of the list must fit the mask.
+Only the first 8 data bytes can be compared. A condition without an `id` term
+meets a frame with any identifier, standard or extended. Inside a response
+`for`, one term names the loop variable: `id & MASK == variable`, `(id >>
+SHIFT) & MASK == variable` or the shorthand `id == BASE + variable` (`id ==
+variable` for nodes 0x000 to 0x00F, say), whose bits must be the only
+bits of the id the other terms leave free, or `byte[I] == variable`, the whole
+byte; every value of the list must fit.
 
 An identifier written with 8 hexadecimal digits, or above 0x7FF, is extended
 (29 bits); otherwise it is standard (11 bits). A standard identifier never
@@ -272,17 +286,17 @@ a CAN FD frame.
 
 | Limit | Why |
 |---|---|
-| 16 templates, counting the variants that `where` on bytes the template does not compare, `where id == ...` and `gap` create | the agent holds 16 templates per transaction |
-| one template `for` (one list, one way of telling who answered) per script | one origin extractor per transaction |
-| 64 values in a template `for` | the roster |
+| 16 ways of waiting: each response, and each distinct `where` shape (bytes the response does not compare, or `where id == ...`), `gap` and response it is used with | the agent holds 16 templates per transaction |
+| one response `for` (one list, one way of telling who answered) per script | one roster per transaction |
+| 64 values in a response `for` | the roster |
 | chunks of up to 4096 bytes | the client's chunk buffer |
 | no `if`, no user functions, no arithmetic beyond `BASE + variable` | a script describes what the agent can compare; anything else belongs in the C or Python API |
 
 A script that breaks a rule is refused before anything is sent, with the line
-and the reason.
+and the reason: the whole script is checked, its loops unrolled, first.
 
 The language matches frames. Multi-frame ISO-TP messages, which the agent
 segments and reassembles, go through the C and Python APIs
-([libcanhub](libcanhub.md#iso-tp-steps), [python](../python/README.md#iso-tp-steps)).
+([libcanhub](libcanhub.md#iso-tp), [python](../python/README.md#iso-tp)).
 Diagnostic protocols on top of them (UDS sessions, security access, negative
 response codes) belong to a diagnostics library, not to can-hub.

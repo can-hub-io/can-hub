@@ -2,7 +2,7 @@ FIRMWARE    = read("firmware.bin")
 FIRMWARE_ID = 0x123
 NODES       = 0..7
 
-template batch-acknowledgement
+response batch-acknowledgement
     for node in NODES
         success  id & 0x7E0 == 0x700 and id & 0x1F == node and byte[0] == 0x01
     on mismatch abort

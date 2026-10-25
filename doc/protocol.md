@@ -100,6 +100,8 @@ offset  size  field
 0x45  TXN_PROGRESS agent -> hub -> client: completed steps, consumed credit
 0x46  TXN_STATUS   agent (or hub) -> client: terminal outcome
 0x47  TXN_ABORT    client (or hub) -> agent: cancel the transaction
+0x48  TXN_ROSTER   client -> hub -> agent: the nodes roster steps wait for (on the channel's reliable stream)
+0x49  TXN_ROSTER_REPORT agent -> hub -> client: a roster step that moved on without every node
 0x7F  PING/PONG    liveness (flags bit 0: reply)
 ```
 
@@ -819,9 +821,11 @@ CAN has no atomicity and nothing is rolled back.
 
 **Capability.** An agent that runs transactions advertises bit 1 of the HELLO
 `capabilities` bitset (transactions), and bit 2 if it also runs ISO-TP steps
-(below). If the agent owning the interface did not advertise bit 1, or a
-TXN_BEGIN with flag bit 1 (ISO-TP) reaches an agent that did not advertise bit
-2, the hub answers status unsupported (3).
+(below). If the agent owning the interface did not advertise bit 1, the hub
+answers TXN_BEGIN with status unsupported (3). An ISO-TP template (TXN_TEMPLATE
+`type` 1) for an agent that did not advertise bit 2 never reaches it: the hub
+sends the agent TXN_ABORT and the client TXN_STATUS aborted, reason
+unsupported (15).
 
 **Prerequisites.** The client runs a transaction on a channel it has open, and:
 
@@ -835,11 +839,12 @@ TXN_BEGIN with flag bit 1 (ISO-TP) reaches an agent that did not advertise bit
 its interfaces. A TXN_BEGIN while one is active — on any of the agent's
 interfaces, from any client — is answered with status busy (1).
 
-**Paths.** TXN_BEGIN, TXN_BEGIN_ACK, TXN_PROGRESS, TXN_STATUS and TXN_ABORT
-travel on the control stream. TXN_TEMPLATE and TXN_STEPS travel on the channel's
-reliable stream (over TCP/TLS, the connection), so templates and steps reach the
-agent in the order the client sent them, and a large window of steps never
-head-of-line-blocks the control stream. No transaction message travels as a
+**Paths.** TXN_BEGIN, TXN_BEGIN_ACK, TXN_PROGRESS, TXN_STATUS, TXN_ABORT and
+TXN_ROSTER_REPORT travel on the control stream. TXN_ROSTER, TXN_TEMPLATE and
+TXN_STEPS travel on the channel's reliable stream (over TCP/TLS, the
+connection), so the roster, templates and steps reach the agent in the order
+the client sent them, and a large window of steps never head-of-line-blocks the
+control stream. No transaction message travels as a
 datagram. Every message carries the sender's `channel` as the first byte of its
 body; the hub rewrites it between the client's and the agent's channel, as it
 does for FRAME, and otherwise relays the message as is.
@@ -849,16 +854,24 @@ does for FRAME, and otherwise relays the message as is.
 1. The client sends TXN_BEGIN. The agent answers TXN_BEGIN_ACK with status ok,
    the `txn_id` and the `window` in bytes (below); the hub may answer a rejection
    itself.
-2. The client sends the TXN_TEMPLATEs, then TXN_STEPS batches. Sequence numbers
+2. The client sends TXN_TEMPLATEs and TXN_STEPS batches as it goes, and at most
+   one TXN_ROSTER, before the first template waiting for it. Sequence numbers
    start at 0 and are contiguous: a batch whose `first_seq` is not the next
    expected one aborts the transaction (reason invalid step). A template is
    defined once per transaction, before the first step that names it: a step
    naming an undefined template, or a second definition of the same id, aborts
    the transaction (reason invalid step). Steps already queued in the agent would
-   otherwise run with a template sent after them.
+   otherwise run with a template sent after them. So does a roster template
+   before TXN_ROSTER, or a second TXN_ROSTER. The client libraries send
+   TXN_BEGIN with the first step and each definition right before the first step
+   that needs it, so an application builds its steps as it goes.
 3. The agent executes the steps and reports TXN_PROGRESS.
-4. The step flagged **last** completes the transaction: TXN_STATUS done. The
-   first failure ends it instead: TXN_STATUS aborted, with the reason.
+4. The client flags the batch after which no step follows **end**; it may
+   carry steps or none. Once every step completed, the end completes the
+   transaction: TXN_STATUS done. A batch after the end aborts it (reason invalid
+   step). The first failure ends it instead: TXN_STATUS aborted, with the
+   reason. The end goes in its own batch when the steps already went, so a
+   client sends each step as soon as the application hands it over.
 
 Messages naming another `txn_id` than the active one are stale (steps still in
 flight from a cancelled transaction) and are discarded.
@@ -950,7 +963,7 @@ A step of an ISO-TP template carries its message in records with the
 `frame_flags` 0) instead of a frame. A message longer than one record goes on in
 the next ones: every record but the last of the step carries the **continued**
 flag (bit 4), and names the same `template_id` and `can_id`; only the last one
-may carry the expect value or the last-step flag. A continued record is not a
+may carry the expect value. A continued record is not a
 step: sequence numbers count steps, so a batch may start or end inside one, and
 `first_seq` is the sequence number of the step its first record belongs to. The
 agent copies each record of a message out of the ring as the step reaches it and
@@ -959,13 +972,18 @@ message record naming a generic template, a frame record naming an ISO-TP one or
 a message over 4095 bytes abort the transaction (reason invalid step). The
 advance modes of an ISO-TP template are none and count.
 
-**Roster.** TXN_BEGIN carries up to 64 expected origins and how to extract a
+**Roster.** TXN_ROSTER carries up to 64 expected origins and how to extract a
 frame's origin: from the CAN id (X = id bits 0-28) or from the payload (X = the
 4 bytes at `payload_offset`, little-endian, missing bytes read as zero), then
-`origin = (X & mask) >> shift`. In the roster modes, a frame matching the advance
-pattern counts once per origin: a per-step bitmap (bit i = `roster[i]` answered)
-drops retransmissions, and frames from origins outside the roster do not count.
-A failure report carries that bitmap, so the client learns who did not answer,
+`origin = (X & mask) >> shift`. A transaction has one roster, defined once. In
+the roster modes, a frame matching the advance pattern counts once per origin: a
+per-step bitmap (bit i = `roster[i]` answered) drops retransmissions, and frames
+from origins outside the roster do not count. A roster step that completes
+without every origin (its soft timeout expired, or roster k reached `count_k`)
+is reported in TXN_ROSTER_REPORT with its sequence number and bitmap, so the
+client learns who did not answer even when the transaction goes on; a step that
+every origin answered is not reported. A failure report carries the bitmap of
+the failing step, with TXN_STATUS flag bit 1 when that step was a roster step,
 and the origin of the frame that triggered it.
 
 **Credit.** The agent buffers steps in a ring of fixed size, announced as
@@ -1011,23 +1029,17 @@ and releases the lease. If the agent disconnects, the hub answers the client wit
 TXN_STATUS aborted, reason agent disconnected.
 
 ```
-TXN_BEGIN (total 352)
+TXN_BEGIN (total 88)
 @4   channel u8
-@5   flags u8 (bit 0: exclusive lease, bit 1: uses ISO-TP templates)
-@6   origin_source u8 (0 none, 1 can_id, 2 payload)
-@7   origin_shift u8
-@8   origin_mask u32
-@12  origin_payload_offset u8
-@13  roster_count u8 (0-64)
-@14  reserved u16
-@16  roster u32[64] (first roster_count used, the rest zero)
-@272 idle_timeout_ms u32 (0: agent default, 5 s)
-@276 keepalive_period_ms u32 (0: no keepalive)
-@280 keepalive_can_id u32 (as FRAME)
-@284 keepalive_payload_length u8 (as FRAME)
-@285 keepalive_frame_flags u8 (as FRAME)
-@286 reserved u16
-@288 keepalive_payload u8[64]
+@5   flags u8 (bit 0: exclusive lease)
+@6   reserved u16
+@8   idle_timeout_ms u32 (0: agent default, 5 s)
+@12  keepalive_period_ms u32 (0: no keepalive)
+@16  keepalive_can_id u32 (as FRAME)
+@20  keepalive_payload_length u8 (as FRAME)
+@21  keepalive_frame_flags u8 (as FRAME)
+@22  reserved u16
+@24  keepalive_payload u8[64]
 
 TXN_BEGIN_ACK (total 12)
 @4   channel u8
@@ -1065,16 +1077,28 @@ TXN_TEMPLATE (total 112)
 @107 reserved u8
 @108 extend_timeout_ms u32 (0: timeout_ms again after an extend)
 
+TXN_ROSTER (total 272)
+@4   channel u8
+@5   origin_source u8 (1 can_id, 2 payload)
+@6   txn_id u16
+@8   origin_mask u32
+@12  origin_shift u8
+@13  origin_payload_offset u8
+@14  roster_count u8 (1-64)
+@15  reserved u8
+@16  roster u32[64] (first roster_count used, the rest zero)
+
 TXN_STEPS (total 16 + records, records at most 400 bytes)
 @4   channel u8
 @5   step_count u8 (records in the batch)
 @6   txn_id u16
 @8   first_seq u32 (the step the first record belongs to)
-@12  reserved u32
+@12  flags u8 (bit 0: end, no step follows this batch)
+@13  reserved u8[3]
 @16  records, back to back, each:
        +0  template_id u8
        +1  flags u8 (bit 0: expect value present, bit 1: expect-only, no
-                     frame, bit 2: last step, bit 3: message (ISO-TP), bit 4:
+                     frame, bit 2: reserved, bit 3: message (ISO-TP), bit 4:
                      continued in the next record)
        +2  payload_length u8 (0-8 classic, 0-64 FD; 0 for expect-only;
                               1-255 for a message record)
@@ -1106,18 +1130,26 @@ TXN_STATUS (total 116)
                 4 tx failed, 5 cancelled, 6 starved, 7 overrun,
                 8 agent disconnected, 9 invalid step, 10 flow-control
                 timeout, 11 consecutive-frame timeout, 12 overflow, 13
-                sequence error, 14 wait limit)
+                sequence error, 14 wait limit, 15 unsupported)
 @49  rx_payload_length u8
 @50  rx_frame_flags u8
 @51  flags u8 (bit 0: rx frame present — the last frame, or the first 64
                bytes of the last ISO-TP message, that matched a pattern of the
-               failing step)
+               failing step; bit 1: the failing step was a roster step)
 @52  rx_payload u8[64]
 
 TXN_ABORT (total 8)
 @4   channel u8
 @5   reserved u8
 @6   txn_id u16
+
+TXN_ROSTER_REPORT (total 24)
+@4   channel u8
+@5   reserved u8
+@6   txn_id u16
+@8   seq u32 (the roster step)
+@12  reserved u32
+@16  seen_bitmap u64 (bit i set if roster[i] answered)
 ```
 
 A classic 8-byte step is a 16-byte record and an expect-only step 8 bytes, so a

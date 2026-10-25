@@ -47,6 +47,7 @@ static void sendConfigure(Client *self);
 static void handleTxnBeginAck(Client *self, const uint8_t *body, uint16_t length);
 static void handleTxnProgress(Client *self, const uint8_t *body, uint16_t length);
 static void handleTxnStatus(Client *self, const uint8_t *body, uint16_t length);
+static void handleTxnRosterReport(Client *self, const uint8_t *body, uint16_t length);
 static bool isTransactionRunning(const Client *self);
 
 /* ---------- public ---------- */
@@ -224,6 +225,25 @@ bool Client_BeginTransaction(Client *self, TxnBeginMessage *begin)
     return true;
 }
 
+bool Client_DefineRoster(Client *self, TxnRosterMessage *roster)
+{
+    uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
+    size_t encoded_size;
+
+    if (!isTransactionRunning(self) || !Client_FlushTransaction(self)) {
+        return false;
+    }
+
+    roster->channel = self->channel;
+    roster->txn_id = self->transaction.txn_id;
+    encoded_size = TxnRosterMessage_Encode(roster, encoded, sizeof(encoded));
+    if (encoded_size == 0) {
+        return false;
+    }
+
+    return self->hub->send_frame(self->hub->context, self->channel, encoded, encoded_size);
+}
+
 bool Client_DefineTemplate(Client *self, TxnTemplateMessage *template_message)
 {
     uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
@@ -258,7 +278,6 @@ uint32_t Client_SendSteps(Client *self, const TxnStep *steps, uint32_t count, TT
             break;
         }
     }
-    Client_FlushTransaction(self);
 
     *stopped_by = result;
 
@@ -269,9 +288,6 @@ TTRANSACTION_OFFER Client_EndTransaction(Client *self)
 {
     TTRANSACTION_OFFER result = TransactionSender_End(&self->transaction);
 
-    if (result == kTRANSACTION_OFFER_FLUSH_NEEDED && Client_FlushTransaction(self)) {
-        result = TransactionSender_End(&self->transaction);
-    }
     Client_FlushTransaction(self);
 
     return result;
@@ -300,7 +316,7 @@ void Client_AbortTransaction(Client *self)
     uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size;
 
-    if (!isTransactionRunning(self)) {
+    if (!isTransactionRunning(self) && self->transaction.state != kTRANSACTION_SENDER_BEGINNING) {
         return;
     }
 
@@ -308,6 +324,9 @@ void Client_AbortTransaction(Client *self)
     abort_message.txn_id = self->transaction.txn_id;
     encoded_size = TxnAbortMessage_Encode(&abort_message, encoded, sizeof(encoded));
     self->hub->send_control(self->hub->context, encoded, encoded_size);
+    if (self->transaction.state == kTRANSACTION_SENDER_BEGINNING) {
+        TransactionSender_Reset(&self->transaction);
+    }
 }
 
 const TransactionSender *Client_Transaction(const Client *self)
@@ -380,6 +399,10 @@ static void transportOnControl(void *context, const uint8_t *data, size_t size, 
     }
     if (header.type == kMESSAGE_TYPE_TXN_STATUS) {
         handleTxnStatus(self, data + MESSAGE_HEADER_SIZE, header.length);
+        return;
+    }
+    if (header.type == kMESSAGE_TYPE_TXN_ROSTER_REPORT) {
+        handleTxnRosterReport(self, data + MESSAGE_HEADER_SIZE, header.length);
     }
 }
 
@@ -656,6 +679,20 @@ static void handleTxnStatus(Client *self, const uint8_t *body, uint16_t length)
     if (TxnStatusMessage_Decode(&status, body, length)) {
         TransactionSender_OnStatus(&self->transaction, &status);
     }
+}
+
+static void handleTxnRosterReport(Client *self, const uint8_t *body, uint16_t length)
+{
+    TxnRosterReportMessage report;
+
+    if (!TxnRosterReportMessage_Decode(&report, body, length) || self->events.on_roster_report == NULL) {
+        return;
+    }
+    if (!isTransactionRunning(self) || report.channel != self->channel || report.txn_id != self->transaction.txn_id) {
+        return;
+    }
+
+    self->events.on_roster_report(self->events.context, &report);
 }
 
 static bool isTransactionRunning(const Client *self)

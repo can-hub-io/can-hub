@@ -654,12 +654,11 @@ static size_t encodeResponseTemplate(uint16_t txn_id, uint8_t *buffer, size_t bu
 
 static size_t encodeLastRequestStep(uint16_t txn_id, uint8_t *buffer, size_t buffer_size)
 {
-    TxnStepsMessage fixed_fields = { TXN_CHANNEL, 0, txn_id, 0, NULL, 0 };
+    TxnStepsMessage fixed_fields = { TXN_CHANNEL, 0, txn_id, 0, TXN_STEPS_FLAG_END, NULL, 0 };
     TxnStepsWriter writer;
     TxnStep step;
 
     memset(&step, 0, sizeof(step));
-    step.flags = TXN_STEP_FLAG_LAST;
     step.can_id = REQUEST_ID;
     step.payload_length = 2;
     step.payload[0] = 0x01;

@@ -10,6 +10,7 @@
 #define STEPS_STEP_COUNT_OFFSET 1
 #define STEPS_TXN_ID_OFFSET 2
 #define STEPS_FIRST_SEQ_OFFSET 4
+#define STEPS_FLAGS_OFFSET 8
 #define STEPS_RECORDS_OFFSET TXN_STEPS_FIXED_FIELDS_SIZE
 
 #define STEP_TEMPLATE_ID_OFFSET 0
@@ -110,6 +111,7 @@ bool TxnStepsWriter_Init(TxnStepsWriter *self, const TxnStepsMessage *message, u
     body[STEPS_CHANNEL_OFFSET] = message->channel;
     Wire_WriteU16(body + STEPS_TXN_ID_OFFSET, message->txn_id);
     Wire_WriteU32(body + STEPS_FIRST_SEQ_OFFSET, message->first_seq);
+    body[STEPS_FLAGS_OFFSET] = message->flags;
 
     return true;
 }
@@ -131,6 +133,11 @@ bool TxnStepsWriter_Append(TxnStepsWriter *self, const TxnStep *step)
     self->step_count++;
 
     return true;
+}
+
+void TxnStepsWriter_MarkEnd(TxnStepsWriter *self)
+{
+    self->buffer[MESSAGE_HEADER_SIZE + STEPS_FLAGS_OFFSET] |= TXN_STEPS_FLAG_END;
 }
 
 size_t TxnStepsWriter_Finish(TxnStepsWriter *self)
@@ -168,6 +175,7 @@ bool TxnStepsMessage_Decode(TxnStepsMessage *self, const uint8_t *payload, size_
     self->step_count = step_count;
     self->txn_id = Wire_ReadU16(payload + STEPS_TXN_ID_OFFSET);
     self->first_seq = Wire_ReadU32(payload + STEPS_FIRST_SEQ_OFFSET);
+    self->flags = payload[STEPS_FLAGS_OFFSET];
     self->records = payload + STEPS_RECORDS_OFFSET;
     self->records_size = (uint16_t)records_size;
 
@@ -202,7 +210,7 @@ static bool isMessageRecordValid(const TxnStep *step)
         return false;
     }
     if (step->flags & TXN_STEP_FLAG_CONTINUED) {
-        return (step->flags & (TXN_STEP_FLAG_EXPECT_VALUE | TXN_STEP_FLAG_LAST)) == 0;
+        return (step->flags & TXN_STEP_FLAG_EXPECT_VALUE) == 0;
     }
     return true;
 }

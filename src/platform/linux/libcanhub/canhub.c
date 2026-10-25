@@ -13,7 +13,7 @@
 #include "client/client.h"
 #include "platform/linux/libcanhub/canhub_internal.h"
 #include "platform/linux/libcanhub/canhub_settings.h"
-#include "platform/linux/libcanhub/canhub_transactions.h"
+#include "platform/linux/libcanhub/canhub_frames.h"
 #include "protocol/ifconfig_message.h"
 #include "protocol/open_message.h"
 #include "platform/linux/clock/clock.h"
@@ -35,7 +35,6 @@
 #define LAST_ERROR_SIZE 256
 #define NO_CONNECT_ERROR "no connect failure recorded"
 #define FRAME_RING_SIZE 512
-#define TXN_SEND_CHUNK_STEPS 32
 
 #define HUB_SLOT 0
 #define TAG_STREAM 1
@@ -73,6 +72,7 @@ struct CanHubSession {
     uint16_t ring_head;
     uint16_t ring_count;
     uint64_t frames_ring_dropped;
+    CanHubTxn *transaction;
 };
 
 static void ignoreSigpipeIfUnhandled(void);
@@ -106,11 +106,7 @@ static int32_t runConfigure(
     int32_t timeout_ms
 );
 static void onConfigureReply(void *context, const ConfigureReplyMessage *reply);
-static const TransactionSender *transactionOf(const CanHubSession *self);
-static bool transactionFinished(const CanHubSession *self);
-static int32_t offerSteps(CanHubSession *self, const CanHubTxnStep *steps, uint32_t count, uint32_t *taken);
-static int32_t handOverRecords(CanHubSession *self, const TxnStep *records, uint8_t count);
-static int32_t transactionEndedResult(CanHubSession *self);
+static void onRosterReport(void *context, const TxnRosterReportMessage *report);
 
 static _Thread_local char connect_error[LAST_ERROR_SIZE] = NO_CONNECT_ERROR;
 
@@ -165,6 +161,7 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
     client_events.on_error = onError;
     client_events.on_disconnected = onDisconnected;
     client_events.on_configure_reply = onConfigureReply;
+    client_events.on_roster_report = onRosterReport;
 
     transport_events = Client_TransportEvents(&self->client);
 
@@ -211,6 +208,10 @@ void canhub_close(CanHubSession *session)
         return;
     }
 
+    if (session->transaction != NULL) {
+        CanHubTxn_Detach(session->transaction);
+        session->transaction = NULL;
+    }
     if (session->port != NULL) {
         session->port->disconnect(session->port->context);
     }
@@ -346,8 +347,10 @@ int32_t canhub_set_filters(CanHubSession *session, const CanHubFilter *filters, 
     }
 
     for(i=0; i<filter_count; i++) {
-        wire_filters[i].can_id = filters[i].can_id;
-        wire_filters[i].can_mask = filters[i].can_mask;
+        if (!CanHubFrames_FilterToWire(&filters[i], &wire_filters[i])) {
+            setError(session, "a filter id or its ignored bits do not fit 11 or 29 bits");
+            return CANHUB_ERR_ARGUMENT;
+        }
     }
     Client_SetFilters(&session->client, wire_filters, filter_count);
     pumpOnce(session, 0);
@@ -384,8 +387,8 @@ int32_t canhub_send(CanHubSession *session, const CanHubFrame *frame)
     FrameMessage message;
     TCLIENT_SEND_RESULT result;
 
-    if (frame == NULL || frame->length > CANHUB_FRAME_PAYLOAD_MAX) {
-        setError(session, "invalid frame");
+    if (frame == NULL || !CanHubFrames_ToWire(frame, &message)) {
+        setError(session, "invalid frame: the id fits 11 or 29 bits, over 8 bytes is CAN FD");
         return CANHUB_ERR_ARGUMENT;
     }
     if (session->disconnected) {
@@ -393,12 +396,9 @@ int32_t canhub_send(CanHubSession *session, const CanHubFrame *frame)
         return CANHUB_ERR_DISCONNECTED;
     }
 
-    memset(&message, 0, sizeof(message));
-    message.can_id = frame->can_id;
-    message.timestamp_us = (frame->timestamp_us != 0) ? frame->timestamp_us : Clock_RealtimeUs();
-    message.payload_length = frame->length;
-    message.frame_flags = frame->flags & (uint8_t)~CANHUB_FRAME_FLAG_BRIDGED;
-    memcpy(message.payload, frame->payload, frame->length);
+    if (message.timestamp_us == 0) {
+        message.timestamp_us = Clock_RealtimeUs();
+    }
 
     result = Client_SendFrame(&session->client, &message, Clock_MonotonicUs());
     if (result == kCLIENT_SEND_FAILED) {
@@ -475,231 +475,39 @@ int32_t canhub_query(
     return runConfigure(session, interface_name, IFCONFIG_OP_QUERY, &settings, effective, timeout_ms);
 }
 
-int32_t canhub_txn_begin(CanHubSession *session, const CanHubTxnBegin *begin, int32_t timeout_ms)
-{
-    uint64_t deadline = deadlineFrom(timeout_ms);
-    TxnBeginMessage message;
-
-    if (begin == NULL || !CanHubTransactions_BeginToWire(begin, &message)) {
-        setError(session, "begin needs struct_size set and at most 64 roster entries");
-        return CANHUB_ERR_ARGUMENT;
-    }
-    if (session->disconnected) {
-        return CANHUB_ERR_DISCONNECTED;
-    }
-    if (!Client_BeginTransaction(&session->client, &message)) {
-        setError(session, "a transaction needs an open interface and none running");
-        return CANHUB_ERR_STATE;
-    }
-
-    while (transactionOf(session)->state == kTRANSACTION_SENDER_BEGINNING && !session->disconnected) {
-        if (timeout_ms >= 0 && remainingMs(deadline) == 0) {
-            setError(session, "begin timed out");
-            return CANHUB_ERR_TIMEOUT;
-        }
-        pumpOnce(session, remainingMs(deadline));
-    }
-
-    if (session->disconnected) {
-        return CANHUB_ERR_DISCONNECTED;
-    }
-    if (transactionOf(session)->state == kTRANSACTION_SENDER_RUNNING) {
-        return CANHUB_OK;
-    }
-    if (transactionOf(session)->begin_status != kTXN_BEGIN_STATUS_OK) {
-        setError(session, CanHubTransactions_BeginDetail(transactionOf(session)->begin_status));
-        return CanHubTransactions_BeginResult(transactionOf(session)->begin_status);
-    }
-
-    return transactionEndedResult(session);
-}
-
-int32_t canhub_txn_template(CanHubSession *session, const CanHubTxnTemplate *template_definition, int32_t timeout_ms)
-{
-    uint64_t deadline = deadlineFrom(timeout_ms);
-    TxnTemplateMessage message;
-
-    if (template_definition == NULL || !CanHubTransactions_TemplateToWire(template_definition, &message)) {
-        setError(session, "template needs struct_size set and an id below 16");
-        return CANHUB_ERR_ARGUMENT;
-    }
-
-    while (!Client_DefineTemplate(&session->client, &message)) {
-        if (transactionOf(session)->state != kTRANSACTION_SENDER_RUNNING) {
-            return transactionEndedResult(session);
-        }
-        if (session->disconnected) {
-            return CANHUB_ERR_DISCONNECTED;
-        }
-        if (timeout_ms >= 0 && remainingMs(deadline) == 0) {
-            setError(session, "template timed out");
-            return CANHUB_ERR_TIMEOUT;
-        }
-        pumpOnce(session, remainingMs(deadline));
-    }
-
-    pumpOnce(session, 0);
-
-    return CANHUB_OK;
-}
-
-int32_t canhub_txn_send(CanHubSession *session, const CanHubTxnStep *steps, uint32_t count, int32_t timeout_ms)
-{
-    uint64_t deadline = deadlineFrom(timeout_ms);
-    uint32_t taken = 0;
-    int32_t result;
-
-    if ((steps == NULL && count > 0) || count > INT32_MAX) {
-        setError(session, "steps required");
-        return CANHUB_ERR_ARGUMENT;
-    }
-
-    for (;;) {
-        result = offerSteps(session, steps, count, &taken);
-        if (result != CANHUB_OK) {
-            return result;
-        }
-        if (taken == count) {
-            pumpOnce(session, 0);
-            return (int32_t)taken;
-        }
-        if (session->disconnected) {
-            return CANHUB_ERR_DISCONNECTED;
-        }
-        if (timeout_ms >= 0 && remainingMs(deadline) == 0) {
-            return (int32_t)taken;
-        }
-        pumpOnce(session, (timeout_ms < 0) ? PUMP_SLICE_MS : remainingMs(deadline));
-        Client_FlushTransaction(&session->client);
-    }
-}
-
-int32_t canhub_txn_send_message(CanHubSession *session, const CanHubTxnMessage *message, int32_t timeout_ms)
-{
-    TxnStep records[CANHUB_TRANSACTIONS_MESSAGE_RECORDS_MAX];
-    uint64_t deadline = deadlineFrom(timeout_ms);
-    uint8_t count;
-
-    count = (message == NULL) ? 0 : CanHubTransactions_MessageToWire(message, records);
-    if (count == 0) {
-        setError(session, "message needs struct_size set, 1-4095 bytes of data and a template id below 16");
-        return CANHUB_ERR_ARGUMENT;
-    }
-    if (transactionOf(session)->state != kTRANSACTION_SENDER_RUNNING) {
-        return transactionFinished(session) ? transactionEndedResult(session) : CANHUB_ERR_STATE;
-    }
-
-    while (!CanHubTransactions_HasCreditFor(transactionOf(session), records, count)) {
-        if (transactionFinished(session)) {
-            return transactionEndedResult(session);
-        }
-        if (session->disconnected) {
-            return CANHUB_ERR_DISCONNECTED;
-        }
-        if (timeout_ms >= 0 && remainingMs(deadline) == 0) {
-            return CANHUB_ERR_TIMEOUT;
-        }
-        pumpOnce(session, (timeout_ms < 0) ? PUMP_SLICE_MS : remainingMs(deadline));
-        Client_FlushTransaction(&session->client);
-    }
-
-    return handOverRecords(session, records, count);
-}
-
-int32_t canhub_txn_end(CanHubSession *session, int32_t timeout_ms)
-{
-    uint64_t deadline = deadlineFrom(timeout_ms);
-    TTRANSACTION_OFFER result;
-
-    for (;;) {
-        result = Client_EndTransaction(&session->client);
-        if (result == kTRANSACTION_OFFER_ACCEPTED) {
-            pumpOnce(session, 0);
-            return CANHUB_OK;
-        }
-        if (transactionFinished(session)) {
-            return transactionEndedResult(session);
-        }
-        if (result == kTRANSACTION_OFFER_REJECTED) {
-            setError(session, "nothing to end: no transaction running, no step sent, or already ended");
-            return CANHUB_ERR_STATE;
-        }
-        if (session->disconnected) {
-            return CANHUB_ERR_DISCONNECTED;
-        }
-        if (timeout_ms >= 0 && remainingMs(deadline) == 0) {
-            setError(session, "end timed out waiting for credit");
-            return CANHUB_ERR_TIMEOUT;
-        }
-        pumpOnce(session, (timeout_ms < 0) ? PUMP_SLICE_MS : remainingMs(deadline));
-    }
-}
-
-int32_t canhub_txn_wait(CanHubSession *session, CanHubTxnResult *result, int32_t timeout_ms)
-{
-    uint64_t deadline = deadlineFrom(timeout_ms);
-    const TransactionSender *transaction = transactionOf(session);
-
-    if (result != NULL && result->struct_size != sizeof(*result)) {
-        setError(session, "result needs struct_size set");
-        return CANHUB_ERR_ARGUMENT;
-    }
-    if (transaction->state == kTRANSACTION_SENDER_IDLE || transaction->begin_status != kTXN_BEGIN_STATUS_OK) {
-        setError(session, "no transaction to wait for");
-        return CANHUB_ERR_STATE;
-    }
-
-    while (!transactionFinished(session)) {
-        if (session->disconnected) {
-            return CANHUB_ERR_DISCONNECTED;
-        }
-        if (timeout_ms >= 0 && remainingMs(deadline) == 0) {
-            return CANHUB_ERR_TIMEOUT;
-        }
-        pumpOnce(session, (timeout_ms < 0) ? PUMP_SLICE_MS : remainingMs(deadline));
-        Client_FlushTransaction(&session->client);
-    }
-
-    if (result != NULL) {
-        CanHubTransactions_ResultFromWire(&transaction->outcome, result);
-    }
-
-    return transactionEndedResult(session);
-}
-
-int32_t canhub_txn_progress(CanHubSession *session, CanHubTxnProgress *progress)
-{
-    const TransactionSender *transaction = transactionOf(session);
-
-    if (progress == NULL || progress->struct_size != sizeof(*progress)) {
-        setError(session, "progress needs struct_size set");
-        return CANHUB_ERR_ARGUMENT;
-    }
-
-    progress->sent_steps = transaction->next_seq;
-    progress->completed_steps = transaction->completed_steps;
-    progress->bytes_in_flight = TransactionSender_BytesInFlight(transaction);
-    progress->window_bytes = transaction->window_bytes;
-
-    return CANHUB_OK;
-}
-
-int32_t canhub_txn_abort(CanHubSession *session)
-{
-    if (transactionOf(session)->state != kTRANSACTION_SENDER_RUNNING) {
-        setError(session, "no transaction running");
-        return CANHUB_ERR_STATE;
-    }
-
-    Client_AbortTransaction(&session->client);
-    pumpOnce(session, 0);
-
-    return CANHUB_OK;
-}
-
 void CanHubSession_SetError(CanHubSession *session, const char *message)
 {
     setError(session, message);
+}
+
+const char *CanHubSession_Error(const CanHubSession *session)
+{
+    return session->last_error;
+}
+
+Client *CanHubSession_Client(CanHubSession *session)
+{
+    return &session->client;
+}
+
+void CanHubSession_Pump(CanHubSession *session, int32_t timeout_ms)
+{
+    pumpOnce(session, timeout_ms);
+}
+
+bool CanHubSession_IsDisconnected(const CanHubSession *session)
+{
+    return session->disconnected;
+}
+
+CanHubTxn *CanHubSession_Transaction(const CanHubSession *session)
+{
+    return session->transaction;
+}
+
+void CanHubSession_SetTransaction(CanHubSession *session, CanHubTxn *transaction)
+{
+    session->transaction = transaction;
 }
 
 /* ---------- private ---------- */
@@ -976,15 +784,7 @@ static void pushFrame(CanHubSession *self, const FrameMessage *message)
 
     tail = (uint16_t)((self->ring_head + self->ring_count) % FRAME_RING_SIZE);
     slot = &self->frame_ring[tail];
-    memset(slot, 0, sizeof(*slot));
-    slot->timestamp_us = message->timestamp_us;
-    slot->can_id = message->can_id;
-    slot->flags = message->frame_flags;
-    if (message->route_flags & FRAME_ROUTE_FLAG_BRIDGED) {
-        slot->flags |= CANHUB_FRAME_FLAG_BRIDGED;
-    }
-    slot->length = message->payload_length;
-    memcpy(slot->payload, message->payload, message->payload_length);
+    CanHubFrames_FromWire(message, slot);
     self->ring_count++;
 }
 
@@ -1144,90 +944,9 @@ static void onConfigureReply(void *context, const ConfigureReplyMessage *reply)
     snprintf(self->last_error, sizeof(self->last_error), "configure refused by the hub (status %u)", reply->status);
 }
 
-static const TransactionSender *transactionOf(const CanHubSession *self)
+static void onRosterReport(void *context, const TxnRosterReportMessage *report)
 {
-    return Client_Transaction(&self->client);
-}
+    CanHubSession *self = context;
 
-static bool transactionFinished(const CanHubSession *self)
-{
-    return transactionOf(self)->state == kTRANSACTION_SENDER_FINISHED;
-}
-
-static int32_t offerSteps(CanHubSession *self, const CanHubTxnStep *steps, uint32_t count, uint32_t *taken)
-{
-    TxnStep wire_steps[TXN_SEND_CHUNK_STEPS];
-    TTRANSACTION_OFFER stopped_by;
-    uint32_t chunk;
-    uint32_t accepted;
-    uint32_t i;
-
-    while (*taken < count) {
-        chunk = count - *taken;
-        if (chunk > TXN_SEND_CHUNK_STEPS) {
-            chunk = TXN_SEND_CHUNK_STEPS;
-        }
-        for(i=0; i<chunk; i++) {
-            CanHubTransactions_StepToWire(&steps[*taken + i], &wire_steps[i]);
-        }
-
-        accepted = Client_SendSteps(&self->client, wire_steps, chunk, &stopped_by);
-        *taken += accepted;
-        if (accepted == chunk) {
-            continue;
-        }
-        if (transactionFinished(self)) {
-            return transactionEndedResult(self);
-        }
-        if (stopped_by == kTRANSACTION_OFFER_REJECTED) {
-            setError(self, "invalid step or no transaction running");
-            return CANHUB_ERR_ARGUMENT;
-        }
-        return CANHUB_OK;
-    }
-
-    return CANHUB_OK;
-}
-
-static int32_t handOverRecords(CanHubSession *self, const TxnStep *records, uint8_t count)
-{
-    TTRANSACTION_OFFER stopped_by;
-    uint32_t taken = 0;
-
-    while (taken < count) {
-        taken += Client_SendSteps(&self->client, records + taken, count - taken, &stopped_by);
-        if (taken == count) {
-            break;
-        }
-        if (transactionFinished(self)) {
-            return transactionEndedResult(self);
-        }
-        if (stopped_by == kTRANSACTION_OFFER_REJECTED) {
-            setError(self, "invalid step or no transaction running");
-            return CANHUB_ERR_ARGUMENT;
-        }
-        if (self->disconnected) {
-            return CANHUB_ERR_DISCONNECTED;
-        }
-        pumpOnce(self, PUMP_SLICE_MS);
-        Client_FlushTransaction(&self->client);
-    }
-
-    pumpOnce(self, 0);
-    return CANHUB_OK;
-}
-
-static int32_t transactionEndedResult(CanHubSession *self)
-{
-    const TransactionSender *transaction = transactionOf(self);
-
-    if (transaction->state != kTRANSACTION_SENDER_FINISHED) {
-        return CANHUB_ERR_STATE;
-    }
-    if (transaction->outcome.state == kTXN_STATE_DONE && transaction->outcome.reason == kTXN_REASON_NONE) {
-        return CANHUB_OK;
-    }
-
-    setError(self, "the transaction was aborted");
-    return CANHUB_ERR_TXN_ABORTED;
+    CanHubTxn_OnRosterReport(self->transaction, report);
 }
