@@ -146,7 +146,9 @@ if (canhub_txn_finish(transaction, &report) != CANHUB_OK) {
 Declarations are structs, written with designated initializers and fine as
 `static const`; actions are functions. **Every zero means what it says**: id 0
 is the id 0x000, `id_ignored_bits` 0 compares the whole id, a byte whose mask
-is 0 is not compared. What is optional is a pointer, `NULL` when absent.
+is 0 is not compared. `CANHUB_TXN_ANY_ID_BITS` as `id_ignored_bits` compares
+no id at all, standard or extended. What is optional is a pointer, `NULL` when
+absent.
 `CANHUB_TXN_BYTES(...)` expands to a byte array and its length,
 `CANHUB_TXN_EQUALS(v)` and `CANHUB_TXN_MASKED(m, v)` to a byte to compare;
 they use C99 compound literals, so C++ passes an array and its length instead.
@@ -201,15 +203,16 @@ that names nodes.
 | `canhub_txn_send_message(transaction, link, data, length, response)` | an [ISO-TP](#iso-tp) message |
 | `canhub_txn_expect(transaction, response)` | waits without sending |
 | `canhub_txn_step(transaction, step)` | every option of a step: `where`, `gap_us`, a frame of length 0 (`data` not NULL), a wait on an ISO-TP link (`data` NULL) |
-| `canhub_txn_try_step(transaction, step, timeout_ms)` | gives up with `CANHUB_ERR_TIMEOUT` when the agent's window did not take the step in time, nothing of it sent: call it again |
+| `canhub_txn_try_step(transaction, step, timeout_ms)` | gives up with `CANHUB_ERR_TIMEOUT` when the agent has not granted the transaction yet or its window did not take the step in time, nothing of it sent: call it again with the same step |
 | `canhub_txn_progress(transaction, progress)` | steps sent and completed, record bytes in flight, window |
 | `canhub_txn_abort(transaction)` | cancels at the agent; may be called from another thread (a Ctrl-C handler thread, say) |
-| `canhub_txn_wait(transaction, timeout_ms)` | marks the last step, then waits for the outcome: `CANHUB_ERR_TIMEOUT` while it is not known |
-| `canhub_txn_finish(transaction, report)` | waits for the outcome, fills `report` and frees the transaction. Call it after every `canhub_txn_create`, also after an error, as `fclose` after `fopen` |
+| `canhub_txn_wait(transaction, timeout_ms)` | ends the transaction (no step follows), then waits for the outcome: `CANHUB_ERR_TIMEOUT` while it is not known |
+| `canhub_txn_finish(transaction, report)` | waits for the outcome, fills `report` and frees the transaction. Call it after every `canhub_txn_create`, also after an error, as `fclose` after `fopen`. After `canhub_close` it only frees the transaction and returns `CANHUB_ERR_DISCONNECTED` |
 | `canhub_txn_reason_name(reason)` | `"timeout"`, `"failure_matched"`... as the CLI prints them |
 
-A step waits for the agent's window like a blocking write and frames received
-meanwhile stay queued for `canhub_recv`. `where` adds to the response for that
+A step waits for the agent's window like a blocking write and goes out as soon
+as the call returns, so the agent runs it while the application builds the
+next one; frames received meanwhile stay queued for `canhub_recv`. `where` adds to the response for that
 step only: its id and `id_ignored_bits` replace the response's, its bytes add
 to the response's bytes, so one response serves every block of a firmware
 image, each with its own counter or checksum:
@@ -258,9 +261,14 @@ is sent.
 
 `canhub_txn_create` and the first step answer `CANHUB_ERR_TXN_BUSY` while the
 agent runs another transaction, `CANHUB_ERR_TXN_UNSUPPORTED` for an agent that
-cannot, `CANHUB_ERR_WRITE_DENIED`, `CANHUB_ERR_STATE` on a lossy channel. Once
-the transaction ran, the calls return `CANHUB_ERR_TXN_ABORTED` and
-`canhub_txn_finish` reports why.
+cannot, `CANHUB_ERR_WRITE_DENIED`, `CANHUB_ERR_STATE` on a lossy channel, and
+`CANHUB_ERR_AGENT_UNREACHABLE` when the agent did not grant the transaction
+within 5 s (the library cancels it, even if the grant comes later). Once the
+transaction ran, the calls return `CANHUB_ERR_TXN_ABORTED` and
+`canhub_txn_finish` reports why. An agent without ISO-TP aborts the
+transaction with `CANHUB_TXN_REASON_UNSUPPORTED` when the first ISO-TP step
+arrives, after the steps before it ran; `failing_step` names that step.
+`canhub_close` cancels a transaction still running at the agent.
 
 ### ISO-TP
 

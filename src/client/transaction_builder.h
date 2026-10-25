@@ -39,7 +39,15 @@ typedef struct {
     const char *error;
 } TransactionBuilder;
 
+typedef struct {
+    bool has_roster;
+    uint8_t template_count;
+    uint8_t last_template;
+} TransactionBuilderMark;
+
 bool TransactionBuilder_Begin(const CanHubTxnOptions *options, TxnBeginMessage *begin, const char **error);
 void TransactionBuilder_Init(TransactionBuilder *self, bool bitrate_switch);
 bool TransactionBuilder_Step(TransactionBuilder *self, const CanHubTxnStep *step, TransactionBuild *build);
+TransactionBuilderMark TransactionBuilder_Mark(const TransactionBuilder *self);
+void TransactionBuilder_Rewind(TransactionBuilder *self, const TransactionBuilderMark *mark);
 const char *TransactionBuilder_Error(const TransactionBuilder *self);

@@ -191,6 +191,33 @@ A Cancelled Transaction Reports It And Frees The Agent
     Should Contain    ${result.stdout}    aborted reason=cancelled
     Wait Until ${hub} Relays No Transaction
 
+Shutting The Bus Down Cancels Its Transaction At The Agent
+    ${hub}=    Start CAN HUB Open To Writers On ${LOCAL_SERVER}
+    ${client_state}=    Fresh State Directory For client
+    Start CAN Agent truck42 On ${LOCAL_SERVER} Exporting vcan0 Into ${hub}
+    ${ecu}=    Start Python ${ECU} On ${LOCAL_SERVER}    vcan0    uds    --delay-ms    10
+    Log Of ${ecu} Should Contain ready
+
+    ${closed}=    Run Python ${TXN} On ${LOCAL_SERVER}    ${QUIC}    truck42/vcan0    uds    300    --close-after-ms    300    --state-dir    ${client_state}
+    Wait Until ${hub} Relays No Transaction
+    ${next}=    Run Python ${TXN} On ${LOCAL_SERVER}    ${QUIC}    truck42/vcan0    uds    5    --state-dir    ${client_state}
+
+    Should Contain    ${closed.stderr}    failed: the bus is shut down
+    Should Be True    ${next.ok}    ${next.stdout}${next.stderr}
+    Should Contain    ${next.stdout}    done steps=5
+
+Each Step Reaches The Agent When The Application Hands It Over
+    ${hub}=    Start CAN HUB Open To Writers On ${LOCAL_SERVER}
+    ${client_state}=    Fresh State Directory For client
+    Start CAN Agent truck42 On ${LOCAL_SERVER} Exporting vcan0 Into ${hub}
+    ${ecu}=    Start Python ${ECU} On ${LOCAL_SERVER}    vcan0    uds
+    Log Of ${ecu} Should Contain ready
+
+    ${result}=    Run Python ${TXN} On ${LOCAL_SERVER}    ${QUIC}    truck42/vcan0    uds    20    --step-by-step    --state-dir    ${client_state}
+
+    Should Be True    ${result.ok}    ${result.stdout}${result.stderr}
+    Should Contain    ${result.stdout}    done steps=20
+
 A Transaction Needs A Reliable Channel
     ${hub}=    Start CAN HUB Open To Writers On ${LOCAL_SERVER}
     ${client_state}=    Fresh State Directory For client

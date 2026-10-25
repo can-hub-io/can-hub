@@ -28,6 +28,18 @@ A Script Runs A Request Sequence From The Command Line Across The WAN
     Should Be True    ${result.ok}    ${result.stdout}${result.stderr}
     Should Contain    ${result.stdout}    done steps=200
 
+A Response That Compares No Identifier Takes The Answer From Any
+    ${hub}=    Start CAN HUB Open To Writers On ${LOCAL_SERVER}
+    ${client_state}=    Fresh State Directory For client
+    Start CAN Agent truck42 On ${LOCAL_SERVER} Exporting vcan0 Into ${hub}
+    ${ecu}=    Start Python ${ECU} On ${LOCAL_SERVER}    vcan0    uds
+    Log Of ${ecu} Should Contain ready
+
+    ${result}=    Run Binary can-hub-client On ${LOCAL_SERVER}    --connect    ${QUIC}    --state-dir    ${client_state}    txn    truck42/vcan0    ${SCRIPTS}/uds_any_id.txn
+
+    Should Be True    ${result.ok}    ${result.stdout}${result.stderr}
+    Should Contain    ${result.stdout}    done steps=50
+
 A Negative Response Stops A Script At Its Step
     ${hub}=    Start CAN HUB Open To Writers On ${LOCAL_SERVER}
     ${client_state}=    Fresh State Directory For client

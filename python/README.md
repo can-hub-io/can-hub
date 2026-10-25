@@ -105,13 +105,15 @@ except TransactionAborted as aborted:
 
 A `Match` compares the id, except the bits in `ignored_bits`, and the data
 bytes given in `data` (index to value, or to `Masked(mask, value)`); a
-standard and an extended id (`extended=True`) never match each other. `where`
+standard and an extended id (`extended=True`) never match each other, and
+`Match(None, ...)` meets any id. `where`
 adds to the response for one step: its id replaces the response's, its bytes
 add to them. Nothing reaches the agent before the first step; each step waits
 for the agent's window, a slice at a time, so the bus keeps receiving
 meanwhile. Leaving the `with` block finishes the transaction and raises
 `TransactionAborted` with the report when it did not complete; leaving it on
-an exception (Ctrl-C included) cancels it at the agent.
+an exception (Ctrl-C included) cancels it at the agent, and so does shutting
+the bus down while it runs.
 
 A response with `nodes` waits for an answer from each of them, told apart by
 the bits `success.ignored_bits` leaves free (or by data byte `node_byte`);

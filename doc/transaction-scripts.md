@@ -222,7 +222,7 @@ the same depth.
 
 | Line | Meaning |
 |---|---|
-| `success CONDITION` | the step completes on a frame meeting it; required, and it compares the id |
+| `success CONDITION` | the step completes on a frame meeting it; required |
 | `failure CONDITION` | the transaction aborts (`failure_matched`) |
 | `pending CONDITION` | the wait restarts (checked before `failure`) |
 | `for VARIABLE in LIST` + `success ...` | completes once every value of the list answered |
@@ -246,9 +246,11 @@ Terms joined with `and`, each one of:
 | `byte[I] == VALUE`, `byte[I] & MASK == VALUE` | `byte[1] == 0x76`, `byte[0] & 0xF0 == 0x30` |
 | `byte[I..J] == ORDER(NUMBER)` | `byte[1..2] == little_endian(sum16(block))` |
 
-Only the first 8 data bytes can be compared. Inside a response `for`, one term
-names the loop variable: `id & MASK == variable`, `(id >> SHIFT) & MASK ==
-variable` or the shorthand `id == BASE + variable`, whose bits must be the only
+Only the first 8 data bytes can be compared. A condition without an `id` term
+meets a frame with any identifier, standard or extended. Inside a response
+`for`, one term names the loop variable: `id & MASK == variable`, `(id >>
+SHIFT) & MASK == variable` or the shorthand `id == BASE + variable` (`id ==
+variable` for nodes 0x000 to 0x00F, say), whose bits must be the only
 bits of the id the other terms leave free, or `byte[I] == variable`, the whole
 byte; every value of the list must fit.
 

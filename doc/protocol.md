@@ -866,8 +866,12 @@ does for FRAME, and otherwise relays the message as is.
    TXN_BEGIN with the first step and each definition right before the first step
    that needs it, so an application builds its steps as it goes.
 3. The agent executes the steps and reports TXN_PROGRESS.
-4. The step flagged **last** completes the transaction: TXN_STATUS done. The
-   first failure ends it instead: TXN_STATUS aborted, with the reason.
+4. The client flags the batch after which no step follows **end**; it may
+   carry steps or none. Once every step completed, the end completes the
+   transaction: TXN_STATUS done. A batch after the end aborts it (reason invalid
+   step). The first failure ends it instead: TXN_STATUS aborted, with the
+   reason. The end goes in its own batch when the steps already went, so a
+   client sends each step as soon as the application hands it over.
 
 Messages naming another `txn_id` than the active one are stale (steps still in
 flight from a cancelled transaction) and are discarded.
@@ -959,7 +963,7 @@ A step of an ISO-TP template carries its message in records with the
 `frame_flags` 0) instead of a frame. A message longer than one record goes on in
 the next ones: every record but the last of the step carries the **continued**
 flag (bit 4), and names the same `template_id` and `can_id`; only the last one
-may carry the expect value or the last-step flag. A continued record is not a
+may carry the expect value. A continued record is not a
 step: sequence numbers count steps, so a batch may start or end inside one, and
 `first_seq` is the sequence number of the step its first record belongs to. The
 agent copies each record of a message out of the ring as the step reaches it and
@@ -1089,11 +1093,12 @@ TXN_STEPS (total 16 + records, records at most 400 bytes)
 @5   step_count u8 (records in the batch)
 @6   txn_id u16
 @8   first_seq u32 (the step the first record belongs to)
-@12  reserved u32
+@12  flags u8 (bit 0: end, no step follows this batch)
+@13  reserved u8[3]
 @16  records, back to back, each:
        +0  template_id u8
        +1  flags u8 (bit 0: expect value present, bit 1: expect-only, no
-                     frame, bit 2: last step, bit 3: message (ISO-TP), bit 4:
+                     frame, bit 2: reserved, bit 3: message (ISO-TP), bit 4:
                      continued in the next record)
        +2  payload_length u8 (0-8 classic, 0-64 FD; 0 for expect-only;
                               1-255 for a message record)

@@ -194,6 +194,10 @@ void canhub_close(CanHubSession *session)
         return;
     }
 
+    if (session->transaction != NULL) {
+        CanHubTxn_Detach(session->transaction);
+        session->transaction = NULL;
+    }
     if (session->port != NULL) {
         session->port->disconnect(session->port->context);
     }

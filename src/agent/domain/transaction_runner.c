@@ -41,6 +41,7 @@ static bool transmitTracked(TransactionRunner *self, const FrameMessage *frame, 
 static bool settleWait(TransactionRunner *self, uint64_t now_us);
 static void startWait(TransactionRunner *self, uint64_t now_us);
 static void completeStep(TransactionRunner *self);
+static void finishDone(TransactionRunner *self);
 static void flushProgress(TransactionRunner *self, uint64_t now_us);
 static void reportProgress(TransactionRunner *self);
 static bool isOnBus(const TransactionRunner *self, uint8_t interface_index, const FrameMessage *frame);
@@ -129,6 +130,7 @@ void TransactionRunner_Begin(
     self->roster_count = 0;
     self->defined_templates = 0;
     self->next_seq = 0;
+    self->steps_ended = false;
     self->completed_steps = 0;
     self->pushed_bytes = 0;
     self->consumed_bytes = 0;
@@ -191,7 +193,7 @@ void TransactionRunner_PushSteps(TransactionRunner *self, const TxnStepsMessage 
     if (!self->active || steps->txn_id != self->txn_id) {
         return;
     }
-    if (steps->first_seq != self->next_seq) {
+    if (self->steps_ended || steps->first_seq != self->next_seq) {
         abortWith(self, kTXN_REASON_INVALID_STEP, steps->first_seq);
         return;
     }
@@ -208,6 +210,7 @@ void TransactionRunner_PushSteps(TransactionRunner *self, const TxnStepsMessage 
         }
     }
     self->next_seq = seq;
+    self->steps_ended = (steps->flags & TXN_STEPS_FLAG_END) != 0;
 }
 
 void TransactionRunner_OnFrame(TransactionRunner *self, uint8_t interface_index, const FrameMessage *frame)
@@ -271,7 +274,7 @@ uint64_t TransactionRunner_NextWakeUs(const TransactionRunner *self)
 
     wake_us = earliestWake(wake_us, self->report_due_us);
     if (self->current.phase == kTRANSACTION_PHASE_IDLE) {
-        if (!StepRing_IsEmpty(&self->ring)) {
+        if (!StepRing_IsEmpty(&self->ring) || self->steps_ended) {
             return self->last_tick_us;
         }
         if (self->keepalive.period_ms != 0) {
@@ -454,6 +457,10 @@ static bool loadNextStep(TransactionRunner *self, uint64_t now_us)
     uint32_t available;
 
     available = StepRing_Peek(&self->ring, &record);
+    if (available == 0 && self->steps_ended) {
+        finishDone(self);
+        return false;
+    }
     if (available == 0) {
         return waitForSteps(self, now_us);
     }
@@ -705,18 +712,16 @@ static void startWait(TransactionRunner *self, uint64_t now_us)
 
 static void completeStep(TransactionRunner *self)
 {
-    TxnStatusMessage status;
-    bool last = (self->current.step.flags & TXN_STEP_FLAG_LAST) != 0;
-
     reportMissingRoster(self);
     releaseRecord(self);
     self->message_length = 0;
     self->completed_steps++;
     self->current.phase = kTRANSACTION_PHASE_IDLE;
+}
 
-    if (!last) {
-        return;
-    }
+static void finishDone(TransactionRunner *self)
+{
+    TxnStatusMessage status;
 
     prepareStatus(self, &status, kTXN_STATE_DONE, kTXN_REASON_NONE);
     finish(self, &status);

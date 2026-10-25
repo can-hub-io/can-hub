@@ -34,6 +34,7 @@ MATCH_BYTES = 8
 SEND_SLICE_MS = 50
 WAIT_SLICE_MS = 50
 CLOSE_WAIT_MS = 1000
+SHUT_DOWN = "the bus is shut down"
 MICROSECONDS_PER_SECOND = 1_000_000
 MILLISECONDS_PER_SECOND = 1000
 BYTE_MASK = 0xFF
@@ -52,9 +53,9 @@ class Masked:
 class Match:
     """A frame whose id equals ``id`` except in ``ignored_bits`` (0: the exact
     id) and whose first 8 data bytes meet ``data``. A standard and an
-    extended id never match each other."""
+    extended id never match each other; ``id`` None meets any id."""
 
-    id: int
+    id: Optional[int]
     data: Mapping[int, Union[int, Masked]] = field(default_factory=dict)
     ignored_bits: int = 0
     extended: bool = False
@@ -258,7 +259,7 @@ class Transaction:
         report = native.CanHubTxnReport()
         with self._bus._lock:
             status = native.lib.canhub_txn_finish(self._handle, ctypes.byref(report))
-            error = native.last_error(self._bus._session)
+            error = self._error()
         self._handle = None
         self._result = from_native_report(report)
         if status == native.ERR_TXN_ABORTED:
@@ -271,7 +272,7 @@ class Transaction:
         while True:
             with self._bus._lock:
                 status = native.lib.canhub_txn_try_step(self._handle, ctypes.byref(step), SEND_SLICE_MS)
-                error = native.last_error(self._bus._session) if status not in (native.OK, native.ERR_TIMEOUT) else ""
+                error = self._error() if status not in (native.OK, native.ERR_TIMEOUT) else ""
             if status == native.OK:
                 return
             if status == native.ERR_TIMEOUT:
@@ -279,6 +280,9 @@ class Transaction:
             if status == native.ERR_TXN_ABORTED:
                 self.finish()
             raise CanOperationError(error)
+
+    def _error(self) -> str:
+        return native.last_error(self._bus._session) if self._bus._session else SHUT_DOWN
 
     def _report_roster(self, context, result) -> None:
         if self._on_roster is not None:
@@ -438,8 +442,11 @@ def to_native_response(response: Response, keep: list) -> "native.CanHubTxnRespo
 
 def to_native_match(match: Match) -> "native.CanHubTxnMatch":
     native_match = native.CanHubTxnMatch()
-    native_match.id = to_native_id(match.id, match.extended)
-    native_match.id_ignored_bits = match.ignored_bits
+    if match.id is None:
+        native_match.id_ignored_bits = native.TXN_ANY_ID_BITS
+    else:
+        native_match.id = to_native_id(match.id, match.extended)
+        native_match.id_ignored_bits = match.ignored_bits
     for index, expected in match.data.items():
         if not 0 <= index < MATCH_BYTES:
             raise ValueError(f"a match compares the first {MATCH_BYTES} data bytes")

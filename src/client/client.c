@@ -278,7 +278,6 @@ uint32_t Client_SendSteps(Client *self, const TxnStep *steps, uint32_t count, TT
             break;
         }
     }
-    Client_FlushTransaction(self);
 
     *stopped_by = result;
 
@@ -289,9 +288,6 @@ TTRANSACTION_OFFER Client_EndTransaction(Client *self)
 {
     TTRANSACTION_OFFER result = TransactionSender_End(&self->transaction);
 
-    if (result == kTRANSACTION_OFFER_FLUSH_NEEDED && Client_FlushTransaction(self)) {
-        result = TransactionSender_End(&self->transaction);
-    }
     Client_FlushTransaction(self);
 
     return result;
@@ -320,7 +316,7 @@ void Client_AbortTransaction(Client *self)
     uint8_t encoded[CONTROL_MESSAGE_MAX_WIRE_SIZE];
     size_t encoded_size;
 
-    if (!isTransactionRunning(self)) {
+    if (!isTransactionRunning(self) && self->transaction.state != kTRANSACTION_SENDER_BEGINNING) {
         return;
     }
 
@@ -328,6 +324,9 @@ void Client_AbortTransaction(Client *self)
     abort_message.txn_id = self->transaction.txn_id;
     encoded_size = TxnAbortMessage_Encode(&abort_message, encoded, sizeof(encoded));
     self->hub->send_control(self->hub->context, encoded, encoded_size);
+    if (self->transaction.state == kTRANSACTION_SENDER_BEGINNING) {
+        TransactionSender_Reset(&self->transaction);
+    }
 }
 
 const TransactionSender *Client_Transaction(const Client *self)

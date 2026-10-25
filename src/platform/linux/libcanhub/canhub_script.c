@@ -36,6 +36,7 @@ typedef struct {
     const char *label;
     char open_path[SCRIPT_PATH_MAX];
     FILE *open_file;
+    bool generator_failed;
 } ScriptRun;
 
 typedef struct {
@@ -54,9 +55,11 @@ static bool readScriptFile(void *context, const char *path, uint64_t offset, uin
 static bool resolvePath(const ScriptRun *run, const char *path, char *resolved, size_t resolved_size);
 static int32_t compileScript(ScriptRun *run, CanHubSession *session);
 static int32_t prepareKeepalive(ScriptRun *run, CanHubSession *session);
+static int32_t checkOptions(ScriptRun *run, CanHubSession *session);
 static int32_t countSteps(ScriptRun *run, CanHubSession *session, uint32_t *total_steps);
 static int32_t reportScriptError(CanHubSession *session, const ScriptRun *run, uint16_t line_number, const char *message);
 static int32_t streamSteps(ScriptRun *run, Progress *progress);
+static int32_t queueStep(Progress *progress, const CanHubTxnStep *step);
 static int32_t settle(Progress *progress);
 static bool keepGoing(Progress *progress);
 static void releaseRun(ScriptRun *run);
@@ -148,6 +151,9 @@ static int32_t runScript(ScriptRun *run, CanHubSession *session, const CanHubTxn
         result = prepareKeepalive(run, session);
     }
     if (result == CANHUB_OK) {
+        result = checkOptions(run, session);
+    }
+    if (result == CANHUB_OK) {
         result = countSteps(run, session, &progress.total_steps);
     }
     if (result != CANHUB_OK) {
@@ -166,7 +172,7 @@ static int32_t runScript(ScriptRun *run, CanHubSession *session, const CanHubTxn
     if (result == CANHUB_OK) {
         result = settle(&progress);
     }
-    if (result == CANHUB_ERR_ARGUMENT) {
+    if (run->generator_failed) {
         snprintf(message, sizeof(message), "%s", CanHubSession_Error(session));
         canhub_txn_abort(progress.transaction);
         canhub_txn_finish(progress.transaction, report);
@@ -313,6 +319,21 @@ static int32_t prepareKeepalive(ScriptRun *run, CanHubSession *session)
     return CANHUB_OK;
 }
 
+static int32_t checkOptions(ScriptRun *run, CanHubSession *session)
+{
+    TxnBeginMessage begin;
+    const char *error = NULL;
+
+    if (TransactionBuilder_Begin(&run->program.options, &begin, &error)) {
+        return CANHUB_OK;
+    }
+    if (run->script.keepalive != SCRIPT_NO_INDEX) {
+        return reportScriptError(session, run, run->script.statements[run->script.keepalive].line_number, error);
+    }
+    CanHubSession_SetError(session, error);
+    return CANHUB_ERR_ARGUMENT;
+}
+
 static int32_t countSteps(ScriptRun *run, CanHubSession *session, uint32_t *total_steps)
 {
     ScriptFiles files = { run, readScriptFile };
@@ -360,21 +381,35 @@ static int32_t streamSteps(ScriptRun *run, Progress *progress)
     memset(&error, 0, sizeof(error));
     ScriptGenerator_Start(&run->generator, &run->program, &files);
     while ((generated = ScriptGenerator_Next(&run->generator, &step, &error)) == kSCRIPT_GENERATED_STEP) {
-        result = canhub_txn_step(progress->transaction, &step);
+        result = queueStep(progress, &step);
         if (result != CANHUB_OK) {
             return result;
-        }
-        if (!keepGoing(progress)) {
-            canhub_txn_abort(progress->transaction);
-            return CANHUB_ERR_TXN_ABORTED;
         }
     }
     if (generated == kSCRIPT_GENERATED_ERROR) {
         CanHubSession_SetError(progress->session, error.message);
         run->generator.line_number = error.line_number;
+        run->generator_failed = true;
         return CANHUB_ERR_ARGUMENT;
     }
     return CANHUB_OK;
+}
+
+static int32_t queueStep(Progress *progress, const CanHubTxnStep *step)
+{
+    int32_t result;
+
+    while ((result = CanHubTxn_Queue(progress->transaction, step, WAIT_SLICE_MS)) == CANHUB_ERR_TIMEOUT) {
+        if (!keepGoing(progress)) {
+            canhub_txn_abort(progress->transaction);
+            return CANHUB_ERR_TXN_ABORTED;
+        }
+    }
+    if (result == CANHUB_OK && !keepGoing(progress)) {
+        canhub_txn_abort(progress->transaction);
+        return CANHUB_ERR_TXN_ABORTED;
+    }
+    return result;
 }
 
 static int32_t settle(Progress *progress)

@@ -197,6 +197,33 @@ describe("transaction_builder", []() {
             expect(build.template_message.patterns[kTXN_PATTERN_ADVANCE].can_mask).toBe((uint32_t)(0x1FFFFF00 | EFF_FLAG));
         });
 
+        it("compares no id at all with every id bit ignored", []() {
+            CanHubTxnResponse response = positiveResponse();
+            CanHubTxnStep definition = sendStep(&response);
+
+            response.success.id_ignored_bits = CANHUB_TXN_ANY_ID_BITS;
+
+            step(&definition);
+
+            expect(build.template_message.patterns[kTXN_PATTERN_ADVANCE].can_id).toBe((uint32_t)0);
+            expect(build.template_message.patterns[kTXN_PATTERN_ADVANCE].can_mask).toBe((uint32_t)0);
+            expect(build.template_message.patterns[kTXN_PATTERN_ADVANCE].payload_mask).toBe((uint64_t)0xFF00);
+        });
+
+        it("defines a template again after rewinding to before it", []() {
+            CanHubTxnResponse response = positiveResponse();
+            CanHubTxnStep definition = sendStep(&response);
+            TransactionBuilderMark mark;
+
+            mark = TransactionBuilder_Mark(&builder);
+            step(&definition);
+            TransactionBuilder_Rewind(&builder, &mark);
+            step(&definition);
+
+            expect(build.defines_template).toBe(true);
+            expect(build.template_message.template_id).toBe(0);
+        });
+
         it("waits for nothing on a step without response, keeping its gap", []() {
             CanHubTxnStep definition = sendStep(NULL);
 

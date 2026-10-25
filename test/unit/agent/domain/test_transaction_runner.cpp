@@ -79,7 +79,9 @@ static TxnStep transmitOnlyStep(uint8_t template_id, uint32_t can_id);
 static TxnStep expectOnlyStep(uint8_t template_id);
 static TxnStep messageRecord(uint8_t template_id, uint8_t flags, uint8_t length);
 static void pushSteps(const TxnStep *steps, uint8_t step_count, uint32_t first_seq);
+static void pushLastSteps(const TxnStep *steps, uint8_t step_count, uint32_t first_seq);
 static void pushStepsOfTransaction(uint16_t other_txn_id, const TxnStep *steps, uint8_t step_count, uint32_t first_seq);
+static void pushBatch(uint16_t other_txn_id, const TxnStep *steps, uint8_t step_count, uint32_t first_seq, uint8_t flags);
 static void answer(uint32_t can_id, uint8_t byte0, uint8_t byte1, uint8_t byte2, uint8_t byte3);
 static void answerFromNode(uint8_t node, uint16_t crc);
 static void answerEcho(uint32_t can_id);
@@ -145,8 +147,7 @@ describe("transaction_runner", []() {
 
             steps[0] = requestStep(0x36);
             steps[1] = requestStep(0x36);
-            steps[1].flags = TXN_STEP_FLAG_LAST;
-            pushSteps(steps, 2, 0);
+            pushLastSteps(steps, 2, 0);
 
             TransactionRunner_Tick(&runner, 100);
             answer(RESPONSE_ID, 0x02, 0x76, 0x01, 0x00);
@@ -159,6 +160,36 @@ describe("transaction_runner", []() {
             expect(last_status.state).toBe((uint8_t)kTXN_STATE_DONE);
             expect(last_status.completed_steps).toBe((uint32_t)2);
             expect(TransactionRunner_IsActive(&runner)).toBe(false);
+        });
+
+        it("finishes when the end comes after its last step completed", []() {
+            TxnStep step;
+            uint32_t status_before_end;
+
+            step = requestStep(0x36);
+            pushSteps(&step, 1, 0);
+            TransactionRunner_Tick(&runner, 100);
+            answer(RESPONSE_ID, 0x02, 0x76, 0x00, 0x00);
+            TransactionRunner_Tick(&runner, 200);
+            status_before_end = status_count;
+
+            pushLastSteps(NULL, 0, 1);
+            TransactionRunner_Tick(&runner, 300);
+
+            expect(status_before_end).toBe((uint32_t)0);
+            expect(last_status.state).toBe((uint8_t)kTXN_STATE_DONE);
+            expect(last_status.completed_steps).toBe((uint32_t)1);
+        });
+
+        it("aborts on steps sent after the end", []() {
+            TxnStep step;
+
+            step = requestStep(0x36);
+            pushLastSteps(&step, 1, 0);
+            pushSteps(&step, 1, 1);
+
+            expect(last_status.reason).toBe((uint8_t)kTXN_REASON_INVALID_STEP);
+            expect(last_status.failing_seq).toBe((uint32_t)1);
         });
 
         it("aborts on a negative response and reports the frame", []() {
@@ -288,8 +319,7 @@ describe("transaction_runner", []() {
             template_message.flags = TXN_TEMPLATE_FLAG_SOFT;
             defineTemplate(&template_message);
             step = requestStep(0x3E);
-            step.flags = TXN_STEP_FLAG_LAST;
-            pushSteps(&step, 1, 0);
+            pushLastSteps(&step, 1, 0);
             TransactionRunner_Tick(&runner, 0);
 
             TransactionRunner_Tick(&runner, TIMEOUT_US);
@@ -305,8 +335,7 @@ describe("transaction_runner", []() {
             template_message.flags = 0;
             defineTemplate(&template_message);
             step = requestStep(0x36);
-            step.flags = TXN_STEP_FLAG_LAST;
-            pushSteps(&step, 1, 0);
+            pushLastSteps(&step, 1, 0);
             TransactionRunner_Tick(&runner, 0);
 
             answer(RESPONSE_ID, 0x02, 0x75, 0x00, 0x00);
@@ -373,9 +402,9 @@ describe("transaction_runner", []() {
             template_message = batchAckTemplate();
             defineTemplate(&template_message);
             step = expectOnlyStep(ACK_TEMPLATE);
-            step.flags |= TXN_STEP_FLAG_EXPECT_VALUE | TXN_STEP_FLAG_LAST;
+            step.flags |= TXN_STEP_FLAG_EXPECT_VALUE;
             step.expect_value = (uint64_t)BATCH_CRC << ACK_CRC_SHIFT;
-            pushSteps(&step, 1, 0);
+            pushLastSteps(&step, 1, 0);
             TransactionRunner_Tick(&runner, 0);
         });
 
@@ -476,8 +505,7 @@ describe("transaction_runner", []() {
             defineTemplate(&template_message);
             steps[0] = expectOnlyStep(ACK_TEMPLATE);
             steps[1] = expectOnlyStep(ACK_TEMPLATE);
-            steps[1].flags |= TXN_STEP_FLAG_LAST;
-            pushSteps(steps, 2, 0);
+            pushLastSteps(steps, 2, 0);
             TransactionRunner_Tick(&runner, 0);
         });
 
@@ -522,8 +550,7 @@ describe("transaction_runner", []() {
             template_message.patterns[kTXN_PATTERN_ADVANCE].payload_mask = 0;
             defineTemplate(&template_message);
             step = expectOnlyStep(ACK_TEMPLATE);
-            step.flags |= TXN_STEP_FLAG_LAST;
-            pushSteps(&step, 1, 0);
+            pushLastSteps(&step, 1, 0);
             TransactionRunner_Tick(&runner, 0);
         });
 
@@ -571,8 +598,8 @@ describe("transaction_runner", []() {
             TxnStep records[2];
 
             records[0] = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_CONTINUED, HALF_MESSAGE);
-            records[1] = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_LAST, HALF_MESSAGE);
-            pushSteps(records, 2, 0);
+            records[1] = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE, HALF_MESSAGE);
+            pushLastSteps(records, 2, 0);
 
             TransactionRunner_Tick(&runner, 100);
             answerBytes({ 0x30, 0x00, 0x00 });
@@ -589,8 +616,8 @@ describe("transaction_runner", []() {
             TxnStep request;
             bool active_after_first_timeout;
 
-            request = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_LAST, 3);
-            pushSteps(&request, 1, 0);
+            request = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE, 3);
+            pushLastSteps(&request, 1, 0);
 
             TransactionRunner_Tick(&runner, 100);
             answerBytes({ 0x03, MESSAGE_NEGATIVE, 0x36, 0x78 });
@@ -614,8 +641,8 @@ describe("transaction_runner", []() {
             template_message = isotpTemplate();
             template_message.extend_timeout_ms = 5 * TIMEOUT_MS;
             defineTemplate(&template_message);
-            request = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_LAST, 3);
-            pushSteps(&request, 1, 0);
+            request = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE, 3);
+            pushLastSteps(&request, 1, 0);
 
             TransactionRunner_Tick(&runner, 100);
             answerBytes({ 0x03, MESSAGE_NEGATIVE, 0x36, 0x78 });
@@ -631,8 +658,8 @@ describe("transaction_runner", []() {
         it("reassembles a multi-frame answer, answering it with flow control", []() {
             TxnStep request;
 
-            request = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_LAST, 3);
-            pushSteps(&request, 1, 0);
+            request = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE, 3);
+            pushLastSteps(&request, 1, 0);
 
             TransactionRunner_Tick(&runner, 100);
             answerBytes({ 0x10, 0x0A, MESSAGE_POSITIVE, 0x01, 0x02, 0x03, 0x04, 0x05 });
@@ -666,9 +693,9 @@ describe("transaction_runner", []() {
 
             first_message[0] = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_CONTINUED, 2);
             first_message[1] = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE, 1);
-            second_message = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_LAST, 3);
+            second_message = messageRecord(ISOTP_TEMPLATE, TXN_STEP_FLAG_MESSAGE, 3);
             pushSteps(first_message, 2, 0);
-            pushSteps(&second_message, 1, 1);
+            pushLastSteps(&second_message, 1, 1);
 
             TransactionRunner_Tick(&runner, 100);
             answerBytes({ 0x02, MESSAGE_POSITIVE, 0x01 });
@@ -847,12 +874,11 @@ describe("transaction_runner", []() {
             defineTemplate(&template_message);
             frame_step = transmitOnlyStep(BROADCAST_TEMPLATE, REQUEST_ID);
             listening_step = expectOnlyStep(RESPONSE_TEMPLATE);
-            listening_step.flags |= TXN_STEP_FLAG_LAST;
 
             pushSteps(&frame_step, 1, 0);
             TransactionRunner_Tick(&runner, 100);
             answer(RESPONSE_ID, 0x02, 0x76, 0x00, 0x00);
-            pushSteps(&listening_step, 1, 1);
+            pushLastSteps(&listening_step, 1, 1);
             TransactionRunner_Tick(&runner, 200);
 
             expect(last_status.state).toBe((uint8_t)kTXN_STATE_DONE);
@@ -870,12 +896,11 @@ describe("transaction_runner", []() {
             defineTemplate(&template_message);
             frame_step = transmitOnlyStep(BROADCAST_TEMPLATE, REQUEST_ID);
             request = requestStep(0x36);
-            request.flags = TXN_STEP_FLAG_LAST;
 
             pushSteps(&frame_step, 1, 0);
             TransactionRunner_Tick(&runner, 100);
             answer(RESPONSE_ID, 0x02, 0x76, 0x00, 0x00);
-            pushSteps(&request, 1, 1);
+            pushLastSteps(&request, 1, 1);
             TransactionRunner_Tick(&runner, 200);
             TransactionRunner_Tick(&runner, 200 + TIMEOUT_US);
 
@@ -990,10 +1015,10 @@ describe("transaction_runner", []() {
                 steps[i] = transmitOnlyStep(BROADCAST_TEMPLATE, BATCH_ID);
             }
             steps[BATCH_FRAMES] = expectOnlyStep(ACK_TEMPLATE);
-            steps[BATCH_FRAMES].flags |= TXN_STEP_FLAG_EXPECT_VALUE | TXN_STEP_FLAG_LAST;
+            steps[BATCH_FRAMES].flags |= TXN_STEP_FLAG_EXPECT_VALUE;
             steps[BATCH_FRAMES].expect_value = (uint64_t)BATCH_CRC << ACK_CRC_SHIFT;
             pushSteps(steps, BATCH_FRAMES / 2, 0);
-            pushSteps(steps + BATCH_FRAMES / 2, BATCH_FRAMES / 2 + 1, BATCH_FRAMES / 2);
+            pushLastSteps(steps + BATCH_FRAMES / 2, BATCH_FRAMES / 2 + 1, BATCH_FRAMES / 2);
 
             TransactionRunner_Tick(&runner, 0);
             for(node=0; node<NODES; node++) {
@@ -1201,9 +1226,19 @@ static void pushSteps(const TxnStep *steps, uint8_t step_count, uint32_t first_s
     pushStepsOfTransaction(txn_id, steps, step_count, first_seq);
 }
 
+static void pushLastSteps(const TxnStep *steps, uint8_t step_count, uint32_t first_seq)
+{
+    pushBatch(txn_id, steps, step_count, first_seq, TXN_STEPS_FLAG_END);
+}
+
 static void pushStepsOfTransaction(uint16_t other_txn_id, const TxnStep *steps, uint8_t step_count, uint32_t first_seq)
 {
-    TxnStepsMessage fixed_fields = { CHANNEL, 0, other_txn_id, first_seq, NULL, 0 };
+    pushBatch(other_txn_id, steps, step_count, first_seq, 0);
+}
+
+static void pushBatch(uint16_t other_txn_id, const TxnStep *steps, uint8_t step_count, uint32_t first_seq, uint8_t flags)
+{
+    TxnStepsMessage fixed_fields = { CHANNEL, 0, other_txn_id, first_seq, flags, NULL, 0 };
     TxnStepsMessage decoded;
     TxnStepsWriter writer;
     uint8_t buffer[MESSAGE_HEADER_SIZE + TXN_STEPS_BODY_SIZE_MAX];

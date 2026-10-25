@@ -20,4 +20,6 @@ bool CanHubSession_IsDisconnected(const CanHubSession *session);
 CanHubTxn *CanHubSession_Transaction(const CanHubSession *session);
 void CanHubSession_SetTransaction(CanHubSession *session, CanHubTxn *transaction);
 
+int32_t CanHubTxn_Queue(CanHubTxn *transaction, const CanHubTxnStep *step, int32_t timeout_ms);
 void CanHubTxn_OnRosterReport(CanHubTxn *transaction, const TxnRosterReportMessage *report);
+void CanHubTxn_Detach(CanHubTxn *transaction);

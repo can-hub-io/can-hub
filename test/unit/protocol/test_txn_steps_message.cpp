@@ -22,7 +22,7 @@ static uint8_t decodeRecords(const TxnStepsMessage *message, TxnStep *steps);
 static uint8_t appendUntilRefused(TxnStepsWriter *writer, const TxnStep *step);
 static bool areBytesZero(const uint8_t *bytes, size_t count);
 
-static const TxnStepsMessage fixed_fields = { 3, 0, 7, 140000, NULL, 0 };
+static const TxnStepsMessage fixed_fields = { 3, 0, 7, 140000, 0, NULL, 0 };
 
 describe("txn_step", []() {
     it("takes 16 bytes for a classic 8-byte TX step", []() {
@@ -137,7 +137,7 @@ describe("txn_step", []() {
         uint8_t decoded_count;
 
         steps[0] = messageRecord(248, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_CONTINUED);
-        steps[1] = messageRecord(100, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_EXPECT_VALUE | TXN_STEP_FLAG_LAST);
+        steps[1] = messageRecord(100, TXN_STEP_FLAG_MESSAGE | TXN_STEP_FLAG_EXPECT_VALUE);
         steps[1].expect_value = 0x0176;
 
         encoded_size = encodeSteps(steps, 2, buffer, sizeof(buffer));
@@ -227,7 +227,6 @@ describe("txn_steps_message", []() {
         steps[1].expect_value = 0xC0FFEE;
         steps[2] = classicTxStep(0x18DA10F1 | FRAME_CAN_ID_FLAG_EFF, FRAME_PAYLOAD_MAX_FD);
         steps[2].frame_flags = FRAME_FLAG_FD | FRAME_FLAG_BRS;
-        steps[2].flags = TXN_STEP_FLAG_LAST;
 
         encoded_size = encodeSteps(steps, 3, buffer, sizeof(buffer));
         decoded_ok = TxnStepsMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
@@ -247,8 +246,24 @@ describe("txn_steps_message", []() {
         expect(decoded_steps[1].expect_value).toBe((uint64_t)0xC0FFEE);
         expect(decoded_steps[2].can_id).toBe((uint32_t)(0x18DA10F1 | FRAME_CAN_ID_FLAG_EFF));
         expect(decoded_steps[2].frame_flags).toBe((uint8_t)(FRAME_FLAG_FD | FRAME_FLAG_BRS));
-        expect(decoded_steps[2].flags).toBe((uint8_t)TXN_STEP_FLAG_LAST);
+        expect(decoded_steps[2].flags).toBe((uint8_t)0);
         expect(decoded_steps[2].payload).toEqual(steps[2].payload);
+    });
+
+    it("carries the flag that ends the transaction", []() {
+        TxnStepsWriter writer;
+        TxnStepsMessage decoded;
+        uint8_t buffer[TEST_BUFFER_SIZE];
+        size_t encoded_size;
+
+        TxnStepsWriter_Init(&writer, &fixed_fields, buffer, sizeof(buffer));
+        TxnStepsWriter_MarkEnd(&writer);
+        encoded_size = TxnStepsWriter_Finish(&writer);
+        TxnStepsMessage_Decode(&decoded, buffer + MESSAGE_HEADER_SIZE, encoded_size - MESSAGE_HEADER_SIZE);
+
+        expect(buffer[MESSAGE_HEADER_SIZE + 8]).toBe((uint8_t)TXN_STEPS_FLAG_END);
+        expect(decoded.flags).toBe((uint8_t)TXN_STEPS_FLAG_END);
+        expect(decoded.step_count).toBe(0);
     });
 
     it("accepts a batch without steps", []() {

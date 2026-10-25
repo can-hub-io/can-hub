@@ -1,7 +1,7 @@
 """Run a transaction through the hub with python-can-hub.
 
 usage: txn_run.py <url> <channel> uds <count> [--exclusive] [--timeout-ms T] [--within S] [--abort-after-ms T]
-                   [--lossy] [--state-dir PATH]
+                   [--close-after-ms T] [--step-by-step] [--lossy] [--state-dir PATH]
        txn_run.py <url> <channel> batch <batches> <nodes> [--hold-ms T] [--keepalive-ms T] [--idle-timeout-ms T] [--state-dir PATH]
 
 uds: <count> requests [02 36 n] to 0x7E0, each waiting for [.. 76 n] on 0x7E8,
@@ -9,13 +9,16 @@ aborting on a negative response and extended by a response pending.
 batch: <batches> batches of 16 frames on 0x123, each acknowledged with its
 crc by every node of a <nodes>-strong roster (ids 0x700 | node).
 --abort-after-ms cancels the transaction that long after handing the steps
-over; --lossy opens the bus without the reliable channel a transaction needs;
+over; --close-after-ms shuts the bus down that long after, with the
+transaction still running; --step-by-step waits for each step to complete
+before handing over the next; --lossy opens the bus without the reliable channel a transaction needs;
 --hold-ms hands the first batch over, then keeps reading for T ms without
 handing over another step; --idle-timeout-ms is how long the agent then waits
 for steps, sending a keepalive on 0x7DF every --keepalive-ms meanwhile.
 Prints "granted" once the first step is at the agent, then "done steps=N
 seconds=S" (exit 0), or "aborted reason=R step=S missing=[...] node=N ..."
-(exit 2); --within S fails with exit 3 when the transaction took longer.
+(exit 2), or "failed: why" on stderr (exit 4); --within S fails with exit 3 when the
+transaction took longer.
 """
 
 import argparse
@@ -24,6 +27,8 @@ import sys
 import time
 
 import can
+
+from can import CanOperationError
 
 from canhub import Keepalive, Match, Response, TransactionAborted
 
@@ -46,8 +51,11 @@ BITS_PER_BYTE = 8
 FRAME_BYTES = 8
 MILLISECONDS_PER_SECOND = 1000
 ACK_TIMEOUT_S = 0.5
+STEP_COMPLETION_TIMEOUT_S = 2.0
+POLL_S = 0.01
 EXIT_ABORTED = 2
 EXIT_TOO_SLOW = 3
+EXIT_FAILED = 4
 
 
 def main():
@@ -61,6 +69,8 @@ def main():
     parser.add_argument("--within", type=float)
     parser.add_argument("--state-dir")
     parser.add_argument("--abort-after-ms", type=int)
+    parser.add_argument("--close-after-ms", type=int)
+    parser.add_argument("--step-by-step", action="store_true")
     parser.add_argument("--lossy", action="store_true")
     parser.add_argument("--hold-ms", type=int)
     parser.add_argument("--keepalive-ms", type=int)
@@ -89,6 +99,9 @@ def main():
             flush=True,
         )
         sys.exit(EXIT_ABORTED)
+    except CanOperationError as error:
+        print(f"failed: {error}", file=sys.stderr, flush=True)
+        sys.exit(EXIT_FAILED)
     finally:
         bus.shutdown()
 
@@ -114,10 +127,25 @@ def run_requests(bus, arguments):
             counter = index & BYTE_MASK
             transaction.send(REQUEST_ID, bytes([0x02, SERVICE, counter]), transfer, where=Match(RESPONSE_ID, data={2: counter}))
             announce_grant(index)
+            if arguments.step_by_step:
+                await_completion(bus, transaction, index + 1)
         if arguments.abort_after_ms is not None:
             time.sleep(arguments.abort_after_ms / MILLISECONDS_PER_SECOND)
             transaction.abort()
+        if arguments.close_after_ms is not None:
+            time.sleep(arguments.close_after_ms / MILLISECONDS_PER_SECOND)
+            bus.shutdown()
     return transaction.result
+
+
+def await_completion(bus, transaction, steps):
+    """Read the bus, as a live application does, until the agent completed
+    the steps handed over: each one is at the agent once its call returns."""
+    deadline = time.monotonic() + STEP_COMPLETION_TIMEOUT_S
+    while transaction.progress().completed_steps < steps:
+        if time.monotonic() > deadline:
+            raise CanOperationError(f"step {steps - 1} did not complete before the next was handed over")
+        bus.recv(timeout=POLL_S)
 
 
 def announce_grant(step):
@@ -161,9 +189,7 @@ def keepalive(arguments):
 
 
 def hold_back(bus, hold_ms):
-    """Keep reading, as a live application does, without handing over steps.
-    The library holds the last step handed over back; it is the next batch's
-    first frame, so the acknowledgement before it is already at the agent."""
+    """Keep reading, as a live application does, without handing over steps."""
     print("holding", flush=True)
     deadline = time.monotonic() + hold_ms / MILLISECONDS_PER_SECOND
     while time.monotonic() < deadline:

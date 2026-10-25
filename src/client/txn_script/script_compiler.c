@@ -33,12 +33,12 @@ static bool checkConstants(Compiler *self);
 static bool isReserved(const ScriptName *name);
 static bool checkResponses(Compiler *self);
 static bool compileResponse(Compiler *self, uint16_t index);
-static bool compileOther(Compiler *self, uint16_t condition, uint16_t line_number, CanHubTxnMatch *match);
+static bool compileOther(Compiler *self, uint16_t condition, CanHubTxnMatch *match);
 static bool compileRoster(Compiler *self, uint16_t index, const ScriptTerm *term, ScriptPattern *success);
 static bool nodeBitsAreFree(Compiler *self, const CanHubTxnResponse *response, const ScriptTerm *term);
 static bool rosterValues(Compiler *self, const ScriptResponse *response_node, uint32_t *values, uint8_t *count);
 static bool deriveNodeBits(Compiler *self, const ScriptTerm *term, uint32_t highest, ScriptPattern *success, uint32_t *bits);
-static bool agreesWithRoster(Compiler *self, const CanHubTxnResponse *response, const uint32_t *values, uint8_t count);
+static bool agreesWithRoster(Compiler *self, const CanHubTxnResponse *response, uint32_t bits, const uint32_t *values, uint8_t count);
 static bool walk(Compiler *self, uint16_t first);
 static bool walkFor(Compiler *self, const ScriptStatement *statement);
 static bool checkSend(Compiler *self, const ScriptStatement *statement);
@@ -220,22 +220,18 @@ static bool compileResponse(Compiler *self, uint16_t index)
     if (response_node->has_roster && !compileRoster(self, index, roster_term, &success)) {
         return false;
     }
-    if (!success.has_id) {
-        return fail(self, condition->line_number, "a success line compares the id");
-    }
-
     toMatch(&success, &response->success);
     if (response_node->has_roster && !nodeBitsAreFree(self, response, roster_term)) {
         return false;
     }
     if (response_node->failure != SCRIPT_NO_INDEX) {
-        if (!compileOther(self, response_node->failure, response_node->line_number, &self->program->failures[index])) {
+        if (!compileOther(self, response_node->failure, &self->program->failures[index])) {
             return false;
         }
         response->failure = &self->program->failures[index];
     }
     if (response_node->pending != SCRIPT_NO_INDEX) {
-        if (!compileOther(self, response_node->pending, response_node->line_number, &self->program->pendings[index])) {
+        if (!compileOther(self, response_node->pending, &self->program->pendings[index])) {
             return false;
         }
         response->pending = &self->program->pendings[index];
@@ -251,16 +247,13 @@ static bool compileResponse(Compiler *self, uint16_t index)
     return true;
 }
 
-static bool compileOther(Compiler *self, uint16_t condition, uint16_t line_number, CanHubTxnMatch *match)
+static bool compileOther(Compiler *self, uint16_t condition, CanHubTxnMatch *match)
 {
     ScriptScope scope = { self->script, NULL, NULL, NULL };
     ScriptPattern pattern;
 
     if (!ScriptResolver_Condition(&scope, &self->script->conditions[condition], &pattern, NULL, self->error)) {
         return false;
-    }
-    if (!pattern.has_id) {
-        return fail(self, line_number, "a failure or pending line compares the id");
     }
     toMatch(&pattern, match);
     return true;
@@ -308,10 +301,9 @@ static bool compileRoster(Compiler *self, uint16_t index, const ScriptTerm *term
     response->nodes = self->program->nodes;
     response->node_count = count;
     response->allowed_missing = response_node->quorum > 0 ? count - response_node->quorum : 0;
-    if (!agreesWithRoster(self, response, values, count)) {
+    if (!agreesWithRoster(self, response, bits, values, count)) {
         return fail(self, response_node->line_number, ROSTER_DISAGREES);
     }
-    self->node_bits = bits;
     return true;
 }
 
@@ -357,9 +349,6 @@ static bool deriveNodeBits(Compiler *self, const ScriptTerm *term, uint32_t high
         *bits = (uint32_t)term->mask.value << term->shift;
         return true;
     }
-    if (base == 0) {
-        return fail(self, term->line_number, "compare the other bits of the id, such as id == 0x700 + node");
-    }
     if ((base & variable_mask) != 0) {
         return fail(self, term->line_number, "the base must leave the variable's bits clear, such as 0x700 + node");
     }
@@ -376,7 +365,7 @@ static bool deriveNodeBits(Compiler *self, const ScriptTerm *term, uint32_t high
     return true;
 }
 
-static bool agreesWithRoster(Compiler *self, const CanHubTxnResponse *response, const uint32_t *values, uint8_t count)
+static bool agreesWithRoster(Compiler *self, const CanHubTxnResponse *response, uint32_t bits, const uint32_t *values, uint8_t count)
 {
     ScriptProgram *program = self->program;
 
@@ -384,12 +373,13 @@ static bool agreesWithRoster(Compiler *self, const CanHubTxnResponse *response, 
         self->has_roster = true;
         self->node_from = response->node_from;
         self->node_byte = response->node_byte;
+        self->node_bits = bits;
         program->node_count = count;
         memcpy(program->nodes, values, (size_t)count * sizeof(values[0]));
         return true;
     }
     return self->node_from == response->node_from && self->node_byte == response->node_byte &&
-           program->node_count == count && memcmp(program->nodes, values, (size_t)count * sizeof(values[0])) == 0;
+           self->node_bits == bits && program->node_count == count && memcmp(program->nodes, values, (size_t)count * sizeof(values[0])) == 0;
 }
 
 static bool walk(Compiler *self, uint16_t first)
@@ -519,7 +509,7 @@ static void toMatch(const ScriptPattern *pattern, CanHubTxnMatch *match)
     memset(match, 0, sizeof(*match));
     match->id.value = pattern->can_id & width;
     match->id.extended = pattern->extended;
-    match->id_ignored_bits = pattern->has_id ? width & ~pattern->can_mask : width;
+    match->id_ignored_bits = pattern->has_id ? width & ~pattern->can_mask : CANHUB_TXN_ANY_ID_BITS;
     for(i=0; i<CANHUB_TXN_MATCH_BYTES; i++) {
         match->bytes[i].mask = (uint8_t)(pattern->payload_mask >> (i * BITS_PER_BYTE));
         match->bytes[i].value = (uint8_t)(pattern->payload_value >> (i * BITS_PER_BYTE));

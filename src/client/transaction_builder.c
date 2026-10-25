@@ -110,6 +110,23 @@ bool TransactionBuilder_Step(TransactionBuilder *self, const CanHubTxnStep *step
     return true;
 }
 
+TransactionBuilderMark TransactionBuilder_Mark(const TransactionBuilder *self)
+{
+    TransactionBuilderMark mark;
+
+    mark.has_roster = self->has_roster;
+    mark.template_count = self->template_count;
+    mark.last_template = self->last_template;
+    return mark;
+}
+
+void TransactionBuilder_Rewind(TransactionBuilder *self, const TransactionBuilderMark *mark)
+{
+    self->has_roster = mark->has_roster;
+    self->template_count = mark->template_count;
+    self->last_template = mark->last_template;
+}
+
 const char *TransactionBuilder_Error(const TransactionBuilder *self)
 {
     return self->error;
@@ -157,6 +174,9 @@ static bool isKeepaliveValid(const CanHubTxnKeepalive *keepalive, const char **e
 
 static bool isMatchValid(const CanHubTxnMatch *match)
 {
+    if (match->id_ignored_bits == CANHUB_TXN_ANY_ID_BITS) {
+        return true;
+    }
     return CanId_IsValid(match->id) && CanId_AreIgnoredBitsValid(match->id, match->id_ignored_bits);
 }
 
@@ -281,7 +301,7 @@ static bool checkNodes(TransactionBuilder *self, const CanHubTxnResponse *respon
     if (response->node_from != CANHUB_TXN_NODE_IN_ID) {
         return fail(self, "node_from is CANHUB_TXN_NODE_IN_ID or CANHUB_TXN_NODE_IN_BYTE");
     }
-    if (ignored == 0) {
+    if (ignored == 0 || ignored == CANHUB_TXN_ANY_ID_BITS) {
         return fail(self, "nodes told by the id need the bits that tell them in success.id_ignored_bits");
     }
     for(i=0; i<response->node_count; i++) {
@@ -365,12 +385,17 @@ static void toPattern(const CanHubTxnMatch *match, TxnPattern *pattern)
     uint32_t width = CanId_Width(match->id);
     uint32_t compared = width & ~match->id_ignored_bits;
 
+    bytesToWord(match->bytes, &pattern->payload_mask, &pattern->payload_value);
+    if (match->id_ignored_bits == CANHUB_TXN_ANY_ID_BITS) {
+        pattern->can_id = 0;
+        pattern->can_mask = 0;
+        return;
+    }
     pattern->can_id = match->id.value & compared;
     if (match->id.extended) {
         pattern->can_id |= FRAME_CAN_ID_FLAG_EFF;
     }
     pattern->can_mask = compared | FRAME_CAN_ID_FLAG_EFF;
-    bytesToWord(match->bytes, &pattern->payload_mask, &pattern->payload_value);
 }
 
 static void bytesToWord(const CanHubTxnByte *bytes, uint64_t *mask, uint64_t *value)

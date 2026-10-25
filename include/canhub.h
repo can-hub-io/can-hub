@@ -210,7 +210,11 @@ typedef struct {
 /*
  * A frame meets a match when its id equals id except in id_ignored_bits, and
  * each of its first 8 data bytes meets bytes[i] under bytes[i].mask.
+ * CANHUB_TXN_ANY_ID_BITS ignores the id and its width: any frame, standard or
+ * extended, meets the id part.
  */
+#define CANHUB_TXN_ANY_ID_BITS 0xFFFFFFFFu
+
 typedef struct {
     CanHubCanId id;
     uint32_t id_ignored_bits;
@@ -438,16 +442,20 @@ CANHUB_API int32_t canhub_query(
  * time. canhub_txn_create sends nothing: the first step starts the
  * transaction at the agent, and every step waits for the agent's window like
  * a blocking write. A step the API refuses (canhub_last_error says why)
- * cancels the transaction. canhub_txn_finish waits for the outcome, fills
+ * cancels the transaction; CANHUB_ERR_AGENT_UNREACHABLE when the agent did
+ * not grant it within 5 s. canhub_txn_finish waits for the outcome, fills
  * report and frees the transaction: call it after every canhub_txn_create,
- * also after an error, and before canhub_close. It returns CANHUB_OK when the transaction is done,
- * CANHUB_ERR_TXN_ABORTED with the report otherwise. canhub_txn_abort may be
- * called from another thread. For an event loop or a binding, the timed
- * twins give up with CANHUB_ERR_TIMEOUT: canhub_txn_try_step when the agent's
- * window did not take the step in time (nothing of it sent: call it again),
- * canhub_txn_wait when the outcome is not known yet (it marks the last step
- * first; finish then reports at once). timeout_ms -1 waits forever. sum and
- * crc compute the checks scripts use.
+ * also after an error. It returns CANHUB_OK when the transaction is done,
+ * CANHUB_ERR_TXN_ABORTED with the report otherwise. canhub_close cancels a
+ * transaction still running at the agent; the transaction's calls then
+ * return CANHUB_ERR_DISCONNECTED and canhub_txn_finish only frees it.
+ * canhub_txn_abort may be called from another thread. For an event loop or a
+ * binding, the timed twins give up with CANHUB_ERR_TIMEOUT: canhub_txn_try_step
+ * when the agent has not granted the transaction yet or its window did not
+ * take the step in time (nothing of it sent: call it again with the same
+ * step), canhub_txn_wait when the outcome is not known yet (it ends the
+ * transaction first; finish then reports at once). timeout_ms -1 waits
+ * forever. sum and crc compute the checks scripts use.
  */
 CANHUB_API CanHubTxn *canhub_txn_create(CanHubSession *session, const CanHubTxnOptions *options);
 CANHUB_API int32_t canhub_txn_send(

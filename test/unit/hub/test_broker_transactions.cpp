@@ -461,6 +461,26 @@ describe("broker transactions", []() {
             expect(TransactionTable_AnyLease(&broker.transactions)).toBe(false);
         });
 
+        it("cancels a transaction its client aborted before the agent granted it", []() {
+            TxnAbortMessage abort_message = { client_channel, 0 };
+            uint8_t encoded[MESSAGE_BUFFER_SIZE];
+            size_t encoded_size;
+            int32_t agent_abort;
+            int32_t client_grant;
+
+            encoded_size = TxnAbortMessage_Encode(&abort_message, encoded, sizeof(encoded));
+            events.on_peer_control(events.context, CLIENT_PEER, encoded, encoded_size, 0);
+            HubTransportPortMock_Reset(&transport);
+
+            agentAnswersBegin(kTXN_BEGIN_STATUS_OK, TXN_ID, AGENT_WINDOW);
+            agent_abort = lastControlIndex(AGENT_PEER, kMESSAGE_TYPE_TXN_ABORT);
+            client_grant = lastControlIndex(CLIENT_PEER, kMESSAGE_TYPE_TXN_BEGIN_ACK);
+
+            expect(agent_abort >= 0).toBe(true);
+            expect(client_grant).toBe(-1);
+            expect(TransactionTable_AnyLease(&broker.transactions)).toBe(false);
+        });
+
         it("tells the client when the agent leaves", []() {
             TxnStatusMessage status;
 
@@ -567,7 +587,7 @@ static void agentReportsStatus(uint16_t txn_id, uint8_t state, uint8_t reason, u
 
 static size_t encodeOneStep(uint8_t channel, uint8_t *buffer, size_t buffer_size)
 {
-    TxnStepsMessage fixed_fields = { channel, 0, TXN_ID, 0, NULL, 0 };
+    TxnStepsMessage fixed_fields = { channel, 0, TXN_ID, 0, 0, NULL, 0 };
     TxnStepsWriter writer;
     TxnStep step;
 

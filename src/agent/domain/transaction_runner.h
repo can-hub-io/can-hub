@@ -69,6 +69,7 @@ typedef struct {
     uint8_t interface_index;
     uint32_t window_bytes;
     uint32_t next_seq;
+    bool steps_ended;
     uint32_t completed_steps;
     uint32_t pushed_bytes;
     uint32_t consumed_bytes;

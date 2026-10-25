@@ -432,7 +432,7 @@ describe("client transactions", []() {
         expect(Client_Transaction(&client)->state).toBe((uint8_t)kTRANSACTION_SENDER_BEGINNING);
     });
 
-    it("sends templates and step batches on the channel's stream", []() {
+    it("sends templates, and step batches once flushed, on the channel's stream", []() {
         TxnBeginMessage begin;
         TxnTemplateMessage template_message;
         TxnStep steps[3];
@@ -451,6 +451,7 @@ describe("client transactions", []() {
         Client_DefineTemplate(&client, &template_message);
         template_type = lastFrameType();
         accepted = Client_SendSteps(&client, steps, 3, &stopped_by);
+        Client_FlushTransaction(&client);
 
         expect(template_type).toBe((uint8_t)kMESSAGE_TYPE_TXN_TEMPLATE);
         expect(template_message.txn_id).toBe((uint16_t)TXN_ID);
@@ -464,7 +465,7 @@ describe("client transactions", []() {
         TxnBeginMessage begin;
         TxnStep steps[2];
         TTRANSACTION_OFFER stopped_by;
-        int frames_while_full;
+        bool flushed_while_full;
         bool flushed;
 
         memset(&begin, 0, sizeof(begin));
@@ -475,11 +476,11 @@ describe("client transactions", []() {
         hub.frame_result = false;
 
         Client_SendSteps(&client, steps, 2, &stopped_by);
-        frames_while_full = hub.frame_count;
+        flushed_while_full = Client_FlushTransaction(&client);
         hub.frame_result = true;
         flushed = Client_FlushTransaction(&client);
 
-        expect(frames_while_full).toBe(0);
+        expect(flushed_while_full).toBe(false);
         expect(flushed).toBe(true);
         expect(hub.frame_count).toBe(1);
         expect(lastFrameType()).toBe((uint8_t)kMESSAGE_TYPE_TXN_STEPS);
@@ -544,6 +545,22 @@ describe("client transactions", []() {
         expect(roster_report_count).toBe(1);
         expect(last_roster_report.seq).toBe((uint32_t)3);
         expect(last_roster_report.seen_bitmap).toBe((uint64_t)0x5);
+    });
+
+    it("cancels a begin not yet granted and can begin again", []() {
+        TxnBeginMessage begin;
+        uint32_t last;
+        bool again;
+
+        memset(&begin, 0, sizeof(begin));
+        Client_BeginTransaction(&client, &begin);
+
+        Client_AbortTransaction(&client);
+        last = (uint32_t)hub.control_count - 1;
+        again = Client_BeginTransaction(&client, &begin);
+
+        expect(hub.control_log[last][0]).toBe((uint8_t)kMESSAGE_TYPE_TXN_ABORT);
+        expect(again).toBe(true);
     });
 
     it("refuses to begin a second transaction while one runs", []() {

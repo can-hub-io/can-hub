@@ -16,9 +16,10 @@
 #define TXN_STEP_PADDED_PAYLOAD_SIZE_MAX 256
 #define TXN_STEP_RECORD_SIZE_MAX (TXN_STEP_RECORD_HEADER_SIZE + TXN_STEP_PADDED_PAYLOAD_SIZE_MAX + TXN_STEP_EXPECT_VALUE_SIZE)
 
+#define TXN_STEPS_FLAG_END (1u << 0)
+
 #define TXN_STEP_FLAG_EXPECT_VALUE (1u << 0)
 #define TXN_STEP_FLAG_EXPECT_ONLY (1u << 1)
-#define TXN_STEP_FLAG_LAST (1u << 2)
 #define TXN_STEP_FLAG_MESSAGE (1u << 3)
 #define TXN_STEP_FLAG_CONTINUED (1u << 4)
 
@@ -37,6 +38,7 @@ typedef struct {
     uint8_t step_count;
     uint16_t txn_id;
     uint32_t first_seq;
+    uint8_t flags;
     const uint8_t *records;
     uint16_t records_size;
 } TxnStepsMessage;
@@ -54,6 +56,7 @@ size_t TxnStep_Decode(TxnStep *self, const uint8_t *record, size_t available);
 
 bool TxnStepsWriter_Init(TxnStepsWriter *self, const TxnStepsMessage *message, uint8_t *buffer, size_t buffer_size);
 bool TxnStepsWriter_Append(TxnStepsWriter *self, const TxnStep *step);
+void TxnStepsWriter_MarkEnd(TxnStepsWriter *self);
 size_t TxnStepsWriter_Finish(TxnStepsWriter *self);
 
 bool TxnStepsMessage_Decode(TxnStepsMessage *self, const uint8_t *payload, size_t payload_length);

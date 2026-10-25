@@ -43,6 +43,12 @@ class TestToNativeMatch:
         assert (native_match.bytes[2].mask, native_match.bytes[2].value) == (0xF0, 0x30)
         assert native_match.bytes[0].mask == 0
 
+    def test_it_meets_any_id_without_one(self):
+        native_match = to_native_match(Match(None, data={0: 0x50}))
+
+        assert native_match.id_ignored_bits == native.TXN_ANY_ID_BITS
+        assert native_match.bytes[0].value == 0x50
+
     def test_it_carries_an_extended_id_and_its_ignored_bits(self):
         native_match = to_native_match(Match(0x18DAF100, ignored_bits=0xFF, extended=True))
 
@@ -248,6 +254,19 @@ class TestTransaction:
 
         assert str(refused.value) == "step 0: a response needs timeout_ms"
 
+    def test_it_raises_when_the_bus_shut_down_under_it(self, monkeypatch):
+        bus, library = given_bus_on_library(monkeypatch)
+        transaction = given_transaction(bus)
+        transaction.send(0x123, b"\x01")
+        bus._session = None
+        library.detached = True
+
+        with pytest.raises(CanOperationError) as lost:
+            transaction.finish()
+
+        assert str(lost.value) == "the bus is shut down"
+        assert library.finished
+
     def test_it_cancels_at_the_agent_when_the_block_raises(self, monkeypatch):
         bus, library = given_bus_on_library(monkeypatch)
 
@@ -364,6 +383,7 @@ class FakeLibrary:
         self.wait_timeouts = 0
         self.aborted = False
         self.finished = False
+        self.detached = False
         self.error = b""
 
     def create(self, session, options):
@@ -397,6 +417,8 @@ class FakeLibrary:
 
     def wait(self, transaction, timeout_ms):
         self.wait_calls += 1
+        if self.detached:
+            return native.ERR_DISCONNECTED
         if self.wait_timeouts > 0:
             self.wait_timeouts -= 1
             return native.ERR_TIMEOUT
@@ -405,6 +427,8 @@ class FakeLibrary:
     def finish(self, transaction, report):
         self.finished = True
         contents = ctypes.cast(report, ctypes.POINTER(native.CanHubTxnReport)).contents
+        if self.detached:
+            return native.ERR_DISCONNECTED
         if self.abort_at_step or self.aborted:
             contents.reason = REASON_TIMEOUT
             return native.ERR_TXN_ABORTED

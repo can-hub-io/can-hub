@@ -2785,7 +2785,11 @@ static void handleTxnAbort(Broker *self, HubPeer *peer, const MessageHeader *hea
         return;
     }
     transaction = TransactionTable_ForClientChannel(&self->transactions, peer->peer_id, TxnMessage_Channel(payload));
-    if (transaction == NULL || transaction->state != kTRANSACTION_RELAY_STATE_ACTIVE) {
+    if (transaction == NULL) {
+        return;
+    }
+    if (transaction->state == kTRANSACTION_RELAY_STATE_PENDING) {
+        abandonTransaction(self, transaction);
         return;
     }
 

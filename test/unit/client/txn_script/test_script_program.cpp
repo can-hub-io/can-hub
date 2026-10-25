@@ -306,13 +306,39 @@ describe("script_program", []() {
         expect((const char *)error.message).toBe("a response needs a timeout");
     });
 
-    it("refuses a success that does not compare the id", []() {
+    it("lets a line that does not compare the id meet any id", []() {
         bool ready;
 
-        ready = compile("response answer\n    success byte[0] == 0x01\n    timeout 10ms\n");
+        ready = compile("response answer\n    success byte[0] == 0x01\n    failure byte[0] == 0x7F\n    timeout 10ms\n");
+
+        expect(ready).toBe(true);
+        expect(program.responses[0].success.id_ignored_bits).toBe((uint32_t)CANHUB_TXN_ANY_ID_BITS);
+        expect(program.responses[0].failure->id_ignored_bits).toBe((uint32_t)CANHUB_TXN_ANY_ID_BITS);
+    });
+
+    it("tells nodes by the whole id when the loop variable is all of it", []() {
+        bool ready;
+        const CanHubTxnResponse *response;
+
+        ready = compile("response alive\n    for node in 1..8\n        success id == node\n    timeout 1s\nsend 0x7FF data 01 expect alive\n");
+        response = &program.responses[0];
+
+        expect(ready).toBe(true);
+        expect(response->success.id.value).toBe((uint32_t)0);
+        expect(response->success.id_ignored_bits).toBe((uint32_t)0x0F);
+    });
+
+    it("refuses responses that tell their nodes by different bits", []() {
+        bool ready;
+
+        ready = compile(
+            "response first\n    for node in 0..3\n        success id == 0x700 + node\n    timeout 1s\n"
+            "response second\n    for node in 0..3\n        success id & 0x7F3 == 0x700 and (id >> 2) & 0x03 == node\n    timeout 1s\n"
+            "send 0x7FF data 01 expect first\n"
+        );
 
         expect(ready).toBe(false);
-        expect((const char *)error.message).toBe("a success line compares the id");
+        expect(error.line_number).toBe(5);
     });
 
     it("refuses an expect naming no response", []() {
