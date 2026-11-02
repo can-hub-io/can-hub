@@ -22,6 +22,11 @@ bool QuicUdpEndpoint_Open(QuicUdpEndpoint *self)
     return true;
 }
 
+void QuicUdpEndpoint_Close(QuicUdpEndpoint *self)
+{
+    closesocket((SOCKET)self->udp_fd);
+}
+
 bool QuicUdpEndpoint_ConnectTo(QuicUdpEndpoint *self, const char *host, const char *port)
 {
     struct addrinfo hints;

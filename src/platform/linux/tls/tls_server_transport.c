@@ -29,6 +29,7 @@ static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data
 static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
 static bool portFrameFits(void *context, uint32_t peer_id, uint8_t channel, size_t size);
 static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
+static bool portChannelReliable(void *context, uint32_t peer_id, uint8_t channel);
 static void portClosePeer(void *context, uint32_t peer_id);
 static TlsServerPeer *findPeer(TlsServerTransport *self, uint32_t peer_id);
 static TlsServerPeer *findFreeSlot(TlsServerTransport *self);
@@ -75,6 +76,7 @@ bool TlsServerTransport_Init(
     self->port.send_frame = portSendFrame;
     self->port.frame_fits = portFrameFits;
     self->port.set_channel_mode = portSetChannelMode;
+    self->port.channel_reliable = portChannelReliable;
     self->port.close_peer = portClosePeer;
     self->events = *events;
     self->next_peer_id = peer_id_base;
@@ -246,6 +248,15 @@ static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel,
     (void)peer_id;
     (void)channel;
     (void)reliable;
+}
+
+static bool portChannelReliable(void *context, uint32_t peer_id, uint8_t channel)
+{
+    (void)context;
+    (void)peer_id;
+    (void)channel;
+
+    return true;
 }
 
 static void portClosePeer(void *context, uint32_t peer_id)

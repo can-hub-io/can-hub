@@ -25,6 +25,7 @@ static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data
 static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
 static bool portFrameFits(void *context, uint32_t peer_id, uint8_t channel, size_t size);
 static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
+static bool portChannelReliable(void *context, uint32_t peer_id, uint8_t channel);
 static void portClosePeer(void *context, uint32_t peer_id);
 static QuicServerPeer *findPeerById(QuicServerTransport *self, uint32_t peer_id);
 static QuicServerPeer *findPeerByDcid(QuicServerTransport *self, const uint8_t *packet, size_t packet_size);
@@ -125,6 +126,7 @@ bool QuicServerTransport_Init(
     self->port.send_frame = portSendFrame;
     self->port.frame_fits = portFrameFits;
     self->port.set_channel_mode = portSetChannelMode;
+    self->port.channel_reliable = portChannelReliable;
     self->port.close_peer = portClosePeer;
     self->events = *events;
     self->next_peer_id = peer_id_base;
@@ -345,6 +347,21 @@ static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel,
     }
 
     openReliableChannel(peer, channel);
+}
+
+static bool portChannelReliable(void *context, uint32_t peer_id, uint8_t channel)
+{
+    QuicServerTransport *self = context;
+    QuicServerPeer *peer = findPeerById(self, peer_id);
+
+    if (peer == NULL) {
+        return false;
+    }
+    if (QuicReliableStreams_FindByChannel(&peer->reliable_streams, channel) != NULL) {
+        return true;
+    }
+
+    return QuicReliableStreams_AwaitsReopen(&peer->reliable_streams, channel);
 }
 
 static void openReliableChannel(QuicServerPeer *peer, uint8_t channel)

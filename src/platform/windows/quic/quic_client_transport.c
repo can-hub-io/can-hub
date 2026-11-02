@@ -66,6 +66,11 @@ bool QuicClientTransport_Init(
     return QuicUdpEndpoint_Open(&self->udp);
 }
 
+void QuicClientTransport_Close(QuicClientTransport *self)
+{
+    QuicUdpEndpoint_Close(&self->udp);
+}
+
 TransportPort *QuicClientTransport_Port(QuicClientTransport *self)
 {
     return &self->port;

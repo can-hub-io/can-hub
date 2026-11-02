@@ -70,6 +70,14 @@ Python Bus Configures Its Interface
     Should Contain    ${result.stdout}    txqueuelen=600
     Should Be Equal As Integers    ${queue}    600
 
+QUIC Sessions Give Their Descriptors Back
+    ${state}=    Fresh State Directory For client
+
+    ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${QUIC_CONNECT}    truck42/vcan0    descriptors    quic://127.0.0.1:9    --state-dir    ${state}
+
+    Should Be True    ${result.ok}    ${result.stdout}${result.stderr}
+    Should Contain    ${result.stdout}    descriptor growth=0
+
 Python Bus Refuses Unknown Interfaces
     ${result}=    Run Python ${PROBE} On ${LOCAL_SERVER}    ${CONNECT}    truck42/nope    dump
 

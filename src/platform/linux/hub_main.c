@@ -96,6 +96,7 @@ static void warnIfPlainTcpExposed(void);
 static bool muxSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool muxSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
 static bool muxFrameFits(void *context, uint32_t peer_id, uint8_t channel, size_t size);
+static bool muxChannelReliable(void *context, uint32_t peer_id, uint8_t channel);
 static void muxSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
 static void muxClosePeer(void *context, uint32_t peer_id);
 static uint32_t muxReceiveOverflows(void *context);
@@ -312,6 +313,7 @@ static bool startListeners(const char *unix_path, const char *certificate, const
     mux_port.send_frame = muxSendFrame;
     mux_port.frame_fits = muxFrameFits;
     mux_port.set_channel_mode = muxSetChannelMode;
+    mux_port.channel_reliable = muxChannelReliable;
     mux_port.close_peer = muxClosePeer;
     mux_port.receive_overflows = muxReceiveOverflows;
 
@@ -492,6 +494,15 @@ static void muxSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, 
     (void)context;
 
     destination->set_channel_mode(destination->context, peer_id, channel, reliable);
+}
+
+static bool muxChannelReliable(void *context, uint32_t peer_id, uint8_t channel)
+{
+    HubTransportPort *destination = portForPeer(peer_id);
+
+    (void)context;
+
+    return destination->channel_reliable(destination->context, peer_id, channel);
 }
 
 static void muxClosePeer(void *context, uint32_t peer_id)

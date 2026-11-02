@@ -624,11 +624,13 @@ static int streamCloseCallback(
 {
     QuicConnection *self = user_data;
 
-    (void)connection;
     (void)flags;
     (void)app_error_code;
     (void)stream_user_data;
 
+    if (!ngtcp2_conn_is_local_stream2(connection, stream_id)) {
+        ngtcp2_conn_extend_max_streams_bidi(connection, 1);
+    }
     self->events.on_stream_closed(self->events.context, stream_id);
 
     return 0;

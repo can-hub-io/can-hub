@@ -620,7 +620,7 @@ static const char *beginDetail(uint8_t begin_status)
         return "transaction refused: the agent does not run transactions";
     }
     if (begin_status == kTXN_BEGIN_STATUS_RELIABLE_CHANNEL_REQUIRED) {
-        return "transaction refused: open the interface reliable";
+        return "transaction refused: no reliable path to the agent: open the interface reliable, or close another reliable channel on this agent";
     }
     return "transaction refused: invalid request";
 }

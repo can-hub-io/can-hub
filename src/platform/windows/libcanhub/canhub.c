@@ -201,6 +201,9 @@ void canhub_close(CanHubSession *session)
     if (session->port != NULL) {
         session->port->disconnect(session->port->context);
     }
+    if (session->scheme == kCONNECT_SCHEME_QUIC) {
+        QuicClientTransport_Close(&session->quic_transport);
+    }
 
     free(session);
 }
