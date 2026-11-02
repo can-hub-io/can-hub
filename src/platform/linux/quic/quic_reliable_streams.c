@@ -62,9 +62,6 @@ QuicReliableStream *QuicReliableStreams_Open(QuicReliableStreamSet *self, QuicCo
     if (reliable != NULL) {
         return reliable;
     }
-    if (!QuicConnection_OpenControlStream(connection, &stream_id)) {
-        return NULL;
-    }
 
     reliable = findFree(self);
     if (reliable == NULL) {
@@ -73,6 +70,10 @@ QuicReliableStream *QuicReliableStreams_Open(QuicReliableStreamSet *self, QuicCo
 
     QuicControlChannel_Reset(&reliable->stream);
     if (!attachStorage(reliable)) {
+        return NULL;
+    }
+    if (!QuicConnection_OpenControlStream(connection, &stream_id)) {
+        releaseStream(reliable);
         return NULL;
     }
     reliable->stream.stream_id = stream_id;

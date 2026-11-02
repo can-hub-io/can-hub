@@ -182,7 +182,7 @@ CanHubSession *canhub_connect(const CanHubConnectConfig *config)
 
     if (!EpollRegistry_Open(&self->poll_registry)) {
         setConnectError("could not create the event loop");
-        free(self);
+        canhub_close(self);
         return NULL;
     }
     if (self->scheme == kCONNECT_SCHEME_QUIC) {
@@ -214,6 +214,9 @@ void canhub_close(CanHubSession *session)
     }
     if (session->port != NULL) {
         session->port->disconnect(session->port->context);
+    }
+    if (session->scheme == kCONNECT_SCHEME_QUIC) {
+        QuicClientTransport_Close(&session->quic_transport);
     }
     if (session->poll_registry.epoll_fd >= 0) {
         close(session->poll_registry.epoll_fd);

@@ -11,8 +11,10 @@
 #include <sys/timerfd.h>
 
 #define UDP_SOCKET_BUFFER_BYTES (4 * 1024 * 1024)
+#define NO_DESCRIPTOR (-1)
 
 static int32_t openSocket(int32_t *address_family);
+static void closeDescriptor(int32_t *fd);
 
 /* ---------- public ---------- */
 
@@ -21,8 +23,19 @@ bool QuicUdpEndpoint_Open(QuicUdpEndpoint *self)
     memset(self, 0, sizeof(*self));
     self->udp_fd = openSocket(&self->address_family);
     self->timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+    if (self->udp_fd >= 0 && self->timer_fd >= 0) {
+        return true;
+    }
 
-    return self->udp_fd >= 0 && self->timer_fd >= 0;
+    QuicUdpEndpoint_Close(self);
+
+    return false;
+}
+
+void QuicUdpEndpoint_Close(QuicUdpEndpoint *self)
+{
+    closeDescriptor(&self->udp_fd);
+    closeDescriptor(&self->timer_fd);
 }
 
 bool QuicUdpEndpoint_ReopenSocket(QuicUdpEndpoint *self)
@@ -151,4 +164,12 @@ static int32_t openSocket(int32_t *address_family)
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buffer_bytes, sizeof(buffer_bytes));
 
     return fd;
+}
+
+static void closeDescriptor(int32_t *fd)
+{
+    if (*fd >= 0) {
+        close(*fd);
+    }
+    *fd = NO_DESCRIPTOR;
 }

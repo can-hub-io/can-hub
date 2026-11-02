@@ -228,6 +228,33 @@ A Transaction Needs A Reliable Channel
     Should Not Be True    ${result.ok}
     Should Contain    ${result.stderr}    open the interface reliable
 
+An Agent Keeps Serving Reliable Sessions Past Its Initial Stream Limit
+    ${hub}=    Start CAN HUB Open To Writers On ${LOCAL_SERVER}
+    ${client_state}=    Fresh State Directory For client
+    Start CAN Agent truck42 On ${LOCAL_SERVER} Exporting vcan0 Into ${hub}
+    ${ecu}=    Start Python ${ECU} On ${LOCAL_SERVER}    vcan0    uds
+    Log Of ${ecu} Should Contain ready
+
+    FOR    ${session}    IN RANGE    20
+        ${result}=    Run Python ${TXN} On ${LOCAL_SERVER}    ${TLS}    truck42/vcan0    uds    1    --state-dir    ${client_state}
+        Should Be True    ${result.ok}    session ${session}: ${result.stdout}${result.stderr}
+    END
+
+A Transaction Is Refused When The Agent Has No Reliable Stream Left
+    ${hub}=    Start CAN HUB Open To Writers On ${LOCAL_SERVER}
+    ${client_state}=    Fresh State Directory For client
+    ${interfaces}=    Create List    vcan0    vcan1    vcan2    vcan3    vcan4    vcan5    vcan6    vcan7
+    Start CAN Agent truck42 On ${LOCAL_SERVER} Exporting Interfaces ${interfaces} And vcan8 Into ${hub}
+    FOR    ${interface}    IN    @{interfaces}
+        ${holder}=    Start Python ${PROBE} On ${LOCAL_SERVER}    ${TLS}    truck42/${interface}    dump    --reliable    --state-dir    ${client_state}
+        Log Of ${holder} Should Contain dumping truck42/${interface}
+    END
+
+    ${result}=    Run Python ${TXN} On ${LOCAL_SERVER}    ${TLS}    truck42/vcan8    uds    1    --state-dir    ${client_state}
+
+    Should Not Be True    ${result.ok}
+    Should Contain    ${result.stderr}    no reliable path to the agent
+
 A Client Without A Write Grant Cannot Start A Transaction
     ${hub_state}=    Fresh State Directory For hub
     ${hub_cfg}=    Hub Configuration    state_dir=${hub_state}

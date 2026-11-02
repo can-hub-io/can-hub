@@ -25,6 +25,7 @@ typedef struct {
 } QuicUdpEndpoint;
 
 bool QuicUdpEndpoint_Open(QuicUdpEndpoint *self);
+void QuicUdpEndpoint_Close(QuicUdpEndpoint *self);
 bool QuicUdpEndpoint_ConnectTo(QuicUdpEndpoint *self, const char *host, const char *port);
 int QuicUdpEndpoint_Send(QuicUdpEndpoint *self, const uint8_t *data, size_t size);
 int QuicUdpEndpoint_Receive(QuicUdpEndpoint *self, uint8_t *buffer, size_t buffer_size);

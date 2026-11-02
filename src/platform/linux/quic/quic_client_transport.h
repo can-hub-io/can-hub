@@ -59,6 +59,7 @@ bool QuicClientTransport_Init(
     const TransportEvents *events,
     const QuicClientSecurityConfig *security_config
 );
+void QuicClientTransport_Close(QuicClientTransport *self);
 TransportPort *QuicClientTransport_Port(QuicClientTransport *self);
 const HostResolver *QuicClientTransport_Resolver(const QuicClientTransport *self);
 int32_t QuicClientTransport_UdpFd(const QuicClientTransport *self);

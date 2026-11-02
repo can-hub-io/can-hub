@@ -29,6 +29,7 @@ typedef struct {
 } QuicUdpEndpoint;
 
 bool QuicUdpEndpoint_Open(QuicUdpEndpoint *self);
+void QuicUdpEndpoint_Close(QuicUdpEndpoint *self);
 bool QuicUdpEndpoint_ReopenSocket(QuicUdpEndpoint *self);
 void QuicUdpEndpoint_AddressHints(const QuicUdpEndpoint *self, struct addrinfo *hints);
 bool QuicUdpEndpoint_ConnectTo(QuicUdpEndpoint *self, const struct addrinfo *addresses);

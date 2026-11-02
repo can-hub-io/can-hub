@@ -830,8 +830,10 @@ unsupported (15).
 **Prerequisites.** The client runs a transaction on a channel it has open, and:
 
 - the channel must be **reliable** (OPEN flag bit 2): its reliable stream carries
-  the steps. Otherwise the hub answers status reliable channel required (4). Over
-  TCP/TLS the flag is a no-op but must still be set;
+  the steps. Otherwise the hub answers status reliable channel required (4). The
+  hub answers the same when the agent's side of the channel has no reliable stream
+  either: a QUIC connection carries at most 8 reliable streams at once. Over TCP/TLS
+  the flag is a no-op but must still be set;
 - the client must be authorized to **write** the interface (ACL `rw`; unix and
   plain tcp clients are trusted). Otherwise the hub answers status write denied (2).
 

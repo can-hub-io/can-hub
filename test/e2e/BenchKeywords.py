@@ -119,6 +119,17 @@ class BenchKeywords:
         agent.wait_registered(hub, timeout=8)
         return agent
 
+    @keyword("Start CAN Agent ${name} On ${server} Exporting Interfaces ${interfaces} And ${last} Into ${hub}")
+    def start_agent_exporting_interfaces(self, name, server, interfaces, last, hub) -> CanAgent:
+        exported = [*interfaces, last]
+        for interface in exported:
+            server.make_vcan(interface)
+        config = AgentConfig(connect="quic://local:7227", name=name, interfaces=exported,
+                             state_dir=self.fresh_state_directory("agent"))
+        agent = CanAgent.start(server, config)
+        agent.wait_registered(hub, timeout=8)
+        return agent
+
     @keyword("Wait Until Hub ${hub} Exports ${count} Interfaces")
     def wait_until_hub_exports(self, hub, count, timeout=30):
         deadline = time.monotonic() + float(timeout)

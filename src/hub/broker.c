@@ -2847,6 +2847,9 @@ static uint8_t admitTransaction(Broker *self, const HubPeer *client, const TxnBe
     if (!ClientSession_ChannelReliable(&client->session, begin->channel)) {
         return kTXN_BEGIN_STATUS_RELIABLE_CHANNEL_REQUIRED;
     }
+    if (!self->transport->channel_reliable(self->transport->context, agent->peer_id, entry->agent_channel)) {
+        return kTXN_BEGIN_STATUS_RELIABLE_CHANNEL_REQUIRED;
+    }
     if (!ClientSession_CanWrite(&client->session, begin->channel)) {
         return kTXN_BEGIN_STATUS_WRITE_DENIED;
     }

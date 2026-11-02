@@ -6,6 +6,7 @@ usage: pycan_probe.py <url> <channel> dump [options]
        pycan_probe.py <url> <channel> list [options]
        pycan_probe.py <url> <channel> detect [options]
        pycan_probe.py <url> <channel> configure <key>=<value> ... [options]
+       pycan_probe.py <url> <channel> descriptors <unreachable-url> [options]
 
 options: --state-dir PATH --cert PATH --key PATH --hub-fingerprint HEX
 """
@@ -19,6 +20,8 @@ import can
 from canhub import CanHubBus
 
 DUPLEX_SEND_GAP_S = 0.02
+DESCRIPTOR_SESSIONS = 5
+UNREACHABLE_TIMEOUT_S = 1
 SETTING_VALUES = {"on": True, "off": False}
 
 
@@ -26,7 +29,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("url")
     parser.add_argument("channel")
-    parser.add_argument("action", choices=["dump", "send", "duplex", "list", "detect", "configure"])
+    parser.add_argument("action", choices=["dump", "send", "duplex", "list", "detect", "configure", "descriptors"])
     parser.add_argument("frame_arguments", nargs="*")
     parser.add_argument("--state-dir")
     parser.add_argument("--cert")
@@ -41,6 +44,10 @@ def main():
 
     if arguments.action == "detect":
         detect_interfaces(arguments)
+        return
+
+    if arguments.action == "descriptors":
+        report_descriptor_growth(arguments)
         return
 
     bus = can.Bus(
@@ -118,6 +125,35 @@ def list_interfaces(arguments):
         state_dir=arguments.state_dir,
     )
     print_configs(configs)
+
+
+def report_descriptor_growth(arguments):
+    list_quietly(arguments)
+    before = open_descriptors()
+    for _ in range(DESCRIPTOR_SESSIONS):
+        list_quietly(arguments)
+        fail_to_list(arguments)
+    print(f"descriptor growth={open_descriptors() - before}", flush=True)
+
+
+def list_quietly(arguments):
+    CanHubBus.list_interfaces(url=arguments.url, state_dir=arguments.state_dir)
+
+
+def fail_to_list(arguments):
+    try:
+        CanHubBus.list_interfaces(
+            url=arguments.frame_arguments[0],
+            state_dir=arguments.state_dir,
+            timeout=UNREACHABLE_TIMEOUT_S,
+        )
+    except can.CanInitializationError:
+        return
+    raise RuntimeError("the unreachable hub answered")
+
+
+def open_descriptors():
+    return len(os.listdir("/proc/self/fd"))
 
 
 def detect_interfaces(arguments):

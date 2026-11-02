@@ -130,6 +130,18 @@ describe("broker transactions", []() {
             expect(ack.status).toBe((uint8_t)kTXN_BEGIN_STATUS_RELIABLE_CHANNEL_REQUIRED);
         });
 
+        it("refuses a transaction when the agent side of the channel is not reliable", []() {
+            TxnBeginAckMessage ack;
+
+            transport.unreliable_peer = AGENT_PEER;
+
+            beginFrom(CLIENT_PEER, client_channel, 0);
+            ack = lastBeginAckTo(CLIENT_PEER);
+
+            expect(ack.status).toBe((uint8_t)kTXN_BEGIN_STATUS_RELIABLE_CHANNEL_REQUIRED);
+            expect(lastControlIndex(AGENT_PEER, kMESSAGE_TYPE_TXN_BEGIN)).toBe(-1);
+        });
+
         it("rejects a channel the client never opened", []() {
             TxnBeginAckMessage ack;
 
