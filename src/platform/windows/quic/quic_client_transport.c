@@ -386,6 +386,7 @@ static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, 
         return;
     }
     QuicConnection_ExtendStreamCredit(&self->connection, stream_id, size);
+    QuicConnection_RefuseStream(&self->connection, stream_id);
 }
 
 static void receiveControlData(QuicClientTransport *self, const uint8_t *data, size_t size)

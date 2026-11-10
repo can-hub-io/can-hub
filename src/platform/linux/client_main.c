@@ -153,6 +153,7 @@ static bool initQuicTransport(const char *host, const char *port_text, const Tra
 static int32_t runQuicEventLoop(void);
 static void clientOnListReply(void *context, const ListReplyMessage *reply);
 static void clientOnOpenResult(void *context, uint8_t status, uint8_t channel, uint32_t interface_id);
+static const char *openRejectionText(uint8_t status);
 static void clientOnFrame(void *context, const FrameMessage *frame);
 static void clientOnError(void *context, uint16_t code, const char *detail);
 static void clientOnDisconnected(void *context);
@@ -534,7 +535,7 @@ static void clientOnOpenResult(void *context, uint8_t status, uint8_t channel, u
     (void)context;
 
     if (status != OPEN_STATUS_OK) {
-        LOG_ERROR("open rejected for interface %u", interface_id);
+        LOG_ERROR("open rejected for interface %u: %s", interface_id, openRejectionText(status));
         exit_code = 1;
         return;
     }
@@ -544,6 +545,24 @@ static void clientOnOpenResult(void *context, uint8_t status, uint8_t channel, u
     }
 
     LOG_INFO("dumping interface %u (channel %u), ctrl-c to stop", interface_id, channel);
+}
+
+static const char *openRejectionText(uint8_t status)
+{
+    if (status == OPEN_STATUS_WRITE_DENIED) {
+        return "write denied";
+    }
+    if (status == OPEN_STATUS_READ_DENIED) {
+        return "read denied";
+    }
+    if (status == OPEN_STATUS_RELIABLE_UNSUPPORTED) {
+        return "reliable channels unsupported by a peer";
+    }
+    if (status == OPEN_STATUS_RELIABLE_EXHAUSTED) {
+        return "no reliable stream left to the agent";
+    }
+
+    return "unknown interface or refused";
 }
 
 static void clientOnFrame(void *context, const FrameMessage *frame)

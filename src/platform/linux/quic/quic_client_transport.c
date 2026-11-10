@@ -1,6 +1,7 @@
 #include "platform/linux/quic/quic_client_transport.h"
 #include "platform/linux/shared/log.h"
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -476,7 +477,9 @@ static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, 
         QuicReliableStreams_Receive(reliable, &self->connection, data, size, clientFrameSink, self);
         return;
     }
+    LOG_WARN("stream %" PRId64 " refused: no reliable stream left", stream_id);
     QuicConnection_ExtendStreamCredit(&self->connection, stream_id, size);
+    QuicConnection_RefuseStream(&self->connection, stream_id);
 }
 
 static void receiveControlData(QuicClientTransport *self, const uint8_t *data, size_t size)

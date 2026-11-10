@@ -67,6 +67,8 @@ bool QuicConnection_ReadPacket(QuicConnection *self, const ngtcp2_path *path, co
 bool QuicConnection_HandleExpiry(QuicConnection *self);
 uint64_t QuicConnection_NextExpiryNs(const QuicConnection *self);
 bool QuicConnection_OpenControlStream(QuicConnection *self, int64_t *stream_id);
+uint64_t QuicConnection_StreamsLeft(QuicConnection *self);
+void QuicConnection_RefuseStream(QuicConnection *self, int64_t stream_id);
 void QuicConnection_ExtendStreamCredit(QuicConnection *self, int64_t stream_id, size_t size);
 ngtcp2_ssize QuicConnection_WriteDatagram(
     QuicConnection *self,

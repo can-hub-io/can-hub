@@ -32,6 +32,7 @@ typedef struct {
     bool frame_result;
     uint32_t full_peer;
     uint32_t unreliable_peer;
+    uint32_t exhausted_peer;
     uint32_t receive_overflows;
 } HubTransportPortMock;
 

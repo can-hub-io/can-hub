@@ -778,8 +778,10 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
     request.interface_name = entry->interface_name;
     if (ClientSession_OpenInterface(&peer->session, &request, &ack.channel)) {
         ack.status = OPEN_STATUS_OK;
-        if (reliable) {
-            self->transport->set_channel_mode(self->transport->context, entry->agent_peer_id, entry->agent_channel, true);
+        if (reliable && !self->transport->set_channel_mode(self->transport->context, entry->agent_peer_id, entry->agent_channel, true)) {
+            ClientSession_CloseChannel(&peer->session, ack.channel);
+            ack.status = OPEN_STATUS_RELIABLE_EXHAUSTED;
+            ack.channel = 0;
         }
     }
 
@@ -2284,8 +2286,10 @@ static void reattachInterface(Broker *self, const InterfaceEntry *entry)
             continue;
         }
         if (ClientSession_ChannelForInterface(&peer->session, entry->interface_id, &channel)
-            && ClientSession_ChannelReliable(&peer->session, channel)) {
-            self->transport->set_channel_mode(self->transport->context, entry->agent_peer_id, entry->agent_channel, true);
+            && ClientSession_ChannelReliable(&peer->session, channel)
+            && !self->transport->set_channel_mode(self->transport->context, entry->agent_peer_id, entry->agent_channel, true)) {
+            sendError(self, peer->peer_id, kERROR_CODE_RELIABLE_EXHAUSTED, "no reliable stream left to the agent");
+            removeClientInterface(self, peer, entry->interface_id);
         }
     }
 }

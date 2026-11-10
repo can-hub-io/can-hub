@@ -137,7 +137,10 @@ HELLO (total 76)
 
 ERROR (total 72)
 @4   code u16 (1 malformed message, 2 role rejected, 3 hub full,
-              4 hello timeout, 5 kicked, 6 slow consumer)
+              4 hello timeout, 5 kicked, 6 slow consumer,
+              7 reliable exhausted: the agent came back but no reliable
+              stream is left to it, so the hub closed this client's
+              reliable channel on that interface)
 @6   reserved u16
 @8   detail char[64]
 
@@ -200,7 +203,9 @@ OPEN (total 12)
 OPEN_ACK (total 12)
 @4   status u8 (0 ok, 1 rejected/unknown interface, 2 write denied, 3 read denied,
               4 reliable unsupported: OPEN set the reliable flag but the peer
-              did not advertise the reliable-channels capability in HELLO)
+              did not advertise the reliable-channels capability in HELLO,
+              5 reliable exhausted: no reliable stream is left on the hub's
+              connection to the owning agent)
 @5   channel u8
 @6   reserved u16
 @8   interface_id u32
@@ -754,6 +759,14 @@ SUBSCRIBE is unchanged and carries no reliability flag of its own.
 advertise the capability, the hub rejects it with OPEN_ACK status 4 (reliable
 unsupported) rather than silently degrading to the lossy plane.
 
+**Capacity.** Each reliable interface of an agent takes one stream on the hub's
+connection to that agent, shared by every client holding it reliable. The hub
+opens at most 32, and never more than the agent allows through its
+`initial_max_streams_bidi` transport parameter, so a constrained agent caps the
+count by announcing less. An OPEN that needs one more stream than is left is
+rejected with OPEN_ACK status 5 (reliable exhausted), never degraded to the
+lossy plane. A stream a peer opens beyond the receiver's capacity is reset.
+
 **Transport.** A reliable channel maps to one dedicated **bidirectional QUIC
 stream**, distinct from the control stream and from the datagram plane:
 
@@ -832,8 +845,9 @@ unsupported (15).
 - the channel must be **reliable** (OPEN flag bit 2): its reliable stream carries
   the steps. Otherwise the hub answers status reliable channel required (4). The
   hub answers the same when the agent's side of the channel has no reliable stream
-  either: a QUIC connection carries at most 8 reliable streams at once. Over TCP/TLS
-  the flag is a no-op but must still be set;
+  either (see **Capacity** under reliable channels: such an OPEN is normally
+  refused up front with status 5). Over TCP/TLS the flag is a no-op but must
+  still be set;
 - the client must be authorized to **write** the interface (ACL `rw`; unix and
   plain tcp clients are trusted). Otherwise the hub answers status write denied (2).
 

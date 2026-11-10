@@ -240,20 +240,23 @@ An Agent Keeps Serving Reliable Sessions Past Its Initial Stream Limit
         Should Be True    ${result.ok}    session ${session}: ${result.stdout}${result.stderr}
     END
 
-A Transaction Is Refused When The Agent Has No Reliable Stream Left
+A Transaction Runs While Every Other Interface Of The Agent Is Held Reliable
     ${hub}=    Start CAN HUB Open To Writers On ${LOCAL_SERVER}
     ${client_state}=    Fresh State Directory For client
     ${interfaces}=    Create List    vcan0    vcan1    vcan2    vcan3    vcan4    vcan5    vcan6    vcan7
-    Start CAN Agent truck42 On ${LOCAL_SERVER} Exporting Interfaces ${interfaces} And vcan8 Into ${hub}
+    ...    vcan8    vcan9    vcan10    vcan11    vcan12    vcan13    vcan14
+    Start CAN Agent truck42 On ${LOCAL_SERVER} Exporting Interfaces ${interfaces} And vcan15 Into ${hub}
     FOR    ${interface}    IN    @{interfaces}
         ${holder}=    Start Python ${PROBE} On ${LOCAL_SERVER}    ${TLS}    truck42/${interface}    dump    --reliable    --state-dir    ${client_state}
         Log Of ${holder} Should Contain dumping truck42/${interface}
     END
+    ${ecu}=    Start Python ${ECU} On ${LOCAL_SERVER}    vcan15    uds
+    Log Of ${ecu} Should Contain ready
 
-    ${result}=    Run Python ${TXN} On ${LOCAL_SERVER}    ${TLS}    truck42/vcan8    uds    1    --state-dir    ${client_state}
+    ${result}=    Run Python ${TXN} On ${LOCAL_SERVER}    ${TLS}    truck42/vcan15    uds    5    --state-dir    ${client_state}
 
-    Should Not Be True    ${result.ok}
-    Should Contain    ${result.stderr}    no reliable path to the agent
+    Should Be True    ${result.ok}    ${result.stdout}${result.stderr}
+    Should Contain    ${result.stdout}    done steps=5
 
 A Client Without A Write Grant Cannot Start A Transaction
     ${hub_state}=    Fresh State Directory For hub

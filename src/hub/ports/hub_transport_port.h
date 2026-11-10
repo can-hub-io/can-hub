@@ -11,7 +11,9 @@
  * the up to HUB_PEERS_MAX connected peers. peer_id is assigned by the platform transport and
  * is opaque to the core. receive_overflows counts the packets the transports
  * lost before reading them (receive buffer full). channel_reliable tells
- * whether a channel set reliable really has its reliable path to the peer.
+ * whether a channel set reliable really has its reliable path to the peer;
+ * set_channel_mode returns false when the transport has no room left for
+ * another reliable path to that peer.
  * Counterpart of HubTransportEvents.
  */
 typedef struct {
@@ -19,7 +21,7 @@ typedef struct {
     bool (*send_control)(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
     bool (*send_frame)(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
     bool (*frame_fits)(void *context, uint32_t peer_id, uint8_t channel, size_t size);
-    void (*set_channel_mode)(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
+    bool (*set_channel_mode)(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
     bool (*channel_reliable)(void *context, uint32_t peer_id, uint8_t channel);
     void (*close_peer)(void *context, uint32_t peer_id);
     uint32_t (*receive_overflows)(void *context);

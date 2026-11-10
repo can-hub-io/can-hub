@@ -21,7 +21,7 @@
  * there the stream is bidirectional and lossless from byte zero.
  */
 
-#define QUIC_RELIABLE_STREAMS_MAX 8
+#define QUIC_RELIABLE_STREAMS_MAX 32
 
 /*
  * The reliable data plane carries bulk traffic, not the small control messages
@@ -43,14 +43,13 @@ typedef struct {
     uint8_t *tx_storage;
     uint8_t *rx_storage;
     uint8_t channel;
-    bool in_use;
     bool has_channel;
     bool closing;
     bool closed;
 } QuicReliableStream;
 
 typedef struct {
-    QuicReliableStream streams[QUIC_RELIABLE_STREAMS_MAX];
+    QuicReliableStream *streams[QUIC_RELIABLE_STREAMS_MAX];
     uint8_t reopen_channels[QUIC_RELIABLE_STREAMS_MAX];
     uint8_t reopen_count;
 } QuicReliableStreamSet;

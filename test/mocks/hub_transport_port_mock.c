@@ -5,7 +5,7 @@
 static bool mockSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool mockSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
 static bool mockFrameFits(void *context, uint32_t peer_id, uint8_t channel, size_t size);
-static void mockSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
+static bool mockSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
 static bool mockChannelReliable(void *context, uint32_t peer_id, uint8_t channel);
 static void mockClosePeer(void *context, uint32_t peer_id);
 static uint32_t mockReceiveOverflows(void *context);
@@ -78,7 +78,7 @@ static bool mockFrameFits(void *context, uint32_t peer_id, uint8_t channel, size
     return self->frame_result && peer_id != self->full_peer;
 }
 
-static void mockSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable)
+static bool mockSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable)
 {
     HubTransportPortMock *self = context;
 
@@ -91,6 +91,8 @@ static void mockSetChannelMode(void *context, uint32_t peer_id, uint8_t channel,
     self->last_channel_mode_peer = peer_id;
     self->last_channel_mode_channel = channel;
     self->last_channel_mode_reliable = reliable;
+
+    return !reliable || peer_id != self->exhausted_peer;
 }
 
 static bool mockChannelReliable(void *context, uint32_t peer_id, uint8_t channel)
