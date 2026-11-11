@@ -1373,7 +1373,7 @@ describe("broker", []() {
             uint32_t i;
 
             for(i=0; i<ADMIN_PEERS_REPLY_ENTRIES_MAX; i++) {
-                BrokerDriver_ConnectClient(&events, CLIENT_PEER + 100 + i);
+                BrokerDriver_ConnectClient(&events, ADMIN_PEER + 1 + i);
             }
             HubTransportPortMock_Reset(&transport);
 

@@ -2,6 +2,13 @@
 
 #include <stddef.h>
 
+#define SOLE_OCCUPANT 0
+
+static void vacateSlot(EpollRegistry *self, uint16_t slot);
+static bool isRegisteredByAnotherSlot(const EpollRegistry *self, uint16_t slot, int32_t fd);
+
+/* ---------- public ---------- */
+
 bool EpollRegistry_Open(EpollRegistry *self)
 {
     uint16_t slot;
@@ -10,6 +17,7 @@ bool EpollRegistry_Open(EpollRegistry *self)
     for(slot=0; slot<EPOLL_REGISTRY_SLOTS_MAX; slot++) {
         self->registered_fds[slot] = EPOLL_REGISTRY_NO_SOCKET;
         self->registered_masks[slot] = 0;
+        self->registered_occupants[slot] = SOLE_OCCUPANT;
     }
 
     return self->epoll_fd >= 0;
@@ -42,39 +50,46 @@ void EpollRegistry_SyncSlot(
     uint32_t event_data
 )
 {
+    EpollRegistry_SyncOccupiedSlot(self, slot, SOLE_OCCUPANT, current_fd, wanted_mask, event_data);
+}
+
+void EpollRegistry_SyncOccupiedSlot(
+    EpollRegistry *self,
+    uint16_t slot,
+    uint32_t occupant,
+    int32_t current_fd,
+    uint32_t wanted_mask,
+    uint32_t event_data
+)
+{
     struct epoll_event event;
-    int32_t registered_fd;
-    bool unchanged;
+    bool same_socket;
 
     if (slot >= EPOLL_REGISTRY_SLOTS_MAX) {
         return;
     }
 
-    registered_fd = self->registered_fds[slot];
-    unchanged = current_fd == registered_fd
-                && (current_fd == EPOLL_REGISTRY_NO_SOCKET || wanted_mask == self->registered_masks[slot]);
-    if (unchanged) {
+    same_socket = current_fd == self->registered_fds[slot] && occupant == self->registered_occupants[slot];
+    if (same_socket && (current_fd == EPOLL_REGISTRY_NO_SOCKET || wanted_mask == self->registered_masks[slot])) {
         return;
     }
-
-    if (registered_fd != EPOLL_REGISTRY_NO_SOCKET && registered_fd != current_fd) {
-        epoll_ctl(self->epoll_fd, EPOLL_CTL_DEL, registered_fd, NULL);
-        self->registered_fds[slot] = EPOLL_REGISTRY_NO_SOCKET;
+    if (!same_socket) {
+        vacateSlot(self, slot);
     }
     if (current_fd == EPOLL_REGISTRY_NO_SOCKET) {
-        self->registered_fds[slot] = EPOLL_REGISTRY_NO_SOCKET;
         return;
     }
 
     event.events = wanted_mask;
     event.data.u32 = event_data;
-    if (registered_fd == current_fd) {
+    if (same_socket) {
         epoll_ctl(self->epoll_fd, EPOLL_CTL_MOD, current_fd, &event);
     } else {
         epoll_ctl(self->epoll_fd, EPOLL_CTL_ADD, current_fd, &event);
     }
     self->registered_fds[slot] = current_fd;
     self->registered_masks[slot] = wanted_mask;
+    self->registered_occupants[slot] = occupant;
 }
 
 int32_t EpollRegistry_Wait(
@@ -85,4 +100,33 @@ int32_t EpollRegistry_Wait(
 )
 {
     return (int32_t)epoll_wait(self->epoll_fd, events, max_events, timeout_ms);
+}
+
+/* ---------- private ---------- */
+
+static void vacateSlot(EpollRegistry *self, uint16_t slot)
+{
+    int32_t registered_fd = self->registered_fds[slot];
+
+    if (registered_fd == EPOLL_REGISTRY_NO_SOCKET) {
+        return;
+    }
+
+    self->registered_fds[slot] = EPOLL_REGISTRY_NO_SOCKET;
+    if (!isRegisteredByAnotherSlot(self, slot, registered_fd)) {
+        epoll_ctl(self->epoll_fd, EPOLL_CTL_DEL, registered_fd, NULL);
+    }
+}
+
+static bool isRegisteredByAnotherSlot(const EpollRegistry *self, uint16_t slot, int32_t fd)
+{
+    uint16_t other;
+
+    for(other=0; other<EPOLL_REGISTRY_SLOTS_MAX; other++) {
+        if (other != slot && self->registered_fds[other] == fd) {
+            return true;
+        }
+    }
+
+    return false;
 }

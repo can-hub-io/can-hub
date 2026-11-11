@@ -33,6 +33,7 @@ static bool portChannelReliable(void *context, uint32_t peer_id, uint8_t channel
 static void portClosePeer(void *context, uint32_t peer_id);
 static TlsServerPeer *findPeer(TlsServerTransport *self, uint32_t peer_id);
 static TlsServerPeer *findFreeSlot(TlsServerTransport *self);
+static void listPeer(TlsServerTransport *self, const TlsServerPeer *peer);
 static bool adoptPeer(TlsServerTransport *self, int32_t peer_fd, const struct sockaddr_storage *remote);
 static bool admitsHandshake(const TlsServerTransport *self, const char *origin_host);
 static bool isHandshaking(const TlsServerPeer *peer);
@@ -80,6 +81,7 @@ bool TlsServerTransport_Init(
     self->port.close_peer = portClosePeer;
     self->events = *events;
     self->next_peer_id = peer_id_base;
+    SlotIndex_Init(&self->slot_by_peer_id, self->peer_id_buckets, TLS_SERVER_PEER_ID_BUCKETS);
     for(slot=0; slot<TLS_SERVER_PEERS_MAX; slot++) {
         TlsChannel_Reset(&self->peers[slot].channel);
         self->peers[slot].fd = TLS_CHANNEL_NO_SOCKET;
@@ -118,6 +120,16 @@ int32_t TlsServerTransport_ListenFd(const TlsServerTransport *self)
 int32_t TlsServerTransport_SlotFd(const TlsServerTransport *self, uint16_t slot)
 {
     return self->peers[slot].fd;
+}
+
+uint32_t TlsServerTransport_SlotPeerId(const TlsServerTransport *self, uint16_t slot)
+{
+    return self->peers[slot].peer_id;
+}
+
+uint16_t TlsServerTransport_SlotsTouched(const TlsServerTransport *self)
+{
+    return self->slots_touched;
 }
 
 bool TlsServerTransport_SlotWantsWritable(const TlsServerTransport *self, uint16_t slot)
@@ -194,7 +206,7 @@ void TlsServerTransport_Tick(TlsServerTransport *self, uint64_t now_us)
     TlsServerPeer *peer;
     uint16_t slot;
 
-    for(slot=0; slot<TLS_SERVER_PEERS_MAX; slot++) {
+    for(slot=0; slot<self->slots_touched; slot++) {
         peer = &self->peers[slot];
         if (isHandshaking(peer) && now_us >= peer->handshake_deadline_us) {
             closePeer(self, peer, false);
@@ -277,13 +289,21 @@ static TlsServerPeer *findPeer(TlsServerTransport *self, uint32_t peer_id)
 {
     uint16_t slot;
 
-    for(slot=0; slot<TLS_SERVER_PEERS_MAX; slot++) {
-        if (TlsChannel_IsBound(&self->peers[slot].channel) && self->peers[slot].peer_id == peer_id) {
-            return &self->peers[slot];
-        }
+    if (!SlotIndex_Find(&self->slot_by_peer_id, peer_id, &slot)) {
+        return NULL;
     }
 
-    return NULL;
+    return &self->peers[slot];
+}
+
+static void listPeer(TlsServerTransport *self, const TlsServerPeer *peer)
+{
+    uint16_t slot = (uint16_t)(peer - self->peers);
+
+    SlotIndex_Put(&self->slot_by_peer_id, peer->peer_id, slot);
+    if (slot >= self->slots_touched) {
+        self->slots_touched = (uint16_t)(slot + 1);
+    }
 }
 
 static TlsServerPeer *findFreeSlot(TlsServerTransport *self)
@@ -454,6 +474,7 @@ static bool adoptPeer(TlsServerTransport *self, int32_t peer_fd, const struct so
     TlsChannel_Bind(&peer->channel, tls, NULL);
     peer->fd = peer_fd;
     peer->peer_id = self->next_peer_id++;
+    listPeer(self, peer);
     peer->announced = false;
     peer->handshake_deadline_us = Clock_MonotonicUs() + HANDSHAKE_TIMEOUT_US;
     ListenEndpoint_FormatOrigin(remote, peer->origin, sizeof(peer->origin));
@@ -495,6 +516,7 @@ static void closePeer(TlsServerTransport *self, TlsServerPeer *peer, bool notify
     bool was_announced = peer->announced;
     int32_t peer_fd = peer->fd;
 
+    SlotIndex_Remove(&self->slot_by_peer_id, peer_id);
     sendPendingRecords(peer);
     TlsChannel_Close(&peer->channel);
     close(peer_fd);

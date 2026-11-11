@@ -199,10 +199,28 @@ add_unit_test(test_listen_endpoint
         ${ROOT_SRC_DIR}/platform/linux/shared/listen_endpoint.c
 )
 
+add_unit_test(test_slot_index
+    SOURCES
+        shared/test_slot_index.cpp
+        ${ROOT_SRC_DIR}/shared/slot_index.c
+)
+
+add_unit_test(test_subscriber_index
+    SOURCES
+        hub/domain/test_subscriber_index.cpp
+        ${ROOT_SRC_DIR}/hub/domain/subscriber_index.c
+)
+
 add_unit_test(test_bounded_string
     SOURCES
         shared/test_bounded_string.cpp
         ${ROOT_SRC_DIR}/shared/bounded_string.c
+)
+
+add_unit_test(test_epoll_registry
+    SOURCES
+        platform/test_epoll_registry.cpp
+        ${ROOT_SRC_DIR}/platform/linux/shared/epoll_registry.c
 )
 
 add_unit_test(test_tcp_keepalive
@@ -355,6 +373,7 @@ add_unit_test(test_interface_registry
         ${ROOT_SRC_DIR}/protocol/message_header.c
         ${ROOT_SRC_DIR}/protocol/register_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
+        ${ROOT_SRC_DIR}/shared/slot_index.c
 )
 
 add_unit_test(test_client_session
@@ -380,6 +399,7 @@ add_unit_test(test_admin_views
         ${ROOT_SRC_DIR}/protocol/register_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
         ${ROOT_SRC_DIR}/shared/bounded_string.c
+        ${ROOT_SRC_DIR}/shared/slot_index.c
 )
 
 add_unit_test(test_hub_peer
@@ -430,6 +450,8 @@ add_unit_test(test_frame_routes
         ${ROOT_SRC_DIR}/protocol/register_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
         ${ROOT_SRC_DIR}/shared/bounded_string.c
+        ${ROOT_SRC_DIR}/hub/domain/subscriber_index.c
+        ${ROOT_SRC_DIR}/shared/slot_index.c
 )
 
 add_unit_test(test_transaction_table
@@ -471,6 +493,8 @@ add_unit_test(test_broker
         ${ROOT_SRC_DIR}/protocol/interface_status_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
         ${ROOT_SRC_DIR}/shared/bounded_string.c
+        ${ROOT_SRC_DIR}/hub/domain/subscriber_index.c
+        ${ROOT_SRC_DIR}/shared/slot_index.c
 )
 target_link_libraries(test_broker PRIVATE port_mocks)
 
@@ -508,6 +532,8 @@ add_unit_test(test_broker_bridges
         ${ROOT_SRC_DIR}/protocol/interface_status_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
         ${ROOT_SRC_DIR}/shared/bounded_string.c
+        ${ROOT_SRC_DIR}/hub/domain/subscriber_index.c
+        ${ROOT_SRC_DIR}/shared/slot_index.c
 )
 target_link_libraries(test_broker_bridges PRIVATE port_mocks)
 
@@ -545,6 +571,8 @@ add_unit_test(test_broker_transactions
         ${ROOT_SRC_DIR}/protocol/interface_status_message.c
         ${ROOT_SRC_DIR}/protocol/wire.c
         ${ROOT_SRC_DIR}/shared/bounded_string.c
+        ${ROOT_SRC_DIR}/hub/domain/subscriber_index.c
+        ${ROOT_SRC_DIR}/shared/slot_index.c
 )
 target_link_libraries(test_broker_transactions PRIVATE port_mocks)
 

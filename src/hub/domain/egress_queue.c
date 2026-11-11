@@ -7,6 +7,7 @@
 static uint16_t popChannelHead(EgressQueue *self, uint8_t channel);
 static void appendChannelTail(EgressQueue *self, uint8_t channel, uint16_t slot);
 static uint8_t fullestChannel(const EgressQueue *self);
+static uint64_t pendingBit(uint8_t channel);
 static void fillSlot(EgressSlot *slot, uint8_t channel, const uint8_t *data, uint16_t size, uint64_t now_us);
 
 /* ---------- public ---------- */
@@ -113,16 +114,29 @@ void EgressQueue_PopChannel(EgressQueue *self, uint8_t channel)
 
 bool EgressQueue_NextPendingChannel(EgressQueue *self, uint8_t *channel)
 {
-    uint16_t i;
-    uint16_t candidate;
+    if (!EgressQueue_PendingChannelFrom(self, self->cursor, channel) && !EgressQueue_PendingChannelFrom(self, 0, channel)) {
+        return false;
+    }
 
-    for(i=0; i<EGRESS_QUEUE_CHANNELS_MAX; i++) {
-        candidate = (uint16_t)((self->cursor + i) % EGRESS_QUEUE_CHANNELS_MAX);
+    self->cursor = (uint16_t)((*channel + 1) % EGRESS_QUEUE_CHANNELS_MAX);
+
+    return true;
+}
+
+bool EgressQueue_PendingChannelFrom(const EgressQueue *self, uint16_t from, uint8_t *channel)
+{
+    uint16_t candidate = from;
+
+    while (candidate < EGRESS_QUEUE_CHANNELS_MAX) {
+        if (self->pending_words[candidate / EGRESS_QUEUE_PENDING_WORD_BITS] == 0) {
+            candidate = (uint16_t)((candidate / EGRESS_QUEUE_PENDING_WORD_BITS + 1) * EGRESS_QUEUE_PENDING_WORD_BITS);
+            continue;
+        }
         if (self->channels[candidate].count > 0) {
-            self->cursor = (uint16_t)((candidate + 1) % EGRESS_QUEUE_CHANNELS_MAX);
             *channel = (uint8_t)candidate;
             return true;
         }
+        candidate++;
     }
 
     return false;
@@ -139,6 +153,9 @@ static uint16_t popChannelHead(EgressQueue *self, uint8_t channel)
         self->channels[channel].tail = EGRESS_SLOT_NIL;
     }
     self->channels[channel].count--;
+    if (self->channels[channel].count == 0) {
+        self->pending_words[channel / EGRESS_QUEUE_PENDING_WORD_BITS] &= ~pendingBit(channel);
+    }
 
     return slot;
 }
@@ -153,6 +170,12 @@ static void appendChannelTail(EgressQueue *self, uint8_t channel, uint16_t slot)
     }
     self->channels[channel].tail = slot;
     self->channels[channel].count++;
+    self->pending_words[channel / EGRESS_QUEUE_PENDING_WORD_BITS] |= pendingBit(channel);
+}
+
+static uint64_t pendingBit(uint8_t channel)
+{
+    return (uint64_t)1 << (channel % EGRESS_QUEUE_PENDING_WORD_BITS);
 }
 
 static uint8_t fullestChannel(const EgressQueue *self)

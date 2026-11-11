@@ -9,7 +9,10 @@ extern "C" {
 
 static InterfaceRegistry registry;
 static PeerDirectory directory;
+static SubscriberIndex subscribers;
 static const RegisterMessage truck_registration = { "truck42", 2, { "can0", "can1" } };
+
+static void subscribeOpenBindings(void);
 
 describe("frame_routes", []() {
     beforeEach([]() {
@@ -19,6 +22,7 @@ describe("frame_routes", []() {
 
         InterfaceRegistry_Reset(&registry);
         PeerDirectory_Reset(&directory);
+        SubscriberIndex_Reset(&subscribers);
         agent = PeerDirectory_Allocate(&directory, 100);
         agent->role = kHUB_PEER_ROLE_AGENT;
         client = PeerDirectory_Allocate(&directory, 200);
@@ -42,7 +46,8 @@ describe("frame_routes", []() {
 
         ClientSession_OpenInterface(&client->session, &request, &client_channel);
 
-        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX, &routes_dropped);
+        subscribeOpenBindings();
+        route_count = FrameRoutes_FromAgent(&registry, &subscribers, &directory, 100, 1, routes, FRAME_ROUTES_MAX, &routes_dropped);
 
         expect(route_count).toBe(1);
         expect(routes[0].peer_id).toBe((uint32_t)200);
@@ -65,7 +70,8 @@ describe("frame_routes", []() {
 
         ClientSession_OpenInterface(&client->session, &request, &client_channel);
 
-        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX, &routes_dropped);
+        subscribeOpenBindings();
+        route_count = FrameRoutes_FromAgent(&registry, &subscribers, &directory, 100, 1, routes, FRAME_ROUTES_MAX, &routes_dropped);
 
         expect(route_count).toBe(1);
         expect(routes[0].reliable).toBe(true);
@@ -89,7 +95,8 @@ describe("frame_routes", []() {
         ClientSession_OpenInterface(&client->session, &request, &first_channel);
         ClientSession_OpenInterface(&client->session, &request, &second_channel);
 
-        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX, &routes_dropped);
+        subscribeOpenBindings();
+        route_count = FrameRoutes_FromAgent(&registry, &subscribers, &directory, 100, 1, routes, FRAME_ROUTES_MAX, &routes_dropped);
 
         expect(route_count).toBe(2);
         expect(routes[0].peer_id).toBe((uint32_t)200);
@@ -115,7 +122,8 @@ describe("frame_routes", []() {
         ClientSession_OpenInterface(&client->session, &request, &channel);
         ClientSession_OpenInterface(&client->session, &request, &channel);
 
-        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, 1, &routes_dropped);
+        subscribeOpenBindings();
+        route_count = FrameRoutes_FromAgent(&registry, &subscribers, &directory, 100, 1, routes, 1, &routes_dropped);
 
         expect(route_count).toBe(1);
         expect(routes_dropped).toBe(1);
@@ -148,7 +156,8 @@ describe("frame_routes", []() {
             }
         }
 
-        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX, &routes_dropped);
+        subscribeOpenBindings();
+        route_count = FrameRoutes_FromAgent(&registry, &subscribers, &directory, 100, 1, routes, FRAME_ROUTES_MAX, &routes_dropped);
 
         expect(expected > PEER_DIRECTORY_MAX).toBe(true);
         expect(route_count).toBe(expected);
@@ -160,7 +169,8 @@ describe("frame_routes", []() {
         uint16_t route_count;
         uint16_t routes_dropped;
 
-        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 1, routes, FRAME_ROUTES_MAX, &routes_dropped);
+        subscribeOpenBindings();
+        route_count = FrameRoutes_FromAgent(&registry, &subscribers, &directory, 100, 1, routes, FRAME_ROUTES_MAX, &routes_dropped);
 
         expect(route_count).toBe(0);
     });
@@ -170,7 +180,8 @@ describe("frame_routes", []() {
         uint16_t route_count;
         uint16_t routes_dropped;
 
-        route_count = FrameRoutes_FromAgent(&registry, &directory, 100, 42, routes, FRAME_ROUTES_MAX, &routes_dropped);
+        subscribeOpenBindings();
+        route_count = FrameRoutes_FromAgent(&registry, &subscribers, &directory, 100, 42, routes, FRAME_ROUTES_MAX, &routes_dropped);
 
         expect(route_count).toBe(0);
     });
@@ -209,3 +220,24 @@ describe("frame_routes", []() {
         expect(route_count).toBe(0);
     });
 });
+
+static void subscribeOpenBindings(void)
+{
+    const ChannelBinding *binding;
+    const InterfaceEntry *entry;
+    HubPeer *peer;
+    uint16_t peer_slot;
+    uint8_t binding_index;
+
+    for(peer_slot=0; peer_slot<PEER_DIRECTORY_MAX; peer_slot++) {
+        peer = PeerDirectory_At(&directory, peer_slot);
+        for(binding_index=0; peer!=NULL && binding_index<CLIENT_SESSION_BINDINGS_MAX; binding_index++) {
+            binding = ClientSession_BindingAt(&peer->session, binding_index);
+            if (binding == NULL) {
+                continue;
+            }
+            entry = InterfaceRegistry_FindById(&registry, binding->interface_id);
+            SubscriberIndex_Subscribe(&subscribers, InterfaceRegistry_SlotOf(&registry, entry), peer_slot, binding_index);
+        }
+    }
+}

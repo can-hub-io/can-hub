@@ -6,8 +6,10 @@
 #include "shared/egress_shaper.h"
 #include "protocol/list_message.h"
 #include "protocol/register_message.h"
+#include "shared/slot_index.h"
 
 #define INTERFACE_REGISTRY_MAX 256
+#define INTERFACE_REGISTRY_INDEX_BUCKETS (2 * INTERFACE_REGISTRY_MAX)
 #define INTERFACE_REGISTRY_HUB_PEER 0
 
 /*
@@ -37,6 +39,10 @@ typedef struct {
 
 typedef struct {
     InterfaceEntry entries[INTERFACE_REGISTRY_MAX];
+    SlotIndexBucket interface_id_buckets[INTERFACE_REGISTRY_INDEX_BUCKETS];
+    SlotIndexBucket agent_channel_buckets[INTERFACE_REGISTRY_INDEX_BUCKETS];
+    SlotIndex slot_by_interface_id;
+    SlotIndex slot_by_agent_channel;
     uint32_t next_interface_id;
 } InterfaceRegistry;
 
@@ -73,6 +79,7 @@ const InterfaceEntry *InterfaceRegistry_FindByName(
     const char *agent_name,
     const char *interface_name
 );
+uint16_t InterfaceRegistry_SlotOf(const InterfaceRegistry *self, const InterfaceEntry *entry);
 void InterfaceRegistry_List(const InterfaceRegistry *self, uint16_t offset, ListReplyMessage *reply);
 uint16_t InterfaceRegistry_Count(const InterfaceRegistry *self);
 void InterfaceRegistry_CountFrame(InterfaceRegistry *self, uint32_t interface_id);

@@ -13,11 +13,16 @@
  * Keeps epoll registrations in sync with fds that appear, change interest
  * mask or vanish between loop iterations (reconnecting clients, peer slots).
  * Every event carries a caller-chosen u32 tag in epoll_data.u32.
+ * The kernel drops a registration when its fd closes, and the next socket
+ * accepted gets the same fd number. A slot serving a table of peers names
+ * its occupant so a new peer on a recycled fd is registered again, and a
+ * vacated slot never unregisters an fd another slot has since taken.
  */
 typedef struct EpollRegistry {
     int32_t epoll_fd;
     int32_t registered_fds[EPOLL_REGISTRY_SLOTS_MAX];
     uint32_t registered_masks[EPOLL_REGISTRY_SLOTS_MAX];
+    uint32_t registered_occupants[EPOLL_REGISTRY_SLOTS_MAX];
 } EpollRegistry;
 
 bool EpollRegistry_Open(EpollRegistry *self);
@@ -26,6 +31,14 @@ void EpollRegistry_SetStaticInterest(EpollRegistry *self, int32_t fd, uint32_t m
 void EpollRegistry_SyncSlot(
     EpollRegistry *self,
     uint16_t slot,
+    int32_t current_fd,
+    uint32_t wanted_mask,
+    uint32_t event_data
+);
+void EpollRegistry_SyncOccupiedSlot(
+    EpollRegistry *self,
+    uint16_t slot,
+    uint32_t occupant,
     int32_t current_fd,
     uint32_t wanted_mask,
     uint32_t event_data

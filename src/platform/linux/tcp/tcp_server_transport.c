@@ -31,6 +31,7 @@ static void portClosePeer(void *context, uint32_t peer_id);
 static void initTransportBase(TcpServerTransport *self, uint32_t peer_id_base, const HubTransportEvents *events);
 static TcpServerPeer *findPeer(TcpServerTransport *self, uint32_t peer_id);
 static TcpServerPeer *findFreeSlot(TcpServerTransport *self);
+static void listPeer(TcpServerTransport *self, const TcpServerPeer *peer);
 typedef struct {
     TcpServerTransport *transport;
     TcpServerPeer *peer;
@@ -128,6 +129,16 @@ bool TcpServerTransport_SlotWantsWritable(const TcpServerTransport *self, uint16
     return TcpChannel_HasPendingTx(&self->peers[slot].channel);
 }
 
+uint32_t TcpServerTransport_SlotPeerId(const TcpServerTransport *self, uint16_t slot)
+{
+    return self->peers[slot].peer_id;
+}
+
+uint16_t TcpServerTransport_SlotsTouched(const TcpServerTransport *self)
+{
+    return self->slots_touched;
+}
+
 void TcpServerTransport_OnAcceptReady(TcpServerTransport *self)
 {
     TcpServerPeer *peer;
@@ -154,6 +165,7 @@ void TcpServerTransport_OnAcceptReady(TcpServerTransport *self)
         setsockopt(peer_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
         TcpChannel_Bind(&peer->channel, peer_fd);
         peer->peer_id = self->next_peer_id++;
+        listPeer(self, peer);
 
         origin[0] = '\0';
         origin_host[0] = '\0';
@@ -289,6 +301,7 @@ static void initTransportBase(TcpServerTransport *self, uint32_t peer_id_base, c
     self->port.close_peer = portClosePeer;
     self->events = *events;
     self->next_peer_id = peer_id_base;
+    SlotIndex_Init(&self->slot_by_peer_id, self->peer_id_buckets, TCP_SERVER_PEER_ID_BUCKETS);
     for(slot=0; slot<TCP_SERVER_PEERS_MAX; slot++) {
         TcpChannel_Unbind(&self->peers[slot].channel);
     }
@@ -298,13 +311,21 @@ static TcpServerPeer *findPeer(TcpServerTransport *self, uint32_t peer_id)
 {
     uint16_t slot;
 
-    for(slot=0; slot<TCP_SERVER_PEERS_MAX; slot++) {
-        if (TcpChannel_IsBound(&self->peers[slot].channel) && self->peers[slot].peer_id == peer_id) {
-            return &self->peers[slot];
-        }
+    if (!SlotIndex_Find(&self->slot_by_peer_id, peer_id, &slot)) {
+        return NULL;
     }
 
-    return NULL;
+    return &self->peers[slot];
+}
+
+static void listPeer(TcpServerTransport *self, const TcpServerPeer *peer)
+{
+    uint16_t slot = (uint16_t)(peer - self->peers);
+
+    SlotIndex_Put(&self->slot_by_peer_id, peer->peer_id, slot);
+    if (slot >= self->slots_touched) {
+        self->slots_touched = (uint16_t)(slot + 1);
+    }
 }
 
 static TcpServerPeer *findFreeSlot(TcpServerTransport *self)
@@ -345,6 +366,7 @@ static void closePeer(TcpServerTransport *self, TcpServerPeer *peer, bool notify
 {
     uint32_t peer_id = peer->peer_id;
 
+    SlotIndex_Remove(&self->slot_by_peer_id, peer_id);
     close(peer->channel.fd);
     TcpChannel_Unbind(&peer->channel);
 
