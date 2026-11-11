@@ -7,6 +7,7 @@
 #include "protocol/subscribe_message.h"
 
 #define CLIENT_SESSION_BINDINGS_MAX 32
+#define CLIENT_SESSION_CHANNELS_MAX 256
 
 /*
  * One client's session with the hub: the interfaces it holds open, each
@@ -34,6 +35,7 @@ typedef struct {
 
 typedef struct {
     ChannelBinding bindings[CLIENT_SESSION_BINDINGS_MAX];
+    uint8_t binding_of_channel[CLIENT_SESSION_CHANNELS_MAX];
     uint8_t next_channel;
 } ClientSession;
 
@@ -62,6 +64,7 @@ const ChannelBinding *ClientSession_NextBindingForInterface(
     uint8_t *iterator
 );
 ChannelBinding *ClientSession_BindingForChannel(ClientSession *self, uint8_t channel);
+const ChannelBinding *ClientSession_BindingAt(const ClientSession *self, uint8_t index);
 bool ClientSession_HoldsReliable(const ClientSession *self, uint32_t interface_id);
 bool ClientSession_HoldsChannels(const ClientSession *self);
 bool ClientSession_TakeReliableBinding(ClientSession *self, uint32_t *interface_id);

@@ -1,5 +1,6 @@
 #include "platform/linux/quic/quic_server_transport.h"
 
+#include <assert.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,11 @@
 
 #define UDP_PACKET_BUFFER_SIZE 1452
 #define UDP_SOCKET_BUFFER_BYTES (4 * 1024 * 1024)
+#define DCID_NOT_REMEMBERED 0
+#define DCID_HASH_SEED 2166136261
+#define DCID_HASH_PRIME 16777619
+
+static_assert(SLOT_INDEX_FITS(QUIC_SERVER_PEER_ID_BUCKETS, QUIC_SERVER_PEERS_MAX), "the QUIC peer id index needs a power-of-two bucket count at least twice its slots");
 
 static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
@@ -100,6 +106,11 @@ static void reopenClosedChannels(QuicServerPeer *peer);
 static void receiveControlData(QuicServerPeer *peer, const uint8_t *data, size_t size);
 static bool serverFrameSink(void *context, const uint8_t *frame, size_t size);
 static void retryStalledReliableStreams(QuicServerTransport *self);
+static QuicServerPeer *openPeerAt(QuicServerTransport *self, uint16_t position);
+static void listOpenPeer(QuicServerTransport *self, QuicServerPeer *peer);
+static void unlistOpenPeer(QuicServerTransport *self, const QuicServerPeer *peer);
+static bool ownsDcid(const QuicServerPeer *peer, const ngtcp2_cid *dcid);
+static uint16_t dcidCacheBucket(const ngtcp2_cid *dcid);
 
 static const char *cipherSuiteOrUnknown(const char *name);
 
@@ -131,6 +142,7 @@ bool QuicServerTransport_Init(
     self->port.close_peer = portClosePeer;
     self->events = *events;
     self->next_peer_id = peer_id_base;
+    SlotIndex_Init(&self->slot_by_peer_id, self->peer_id_buckets, QUIC_SERVER_PEER_ID_BUCKETS);
     QuicRetry_Init(&self->retry);
 
     if (!QuicServerSecurity_Init(&self->security, certificate_file, key_file)) {
@@ -183,6 +195,7 @@ void QuicServerTransport_OnUdpReadable(QuicServerTransport *self)
     socklen_t peer_address_length;
     ssize_t bytes_received;
 
+    self->serving = true;
     for (;;) {
         bytes_received = receivePacket(self, packet, sizeof(packet), &peer_address, &peer_address_length);
         if (bytes_received <= 0) {
@@ -194,6 +207,7 @@ void QuicServerTransport_OnUdpReadable(QuicServerTransport *self)
     }
 
     retryStalledReliableStreams(self);
+    self->serving = false;
     rearmTimer(self);
 }
 
@@ -208,10 +222,11 @@ void QuicServerTransport_OnTimer(QuicServerTransport *self)
     (void)bytes_read;
 
     now_ns = Clock_MonotonicNs();
-    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
-        QuicServerPeer *peer = &self->peers[i];
+    self->serving = true;
+    for(i=self->open_count; i>0; i--) {
+        QuicServerPeer *peer = openPeerAt(self, (uint16_t)(i - 1));
 
-        if (!QuicConnection_IsOpen(&peer->connection)) {
+        if (peer == NULL) {
             continue;
         }
         if (QuicConnection_NextExpiryNs(&peer->connection) > now_ns) {
@@ -239,6 +254,7 @@ void QuicServerTransport_OnTimer(QuicServerTransport *self)
 
     flushStagedPeers(self);
     retryStalledReliableStreams(self);
+    self->serving = false;
     rearmTimer(self);
 }
 
@@ -250,16 +266,23 @@ void QuicServerTransport_Cork(QuicServerTransport *self)
 void QuicServerTransport_Uncork(QuicServerTransport *self)
 {
     self->corked = false;
+    self->serving = true;
     flushStagedPeers(self);
+    self->serving = false;
+    if (self->timer_stale) {
+        rearmTimer(self);
+    }
 }
 
 void QuicServerTransport_CloseAll(QuicServerTransport *self)
 {
+    QuicServerPeer *peer;
     uint16_t i;
 
-    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
-        if (QuicConnection_IsOpen(&self->peers[i].connection)) {
-            closePeer(self, &self->peers[i]);
+    for(i=self->open_count; i>0; i--) {
+        peer = openPeerAt(self, (uint16_t)(i - 1));
+        if (peer != NULL) {
+            closePeer(self, peer);
         }
     }
 }
@@ -422,15 +445,51 @@ static void portClosePeer(void *context, uint32_t peer_id)
 
 static QuicServerPeer *findPeerById(QuicServerTransport *self, uint32_t peer_id)
 {
-    uint16_t i;
+    uint16_t slot;
 
-    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
-        if (QuicConnection_IsOpen(&self->peers[i].connection) && self->peers[i].peer_id == peer_id) {
-            return &self->peers[i];
-        }
+    if (!SlotIndex_Find(&self->slot_by_peer_id, peer_id, &slot)) {
+        return NULL;
     }
 
-    return NULL;
+    return &self->peers[slot];
+}
+
+static QuicServerPeer *openPeerAt(QuicServerTransport *self, uint16_t position)
+{
+    QuicServerPeer *peer;
+
+    if (position >= self->open_count) {
+        return NULL;
+    }
+
+    peer = &self->peers[self->open_slots[position]];
+    if (!QuicConnection_IsOpen(&peer->connection)) {
+        return NULL;
+    }
+
+    return peer;
+}
+
+static void listOpenPeer(QuicServerTransport *self, QuicServerPeer *peer)
+{
+    uint16_t slot = (uint16_t)(peer - self->peers);
+
+    self->open_slots[self->open_count++] = slot;
+    SlotIndex_Put(&self->slot_by_peer_id, peer->peer_id, slot);
+}
+
+static void unlistOpenPeer(QuicServerTransport *self, const QuicServerPeer *peer)
+{
+    uint16_t slot = (uint16_t)(peer - self->peers);
+    uint16_t position;
+
+    SlotIndex_Remove(&self->slot_by_peer_id, peer->peer_id);
+    for(position=0; position<self->open_count; position++) {
+        if (self->open_slots[position] == slot) {
+            self->open_slots[position] = self->open_slots[--self->open_count];
+            return;
+        }
+    }
 }
 
 static QuicServerPeer *findPeerByDcid(QuicServerTransport *self, const uint8_t *packet, size_t packet_size)
@@ -438,6 +497,7 @@ static QuicServerPeer *findPeerByDcid(QuicServerTransport *self, const uint8_t *
     ngtcp2_version_cid version_cid;
     ngtcp2_cid dcid;
     QuicServerPeer *peer;
+    uint16_t *remembered;
     uint16_t i;
 
     if (ngtcp2_pkt_decode_version_cid(&version_cid, packet, packet_size, QUIC_CONNECTION_CID_LENGTH) != 0) {
@@ -448,20 +508,44 @@ static QuicServerPeer *findPeerByDcid(QuicServerTransport *self, const uint8_t *
     }
     ngtcp2_cid_init(&dcid, version_cid.dcid, version_cid.dcidlen);
 
-    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
-        peer = &self->peers[i];
-        if (!QuicConnection_IsOpen(&peer->connection)) {
-            continue;
-        }
-        if (ngtcp2_cid_eq(&peer->original_dcid, &dcid)) {
-            return peer;
-        }
-        if (QuicConnection_HasLocalCid(&peer->connection, &dcid)) {
+    remembered = &self->dcid_cache[dcidCacheBucket(&dcid)];
+    if (*remembered != DCID_NOT_REMEMBERED && ownsDcid(&self->peers[*remembered - 1], &dcid)) {
+        return &self->peers[*remembered - 1];
+    }
+
+    for(i=0; i<self->open_count; i++) {
+        peer = openPeerAt(self, i);
+        if (peer != NULL && ownsDcid(peer, &dcid)) {
+            *remembered = (uint16_t)(self->open_slots[i] + 1);
             return peer;
         }
     }
 
     return NULL;
+}
+
+static bool ownsDcid(const QuicServerPeer *peer, const ngtcp2_cid *dcid)
+{
+    if (!QuicConnection_IsOpen(&peer->connection)) {
+        return false;
+    }
+    if (ngtcp2_cid_eq(&peer->original_dcid, dcid)) {
+        return true;
+    }
+
+    return QuicConnection_HasLocalCid(&peer->connection, dcid);
+}
+
+static uint16_t dcidCacheBucket(const ngtcp2_cid *dcid)
+{
+    uint32_t hash = DCID_HASH_SEED;
+    uint8_t i;
+
+    for(i=0; i<dcid->datalen; i++) {
+        hash = (hash ^ dcid->data[i]) * DCID_HASH_PRIME;
+    }
+
+    return (uint16_t)(hash % QUIC_SERVER_DCID_CACHE_SIZE);
 }
 
 static QuicServerPeer *acceptPeer(
@@ -542,6 +626,7 @@ static QuicServerPeer *openPeer(
         QuicServerSecurity_FreeSession(&peer->session);
         return NULL;
     }
+    listOpenPeer(self, peer);
 
     LOG_DEBUG("quic: handshake %u from %s", peer->peer_id, peer->origin_host);
 
@@ -581,8 +666,8 @@ static bool admitsHandshake(const QuicServerTransport *self, const char *origin_
     uint16_t from_host = 0;
     uint16_t i;
 
-    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
-        peer = &self->peers[i];
+    for(i=0; i<self->open_count; i++) {
+        peer = &self->peers[self->open_slots[i]];
         if (!isHandshaking(peer)) {
             continue;
         }
@@ -600,8 +685,8 @@ static uint16_t countHandshakes(const QuicServerTransport *self)
     uint16_t handshaking = 0;
     uint16_t i;
 
-    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
-        if (isHandshaking(&self->peers[i])) {
+    for(i=0; i<self->open_count; i++) {
+        if (isHandshaking(&self->peers[self->open_slots[i]])) {
             handshaking++;
         }
     }
@@ -762,9 +847,9 @@ static void flushStagedPeers(QuicServerTransport *self)
     QuicServerPeer *peer;
     uint16_t i;
 
-    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
-        peer = &self->peers[i];
-        if (!peer->connected || peer->egress_blocked || QuicDatagramBacklog_IsEmpty(&peer->egress_backlog)) {
+    for(i=self->open_count; i>0; i--) {
+        peer = openPeerAt(self, (uint16_t)(i - 1));
+        if (peer == NULL || !peer->connected || peer->egress_blocked || QuicDatagramBacklog_IsEmpty(&peer->egress_backlog)) {
             continue;
         }
         flushPeer(self, peer);
@@ -791,6 +876,10 @@ static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer)
         return false;
     }
 
+    if (self->serving || self->corked) {
+        self->timer_stale = true;
+        return true;
+    }
     rearmTimer(self);
 
     return true;
@@ -798,17 +887,20 @@ static bool flushPeer(QuicServerTransport *self, QuicServerPeer *peer)
 
 static void retryStalledReliableStreams(QuicServerTransport *self)
 {
+    QuicServerPeer *peer;
     uint16_t i;
 
-    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
-        if (QuicConnection_IsOpen(&self->peers[i].connection)) {
-            QuicReliableStreams_RetryDrain(&self->peers[i].reliable_streams, &self->peers[i].connection, serverFrameSink, &self->peers[i]);
-            reopenClosedChannels(&self->peers[i]);
+    for(i=self->open_count; i>0; i--) {
+        peer = openPeerAt(self, (uint16_t)(i - 1));
+        if (peer != NULL) {
+            QuicReliableStreams_RetryDrain(&peer->reliable_streams, &peer->connection, serverFrameSink, peer);
+            reopenClosedChannels(peer);
         }
     }
-    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
-        if (QuicConnection_IsOpen(&self->peers[i].connection)) {
-            flushPeer(self, &self->peers[i]);
+    for(i=self->open_count; i>0; i--) {
+        peer = openPeerAt(self, (uint16_t)(i - 1));
+        if (peer != NULL) {
+            flushPeer(self, peer);
         }
     }
 }
@@ -847,13 +939,16 @@ static void rearmTimer(QuicServerTransport *self)
     struct itimerspec timer_specification;
     uint64_t earliest_ns = UINT64_MAX;
     uint64_t expiry_ns;
+    QuicServerPeer *peer;
     uint16_t i;
 
-    for(i=0; i<QUIC_SERVER_PEERS_MAX; i++) {
-        if (!QuicConnection_IsOpen(&self->peers[i].connection)) {
+    self->timer_stale = false;
+    for(i=0; i<self->open_count; i++) {
+        peer = openPeerAt(self, i);
+        if (peer == NULL) {
             continue;
         }
-        expiry_ns = QuicConnection_NextExpiryNs(&self->peers[i].connection);
+        expiry_ns = QuicConnection_NextExpiryNs(&peer->connection);
         if (expiry_ns < earliest_ns) {
             earliest_ns = expiry_ns;
         }
@@ -888,6 +983,7 @@ static void teardownPeer(QuicServerTransport *self, QuicServerPeer *peer, bool n
     bool was_connected = peer->connected;
     uint32_t peer_id = peer->peer_id;
 
+    unlistOpenPeer(self, peer);
     QuicServerSecurity_FreeSession(&peer->session);
     QuicConnection_Close(&peer->connection);
     QuicControlChannel_Reset(&peer->control);

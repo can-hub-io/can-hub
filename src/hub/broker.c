@@ -145,6 +145,7 @@ static void recordRejection(Broker *self, const HubPeer *peer, const char *name,
 static const char *unknownAgentDetail(const Broker *self);
 static void detachAgent(Broker *self, uint32_t agent_peer_id);
 static void reattachClientsToAgent(Broker *self, uint32_t agent_peer_id);
+static void refreshSubscriptions(Broker *self, HubPeer *client);
 static void detachInterface(Broker *self, const InterfaceEntry *entry);
 static void reattachInterface(Broker *self, const InterfaceEntry *entry);
 static void sendControl(Broker *self, HubPeer *peer, const uint8_t *encoded, size_t encoded_size);
@@ -293,6 +294,7 @@ void Broker_Init(
     self->bridge_store = bridge_store;
     self->require_known_peers = require_known_peers;
     InterfaceRegistry_Reset(&self->registry);
+    SubscriberIndex_Reset(&self->subscribers);
     PeerDirectory_Reset(&self->directory);
     RejectedPeers_Reset(&self->rejected_peers);
     BridgeRoutes_Reset(&self->bridges);
@@ -323,13 +325,14 @@ void Broker_Tick(Broker *self, uint64_t now_us)
 
     self->now_us = now_us;
 
-    for(i=0; i<PEER_DIRECTORY_MAX; i++) {
-        peer = PeerDirectory_At(&self->directory, i);
+    for(i=PeerDirectory_Count(&self->directory); i>0; i--) {
+        peer = PeerDirectory_LiveAt(&self->directory, (uint16_t)(i - 1));
         if (peer == NULL) {
             continue;
         }
         if (peer->role == kHUB_PEER_ROLE_UNKNOWN) {
             tickHelloDeadline(self, peer, now_us);
+            continue;
         }
         if (EgressQueue_HasPending(&peer->egress)) {
             drainPeer(self, peer);
@@ -343,24 +346,24 @@ int32_t Broker_NextTimeoutMs(Broker *self, int32_t cap_ms)
     uint64_t delay;
     const uint8_t *front;
     uint16_t size;
-    uint16_t channel;
+    uint16_t next_channel;
+    uint8_t channel;
     HubPeer *peer;
     uint16_t i;
 
-    for(i=0; i<PEER_DIRECTORY_MAX; i++) {
-        peer = PeerDirectory_At(&self->directory, i);
+    for(i=0; i<PeerDirectory_Count(&self->directory); i++) {
+        peer = PeerDirectory_LiveAt(&self->directory, i);
         if (peer == NULL || !EgressQueue_HasPending(&peer->egress)) {
             continue;
         }
-        for(channel=0; channel<EGRESS_QUEUE_CHANNELS_MAX; channel++) {
-            if (!EgressQueue_ChannelPending(&peer->egress, (uint8_t)channel)) {
-                continue;
-            }
-            front = EgressQueue_FrontOfChannel(&peer->egress, (uint8_t)channel, &size);
+        next_channel = 0;
+        while (EgressQueue_PendingChannelFrom(&peer->egress, next_channel, &channel)) {
+            next_channel = (uint16_t)(channel + 1);
+            front = EgressQueue_FrontOfChannel(&peer->egress, channel, &size);
             if (front == NULL) {
                 continue;
             }
-            delay = InterfaceRegistry_EgressDelayUs(&self->registry, peer->peer_id, (uint8_t)channel, frameWireBits(front, size), self->now_us);
+            delay = InterfaceRegistry_EgressDelayUs(&self->registry, peer->peer_id, channel, frameWireBits(front, size), self->now_us);
             if (delay > 0 && delay < best_us) {
                 best_us = delay;
             }
@@ -547,6 +550,7 @@ static bool routeFrame(Broker *self, HubPeer *peer, const FrameMessage *frame)
     if (peer->role == kHUB_PEER_ROLE_AGENT) {
         route_count = FrameRoutes_FromAgent(
             &self->registry,
+            &self->subscribers,
             &self->directory,
             peer->peer_id,
             frame->channel,
@@ -783,6 +787,7 @@ static void handleOpen(Broker *self, HubPeer *peer, const MessageHeader *header,
             ack.status = OPEN_STATUS_RELIABLE_EXHAUSTED;
             ack.channel = 0;
         }
+        refreshSubscriptions(self, peer);
     }
 
     sendControl(self, peer, encoded, OpenAckMessage_Encode(&ack, encoded, sizeof(encoded)));
@@ -1715,7 +1720,7 @@ static uint16_t showToGroup(Broker *self, const InterfaceEntry *entry, const Fra
     uint16_t route_count;
     uint16_t i;
 
-    route_count = FrameRoutes_ToInterface(&self->directory, entry->interface_id, routes, FRAME_ROUTES_MAX, &routes_dropped);
+    route_count = FrameRoutes_ToInterface(&self->registry, &self->subscribers, &self->directory, entry, routes, FRAME_ROUTES_MAX, &routes_dropped);
     self->metrics.frames_dropped += routes_dropped;
     InterfaceRegistry_CountFrame(&self->registry, entry->interface_id);
     for(i=0; i<route_count; i++) {
@@ -2133,6 +2138,7 @@ static void releasePeer(Broker *self, HubPeer *peer)
     }
 
     releasePendingIfconfig(self, peer_id);
+    SubscriberIndex_DropPeer(&self->subscribers, PeerDirectory_SlotOf(&self->directory, peer));
     PeerDirectory_Release(&self->directory, peer_id);
 }
 
@@ -2155,6 +2161,7 @@ static void closeClientChannel(Broker *self, HubPeer *client, uint8_t channel)
     interface_id = binding->interface_id;
     reliable = binding->reliable;
     ClientSession_CloseChannel(&client->session, channel);
+    refreshSubscriptions(self, client);
     if (!reliable) {
         return;
     }
@@ -2254,6 +2261,27 @@ static void reattachClientsToAgent(Broker *self, uint32_t agent_peer_id)
     }
 }
 
+static void refreshSubscriptions(Broker *self, HubPeer *client)
+{
+    const ChannelBinding *binding;
+    const InterfaceEntry *entry;
+    uint16_t peer_slot = PeerDirectory_SlotOf(&self->directory, client);
+    uint8_t binding_index;
+
+    SubscriberIndex_DropPeer(&self->subscribers, peer_slot);
+
+    for(binding_index=0; binding_index<CLIENT_SESSION_BINDINGS_MAX; binding_index++) {
+        binding = ClientSession_BindingAt(&client->session, binding_index);
+        if (binding == NULL) {
+            continue;
+        }
+        entry = InterfaceRegistry_FindById(&self->registry, binding->interface_id);
+        if (entry != NULL) {
+            SubscriberIndex_Subscribe(&self->subscribers, InterfaceRegistry_SlotOf(&self->registry, entry), peer_slot, binding_index);
+        }
+    }
+}
+
 static void detachInterface(Broker *self, const InterfaceEntry *entry)
 {
     HubPeer *peer;
@@ -2263,6 +2291,7 @@ static void detachInterface(Broker *self, const InterfaceEntry *entry)
         peer = PeerDirectory_At(&self->directory, peer_index);
         if (peer != NULL && peer->role == kHUB_PEER_ROLE_CLIENT) {
             ClientSession_DetachInterface(&peer->session, entry->interface_id);
+            refreshSubscriptions(self, peer);
         }
     }
 }
@@ -2281,6 +2310,7 @@ static void reattachInterface(Broker *self, const InterfaceEntry *entry)
         if (!ClientSession_ReattachInterface(&peer->session, entry->agent_name, entry->interface_name, entry->interface_id, clientCanWrite(self, peer, entry))) {
             continue;
         }
+        refreshSubscriptions(self, peer);
         if (!clientCanRead(self, peer, entry)) {
             removeClientInterface(self, peer, entry->interface_id);
             continue;

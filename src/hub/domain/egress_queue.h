@@ -9,6 +9,8 @@
 #define EGRESS_QUEUE_SLOTS_MAX 512
 #define EGRESS_QUEUE_CHANNEL_CAP 64
 #define EGRESS_QUEUE_CHANNELS_MAX 256
+#define EGRESS_QUEUE_PENDING_WORD_BITS 64
+#define EGRESS_QUEUE_PENDING_WORDS (EGRESS_QUEUE_CHANNELS_MAX / EGRESS_QUEUE_PENDING_WORD_BITS)
 #define EGRESS_FRAME_BYTES_MAX (MESSAGE_HEADER_SIZE + FRAME_FIXED_FIELDS_SIZE + FRAME_PAYLOAD_MAX_FD)
 
 /*
@@ -41,6 +43,7 @@ typedef struct {
 typedef struct {
     EgressSlot slots[EGRESS_QUEUE_SLOTS_MAX];
     EgressChannelList channels[EGRESS_QUEUE_CHANNELS_MAX];
+    uint64_t pending_words[EGRESS_QUEUE_PENDING_WORDS];
     uint16_t free_head;
     uint16_t used;
     uint16_t cursor;
@@ -61,3 +64,4 @@ const uint8_t *EgressQueue_FrontOfChannel(const EgressQueue *self, uint8_t chann
 uint64_t EgressQueue_FrontEnqueuedUs(const EgressQueue *self, uint8_t channel);
 void EgressQueue_PopChannel(EgressQueue *self, uint8_t channel);
 bool EgressQueue_NextPendingChannel(EgressQueue *self, uint8_t *channel);
+bool EgressQueue_PendingChannelFrom(const EgressQueue *self, uint16_t from, uint8_t *channel);

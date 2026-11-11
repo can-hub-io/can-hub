@@ -5,7 +5,11 @@
 #include "protocol/frame_message.h"
 #include "shared/bounded_string.h"
 
+#define NO_BINDING 0
+
 static ChannelBinding *findByChannel(ClientSession *self, uint8_t channel);
+static const ChannelBinding *bindingOfChannel(const ClientSession *self, uint8_t channel);
+static void releaseBinding(ClientSession *self, ChannelBinding *binding);
 static ChannelBinding *findFree(ClientSession *self);
 static bool allocateChannel(ClientSession *self, uint8_t *channel);
 
@@ -32,6 +36,7 @@ bool ClientSession_OpenInterface(ClientSession *self, const ChannelOpenRequest *
     binding->error_frames = request->error_frames;
     binding->interface_id = request->interface_id;
     binding->channel = *channel;
+    self->binding_of_channel[*channel] = (uint8_t)(binding - self->bindings + 1);
     BoundedString_Copy(binding->agent_name, sizeof(binding->agent_name), request->agent_name);
     BoundedString_Copy(binding->interface_name, sizeof(binding->interface_name), request->interface_name);
 
@@ -40,28 +45,16 @@ bool ClientSession_OpenInterface(ClientSession *self, const ChannelOpenRequest *
 
 bool ClientSession_CanWrite(const ClientSession *self, uint8_t channel)
 {
-    uint8_t i;
+    const ChannelBinding *binding = bindingOfChannel(self, channel);
 
-    for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
-        if (self->bindings[i].in_use && self->bindings[i].channel == channel) {
-            return self->bindings[i].can_write;
-        }
-    }
-
-    return false;
+    return binding != NULL && binding->can_write;
 }
 
 bool ClientSession_ChannelReliable(const ClientSession *self, uint8_t channel)
 {
-    uint8_t i;
+    const ChannelBinding *binding = bindingOfChannel(self, channel);
 
-    for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
-        if (self->bindings[i].in_use && self->bindings[i].channel == channel) {
-            return self->bindings[i].reliable;
-        }
-    }
-
-    return false;
+    return binding != NULL && binding->reliable;
 }
 
 bool ClientSession_SetFilters(ClientSession *self, uint8_t channel, const CanFilter *filters, uint8_t count)
@@ -82,29 +75,25 @@ bool ClientSession_SetFilters(ClientSession *self, uint8_t channel, const CanFil
 
 bool ClientSession_ChannelAccepts(const ClientSession *self, uint8_t channel, uint32_t can_id)
 {
-    uint8_t i;
+    const ChannelBinding *binding = bindingOfChannel(self, channel);
     uint8_t f;
 
-    for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
-        if (!self->bindings[i].in_use || self->bindings[i].channel != channel) {
-            continue;
-        }
-        if (can_id & FRAME_CAN_ID_FLAG_ERR) {
-            return self->bindings[i].error_frames;
-        }
-        if (self->bindings[i].filter_count == 0) {
+    if (binding == NULL) {
+        return true;
+    }
+    if (can_id & FRAME_CAN_ID_FLAG_ERR) {
+        return binding->error_frames;
+    }
+    if (binding->filter_count == 0) {
+        return true;
+    }
+    for(f=0; f<binding->filter_count; f++) {
+        if ((can_id & binding->filters[f].can_mask) == (binding->filters[f].can_id & binding->filters[f].can_mask)) {
             return true;
         }
-        for(f=0; f<self->bindings[i].filter_count; f++) {
-            if ((can_id & self->bindings[i].filters[f].can_mask)
-                == (self->bindings[i].filters[f].can_id & self->bindings[i].filters[f].can_mask)) {
-                return true;
-            }
-        }
-        return false;
     }
 
-    return true;
+    return false;
 }
 
 void ClientSession_CloseChannel(ClientSession *self, uint8_t channel)
@@ -112,22 +101,21 @@ void ClientSession_CloseChannel(ClientSession *self, uint8_t channel)
     ChannelBinding *binding = findByChannel(self, channel);
 
     if (binding != NULL) {
-        memset(binding, 0, sizeof(*binding));
+        releaseBinding(self, binding);
     }
 }
 
 bool ClientSession_InterfaceForChannel(const ClientSession *self, uint8_t channel, uint32_t *interface_id)
 {
-    uint8_t i;
+    const ChannelBinding *binding = bindingOfChannel(self, channel);
 
-    for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
-        if (self->bindings[i].in_use && !self->bindings[i].dormant && self->bindings[i].channel == channel) {
-            *interface_id = self->bindings[i].interface_id;
-            return true;
-        }
+    if (binding == NULL || binding->dormant) {
+        return false;
     }
 
-    return false;
+    *interface_id = binding->interface_id;
+
+    return true;
 }
 
 bool ClientSession_ChannelForInterface(const ClientSession *self, uint32_t interface_id, uint8_t *channel)
@@ -168,6 +156,15 @@ ChannelBinding *ClientSession_BindingForChannel(ClientSession *self, uint8_t cha
     return findByChannel(self, channel);
 }
 
+const ChannelBinding *ClientSession_BindingAt(const ClientSession *self, uint8_t index)
+{
+    if (index >= CLIENT_SESSION_BINDINGS_MAX || !self->bindings[index].in_use || self->bindings[index].dormant) {
+        return NULL;
+    }
+
+    return &self->bindings[index];
+}
+
 bool ClientSession_HoldsReliable(const ClientSession *self, uint32_t interface_id)
 {
     uint8_t i;
@@ -201,7 +198,7 @@ bool ClientSession_TakeReliableBinding(ClientSession *self, uint32_t *interface_
     for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
         if (self->bindings[i].in_use && self->bindings[i].reliable) {
             *interface_id = self->bindings[i].interface_id;
-            memset(&self->bindings[i], 0, sizeof(self->bindings[i]));
+            releaseBinding(self, &self->bindings[i]);
             return true;
         }
     }
@@ -255,15 +252,30 @@ bool ClientSession_ReattachInterface(
 
 static ChannelBinding *findByChannel(ClientSession *self, uint8_t channel)
 {
-    uint8_t i;
+    uint8_t occupant = self->binding_of_channel[channel];
 
-    for(i=0; i<CLIENT_SESSION_BINDINGS_MAX; i++) {
-        if (self->bindings[i].in_use && self->bindings[i].channel == channel) {
-            return &self->bindings[i];
-        }
+    if (occupant == NO_BINDING) {
+        return NULL;
     }
 
-    return NULL;
+    return &self->bindings[occupant - 1];
+}
+
+static const ChannelBinding *bindingOfChannel(const ClientSession *self, uint8_t channel)
+{
+    uint8_t occupant = self->binding_of_channel[channel];
+
+    if (occupant == NO_BINDING) {
+        return NULL;
+    }
+
+    return &self->bindings[occupant - 1];
+}
+
+static void releaseBinding(ClientSession *self, ChannelBinding *binding)
+{
+    self->binding_of_channel[binding->channel] = NO_BINDING;
+    memset(binding, 0, sizeof(*binding));
 }
 
 static ChannelBinding *findFree(ClientSession *self)

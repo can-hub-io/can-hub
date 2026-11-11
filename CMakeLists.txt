@@ -246,6 +246,8 @@ set(HUB_SOURCES
     src/hub/domain/bridge_targets.c
     src/hub/domain/interface_registry.c
     src/hub/domain/peer_directory.c
+    src/hub/domain/subscriber_index.c
+    src/shared/slot_index.c
     src/hub/domain/rejected_peers.c
     src/hub/domain/transaction_table.c
     src/platform/linux/clock/clock.c

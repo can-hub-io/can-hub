@@ -1,14 +1,19 @@
 #include "hub/domain/peer_directory.h"
 
+#include <assert.h>
 #include <string.h>
 
+static_assert(SLOT_INDEX_FITS(PEER_DIRECTORY_INDEX_BUCKETS, PEER_DIRECTORY_MAX), "the peer id index needs a power-of-two bucket count at least twice its slots");
+
 static bool displacesBefore(const HubPeer *peer, const HubPeer *other);
+static void forgetLiveSlot(PeerDirectory *self, uint16_t slot);
 
 /* ---------- public ---------- */
 
 void PeerDirectory_Reset(PeerDirectory *self)
 {
     memset(self, 0, sizeof(*self));
+    SlotIndex_Init(&self->slot_by_peer_id, self->peer_id_buckets, PEER_DIRECTORY_INDEX_BUCKETS);
 }
 
 HubPeer *PeerDirectory_Allocate(PeerDirectory *self, uint32_t peer_id)
@@ -22,6 +27,8 @@ HubPeer *PeerDirectory_Allocate(PeerDirectory *self, uint32_t peer_id)
             self->peers[i].peer_id = peer_id;
             ClientSession_Reset(&self->peers[i].session);
             EgressQueue_Reset(&self->peers[i].egress);
+            SlotIndex_Put(&self->slot_by_peer_id, peer_id, i);
+            self->live_slots[self->live_count++] = i;
             return &self->peers[i];
         }
     }
@@ -31,24 +38,26 @@ HubPeer *PeerDirectory_Allocate(PeerDirectory *self, uint32_t peer_id)
 
 HubPeer *PeerDirectory_Find(PeerDirectory *self, uint32_t peer_id)
 {
-    uint16_t i;
+    uint16_t slot;
 
-    for(i=0; i<PEER_DIRECTORY_MAX; i++) {
-        if (self->peers[i].in_use && self->peers[i].peer_id == peer_id) {
-            return &self->peers[i];
-        }
+    if (!SlotIndex_Find(&self->slot_by_peer_id, peer_id, &slot)) {
+        return NULL;
     }
 
-    return NULL;
+    return &self->peers[slot];
 }
 
 void PeerDirectory_Release(PeerDirectory *self, uint32_t peer_id)
 {
     HubPeer *peer = PeerDirectory_Find(self, peer_id);
 
-    if (peer != NULL) {
-        memset(peer, 0, sizeof(*peer));
+    if (peer == NULL) {
+        return;
     }
+
+    forgetLiveSlot(self, PeerDirectory_SlotOf(self, peer));
+    SlotIndex_Remove(&self->slot_by_peer_id, peer_id);
+    memset(peer, 0, sizeof(*peer));
 }
 
 HubPeer *PeerDirectory_At(PeerDirectory *self, uint16_t index)
@@ -58,6 +67,20 @@ HubPeer *PeerDirectory_At(PeerDirectory *self, uint16_t index)
     }
 
     return &self->peers[index];
+}
+
+HubPeer *PeerDirectory_LiveAt(PeerDirectory *self, uint16_t position)
+{
+    if (position >= self->live_count) {
+        return NULL;
+    }
+
+    return &self->peers[self->live_slots[position]];
+}
+
+uint16_t PeerDirectory_SlotOf(const PeerDirectory *self, const HubPeer *peer)
+{
+    return (uint16_t)(peer - self->peers);
 }
 
 HubPeer *PeerDirectory_FindAgentByName(PeerDirectory *self, const char *agent_name)
@@ -121,16 +144,7 @@ bool PeerDirectory_IsFull(const PeerDirectory *self)
 
 uint16_t PeerDirectory_Count(const PeerDirectory *self)
 {
-    uint16_t count = 0;
-    uint16_t i;
-
-    for(i=0; i<PEER_DIRECTORY_MAX; i++) {
-        if (self->peers[i].in_use) {
-            count++;
-        }
-    }
-
-    return count;
+    return self->live_count;
 }
 
 uint16_t PeerDirectory_CountRole(const PeerDirectory *self, uint8_t role)
@@ -200,4 +214,16 @@ static bool displacesBefore(const HubPeer *peer, const HubPeer *other)
     }
 
     return peer->connected_at_us > other->connected_at_us;
+}
+
+static void forgetLiveSlot(PeerDirectory *self, uint16_t slot)
+{
+    uint16_t position;
+
+    for(position=0; position<self->live_count; position++) {
+        if (self->live_slots[position] == slot) {
+            self->live_slots[position] = self->live_slots[--self->live_count];
+            return;
+        }
+    }
 }

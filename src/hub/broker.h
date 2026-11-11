@@ -50,6 +50,7 @@ typedef struct {
     BridgeGroups groups;
     BridgeTarget bridge_targets[BRIDGE_TARGETS_MAX];
     PeerDirectory directory;
+    SubscriberIndex subscribers;
     HubMetrics metrics;
     PendingIfconfig pending_ifconfig[BROKER_PENDING_IFCONFIG_MAX];
     TransactionTable transactions;

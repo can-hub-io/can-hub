@@ -1,9 +1,12 @@
 #include "hub/domain/frame_routes.h"
 
+static const ChannelBinding *boundTo(const HubPeer *peer, uint8_t binding_index, uint32_t interface_id);
+
 /* ---------- public ---------- */
 
 uint16_t FrameRoutes_FromAgent(
     const InterfaceRegistry *registry,
+    const SubscriberIndex *subscribers,
     PeerDirectory *directory,
     uint32_t agent_peer_id,
     uint8_t agent_channel,
@@ -19,12 +22,14 @@ uint16_t FrameRoutes_FromAgent(
         return 0;
     }
 
-    return FrameRoutes_ToInterface(directory, entry->interface_id, routes, routes_max, dropped);
+    return FrameRoutes_ToInterface(registry, subscribers, directory, entry, routes, routes_max, dropped);
 }
 
 uint16_t FrameRoutes_ToInterface(
+    const InterfaceRegistry *registry,
+    const SubscriberIndex *subscribers,
     PeerDirectory *directory,
-    uint32_t interface_id,
+    const InterfaceEntry *entry,
     FrameRoute *routes,
     uint16_t routes_max,
     uint16_t *dropped
@@ -33,29 +38,29 @@ uint16_t FrameRoutes_ToInterface(
     const ChannelBinding *binding;
     HubPeer *peer;
     uint16_t route_count = 0;
-    uint16_t peer_index;
-    uint8_t binding_iterator;
+    uint16_t subscriber;
+    bool pending;
 
     *dropped = 0;
 
-    for(peer_index=0; peer_index<PEER_DIRECTORY_MAX; peer_index++) {
-        peer = PeerDirectory_At(directory, peer_index);
-        if (peer == NULL || peer->role != kHUB_PEER_ROLE_CLIENT) {
+    pending = SubscriberIndex_First(subscribers, InterfaceRegistry_SlotOf(registry, entry), &subscriber);
+    while (pending) {
+        peer = PeerDirectory_At(directory, SubscriberIndex_PeerSlot(subscriber));
+        binding = boundTo(peer, SubscriberIndex_BindingIndex(subscriber), entry->interface_id);
+        pending = SubscriberIndex_Next(subscribers, &subscriber);
+        if (binding == NULL) {
             continue;
         }
-        binding_iterator = 0;
-        while ((binding = ClientSession_NextBindingForInterface(&peer->session, interface_id, &binding_iterator)) != NULL) {
-            if (route_count == routes_max) {
-                (*dropped)++;
-                continue;
-            }
-
-            routes[route_count].peer_id = peer->peer_id;
-            routes[route_count].channel = binding->channel;
-            routes[route_count].suppress_echo = binding->suppress_echo;
-            routes[route_count].reliable = binding->reliable;
-            route_count++;
+        if (route_count == routes_max) {
+            (*dropped)++;
+            continue;
         }
+
+        routes[route_count].peer_id = peer->peer_id;
+        routes[route_count].channel = binding->channel;
+        routes[route_count].suppress_echo = binding->suppress_echo;
+        routes[route_count].reliable = binding->reliable;
+        route_count++;
     }
 
     return route_count;
@@ -93,4 +98,22 @@ uint16_t FrameRoutes_FromClient(
     routes[0].reliable = ClientSession_ChannelReliable(&client_peer->session, client_channel);
 
     return 1;
+}
+
+/* ---------- private ---------- */
+
+static const ChannelBinding *boundTo(const HubPeer *peer, uint8_t binding_index, uint32_t interface_id)
+{
+    const ChannelBinding *binding;
+
+    if (peer == NULL || peer->role != kHUB_PEER_ROLE_CLIENT) {
+        return NULL;
+    }
+
+    binding = ClientSession_BindingAt(&peer->session, binding_index);
+    if (binding == NULL || binding->interface_id != interface_id) {
+        return NULL;
+    }
+
+    return binding;
 }

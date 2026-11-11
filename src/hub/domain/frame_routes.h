@@ -6,6 +6,7 @@
 #include "hub/domain/client_session.h"
 #include "hub/domain/interface_registry.h"
 #include "hub/domain/peer_directory.h"
+#include "hub/domain/subscriber_index.h"
 
 /* Bindings, not peers: several clients can open the same interface, and each
    holds up to CLIENT_SESSION_BINDINGS_MAX channels of it. */
@@ -25,6 +26,7 @@ typedef struct {
 
 uint16_t FrameRoutes_FromAgent(
     const InterfaceRegistry *registry,
+    const SubscriberIndex *subscribers,
     PeerDirectory *directory,
     uint32_t agent_peer_id,
     uint8_t agent_channel,
@@ -33,8 +35,10 @@ uint16_t FrameRoutes_FromAgent(
     uint16_t *dropped
 );
 uint16_t FrameRoutes_ToInterface(
+    const InterfaceRegistry *registry,
+    const SubscriberIndex *subscribers,
     PeerDirectory *directory,
-    uint32_t interface_id,
+    const InterfaceEntry *entry,
     FrameRoute *routes,
     uint16_t routes_max,
     uint16_t *dropped

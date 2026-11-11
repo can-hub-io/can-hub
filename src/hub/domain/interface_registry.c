@@ -1,5 +1,6 @@
 #include "hub/domain/interface_registry.h"
 
+#include <assert.h>
 #include <string.h>
 
 #include "protocol/frame_message.h"
@@ -7,10 +8,17 @@
 
 #define PACE_EFFECTIVE_PERCENT 80
 #define PACE_BURST_BITS 8192
+#define AGENT_CHANNEL_KEY_SHIFT 8
+
+static_assert(SLOT_INDEX_FITS(INTERFACE_REGISTRY_INDEX_BUCKETS, INTERFACE_REGISTRY_MAX), "each interface index needs a power-of-two bucket count at least twice its slots");
 
 static bool isPeerRegistered(const InterfaceRegistry *self, uint32_t agent_peer_id);
 static bool isRegistrationColliding(const InterfaceRegistry *self, const RegisterMessage *registration);
 static InterfaceEntry *findFreeEntry(InterfaceRegistry *self);
+static InterfaceEntry *findMutableById(InterfaceRegistry *self, uint32_t interface_id);
+static uint64_t agentChannelKey(uint32_t agent_peer_id, uint8_t agent_channel);
+static void indexEntry(InterfaceRegistry *self, const InterfaceEntry *entry);
+static void releaseEntry(InterfaceRegistry *self, InterfaceEntry *entry);
 static InterfaceEntry *findMutableByAgentChannel(InterfaceRegistry *self, uint32_t agent_peer_id, uint8_t agent_channel);
 static bool namesMatch(const InterfaceEntry *entry, const char *agent_name, const char *interface_name);
 
@@ -19,6 +27,8 @@ static bool namesMatch(const InterfaceEntry *entry, const char *agent_name, cons
 void InterfaceRegistry_Reset(InterfaceRegistry *self)
 {
     memset(self, 0, sizeof(*self));
+    SlotIndex_Init(&self->slot_by_interface_id, self->interface_id_buckets, INTERFACE_REGISTRY_INDEX_BUCKETS);
+    SlotIndex_Init(&self->slot_by_agent_channel, self->agent_channel_buckets, INTERFACE_REGISTRY_INDEX_BUCKETS);
     self->next_interface_id = 1;
 }
 
@@ -61,6 +71,7 @@ bool InterfaceRegistry_RegisterAgent(
         entry->fd_capable = (registration->fd_interfaces & (1u << i)) != 0;
         memcpy(entry->agent_name, registration->agent_name, REGISTER_AGENT_NAME_SIZE);
         memcpy(entry->interface_name, registration->interface_names[i], REGISTER_INTERFACE_NAME_SIZE);
+        indexEntry(self, entry);
 
         ack->channels[i] = entry->agent_channel;
     }
@@ -76,7 +87,7 @@ void InterfaceRegistry_RemovePeer(InterfaceRegistry *self, uint32_t agent_peer_i
 
     for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
         if (self->entries[i].in_use && self->entries[i].agent_peer_id == agent_peer_id) {
-            memset(&self->entries[i], 0, sizeof(self->entries[i]));
+            releaseEntry(self, &self->entries[i]);
         }
     }
 }
@@ -103,19 +114,17 @@ const InterfaceEntry *InterfaceRegistry_AddVirtual(
     entry->agent_peer_id = INTERFACE_REGISTRY_HUB_PEER;
     BoundedString_Copy(entry->agent_name, sizeof(entry->agent_name), agent_name);
     BoundedString_Copy(entry->interface_name, sizeof(entry->interface_name), interface_name);
+    SlotIndex_Put(&self->slot_by_interface_id, entry->interface_id, InterfaceRegistry_SlotOf(self, entry));
 
     return entry;
 }
 
 void InterfaceRegistry_RemoveVirtual(InterfaceRegistry *self, uint32_t interface_id)
 {
-    uint32_t i;
+    InterfaceEntry *entry = findMutableById(self, interface_id);
 
-    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
-        if (self->entries[i].in_use && self->entries[i].interface_id == interface_id
-            && InterfaceEntry_IsVirtual(&self->entries[i])) {
-            memset(&self->entries[i], 0, sizeof(self->entries[i]));
-        }
+    if (entry != NULL && InterfaceEntry_IsVirtual(entry)) {
+        releaseEntry(self, entry);
     }
 }
 
@@ -131,13 +140,11 @@ bool InterfaceEntry_RefusesFrame(const InterfaceEntry *entry, uint8_t frame_flag
 
 void InterfaceRegistry_SetFdCapable(InterfaceRegistry *self, uint32_t interface_id, bool fd_capable)
 {
-    uint32_t i;
+    InterfaceEntry *entry = findMutableById(self, interface_id);
 
-    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
-        if (self->entries[i].in_use && self->entries[i].interface_id == interface_id) {
-            self->entries[i].fd_reported = true;
-            self->entries[i].fd_capable = fd_capable;
-        }
+    if (entry != NULL) {
+        entry->fd_reported = true;
+        entry->fd_capable = fd_capable;
     }
 }
 
@@ -167,15 +174,13 @@ bool InterfaceRegistry_CollidingPeer(
 
 const InterfaceEntry *InterfaceRegistry_FindById(const InterfaceRegistry *self, uint32_t interface_id)
 {
-    uint32_t i;
+    uint16_t slot;
 
-    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
-        if (self->entries[i].in_use && self->entries[i].interface_id == interface_id) {
-            return &self->entries[i];
-        }
+    if (!SlotIndex_Find(&self->slot_by_interface_id, interface_id, &slot)) {
+        return NULL;
     }
 
-    return NULL;
+    return &self->entries[slot];
 }
 
 const InterfaceEntry *InterfaceRegistry_FindByName(
@@ -201,17 +206,18 @@ const InterfaceEntry *InterfaceRegistry_FindByAgentChannel(
     uint8_t agent_channel
 )
 {
-    uint32_t i;
+    uint16_t slot;
 
-    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
-        if (self->entries[i].in_use
-            && self->entries[i].agent_peer_id == agent_peer_id
-            && self->entries[i].agent_channel == agent_channel) {
-            return &self->entries[i];
-        }
+    if (!SlotIndex_Find(&self->slot_by_agent_channel, agentChannelKey(agent_peer_id, agent_channel), &slot)) {
+        return NULL;
     }
 
-    return NULL;
+    return &self->entries[slot];
+}
+
+uint16_t InterfaceRegistry_SlotOf(const InterfaceRegistry *self, const InterfaceEntry *entry)
+{
+    return (uint16_t)(entry - self->entries);
 }
 
 void InterfaceRegistry_List(const InterfaceRegistry *self, uint16_t offset, ListReplyMessage *reply)
@@ -248,13 +254,10 @@ void InterfaceRegistry_List(const InterfaceRegistry *self, uint16_t offset, List
 
 void InterfaceRegistry_CountFrame(InterfaceRegistry *self, uint32_t interface_id)
 {
-    uint32_t i;
+    InterfaceEntry *entry = findMutableById(self, interface_id);
 
-    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
-        if (self->entries[i].in_use && self->entries[i].interface_id == interface_id) {
-            self->entries[i].frames_received++;
-            return;
-        }
+    if (entry != NULL) {
+        entry->frames_received++;
     }
 }
 
@@ -400,17 +403,46 @@ static InterfaceEntry *findFreeEntry(InterfaceRegistry *self)
 
 static InterfaceEntry *findMutableByAgentChannel(InterfaceRegistry *self, uint32_t agent_peer_id, uint8_t agent_channel)
 {
-    uint32_t i;
+    uint16_t slot;
 
-    for(i=0; i<INTERFACE_REGISTRY_MAX; i++) {
-        if (self->entries[i].in_use
-            && self->entries[i].agent_peer_id == agent_peer_id
-            && self->entries[i].agent_channel == agent_channel) {
-            return &self->entries[i];
-        }
+    if (!SlotIndex_Find(&self->slot_by_agent_channel, agentChannelKey(agent_peer_id, agent_channel), &slot)) {
+        return NULL;
     }
 
-    return NULL;
+    return &self->entries[slot];
+}
+
+static InterfaceEntry *findMutableById(InterfaceRegistry *self, uint32_t interface_id)
+{
+    uint16_t slot;
+
+    if (!SlotIndex_Find(&self->slot_by_interface_id, interface_id, &slot)) {
+        return NULL;
+    }
+
+    return &self->entries[slot];
+}
+
+static uint64_t agentChannelKey(uint32_t agent_peer_id, uint8_t agent_channel)
+{
+    return ((uint64_t)agent_peer_id << AGENT_CHANNEL_KEY_SHIFT) | agent_channel;
+}
+
+static void indexEntry(InterfaceRegistry *self, const InterfaceEntry *entry)
+{
+    uint16_t slot = InterfaceRegistry_SlotOf(self, entry);
+
+    SlotIndex_Put(&self->slot_by_interface_id, entry->interface_id, slot);
+    SlotIndex_Put(&self->slot_by_agent_channel, agentChannelKey(entry->agent_peer_id, entry->agent_channel), slot);
+}
+
+static void releaseEntry(InterfaceRegistry *self, InterfaceEntry *entry)
+{
+    SlotIndex_Remove(&self->slot_by_interface_id, entry->interface_id);
+    if (!InterfaceEntry_IsVirtual(entry)) {
+        SlotIndex_Remove(&self->slot_by_agent_channel, agentChannelKey(entry->agent_peer_id, entry->agent_channel));
+    }
+    memset(entry, 0, sizeof(*entry));
 }
 
 static bool namesMatch(const InterfaceEntry *entry, const char *agent_name, const char *interface_name)

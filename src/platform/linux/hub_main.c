@@ -597,16 +597,18 @@ static void syncStreamSlotRegistrations(TcpServerTransport *transport, uint16_t 
 {
     int32_t current_fd;
     uint32_t wanted_mask;
+    uint32_t occupant;
     uint16_t slot;
 
-    for(slot=0; slot<TCP_SERVER_PEERS_MAX; slot++) {
+    for(slot=0; slot<TcpServerTransport_SlotsTouched(transport); slot++) {
         current_fd = TcpServerTransport_SlotFd(transport, slot);
         wanted_mask = EPOLLIN;
         if (TcpServerTransport_SlotWantsWritable(transport, slot)) {
             wanted_mask |= EPOLLOUT;
         }
 
-        EpollRegistry_SyncSlot(&poll_registry, slot_offset + slot, current_fd, wanted_mask, slot_offset + slot);
+        occupant = TcpServerTransport_SlotPeerId(transport, slot);
+        EpollRegistry_SyncOccupiedSlot(&poll_registry, slot_offset + slot, occupant, current_fd, wanted_mask, slot_offset + slot);
     }
 }
 
@@ -614,16 +616,18 @@ static void syncTlsSlotRegistrations(void)
 {
     int32_t current_fd;
     uint32_t wanted_mask;
+    uint32_t occupant;
     uint16_t slot;
 
-    for(slot=0; slot<TLS_SERVER_PEERS_MAX; slot++) {
+    for(slot=0; slot<TlsServerTransport_SlotsTouched(&tls_transport); slot++) {
         current_fd = TlsServerTransport_SlotFd(&tls_transport, slot);
         wanted_mask = EPOLLIN;
         if (TlsServerTransport_SlotWantsWritable(&tls_transport, slot)) {
             wanted_mask |= EPOLLOUT;
         }
 
-        EpollRegistry_SyncSlot(&poll_registry, TLS_SLOT_OFFSET + slot, current_fd, wanted_mask, TLS_SLOT_OFFSET + slot);
+        occupant = TlsServerTransport_SlotPeerId(&tls_transport, slot);
+        EpollRegistry_SyncOccupiedSlot(&poll_registry, TLS_SLOT_OFFSET + slot, occupant, current_fd, wanted_mask, TLS_SLOT_OFFSET + slot);
     }
 }
 

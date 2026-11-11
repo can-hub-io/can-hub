@@ -18,11 +18,14 @@
 #include "platform/linux/shared/tls_identity.h"
 #include "hub/ports/hub_transport_events.h"
 #include "hub/ports/hub_transport_port.h"
+#include "shared/slot_index.h"
 
 #define QUIC_SERVER_HANDSHAKES_MAX 64
 #define QUIC_SERVER_PEERS_MAX (HUB_PEERS_MAX + QUIC_SERVER_HANDSHAKES_MAX)
 #define QUIC_SERVER_RETRY_THRESHOLD 8
 #define QUIC_SERVER_ORIGIN_SIZE 56
+#define QUIC_SERVER_PEER_ID_BUCKETS 2048
+#define QUIC_SERVER_DCID_CACHE_SIZE 4096
 
 /*
  * QUIC server transport for the hub: one UDP socket multiplexing every
@@ -44,6 +47,10 @@
  * host may hold HANDSHAKES_PER_HOST_MAX handshakes and all of them together
  * half the table. The remote address is the path ngtcp2 has validated,
  * never the source of whichever packet arrived last.
+ * A peer is large, so nothing on the packet path walks the table: the open
+ * slots are listed, peer ids are indexed, and the slot a Destination
+ * Connection ID last resolved to is remembered and checked before trusted.
+ * The timer is armed once per served event, not once per flush.
  */
 typedef struct QuicServerTransport QuicServerTransport;
 
@@ -77,6 +84,13 @@ struct QuicServerTransport {
     bool dispatching;
     bool corked;
     bool gso_unsupported;
+    bool serving;
+    bool timer_stale;
+    uint16_t open_count;
+    uint16_t open_slots[QUIC_SERVER_PEERS_MAX];
+    uint16_t dcid_cache[QUIC_SERVER_DCID_CACHE_SIZE];
+    SlotIndexBucket peer_id_buckets[QUIC_SERVER_PEER_ID_BUCKETS];
+    SlotIndex slot_by_peer_id;
     uint32_t receive_overflows;
     QuicServerPeer *dispatching_peer;
     struct sockaddr_storage local_address;
