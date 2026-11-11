@@ -1,5 +1,6 @@
 #include "platform/linux/quic/quic_server_transport.h"
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,7 +25,7 @@
 static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
 static bool portFrameFits(void *context, uint32_t peer_id, uint8_t channel, size_t size);
-static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
+static bool portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable);
 static bool portChannelReliable(void *context, uint32_t peer_id, uint8_t channel);
 static void portClosePeer(void *context, uint32_t peer_id);
 static QuicServerPeer *findPeerById(QuicServerTransport *self, uint32_t peer_id);
@@ -93,7 +94,7 @@ static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, 
 static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_offset);
 static void onStreamFinished(void *context, int64_t stream_id);
 static void onStreamClosed(void *context, int64_t stream_id);
-static void openReliableChannel(QuicServerPeer *peer, uint8_t channel);
+static bool openReliableChannel(QuicServerPeer *peer, uint8_t channel);
 static void closeReliableChannel(QuicServerPeer *peer, uint8_t channel);
 static void reopenClosedChannels(QuicServerPeer *peer);
 static void receiveControlData(QuicServerPeer *peer, const uint8_t *data, size_t size);
@@ -333,20 +334,20 @@ static bool portFrameFits(void *context, uint32_t peer_id, uint8_t channel, size
     return QuicControlChannel_CanQueue(&reliable->stream, size);
 }
 
-static void portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable)
+static bool portSetChannelMode(void *context, uint32_t peer_id, uint8_t channel, bool reliable)
 {
     QuicServerTransport *self = context;
     QuicServerPeer *peer = findPeerById(self, peer_id);
 
     if (peer == NULL || !peer->connected) {
-        return;
+        return true;
     }
     if (!reliable) {
         closeReliableChannel(peer, channel);
-        return;
+        return true;
     }
 
-    openReliableChannel(peer, channel);
+    return openReliableChannel(peer, channel);
 }
 
 static bool portChannelReliable(void *context, uint32_t peer_id, uint8_t channel)
@@ -364,21 +365,23 @@ static bool portChannelReliable(void *context, uint32_t peer_id, uint8_t channel
     return QuicReliableStreams_AwaitsReopen(&peer->reliable_streams, channel);
 }
 
-static void openReliableChannel(QuicServerPeer *peer, uint8_t channel)
+static bool openReliableChannel(QuicServerPeer *peer, uint8_t channel)
 {
     if (QuicReliableStreams_FindByChannel(&peer->reliable_streams, channel) != NULL) {
-        return;
+        return true;
     }
     if (QuicReliableStreams_DeferReopen(&peer->reliable_streams, channel)) {
         LOG_INFO("peer %u reliable channel %u reopens once its previous stream closes", peer->peer_id, channel);
-        return;
+        return true;
     }
     if (QuicReliableStreams_Open(&peer->reliable_streams, &peer->connection, channel) == NULL) {
-        LOG_WARN("peer %u reliable channel %u could not open a stream", peer->peer_id, channel);
-        return;
+        LOG_WARN("peer %u reliable channel %u refused: no reliable stream left (peer allows %u more)", peer->peer_id, channel, (uint32_t)QuicConnection_StreamsLeft(&peer->connection));
+        return false;
     }
 
     LOG_INFO("peer %u reliable channel %u opened", peer->peer_id, channel);
+
+    return true;
 }
 
 static void reopenClosedChannels(QuicServerPeer *peer)
@@ -990,7 +993,9 @@ static void onStreamData(void *context, int64_t stream_id, const uint8_t *data, 
         QuicReliableStreams_Receive(reliable, &peer->connection, data, size, serverFrameSink, peer);
         return;
     }
+    LOG_WARN("peer %u stream %" PRId64 " refused: no reliable stream left", peer->peer_id, stream_id);
     QuicConnection_ExtendStreamCredit(&peer->connection, stream_id, size);
+    QuicConnection_RefuseStream(&peer->connection, stream_id);
 }
 
 static void onStreamAcked(void *context, int64_t stream_id, uint64_t acked_end_offset)

@@ -2,9 +2,11 @@
 
 #include <stdlib.h>
 
-static QuicReliableStream *findFree(QuicReliableStreamSet *self);
+static bool findFreeSlot(const QuicReliableStreamSet *self, uint8_t *slot);
+static bool findSlotById(const QuicReliableStreamSet *self, int64_t stream_id, uint8_t *slot);
+static QuicReliableStream *claimSlot(QuicReliableStreamSet *self, uint8_t slot);
+static void releaseSlot(QuicReliableStreamSet *self, uint8_t slot);
 static void beginClosing(QuicReliableStream *reliable);
-static void releaseStream(QuicReliableStream *reliable);
 static bool attachStorage(QuicReliableStream *reliable);
 static void drainAndCredit(QuicReliableStream *reliable, QuicConnection *connection, QuicReliableFrameSink sink, void *context);
 static bool isClosing(const QuicReliableStreamSet *self, uint8_t channel);
@@ -18,7 +20,7 @@ void QuicReliableStreams_Reset(QuicReliableStreamSet *self)
     uint8_t i;
 
     for(i=0; i<QUIC_RELIABLE_STREAMS_MAX; i++) {
-        releaseStream(&self->streams[i]);
+        releaseSlot(self, i);
     }
     self->reopen_count = 0;
 }
@@ -29,8 +31,8 @@ QuicReliableStream *QuicReliableStreams_FindByChannel(QuicReliableStreamSet *sel
     uint8_t i;
 
     for(i=0; i<QUIC_RELIABLE_STREAMS_MAX; i++) {
-        reliable = &self->streams[i];
-        if (reliable->in_use && !reliable->closing && reliable->has_channel && reliable->channel == channel) {
+        reliable = self->streams[i];
+        if (reliable != NULL && !reliable->closing && reliable->has_channel && reliable->channel == channel) {
             return reliable;
         }
     }
@@ -40,45 +42,39 @@ QuicReliableStream *QuicReliableStreams_FindByChannel(QuicReliableStreamSet *sel
 
 QuicReliableStream *QuicReliableStreams_FindById(QuicReliableStreamSet *self, int64_t stream_id)
 {
-    QuicReliableStream *reliable;
-    uint8_t i;
+    uint8_t slot;
 
-    for(i=0; i<QUIC_RELIABLE_STREAMS_MAX; i++) {
-        reliable = &self->streams[i];
-        if (reliable->in_use && reliable->stream.stream_id == stream_id) {
-            return reliable;
-        }
+    if (!findSlotById(self, stream_id, &slot)) {
+        return NULL;
     }
 
-    return NULL;
+    return self->streams[slot];
 }
 
 QuicReliableStream *QuicReliableStreams_Open(QuicReliableStreamSet *self, QuicConnection *connection, uint8_t channel)
 {
     QuicReliableStream *reliable;
     int64_t stream_id;
+    uint8_t slot;
 
     reliable = QuicReliableStreams_FindByChannel(self, channel);
     if (reliable != NULL) {
         return reliable;
     }
+    if (!findFreeSlot(self, &slot)) {
+        return NULL;
+    }
 
-    reliable = findFree(self);
+    reliable = claimSlot(self, slot);
     if (reliable == NULL) {
         return NULL;
     }
-
-    QuicControlChannel_Reset(&reliable->stream);
-    if (!attachStorage(reliable)) {
-        return NULL;
-    }
     if (!QuicConnection_OpenControlStream(connection, &stream_id)) {
-        releaseStream(reliable);
+        releaseSlot(self, slot);
         return NULL;
     }
     reliable->stream.stream_id = stream_id;
     reliable->channel = channel;
-    reliable->in_use = true;
     reliable->has_channel = true;
     QuicControlChannel_QueueTx(&reliable->stream, &channel, 1);
 
@@ -87,20 +83,18 @@ QuicReliableStream *QuicReliableStreams_Open(QuicReliableStreamSet *self, QuicCo
 
 QuicReliableStream *QuicReliableStreams_Adopt(QuicReliableStreamSet *self, int64_t stream_id)
 {
-    QuicReliableStream *reliable = findFree(self);
+    QuicReliableStream *reliable;
+    uint8_t slot;
 
+    if (!findFreeSlot(self, &slot)) {
+        return NULL;
+    }
+
+    reliable = claimSlot(self, slot);
     if (reliable == NULL) {
         return NULL;
     }
-
-    QuicControlChannel_Reset(&reliable->stream);
-    if (!attachStorage(reliable)) {
-        return NULL;
-    }
     reliable->stream.stream_id = stream_id;
-    reliable->channel = 0;
-    reliable->in_use = true;
-    reliable->has_channel = false;
 
     return reliable;
 }
@@ -166,17 +160,17 @@ void QuicReliableStreams_Finish(QuicReliableStreamSet *self, int64_t stream_id)
 
 void QuicReliableStreams_Release(QuicReliableStreamSet *self, int64_t stream_id)
 {
-    QuicReliableStream *reliable = QuicReliableStreams_FindById(self, stream_id);
+    uint8_t slot;
 
-    if (reliable == NULL) {
+    if (!findSlotById(self, stream_id, &slot)) {
         return;
     }
-    if (QuicControlChannel_RxPending(&reliable->stream) > 0) {
-        reliable->closed = true;
+    if (QuicControlChannel_RxPending(&self->streams[slot]->stream) > 0) {
+        self->streams[slot]->closed = true;
         return;
     }
 
-    releaseStream(reliable);
+    releaseSlot(self, slot);
 }
 
 void QuicReliableStreams_Receive(
@@ -218,14 +212,19 @@ void QuicReliableStreams_RetryDrain(
     void *context
 )
 {
+    QuicReliableStream *reliable;
     uint8_t i;
 
     for(i=0; i<QUIC_RELIABLE_STREAMS_MAX; i++) {
-        if (self->streams[i].in_use && QuicControlChannel_RxPending(&self->streams[i].stream) > 0) {
-            drainAndCredit(&self->streams[i], connection, sink, context);
+        reliable = self->streams[i];
+        if (reliable == NULL) {
+            continue;
         }
-        if (self->streams[i].closed && QuicControlChannel_RxPending(&self->streams[i].stream) == 0) {
-            releaseStream(&self->streams[i]);
+        if (QuicControlChannel_RxPending(&reliable->stream) > 0) {
+            drainAndCredit(reliable, connection, sink, context);
+        }
+        if (reliable->closed && QuicControlChannel_RxPending(&reliable->stream) == 0) {
+            releaseSlot(self, i);
         }
     }
 }
@@ -235,10 +234,10 @@ bool QuicReliableStreams_Drain(QuicReliableStreamSet *self, QuicConnection *conn
     uint8_t i;
 
     for(i=0; i<QUIC_RELIABLE_STREAMS_MAX; i++) {
-        if (!self->streams[i].in_use) {
+        if (self->streams[i] == NULL) {
             continue;
         }
-        if (!QuicEgress_Drain(connection, &self->streams[i].stream, sink)) {
+        if (!QuicEgress_Drain(connection, &self->streams[i]->stream, sink)) {
             return false;
         }
     }
@@ -248,17 +247,64 @@ bool QuicReliableStreams_Drain(QuicReliableStreamSet *self, QuicConnection *conn
 
 /* ---------- private ---------- */
 
-static QuicReliableStream *findFree(QuicReliableStreamSet *self)
+static bool findFreeSlot(const QuicReliableStreamSet *self, uint8_t *slot)
 {
     uint8_t i;
 
     for(i=0; i<QUIC_RELIABLE_STREAMS_MAX; i++) {
-        if (!self->streams[i].in_use) {
-            return &self->streams[i];
+        if (self->streams[i] == NULL) {
+            *slot = i;
+            return true;
         }
     }
 
-    return NULL;
+    return false;
+}
+
+static bool findSlotById(const QuicReliableStreamSet *self, int64_t stream_id, uint8_t *slot)
+{
+    uint8_t i;
+
+    for(i=0; i<QUIC_RELIABLE_STREAMS_MAX; i++) {
+        if (self->streams[i] != NULL && self->streams[i]->stream.stream_id == stream_id) {
+            *slot = i;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static QuicReliableStream *claimSlot(QuicReliableStreamSet *self, uint8_t slot)
+{
+    QuicReliableStream *reliable = calloc(1, sizeof(*reliable));
+
+    if (reliable == NULL) {
+        return NULL;
+    }
+
+    QuicControlChannel_Reset(&reliable->stream);
+    if (!attachStorage(reliable)) {
+        free(reliable);
+        return NULL;
+    }
+    self->streams[slot] = reliable;
+
+    return reliable;
+}
+
+static void releaseSlot(QuicReliableStreamSet *self, uint8_t slot)
+{
+    QuicReliableStream *reliable = self->streams[slot];
+
+    if (reliable == NULL) {
+        return;
+    }
+
+    free(reliable->tx_storage);
+    free(reliable->rx_storage);
+    free(reliable);
+    self->streams[slot] = NULL;
 }
 
 static void beginClosing(QuicReliableStream *reliable)
@@ -267,28 +313,13 @@ static void beginClosing(QuicReliableStream *reliable)
     QuicControlChannel_RequestFinish(&reliable->stream);
 }
 
-static void releaseStream(QuicReliableStream *reliable)
-{
-    free(reliable->tx_storage);
-    free(reliable->rx_storage);
-    reliable->tx_storage = NULL;
-    reliable->rx_storage = NULL;
-    reliable->in_use = false;
-    reliable->closing = false;
-    reliable->closed = false;
-}
-
 static bool attachStorage(QuicReliableStream *reliable)
 {
-    free(reliable->tx_storage);
-    free(reliable->rx_storage);
     reliable->tx_storage = malloc(QUIC_RELIABLE_TX_BUFFER_SIZE);
     reliable->rx_storage = malloc(QUIC_RELIABLE_RX_BUFFER_SIZE);
     if (reliable->tx_storage == NULL || reliable->rx_storage == NULL) {
         free(reliable->tx_storage);
         free(reliable->rx_storage);
-        reliable->tx_storage = NULL;
-        reliable->rx_storage = NULL;
         return false;
     }
 
@@ -327,8 +358,8 @@ static bool isClosing(const QuicReliableStreamSet *self, uint8_t channel)
     uint8_t i;
 
     for(i=0; i<QUIC_RELIABLE_STREAMS_MAX; i++) {
-        reliable = &self->streams[i];
-        if (reliable->in_use && reliable->closing && reliable->has_channel && reliable->channel == channel) {
+        reliable = self->streams[i];
+        if (reliable != NULL && reliable->closing && reliable->has_channel && reliable->channel == channel) {
             return true;
         }
     }

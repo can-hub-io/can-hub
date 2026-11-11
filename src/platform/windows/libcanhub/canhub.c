@@ -76,6 +76,7 @@ static void dispatchStream(CanHubSession *self, bool readable, bool writable);
 static uint64_t deadlineFrom(int32_t timeout_ms);
 static int32_t remainingMs(uint64_t deadline_us);
 static int32_t openResultFromStatus(uint8_t status);
+static const char *openRefusalText(int32_t result);
 static void setError(CanHubSession *self, const char *message);
 static void setConnectError(const char *message);
 static void pushFrame(CanHubSession *self, const FrameMessage *message);
@@ -753,8 +754,20 @@ static int32_t openResultFromStatus(uint8_t status)
     if (status == OPEN_STATUS_RELIABLE_UNSUPPORTED) {
         return CANHUB_ERR_RELIABLE_UNSUPPORTED;
     }
+    if (status == OPEN_STATUS_RELIABLE_EXHAUSTED) {
+        return CANHUB_ERR_RELIABLE_EXHAUSTED;
+    }
 
     return CANHUB_ERR_OPEN_REJECTED;
+}
+
+static const char *openRefusalText(int32_t result)
+{
+    if (result == CANHUB_ERR_RELIABLE_EXHAUSTED) {
+        return "open refused by the hub: no reliable stream left to the agent";
+    }
+
+    return "open refused by the hub";
 }
 
 static void setError(CanHubSession *self, const char *message)
@@ -837,7 +850,7 @@ static void onOpenResult(void *context, uint8_t status, uint8_t channel, uint32_
     self->open_done = true;
     self->open_result = openResultFromStatus(status);
     if (self->open_result != CANHUB_OK) {
-        setError(self, "open refused by the hub");
+        setError(self, openRefusalText(self->open_result));
     }
 }
 

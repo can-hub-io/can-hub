@@ -1,4 +1,5 @@
 #include "platform/linux/quic/quic_connection.h"
+#include "platform/linux/quic/quic_reliable_streams.h"
 
 #include "platform/linux/clock/clock.h"
 
@@ -19,7 +20,9 @@
  * the connection window covers several concurrent reliable streams. */
 #define INITIAL_MAX_DATA (1024 * 1024)
 #define INITIAL_MAX_STREAM_DATA (64 * 1024)
-#define INITIAL_MAX_STREAMS_BIDI 16
+#define CONTROL_STREAM_COUNT 1
+#define INITIAL_MAX_STREAMS_BIDI (QUIC_RELIABLE_STREAMS_MAX + CONTROL_STREAM_COUNT)
+#define STREAM_REFUSED_ERROR_CODE 1
 #define INITIAL_RTT (50 * NGTCP2_MILLISECONDS)
 #define MAX_TX_UDP_PAYLOAD 1452
 
@@ -294,6 +297,16 @@ uint64_t QuicConnection_NextExpiryNs(const QuicConnection *self)
 bool QuicConnection_OpenControlStream(QuicConnection *self, int64_t *stream_id)
 {
     return ngtcp2_conn_open_bidi_stream(self->connection, stream_id, NULL) == 0;
+}
+
+uint64_t QuicConnection_StreamsLeft(QuicConnection *self)
+{
+    return ngtcp2_conn_get_streams_bidi_left(self->connection);
+}
+
+void QuicConnection_RefuseStream(QuicConnection *self, int64_t stream_id)
+{
+    ngtcp2_conn_shutdown_stream(self->connection, 0, stream_id, STREAM_REFUSED_ERROR_CODE);
 }
 
 void QuicConnection_ExtendStreamCredit(QuicConnection *self, int64_t stream_id, size_t size)

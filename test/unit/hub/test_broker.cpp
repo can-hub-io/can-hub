@@ -58,6 +58,7 @@ static uint8_t framesTo(uint32_t peer_id);
 static uint8_t openReliableChannel(uint32_t client_peer_id);
 static void closeChannel(uint32_t client_peer_id, uint8_t channel);
 static void reconnectReliableAgent(void);
+static uint16_t errorCodeTo(uint32_t peer_id);
 static const RegisterMessage bus_registration = { "bus7", 1, { "can0" } };
 
 static uint8_t injectFrom(uint32_t client_peer_id, uint8_t channel);
@@ -690,6 +691,17 @@ describe("broker", []() {
 
             expect(openReliableStatus(CLIENT_PEER, interface_id)).toBe(OPEN_STATUS_RELIABLE_UNSUPPORTED);
         });
+
+        it("rejects a reliable open when no reliable stream is left to the agent", []() {
+            uint32_t interface_id;
+
+            BrokerDriver_ConnectAgentWithCapabilities(&events, &transport, AGENT_PEER, &truck_registration, HELLO_CAP_RELIABLE_CHANNELS);
+            BrokerDriver_ConnectClientWithCapabilities(&events, CLIENT_PEER, HELLO_CAP_RELIABLE_CHANNELS);
+            interface_id = BrokerDriver_InterfaceIdAt(&events, &transport, 0);
+            transport.exhausted_peer = AGENT_PEER;
+
+            expect(openReliableStatus(CLIENT_PEER, interface_id)).toBe(OPEN_STATUS_RELIABLE_EXHAUSTED);
+        });
     });
 
     describe("reliable delivery with a full destination", []() {
@@ -780,6 +792,31 @@ describe("broker", []() {
             expect(transport.channel_mode_count).toBe((uint32_t)1);
             expect(transport.channel_mode_peers[0]).toBe((uint32_t)AGENT_PEER);
             expect(transport.channel_mode_reliable[0]).toBe(false);
+        });
+
+        it("closes the client leg when the agent returns with no reliable stream left", []() {
+            uint8_t channel;
+
+            channel = openReliableChannel(CLIENT_PEER);
+            transport.exhausted_peer = AGENT_PEER;
+
+            reconnectReliableAgent();
+
+            expect(transport.channel_mode_peers[1]).toBe((uint32_t)CLIENT_PEER);
+            expect(transport.channel_mode_channels[1]).toBe(channel);
+            expect(transport.channel_mode_reliable[1]).toBe(false);
+        });
+
+        it("tells the client its reliable channel is gone when the agent returns with no reliable stream left", []() {
+            uint16_t error_code;
+
+            openReliableChannel(CLIENT_PEER);
+            transport.exhausted_peer = AGENT_PEER;
+
+            reconnectReliableAgent();
+            error_code = errorCodeTo(CLIENT_PEER);
+
+            expect(error_code).toBe((uint16_t)kERROR_CODE_RELIABLE_EXHAUSTED);
         });
 
         it("keeps the agent channel reliable while another client still holds it", []() {
@@ -2643,14 +2680,31 @@ static void closeChannel(uint32_t client_peer_id, uint8_t channel)
 
 static void reconnectReliableAgent(void)
 {
+    HelloMessage hello = { PROTOCOL_VERSION, kPEER_ROLE_AGENT, HELLO_CAP_RELIABLE_CHANNELS, "" };
+    uint8_t encoded[512];
+    size_t encoded_size;
+
     events.on_peer_disconnected(events.context, AGENT_PEER, 0);
-    BrokerDriver_ConnectAgentWithCapabilities(
-        &events,
-        &transport,
-        AGENT_PEER,
-        &truck_registration,
-        HELLO_CAP_RELIABLE_CHANNELS
-    );
+    transport.control_count = 0;
+    connectPeer(AGENT_PEER, NULL, false);
+    encoded_size = HelloMessage_Encode(&hello, encoded, sizeof(encoded));
+    events.on_peer_control(events.context, AGENT_PEER, encoded, encoded_size, 0);
+    encoded_size = RegisterMessage_Encode(&truck_registration, encoded, sizeof(encoded));
+    events.on_peer_control(events.context, AGENT_PEER, encoded, encoded_size, 0);
+}
+
+static uint16_t errorCodeTo(uint32_t peer_id)
+{
+    ErrorMessage error;
+    int i;
+
+    for(i=0; i<transport.control_count; i++) {
+        if (transport.control_peers[i] == peer_id && replyAt(i, &error, ErrorMessage_Decode) == kMESSAGE_TYPE_ERROR) {
+            return error.code;
+        }
+    }
+
+    return 0;
 }
 
 static void connectPeerFrom(uint32_t peer_id, const char *host)
