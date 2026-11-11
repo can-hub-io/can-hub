@@ -10,7 +10,7 @@ static uint16_t homeOf(const SlotIndex *self, uint64_t key);
 static uint16_t following(const SlotIndex *self, uint16_t bucket);
 static uint16_t distance(const SlotIndex *self, uint16_t from, uint16_t to);
 static bool locate(const SlotIndex *self, uint64_t key, uint16_t *bucket);
-static void closeGap(SlotIndex *self, uint16_t gap);
+static void pullDisplacedEntriesIntoGap(SlotIndex *self, uint16_t gap);
 
 /* ---------- public ---------- */
 
@@ -56,7 +56,7 @@ void SlotIndex_Remove(SlotIndex *self, uint64_t key)
     uint16_t bucket;
 
     if (locate(self, key, &bucket)) {
-        closeGap(self, bucket);
+        pullDisplacedEntriesIntoGap(self, bucket);
     }
 }
 
@@ -98,11 +98,7 @@ static bool locate(const SlotIndex *self, uint64_t key, uint16_t *bucket)
     return false;
 }
 
-/*
- * Linear probing never skips an empty bucket, so removing an entry pulls back
- * every later one whose probe sequence passed through the gap.
- */
-static void closeGap(SlotIndex *self, uint16_t gap)
+static void pullDisplacedEntriesIntoGap(SlotIndex *self, uint16_t gap)
 {
     uint16_t candidate = following(self, gap);
     uint16_t home;

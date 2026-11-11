@@ -1,5 +1,6 @@
 #include "platform/linux/quic/quic_server_transport.h"
 
+#include <assert.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +25,8 @@
 #define DCID_NOT_REMEMBERED 0
 #define DCID_HASH_SEED 2166136261
 #define DCID_HASH_PRIME 16777619
+
+static_assert(SLOT_INDEX_FITS(QUIC_SERVER_PEER_ID_BUCKETS, QUIC_SERVER_PEERS_MAX), "the QUIC peer id index needs a power-of-two bucket count at least twice its slots");
 
 static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);

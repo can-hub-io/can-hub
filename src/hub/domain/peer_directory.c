@@ -1,6 +1,9 @@
 #include "hub/domain/peer_directory.h"
 
+#include <assert.h>
 #include <string.h>
+
+static_assert(SLOT_INDEX_FITS(PEER_DIRECTORY_INDEX_BUCKETS, PEER_DIRECTORY_MAX), "the peer id index needs a power-of-two bucket count at least twice its slots");
 
 static bool displacesBefore(const HubPeer *peer, const HubPeer *other);
 static void forgetLiveSlot(PeerDirectory *self, uint16_t slot);

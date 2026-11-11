@@ -1,5 +1,6 @@
 #include "hub/domain/interface_registry.h"
 
+#include <assert.h>
 #include <string.h>
 
 #include "protocol/frame_message.h"
@@ -8,6 +9,8 @@
 #define PACE_EFFECTIVE_PERCENT 80
 #define PACE_BURST_BITS 8192
 #define AGENT_CHANNEL_KEY_SHIFT 8
+
+static_assert(SLOT_INDEX_FITS(INTERFACE_REGISTRY_INDEX_BUCKETS, INTERFACE_REGISTRY_MAX), "each interface index needs a power-of-two bucket count at least twice its slots");
 
 static bool isPeerRegistered(const InterfaceRegistry *self, uint32_t agent_peer_id);
 static bool isRegistrationColliding(const InterfaceRegistry *self, const RegisterMessage *registration);

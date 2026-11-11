@@ -2,6 +2,7 @@
 
 #include "platform/linux/tcp/tcp_server_transport.h"
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +22,8 @@
 
 #define LISTEN_BACKLOG 8
 #define ORIGIN_TEXT_SIZE 56
+
+static_assert(SLOT_INDEX_FITS(TCP_SERVER_PEER_ID_BUCKETS, TCP_SERVER_PEERS_MAX), "the TCP peer id index needs a power-of-two bucket count at least twice its slots");
 
 static bool portSendControl(void *context, uint32_t peer_id, const uint8_t *data, size_t size);
 static bool portSendFrame(void *context, uint32_t peer_id, uint8_t channel, const uint8_t *data, size_t size);
