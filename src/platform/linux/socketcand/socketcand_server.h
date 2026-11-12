@@ -48,6 +48,7 @@ bool SocketcandServer_Init(
 SocketcandServerPort *SocketcandServer_Port(SocketcandServer *self);
 int32_t SocketcandServer_ListenFd(const SocketcandServer *self);
 int32_t SocketcandServer_SlotFd(const SocketcandServer *self, uint8_t slot);
+uint32_t SocketcandServer_SlotConnectionId(const SocketcandServer *self, uint8_t slot);
 bool SocketcandServer_SlotWantsWritable(const SocketcandServer *self, uint8_t slot);
 void SocketcandServer_OnAcceptReady(SocketcandServer *self);
 void SocketcandServer_OnSlotReadable(SocketcandServer *self, uint8_t slot);

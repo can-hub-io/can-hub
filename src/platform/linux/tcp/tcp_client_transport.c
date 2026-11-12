@@ -80,6 +80,11 @@ int32_t TcpClientTransport_Fd(const TcpClientTransport *self)
     return self->channel.fd;
 }
 
+uint32_t TcpClientTransport_FdGeneration(const TcpClientTransport *self)
+{
+    return self->fd_generation;
+}
+
 bool TcpClientTransport_WantsWritable(const TcpClientTransport *self)
 {
     return self->connecting || TcpChannel_HasPendingTx(&self->channel);
@@ -222,6 +227,7 @@ static bool resolveHost(TcpClientTransport *self)
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
+    self->fd_generation++;
 
     return HostResolver_Start(&self->resolver, self->host, self->port_text, &hints);
 }
@@ -271,6 +277,7 @@ static int32_t connectFirstAddress(const struct addrinfo *addresses)
 static void bindConnecting(TcpClientTransport *self, int32_t connected_fd)
 {
     TcpChannel_Bind(&self->channel, connected_fd);
+    self->fd_generation++;
     self->connecting = true;
 }
 

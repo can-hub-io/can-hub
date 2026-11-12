@@ -83,6 +83,11 @@ int32_t TlsClientTransport_Fd(const TlsClientTransport *self)
     return self->fd;
 }
 
+uint32_t TlsClientTransport_FdGeneration(const TlsClientTransport *self)
+{
+    return self->fd_generation;
+}
+
 bool TlsClientTransport_WantsWritable(const TlsClientTransport *self)
 {
     if (!TlsChannel_IsBound(&self->channel)) {
@@ -215,6 +220,7 @@ static bool resolveHost(TlsClientTransport *self)
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
+    self->fd_generation++;
 
     return HostResolver_Start(&self->resolver, self->host, self->port_text, &hints);
 }
@@ -271,6 +277,7 @@ static bool startHandshake(TlsClientTransport *self, int32_t connected_fd)
 
     TlsChannel_Bind(&self->channel, tls, TlsClientSecurity_HandshakeProperties(&self->security));
     self->fd = connected_fd;
+    self->fd_generation++;
     self->connecting = true;
     self->announced = false;
 

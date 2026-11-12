@@ -1708,6 +1708,7 @@ static int32_t runEventLoop(void)
     EpollRegistry poll_registry;
     int32_t event_count;
     uint32_t wanted_mask;
+    uint32_t fd_generation;
     int32_t current_fd;
     int32_t i;
 
@@ -1721,7 +1722,15 @@ static int32_t runEventLoop(void)
         if (TcpClientTransport_WantsWritable(&transport)) {
             wanted_mask |= EPOLLOUT;
         }
-        EpollRegistry_SyncSlot(&poll_registry, TCP_SLOT, current_fd, wanted_mask, (uint32_t)current_fd);
+        fd_generation = TcpClientTransport_FdGeneration(&transport);
+        EpollRegistry_SyncOccupiedSlot(
+            &poll_registry,
+            TCP_SLOT,
+            fd_generation,
+            current_fd,
+            wanted_mask,
+            (uint32_t)current_fd
+        );
 
         event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
         for(i=0; i<event_count; i++) {
