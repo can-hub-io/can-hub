@@ -428,17 +428,21 @@ static bool registerStaticPollFds(void)
 static void syncStreamRegistration(void)
 {
     int32_t current_fd;
+    uint32_t fd_generation;
     uint32_t wanted_mask = EPOLLIN;
 
     if (transport_scheme == kCONNECT_SCHEME_QUIC) {
         current_fd = QuicClientTransport_UdpFd(&quic_transport);
+        fd_generation = QuicClientTransport_FdGeneration(&quic_transport);
     } else if (transport_scheme == kCONNECT_SCHEME_TCP) {
         current_fd = TcpClientTransport_Fd(&tcp_transport);
+        fd_generation = TcpClientTransport_FdGeneration(&tcp_transport);
         if (TcpClientTransport_WantsWritable(&tcp_transport)) {
             wanted_mask |= EPOLLOUT;
         }
     } else if (transport_scheme == kCONNECT_SCHEME_TLS) {
         current_fd = TlsClientTransport_Fd(&tls_transport);
+        fd_generation = TlsClientTransport_FdGeneration(&tls_transport);
         if (TlsClientTransport_WantsWritable(&tls_transport)) {
             wanted_mask |= EPOLLOUT;
         }
@@ -446,7 +450,14 @@ static void syncStreamRegistration(void)
         return;
     }
 
-    EpollRegistry_SyncSlot(&poll_registry, TRANSPORT_SLOT, current_fd, wanted_mask, (uint32_t)current_fd);
+    EpollRegistry_SyncOccupiedSlot(
+        &poll_registry,
+        TRANSPORT_SLOT,
+        fd_generation,
+        current_fd,
+        wanted_mask,
+        (uint32_t)current_fd
+    );
 }
 
 static void dispatchEvent(const struct epoll_event *event, const CanEvents *can_events)

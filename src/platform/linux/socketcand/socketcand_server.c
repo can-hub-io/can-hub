@@ -92,6 +92,11 @@ int32_t SocketcandServer_SlotFd(const SocketcandServer *self, uint8_t slot)
     return self->slots[slot].fd;
 }
 
+uint32_t SocketcandServer_SlotConnectionId(const SocketcandServer *self, uint8_t slot)
+{
+    return self->slots[slot].connection_id;
+}
+
 bool SocketcandServer_SlotWantsWritable(const SocketcandServer *self, uint8_t slot)
 {
     return self->slots[slot].tx_used > 0;

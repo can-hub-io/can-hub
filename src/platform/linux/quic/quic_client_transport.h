@@ -25,6 +25,8 @@
  * OnUdpReadable/OnTimer; transport events are pushed via QuicTransportEvents.
  * While the host name resolves, UdpFd() is the resolver's and readable once
  * the addresses are in, so the loop must re-register it on every iteration.
+ * FdGeneration() changes whenever UdpFd() names a newly opened descriptor,
+ * so the loop re-registers a closed fd whose number the next one reuses.
  */
 
 typedef struct {
@@ -45,6 +47,7 @@ typedef struct {
     QuicConnection connection;
     QuicDatagramSlot egress_slots[QUIC_CLIENT_DATAGRAM_SLOTS];
     QuicDatagramBacklog egress_backlog;
+    uint32_t fd_generation;
     bool connected;
     bool dispatching;
     bool corked;
@@ -63,6 +66,7 @@ void QuicClientTransport_Close(QuicClientTransport *self);
 TransportPort *QuicClientTransport_Port(QuicClientTransport *self);
 const HostResolver *QuicClientTransport_Resolver(const QuicClientTransport *self);
 int32_t QuicClientTransport_UdpFd(const QuicClientTransport *self);
+uint32_t QuicClientTransport_FdGeneration(const QuicClientTransport *self);
 int32_t QuicClientTransport_TimerFd(const QuicClientTransport *self);
 void QuicClientTransport_OnUdpReadable(QuicClientTransport *self);
 void QuicClientTransport_OnTimer(QuicClientTransport *self);

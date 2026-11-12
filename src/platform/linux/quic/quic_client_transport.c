@@ -99,6 +99,11 @@ int32_t QuicClientTransport_UdpFd(const QuicClientTransport *self)
     return self->udp.udp_fd;
 }
 
+uint32_t QuicClientTransport_FdGeneration(const QuicClientTransport *self)
+{
+    return self->fd_generation;
+}
+
 int32_t QuicClientTransport_TimerFd(const QuicClientTransport *self)
 {
     return self->udp.timer_fd;
@@ -284,6 +289,7 @@ static bool resolveHost(QuicClientTransport *self)
     struct addrinfo hints;
 
     QuicUdpEndpoint_AddressHints(&self->udp, &hints);
+    self->fd_generation++;
 
     return HostResolver_Start(&self->resolver, self->server.host, self->server.port_text, &hints);
 }
@@ -346,6 +352,7 @@ static void teardown(QuicClientTransport *self, bool notify)
     QuicDatagramBacklog_Reset(&self->egress_backlog);
     QuicUdpEndpoint_DisarmTimer(&self->udp);
     QuicUdpEndpoint_ReopenSocket(&self->udp);
+    self->fd_generation++;
     self->connected = false;
     self->disconnect_pending = false;
     self->flush_deferred = false;

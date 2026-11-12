@@ -223,6 +223,22 @@ add_unit_test(test_epoll_registry
         ${ROOT_SRC_DIR}/platform/linux/shared/epoll_registry.c
 )
 
+add_unit_test(test_tcp_client_transport
+    SOURCES
+        platform/test_tcp_client_transport.cpp
+        ${ROOT_SRC_DIR}/platform/linux/tcp/tcp_client_transport.c
+        ${ROOT_SRC_DIR}/platform/linux/tcp/tcp_channel.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/epoll_registry.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/host_resolver.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/message_framer.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/tcp_keepalive.c
+        ${ROOT_SRC_DIR}/platform/linux/shared/log.c
+        ${ROOT_SRC_DIR}/platform/linux/clock/clock.c
+        ${ROOT_SRC_DIR}/protocol/message_header.c
+        ${ROOT_SRC_DIR}/protocol/wire.c
+)
+target_link_libraries(test_tcp_client_transport PRIVATE Threads::Threads)
+
 add_unit_test(test_tcp_keepalive
     SOURCES
         platform/test_tcp_keepalive.cpp

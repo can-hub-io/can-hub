@@ -2,7 +2,7 @@
 
 #include <stddef.h>
 
-#define SOLE_OCCUPANT 0
+#define NO_OCCUPANT 0
 
 static void vacateSlot(EpollRegistry *self, uint16_t slot);
 static bool isRegisteredByAnotherSlot(const EpollRegistry *self, uint16_t slot, int32_t fd);
@@ -17,7 +17,7 @@ bool EpollRegistry_Open(EpollRegistry *self)
     for(slot=0; slot<EPOLL_REGISTRY_SLOTS_MAX; slot++) {
         self->registered_fds[slot] = EPOLL_REGISTRY_NO_SOCKET;
         self->registered_masks[slot] = 0;
-        self->registered_occupants[slot] = SOLE_OCCUPANT;
+        self->registered_occupants[slot] = NO_OCCUPANT;
     }
 
     return self->epoll_fd >= 0;
@@ -40,17 +40,6 @@ void EpollRegistry_SetStaticInterest(EpollRegistry *self, int32_t fd, uint32_t m
     event.events = mask;
     event.data.u32 = event_data;
     epoll_ctl(self->epoll_fd, EPOLL_CTL_MOD, fd, &event);
-}
-
-void EpollRegistry_SyncSlot(
-    EpollRegistry *self,
-    uint16_t slot,
-    int32_t current_fd,
-    uint32_t wanted_mask,
-    uint32_t event_data
-)
-{
-    EpollRegistry_SyncOccupiedSlot(self, slot, SOLE_OCCUPANT, current_fd, wanted_mask, event_data);
 }
 
 void EpollRegistry_SyncOccupiedSlot(

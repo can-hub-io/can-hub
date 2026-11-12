@@ -21,6 +21,8 @@
  * connect — the platform loop must re-register it after each reconnect and
  * watch EPOLLOUT until the connection is established. While the host name
  * resolves, Fd() is the resolver's and readable once the addresses are in.
+ * FdGeneration() changes whenever Fd() names a newly opened descriptor, so
+ * the loop re-registers a closed fd whose number the next one reuses.
  */
 typedef struct {
     TransportPort port;
@@ -29,6 +31,7 @@ typedef struct {
     char port_text[TCP_PORT_TEXT_MAX];
     TcpChannel channel;
     HostResolver resolver;
+    uint32_t fd_generation;
     bool unix_socket;
     bool connecting;
     bool connected;
@@ -44,6 +47,7 @@ bool TcpClientTransport_InitUnix(TcpClientTransport *self, const char *socket_pa
 TransportPort *TcpClientTransport_Port(TcpClientTransport *self);
 const HostResolver *TcpClientTransport_Resolver(const TcpClientTransport *self);
 int32_t TcpClientTransport_Fd(const TcpClientTransport *self);
+uint32_t TcpClientTransport_FdGeneration(const TcpClientTransport *self);
 bool TcpClientTransport_WantsWritable(const TcpClientTransport *self);
 void TcpClientTransport_OnReadable(TcpClientTransport *self);
 void TcpClientTransport_OnWritable(TcpClientTransport *self);

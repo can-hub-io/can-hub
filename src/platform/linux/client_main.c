@@ -687,6 +687,7 @@ static int32_t runEventLoop(void)
     EpollRegistry poll_registry;
     int32_t event_count;
     uint32_t wanted_mask;
+    uint32_t fd_generation;
     int32_t current_fd;
     int32_t i;
 
@@ -701,18 +702,27 @@ static int32_t runEventLoop(void)
     while (exit_code < 0 && !stop_requested) {
         if (connect_scheme == kCONNECT_SCHEME_TLS) {
             current_fd = TlsClientTransport_Fd(&tls_transport);
+            fd_generation = TlsClientTransport_FdGeneration(&tls_transport);
             wanted_mask = EPOLLIN;
             if (TlsClientTransport_WantsWritable(&tls_transport)) {
                 wanted_mask |= EPOLLOUT;
             }
         } else {
             current_fd = TcpClientTransport_Fd(&transport);
+            fd_generation = TcpClientTransport_FdGeneration(&transport);
             wanted_mask = EPOLLIN;
             if (TcpClientTransport_WantsWritable(&transport)) {
                 wanted_mask |= EPOLLOUT;
             }
         }
-        EpollRegistry_SyncSlot(&poll_registry, TCP_SLOT, current_fd, wanted_mask, (uint32_t)current_fd);
+        EpollRegistry_SyncOccupiedSlot(
+            &poll_registry,
+            TCP_SLOT,
+            fd_generation,
+            current_fd,
+            wanted_mask,
+            (uint32_t)current_fd
+        );
 
         event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
         for(i=0; i<event_count; i++) {
@@ -746,6 +756,7 @@ static int32_t runQuicEventLoop(void)
     struct epoll_event events[MAX_EPOLL_EVENTS];
     EpollRegistry poll_registry;
     int32_t timer_fd = QuicClientTransport_TimerFd(&quic_transport);
+    uint32_t fd_generation;
     int32_t udp_fd;
     int32_t event_count;
     int32_t i;
@@ -759,7 +770,8 @@ static int32_t runQuicEventLoop(void)
 
     while (exit_code < 0 && !stop_requested) {
         udp_fd = QuicClientTransport_UdpFd(&quic_transport);
-        EpollRegistry_SyncSlot(&poll_registry, QUIC_UDP_SLOT, udp_fd, EPOLLIN, (uint32_t)udp_fd);
+        fd_generation = QuicClientTransport_FdGeneration(&quic_transport);
+        EpollRegistry_SyncOccupiedSlot(&poll_registry, QUIC_UDP_SLOT, fd_generation, udp_fd, EPOLLIN, (uint32_t)udp_fd);
         event_count = EpollRegistry_Wait(&poll_registry, events, MAX_EPOLL_EVENTS, POLL_PERIOD_MS);
         for(i=0; i<event_count; i++) {
             if ((int32_t)events[i].data.u32 == udp_fd) {
@@ -833,25 +845,43 @@ static int32_t runSocketcandServer(const char *host, const char *port_text)
 static void syncHubConnection(EpollRegistry *poll_registry)
 {
     int32_t current_fd;
+    uint32_t fd_generation;
     uint32_t wanted_mask = EPOLLIN;
 
     if (connect_scheme == kCONNECT_SCHEME_QUIC) {
         current_fd = QuicClientTransport_UdpFd(&quic_transport);
-        EpollRegistry_SyncSlot(poll_registry, SOCKETCAND_HUB_SLOT, current_fd, wanted_mask, SC_TAG_HUB_QUIC_UDP);
+        fd_generation = QuicClientTransport_FdGeneration(&quic_transport);
+        EpollRegistry_SyncOccupiedSlot(
+            poll_registry,
+            SOCKETCAND_HUB_SLOT,
+            fd_generation,
+            current_fd,
+            wanted_mask,
+            SC_TAG_HUB_QUIC_UDP
+        );
         return;
     }
     if (connect_scheme == kCONNECT_SCHEME_TLS) {
         current_fd = TlsClientTransport_Fd(&tls_transport);
+        fd_generation = TlsClientTransport_FdGeneration(&tls_transport);
         if (TlsClientTransport_WantsWritable(&tls_transport)) {
             wanted_mask |= EPOLLOUT;
         }
     } else {
         current_fd = TcpClientTransport_Fd(&transport);
+        fd_generation = TcpClientTransport_FdGeneration(&transport);
         if (TcpClientTransport_WantsWritable(&transport)) {
             wanted_mask |= EPOLLOUT;
         }
     }
-    EpollRegistry_SyncSlot(poll_registry, SOCKETCAND_HUB_SLOT, current_fd, wanted_mask, SC_TAG_HUB_STREAM);
+    EpollRegistry_SyncOccupiedSlot(
+        poll_registry,
+        SOCKETCAND_HUB_SLOT,
+        fd_generation,
+        current_fd,
+        wanted_mask,
+        SC_TAG_HUB_STREAM
+    );
 }
 
 static uint32_t socketcandSlotMask(uint8_t slot)
@@ -948,9 +978,10 @@ static int32_t runSocketcandLoop(void)
     while (!stop_requested) {
         syncHubConnection(&poll_registry);
         for(slot=0; slot<SOCKETCAND_SERVER_SLOTS_MAX; slot++) {
-            EpollRegistry_SyncSlot(
+            EpollRegistry_SyncOccupiedSlot(
                 &poll_registry,
                 (uint8_t)(1 + slot),
+                SocketcandServer_SlotConnectionId(&socketcand_server, slot),
                 SocketcandServer_SlotFd(&socketcand_server, slot),
                 socketcandSlotMask(slot),
                 SC_TAG_SC_SLOT_BASE + slot

@@ -21,7 +21,9 @@
  * connection fd is created per connect — the platform loop must re-register
  * it after each reconnect and watch EPOLLOUT while the channel wants to
  * write. While the host name resolves, Fd() is the resolver's and readable
- * once the addresses are in.
+ * once the addresses are in. FdGeneration() changes whenever Fd() names a
+ * newly opened descriptor, so the loop re-registers a closed fd whose number
+ * the next one reuses.
  */
 typedef struct {
     TransportPort port;
@@ -32,6 +34,7 @@ typedef struct {
     TlsChannel channel;
     HostResolver resolver;
     int32_t fd;
+    uint32_t fd_generation;
     bool connecting;
     bool announced;
 } TlsClientTransport;
@@ -46,6 +49,7 @@ bool TlsClientTransport_Init(
 TransportPort *TlsClientTransport_Port(TlsClientTransport *self);
 const HostResolver *TlsClientTransport_Resolver(const TlsClientTransport *self);
 int32_t TlsClientTransport_Fd(const TlsClientTransport *self);
+uint32_t TlsClientTransport_FdGeneration(const TlsClientTransport *self);
 bool TlsClientTransport_WantsWritable(const TlsClientTransport *self);
 void TlsClientTransport_OnReadable(TlsClientTransport *self);
 void TlsClientTransport_OnWritable(TlsClientTransport *self);

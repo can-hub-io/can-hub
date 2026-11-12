@@ -701,25 +701,36 @@ static void dispatchEvent(CanHubSession *self, const struct epoll_event *event)
 static void syncHubConnection(CanHubSession *self)
 {
     int32_t current_fd;
+    uint32_t fd_generation;
     uint32_t wanted_mask = EPOLLIN;
 
     if (self->scheme == kCONNECT_SCHEME_QUIC) {
         current_fd = QuicClientTransport_UdpFd(&self->quic_transport);
-        EpollRegistry_SyncSlot(&self->poll_registry, HUB_SLOT, current_fd, wanted_mask, TAG_QUIC_UDP);
+        fd_generation = QuicClientTransport_FdGeneration(&self->quic_transport);
+        EpollRegistry_SyncOccupiedSlot(
+            &self->poll_registry,
+            HUB_SLOT,
+            fd_generation,
+            current_fd,
+            wanted_mask,
+            TAG_QUIC_UDP
+        );
         return;
     }
     if (self->scheme == kCONNECT_SCHEME_TLS) {
         current_fd = TlsClientTransport_Fd(&self->tls_transport);
+        fd_generation = TlsClientTransport_FdGeneration(&self->tls_transport);
         if (TlsClientTransport_WantsWritable(&self->tls_transport)) {
             wanted_mask |= EPOLLOUT;
         }
     } else {
         current_fd = TcpClientTransport_Fd(&self->tcp_transport);
+        fd_generation = TcpClientTransport_FdGeneration(&self->tcp_transport);
         if (TcpClientTransport_WantsWritable(&self->tcp_transport)) {
             wanted_mask |= EPOLLOUT;
         }
     }
-    EpollRegistry_SyncSlot(&self->poll_registry, HUB_SLOT, current_fd, wanted_mask, TAG_STREAM);
+    EpollRegistry_SyncOccupiedSlot(&self->poll_registry, HUB_SLOT, fd_generation, current_fd, wanted_mask, TAG_STREAM);
 }
 
 static uint64_t deadlineFrom(int32_t timeout_ms)
