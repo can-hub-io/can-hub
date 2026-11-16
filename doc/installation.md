@@ -24,7 +24,7 @@ fingerprint `882FA1A7753DE71C0FEC849CBCEB231428DE4144`.
 
 The repository keeps the last ten releases. Until the wire protocol is frozen,
 hub and agents should run the same version; pin one with
-`sudo apt install can-hub-agent=0.6.2`.
+`sudo apt install can-hub-agent=0.6.3`.
 
 Without the repository, every
 [release](https://github.com/can-hub-io/can-hub/releases) ships the same debs:
@@ -54,9 +54,9 @@ sudo editor /etc/can-hub/agent.conf      # HUB_URL, INTERFACES; AGENT_NAME defau
 sudo systemctl enable --now can-hub-agent
 ```
 
-The unit runs as the `can-hub` user with `CAP_NET_RAW` only. Remote
-interface reconfiguration (`can-hub-cli interface set ...`) additionally
-needs `CAP_NET_ADMIN` — see [agent](agent.md#capabilities).
+The unit runs as the `can-hub` user with `CAP_NET_RAW` (SocketCAN) and
+`CAP_NET_ADMIN` (remote interface reconfiguration, `can-hub-cli interface
+set ...`) — see [agent](agent.md#capabilities).
 
 ### socketcand bridge (optional)
 
