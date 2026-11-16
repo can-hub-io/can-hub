@@ -18,8 +18,8 @@ Restart=on-failure
 RestartSec=2
 StateDirectory=can-hub-agent
 
-# The agent opens raw SocketCAN sockets (PF_CAN/SOCK_RAW): CAP_NET_RAW only,
-# nothing else. AF_CAN is added to the address-family allowlist.
+# The agent opens raw SocketCAN sockets (PF_CAN/SOCK_RAW): CAP_NET_RAW. Remote
+# interface reconfiguration goes over rtnetlink: CAP_NET_ADMIN and AF_NETLINK.
 NoNewPrivileges=yes
 CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
 AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN

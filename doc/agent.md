@@ -76,17 +76,20 @@ sudo systemctl enable --now can-hub-agent
 
 ### Capabilities
 
-The unit grants `CAP_NET_RAW` only (raw SocketCAN sockets). Remote interface
-reconfiguration — `can-hub-cli interface set <agent>/<iface> ...`,
-`interface up|down`, `can-hub-client configure` — uses rtnetlink on the
-device and needs
-`CAP_NET_ADMIN`. Add it with a drop-in if you use that feature:
+The unit grants `CAP_NET_RAW` (raw SocketCAN sockets) and `CAP_NET_ADMIN`
+(remote interface reconfiguration — `can-hub-cli interface set <agent>/<iface> ...`,
+`interface up|down`, `can-hub-client configure` — applied on the device over
+rtnetlink, hence `AF_NETLINK` in the address-family allowlist). If you never
+reconfigure interfaces remotely, drop `CAP_NET_ADMIN` with a drop-in (the
+empty assignments reset the sets, which systemd otherwise merges):
 
 ```ini
-# /etc/systemd/system/can-hub-agent.service.d/netadmin.conf
+# /etc/systemd/system/can-hub-agent.service.d/no-netadmin.conf
 [Service]
-CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
-AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=
+CapabilityBoundingSet=CAP_NET_RAW
+AmbientCapabilities=
+AmbientCapabilities=CAP_NET_RAW
 ```
 
 ## No hardware? vcan
